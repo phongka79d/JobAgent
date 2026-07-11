@@ -13,10 +13,11 @@ Sanitized readiness transferred from task 01A:
 | npm | READY | npm 11.6.1 version check passed | None |
 | Docker Compose | READY | Docker Compose v5.1.1 version check passed | None |
 | Local ShopAIKey setting | READY | Ignored root environment exists with a non-empty setting; value was not recorded | Authorize live use and approve structured-schema criterion before the live gate |
-| Digital PDF corpus | COUNT_READY | Six ignored PDFs observed; no names, paths, or content were recorded | Confirm the set is representative, digitally born, and redacted; approve the numeric criterion |
-| Image-only PDF fixture | MISSING_OR_UNDECLARED | No safe designation was available | Supply or designate the local ignored fixture |
+| Digital PDF corpus | READY | Five digital fixtures frozen under ignored private path with generic IDs; 04C digital comparison complete; 04D reconfirmed selected `layout` still meets 4/5 | Digital mode `layout` locked; PDF gate closed in 04D |
+| Image-only PDF fixture | READY | One image-only fixture frozen as `pdf_image_only_001`; dual-mode exact `NO_EXTRACTABLE_TEXT` verified in 04D (normal + layout, repeated runs) | Exact dual-mode rule closed PASS in 04D |
 | Labeled retrieval subset | MISSING_OR_UNDECLARED | No declared manifest or location was available | Confirm provenance, fixed split, seed, record count, and decision criteria |
-| PDF and embedding decision criteria | BLOCKED_BY_USER_ACTION | No approved numeric criteria were available | Record criteria before measuring affected gates |
+| PDF decision criterion | READY | Pre-benchmark rule recorded: at least 4 of 5 digital fixtures must yield extractable text; image-only must be `NO_EXTRACTABLE_TEXT` | Criterion unchanged after 04C measurement; do not revise post-hoc |
+| Embedding decision criteria | BLOCKED_BY_USER_ACTION | No approved numeric embedding criteria were available | Record embedding criteria before measuring Batch05 |
 | Committed manifest metadata | CONFIRMED | Generic non-identifying identifiers and metadata were approved | Keep real names, paths, text, and personal data in ignored local files |
 
 ## Astryx
@@ -95,14 +96,72 @@ Manifest sources:
 
 - Synthetic metadata: `backend/evaluation/fixtures/synthetic_pdf_manifest.json`
 - Local-private template: `backend/evaluation/fixtures/local_private_pdf_manifest.template.json`
-- Populated private manifest: ignored local path declared by the template
+- Safe frozen aggregate: `backend/evaluation/fixtures/pdf_fixture_manifest.json`
+- Populated private manifest: ignored `backend/evaluation/private/pdf_manifest.local.json`
+- Pre-benchmark private criterion copy: ignored `backend/evaluation/private/pdf_pass_criterion.local.json`
+
+User-authorized local corpus materialization (aggregate only; no private filenames or document text):
+
+| Inventory item | Status | Safe evidence |
+|---|---|---|
+| Local PDF file count | READY | Six PDFs under ignored private evaluation path (5 digital + 1 image-only) |
+| Documented private evaluation path | READY | Ignored `backend/evaluation/private/` populated with generic-ID copies and local manifest |
+| Frozen committed/safe manifest | READY | `pdf_fixture_manifest.json` records fixture IDs, kinds, page counts, and sha256 digests only |
+| User-confirmed digital corpus (5–10) | READY | Five digital fixtures frozen from the user’s existing local ignored PDF set |
+| At least one user-redacted evaluation CV slot | READY | `pdf_digital_001` designated as the redacted evaluation CV slot in the private manifest |
+| Image-only fixture designation | READY | `pdf_image_only_001` designated; pypdf smoke extractable character count = 0 |
+| Numeric digital-fixture pass criterion (“agreed majority”) | READY | Pre-benchmark: require ≥ 4 of 5 digital fixtures with extractable character count > 0 (80% floor) |
+| Pre-benchmark freeze | READY | Criterion and fixture digests recorded before Batch04 benchmark measurement |
 
 | Evidence item | Result | Evidence | Locked decision |
 |---|---|---|---|
-| Frozen fixture set and criterion | PENDING | Pending Batch04 evidence | PENDING |
-| Normal extraction mode | PENDING | Pending Batch04 evidence | PENDING |
-| Layout extraction mode | PENDING | Pending Batch04 evidence | PENDING |
-| Image-only classification | PENDING | Pending Batch04 evidence | PENDING |
+| Frozen fixture set and criterion | READY | Safe freeze + ignored private corpus + pre-benchmark 4/5 digital success rule and image-only `NO_EXTRACTABLE_TEXT` rule; criterion_id `pdf_digital_agreed_majority_v1` unchanged in 04C | Keep 4/5 (80%) digital rule fixed |
+| Normal extraction mode | MEASURED | Digital subset 5/5 `EXTRACTED_TEXT` (chars 1049/953/995/971/1038); meets frozen 4/5 | Eligible; not selected (tie on yield) |
+| Layout extraction mode | MEASURED_AND_SELECTED | Digital subset 5/5 `EXTRACTED_TEXT` (identical char yields); meets frozen 4/5; equal yield vs normal | **Selected digital parser mode: `layout`** |
+| Digital normal/layout comparability | PASS | Same ordered digital IDs, matching page counts (1 each), both modes full coverage; aggregate `backend/evaluation/reports/pdf_extraction_benchmark.json` | Required for 04C acceptance |
+| Image-only classification | PASS | Frozen `pdf_image_only_001`: normal and layout both exact `NO_EXTRACTABLE_TEXT` with `extracted_character_count=0` on three repeated dual-mode runs; aggregate refreshed | Exact failure rule locked; no OCR |
+
+### Digital-PDF benchmark table (04C)
+
+Frozen criterion (pre-04A/04C measurement, not changed): require ≥ 4 of 5 digital fixtures with usable extracted character count > 0 under the selected mode (`criterion_id=pdf_digital_agreed_majority_v1`, 80% floor). Aggregate artifact: `backend/evaluation/reports/pdf_extraction_benchmark.json` (metrics only; no document text).
+
+| Fixture ID | Kind | Pages | Normal outcome | Normal chars | Normal ms | Layout outcome | Layout chars | Layout ms |
+|---|---|---:|---|---:|---:|---|---:|---:|
+| pdf_digital_001 | digital | 1 | EXTRACTED_TEXT | 1049 | 5 | EXTRACTED_TEXT | 1049 | 6 |
+| pdf_digital_002 | digital | 1 | EXTRACTED_TEXT | 953 | 5 | EXTRACTED_TEXT | 953 | 4 |
+| pdf_digital_003 | digital | 1 | EXTRACTED_TEXT | 995 | 5 | EXTRACTED_TEXT | 995 | 4 |
+| pdf_digital_004 | digital | 1 | EXTRACTED_TEXT | 971 | 4 | EXTRACTED_TEXT | 971 | 5 |
+| pdf_digital_005 | digital | 1 | EXTRACTED_TEXT | 1038 | 5 | EXTRACTED_TEXT | 1038 | 4 |
+
+| Mode | Digital successes | Required | Meets frozen 4/5 | Total digital usable chars | Notes |
+|---|---:|---:|---|---:|---|
+| normal | 5 / 5 | 4 | yes | 5006 | Comparable coverage; equal yield |
+| layout | 5 / 5 | 4 | yes | 5006 | Comparable coverage; equal yield; **selected** |
+
+**04C parser-mode decision:** lock pypdf **`layout`** for digital CV extraction. Both modes meet the frozen majority rule with identical per-fixture usable character yields; selection uses the master-plan ingestion path preference for layout text extraction under equal measured yield. No OCR, no alternate parser, no post-hoc threshold change. Full PDF gate closed in 04D after image-only exact-code verification.
+
+### Image-only exact failure gate (04D)
+
+Exact failure rule (pre-recorded, unchanged): image-only fixture must yield outcome code **`NO_EXTRACTABLE_TEXT`** with zero usable extracted characters under both `normal` and `layout`; OCR and alternate parsers are prohibited (`ocr_allowed=false`).
+
+Frozen fixture: `pdf_image_only_001` (manifest `phase0_pdf_fixture_freeze_v1`). Aggregate evidence: `backend/evaluation/reports/pdf_extraction_benchmark.json` (`ocr_used=false`, `alternate_parser_used=false`, `parser_library=pypdf`).
+
+| Fixture ID | Kind | Pages | Mode | Outcome (exact) | Usable chars | Elapsed ms (sample) | Repeated runs (3×) |
+|---|---|---:|---|---|---:|---:|---|
+| pdf_image_only_001 | image_only | 1 | normal | NO_EXTRACTABLE_TEXT | 0 | 1 | all exact code + 0 chars |
+| pdf_image_only_001 | image_only | 1 | layout | NO_EXTRACTABLE_TEXT | 0 | 0–1 | all exact code + 0 chars |
+
+| Check | Result | Evidence |
+|---|---|---|
+| Normal mode exact outcome | PASS | `outcome=NO_EXTRACTABLE_TEXT`, `extracted_character_count=0` |
+| Layout mode exact outcome | PASS | `outcome=NO_EXTRACTABLE_TEXT`, `extracted_character_count=0` |
+| Zero usable characters both modes | PASS | Non-whitespace char count is 0 for both modes |
+| Repeated dual-mode stability | PASS | Three full dual-mode runs; classification and char counts stable |
+| OCR package / call / alternate parser | PASS | Source and `pyproject.toml` search clean; aggregate flags `ocr_used=false`, `alternate_parser_used=false` |
+| Manual text substitution | PASS | No raw-text fields in aggregate; classifier maps zero usable text only |
+| Selected digital mode still meets 04C | PASS | Selected `layout` still 5/5 digital successes vs frozen 4/5 on refreshed aggregate |
+
+**04D PDF extraction compatibility decision:** **PASS**. Selected digital parser mode remains pypdf **`layout`**. Image-only exact dual-mode failure rule is locked as `NO_EXTRACTABLE_TEXT` with zero usable characters. No OCR, no alternate parser, no post-hoc criterion change, no raw document text recorded.
 
 ## Embeddings
 
@@ -126,7 +185,7 @@ Manifest source: `backend/evaluation/labels/retrieval_subset_manifest.template.j
 | ShopAIKey tool-call mode | `bind_tools` + `tool_result_round_trip` | Live 03F function-call and tool-result checks |
 | ShopAIKey completion schema mode | `strict_schema` | Live 03F three consecutive validated attempts; repairs_used_total=0; max 1 repair/attempt policy |
 | ShopAIKey streaming | supported (`streaming_text`) | Live 03F ordered non-empty text chunks; knowledge-only |
-| PDF extraction mode | PENDING | Pending gate measurement |
+| PDF extraction mode | `layout` (digital; Batch04 closed) | 04C: both digital modes 5/5 vs frozen 4/5 with equal yield; layout locked; 04D: image-only dual-mode exact `NO_EXTRACTABLE_TEXT` PASS |
 | Embedding adapter contract | PENDING | Pending gate measurement |
 
 ## Cleanup
@@ -149,6 +208,6 @@ Plan 2 remains blocked until every required gate is measured, supported by evide
 | Prerequisite readiness | PENDING | Sanitized inventory above; user actions remain | PENDING | Blocks affected live gates |
 | Astryx compatibility | PASS | Exact npm resolution, initializer evidence, sixteen pinned CLI lookups, and `npm run check:astryx` | `@astryxdesign/core` and `@astryxdesign/cli` `0.1.4`; public matrix above | Astryx decision is locked for Plan 2; overall Plan 2 remains blocked on other Phase 0 gates |
 | ShopAIKey compatibility | PASS | Live 03F diagnostic exit 0; all six capabilities characterized; secret/leakage scan clean; fake suite 73 passed without network | Model `gpt-4o-mini`; tools `bind_tools` + tool-result round trip; schema `strict_schema` (max 1 repair/attempt); streaming supported | ShopAIKey provider decisions locked for Plan 2; overall Plan 2 remains blocked on PDF, embeddings, and consolidation gates |
-| PDF extraction compatibility | PENDING | Pending Batch04 evidence | PENDING | Blocks Plan 2 |
+| PDF extraction compatibility | PASS | 04C digital majority met with `layout` locked; 04D image-only normal+layout exact `NO_EXTRACTABLE_TEXT` / 0 chars on repeated runs; OCR/alternate search clean | Digital mode `layout`; image-only exact failure `NO_EXTRACTABLE_TEXT` | PDF adapter locked for Plan 2; overall Plan 2 remains blocked on embeddings and consolidation gates |
 | Embedding compatibility | PENDING | Pending Batch05 evidence | PENDING | Blocks Plan 2 |
 | Cleanup and evidence consolidation | PENDING | Pending Batch06 evidence | PENDING | Blocks Plan 2 |

@@ -1,0 +1,92 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "phase0_pdf_fixture_freeze_v1",
+  "data_class": "safe_aggregate",
+  "frozen_at_utc": "2026-07-11T04:55:12+00:00",
+  "recorded_before_benchmark": true,
+  "corpus_summary": {
+    "digital_fixture_count": 5,
+    "image_only_fixture_count": 1,
+    "total_fixture_count": 6,
+    "redacted_real_cv_slot_fixture_id": "pdf_digital_001",
+    "private_inputs_location": "backend/evaluation/private/ (ignored)",
+    "private_manifest_path": "backend/evaluation/private/pdf_manifest.local.json"
+  },
+  "pass_criterion": {
+    "criterion_id": "pdf_digital_agreed_majority_v1",
+    "recorded_at_utc": "2026-07-11T04:55:12+00:00",
+    "recorded_before_benchmark": true,
+    "digital_success_rule": "At least 4 of 5 digital fixtures must yield extractable character count > 0 under the selected pypdf mode",
+    "required_successful_digital_fixtures": 4,
+    "total_digital_fixtures": 5,
+    "percent_floor": 80.0,
+    "image_only_required_outcome": "NO_EXTRACTABLE_TEXT",
+    "ocr_allowed": false,
+    "modes_in_scope": [
+      "normal",
+      "layout"
+    ]
+  },
+  "fixtures": [
+    {
+      "fixture_id": "pdf_digital_001",
+      "fixture_kind": "digital",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "1e2b385bcffb40d0f05eb1b08e8cfcb23e28630cb9f65231914fab6d18a2a844",
+      "redacted_real_cv_slot": true,
+      "benchmark_status": "FROZEN"
+    },
+    {
+      "fixture_id": "pdf_digital_002",
+      "fixture_kind": "digital",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "3a98795b284eb62106b1a16c5b81d148c89a1402133f862f44cb417d9b8b989d",
+      "redacted_real_cv_slot": false,
+      "benchmark_status": "FROZEN"
+    },
+    {
+      "fixture_id": "pdf_digital_003",
+      "fixture_kind": "digital",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "e83422b50f8ac0040d6af688432a46cc286b078f85fdc73e1edaacc343e4a94c",
+      "redacted_real_cv_slot": false,
+      "benchmark_status": "FROZEN"
+    },
+    {
+      "fixture_id": "pdf_digital_004",
+      "fixture_kind": "digital",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "1fc21cc588e5e7c0f4b9740e6e0e9e149c6b969a2fcdf7c651c639136a1fb0f4",
+      "redacted_real_cv_slot": false,
+      "benchmark_status": "FROZEN"
+    },
+    {
+      "fixture_id": "pdf_digital_005",
+      "fixture_kind": "digital",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "585c04dea5bdee34fff9a9dda6c339b323890160887875948fc44db1f545682e",
+      "redacted_real_cv_slot": false,
+      "benchmark_status": "FROZEN"
+    },
+    {
+      "fixture_id": "pdf_image_only_001",
+      "fixture_kind": "image_only",
+      "data_class": "local_private",
+      "content_origin": "local_user_corpus",
+      "page_count": 1,
+      "sha256": "d26c786409b1681b028c8b22f435c155e455937b5346139d0277f02f11d5b4fe",
+      "redacted_real_cv_slot": false,
+      "benchmark_status": "FROZEN"
+    }
+  ]
+}

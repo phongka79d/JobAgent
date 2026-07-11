@@ -2229,3 +2229,503 @@ ACCEPTED
 ## Repair Instructions
 - None.
 
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - pypdf Extraction Compatibility Gate
+- Task ID: 04A
+- Task title: Freeze the PDF fixture manifest and pass criterion
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git:
+  - M backend/evaluation/reports/phase_0_feasibility.md
+  - M docs/reports/report_1_execute_agent.md
+  - ?? backend/evaluation/fixtures/pdf_fixture_manifest.json
+  - ignored (not in git status): backend/evaluation/private/* corpus, local manifest, pass criterion
+
+## Files Reviewed
+- `backend/evaluation/fixtures/pdf_fixture_manifest.json`: in scope - safe freeze with 5 digital + 1 image-only, redacted slot, pass criterion, digests
+- `backend/evaluation/private/pdf_manifest.local.json`: in scope (ignored) - private alignment, smoke counts only
+- `backend/evaluation/private/pdf_pass_criterion.local.json`: in scope (ignored) - 4/5 @ 80% pre-benchmark criterion
+- `backend/evaluation/private/pdfs/*.pdf`: in scope (ignored) - six generic-ID PDFs present
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - READY freeze inventory; measurement gates remain PENDING
+- `docs/reports/report_1_execute_agent.md`: in scope - 04A complete execution block
+- `.gitignore`: in scope for ignore proof - `/backend/evaluation/private/` covers private inputs
+
+## Validations Reviewed
+- Command/check: Manifest schema/count + private/committed alignment + redacted slot
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: total=6 (digital=5, image_only=1); required fields present; redacted slot pdf_digital_001; criterion 4/5 @ 80% with recorded_before_benchmark=true; hashes align private↔committed
+
+- Command/check: File-type/page-read smoke (PDF magic, pypdf pages, extractable char counts aggregate only)
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: magic_ok=6; page_ok=6; hash_ok=6; digital extractable_char_count>0 = 5/5; image-only chars=0; no document text emitted
+
+- Command/check: Ignore-state for private evaluation paths
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: git check-ignore covers private manifest, criterion, and PDFs; git ls-files shows no private paths tracked
+
+- Command/check: Timestamp/order review for pre-recorded pass criterion
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: frozen_at_utc and criterion recorded_at_utc both 2026-07-11T04:55:12+00:00; recorded_before_benchmark=true; no Batch04 benchmark result artifacts under reports/ (only phase_0_feasibility.md + .gitkeep); ordered content-set hash of digests (newline-joined hex) matches A1 report
+
+- Command/check: Privacy/OCR boundary scan on tracked 04A artifacts
+- Required: yes (task privacy + no-OCR)
+- Reported result: passed (A1 aggregate-only claim)
+- Rerun result: passed
+- Status: passed
+- Notes: reports use generic IDs/counts/digests only; ocr_allowed=false; no OCR dependency references under backend for this task
+
+## Acceptance Review
+- Task acceptance: Corpus size/type requirements and the one-redacted-real-CV requirement are met, private paths are ignored, and the pass rule predates benchmark results.
+- Status: satisfied
+- Evidence: User-confirmed 5 digital + 1 image-only corpus materialised under ignored private path; redacted CV slot pdf_digital_001; image-only pdf_image_only_001; private ignore proof; pre-benchmark 4/5 (80%) digital success rule and image-only NO_EXTRACTABLE_TEXT rule frozen before any full normal/layout benchmark measurement. Feasibility PDF measurement rows remain PENDING for 04B–04D.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Safe freeze file `backend/evaluation/fixtures/pdf_fixture_manifest.json` is present and untracked until orchestrator/batch commit; expected for this freeze task.
+- Smoke extraction is inventory/readiness only; do not treat smoke success rates as 04C mode lock.
+- Do not change the 4/5 criterion after 04B–04D measurement begins.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - pypdf Extraction Compatibility Gate
+- Task ID: 04B
+- Task title: Implement the focused pypdf benchmark recorder
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04B-relevant):
+  - M backend/pyproject.toml (pypdf pin)
+  - M docs/reports/report_1_execute_agent.md (04B execution block)
+  - ?? backend/evaluation/benchmark_pdf_extraction.py
+  - ?? backend/evaluation/pdf_benchmark_schema.py
+  - ?? backend/evaluation/reports/pdf_extraction_benchmark.json
+  - ?? backend/tests/test_pdf_extraction_benchmark.py
+- concurrent non-04B working-tree state (not attributed to this task): M phase_0_feasibility.md and ?? pdf_fixture_manifest.json from accepted 04A; review report/task file updates from A2 progress
+
+## Files Reviewed
+- `backend/evaluation/pdf_benchmark_schema.py`: in scope - typed BenchmarkRecord with all six plan fields; extra=forbid; no raw text; ocr_used/alternate_parser_used fixed false on aggregate
+- `backend/evaluation/benchmark_pdf_extraction.py`: in scope - single extract_with_mode/run_single path for normal (pypdf plain) and layout; frozen-manifest load; ignored private path mapping; aggregate write without document text
+- `backend/tests/test_pdf_extraction_benchmark.py`: in scope - synthetic text, image-only, malformed, schema, ordering, OCR/fallback, raw-text leakage tests
+- `backend/pyproject.toml`: in scope - pypdf>=6.12,<7 pinned; no OCR stack deps
+- `backend/evaluation/reports/pdf_extraction_benchmark.json`: in scope - aggregate metrics only (12 records, both modes); metrics/IDs/outcomes only
+- `docs/reports/report_1_execute_agent.md`: in scope - complete 04B execution block
+
+## Validations Reviewed
+- Command/check: `python -m pytest tests/test_pdf_extraction_benchmark.py -q`
+- Required: yes
+- Reported result: passed (13 passed)
+- Rerun result: passed (13 passed in 0.20s)
+- Status: passed
+- Notes: Covers synthetic text both modes, image-only NO_EXTRACTABLE_TEXT both modes, malformed EXTRACTION_ERROR, schema, ordering, manifest load, OCR/fallback search, raw-text leakage
+
+- Command/check: Schema validation for required plan metrics on every record
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: BenchmarkRecord fields are fixture_id, page_count, parser_mode, extracted_character_count, elapsed_milliseconds, outcome; aggregate JSON records all include these keys; extra text fields rejected
+
+- Command/check: OCR / alternate-parser dependency search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: No pdfminer/pdfplumber/pymupdf/pytesseract/ocrmypdf/easyocr/paddleocr/pdf2image in runner, schema, or pyproject; only pypdf used; banned-name hits only appear as assertion patterns in the test file
+
+- Command/check: Optional private-corpus aggregate artifact review
+- Required: no
+- Reported result: passed (12 records; dual-mode image-only NO_EXTRACTABLE_TEXT)
+- Rerun result: passed (static review of pdf_extraction_benchmark.json)
+- Status: passed
+- Notes: 5 digital EXTRACTED_TEXT + 1 image-only NO_EXTRACTABLE_TEXT per mode; no document body or email-like content; recorder proof only, not mode lock
+
+## Acceptance Review
+- Task acceptance: Both modes run through one consistent path, every record has all required fields, and no raw text or OCR path is emitted.
+- Status: satisfied
+- Evidence: Shared run_single/extract_with_mode for normal and layout with equivalent timing bounds; Pydantic schema enforces required metrics and forbids raw text fields; write_aggregate bans text-like keys; pypdf-only pin and OCR/fallback searches clean; focused tests 13/13 pass on A2 rerun. Mode selection (04C) and PDF gate close (04D) correctly deferred.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Character counts use non-whitespace usable characters; A1 correctly notes this may differ from any whitespace-inclusive smoke counts from 04A.
+- Aggregate artifact is recorder evidence only; do not treat it as the locked parser-mode decision (04C) or final PDF gate (04D).
+- phase_0_feasibility.md was not updated by 04B; not required by the 04B file list (measurement/lock remain later tasks).
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+
+---
+
+# Task Review Report - 04C
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - pypdf Extraction Compatibility Gate
+- Task ID: 04C
+- Task title: Run the digital-PDF comparison and select a parser mode
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04C-relevant):
+  - M backend/evaluation/reports/phase_0_feasibility.md (digital comparison table + layout mode lock; PDF gate remains PENDING for 04D)
+  - M docs/reports/report_1_execute_agent.md (04C execution block)
+  - ?? backend/evaluation/reports/pdf_extraction_benchmark.json (refreshed aggregate metrics from 04C re-run; untracked from prior 04B creation)
+- concurrent non-04C working-tree state (not attributed as 04C implementation): M backend/pyproject.toml; ?? benchmark_pdf_extraction.py / pdf_benchmark_schema.py / tests / pdf_fixture_manifest.json from accepted 04A/04B; review report and task-file progress updates
+
+## Files Reviewed
+- `backend/evaluation/reports/pdf_extraction_benchmark.json`: in scope - 12 metric records (5 digital + 1 image-only) x both modes; required fields present; ocr_used=false; alternate_parser_used=false; no document text
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - complete digital-PDF table, dual-mode 5/5 vs frozen 4/5, locked selected mode `layout`, full PDF gate still PENDING 04D
+- `backend/evaluation/fixtures/pdf_fixture_manifest.json`: in scope (read-only) - frozen digital IDs, page counts, criterion_id pdf_digital_agreed_majority_v1 with required 4 of 5 and recorded_before_benchmark=true
+- `backend/evaluation/private/pdf_pass_criterion.local.json`: in scope (read-only) - pre-recorded 4/5 criterion copy matches committed freeze; not changed after measurement
+- `docs/reports/report_1_execute_agent.md`: in scope - complete 04C execution block
+- `docs/plans/Master_plan.md` section 10.2: source tie-break for layout under equal yield (`pypdf layout text extraction`)
+
+## Validations Reviewed
+- Command/check: Result-set equality (digital IDs, page counts, dual-mode coverage)
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Ordered digital IDs pdf_digital_001..005 match frozen manifest; page_count=1 for all; both modes cover all five digital fixtures
+
+- Command/check: Required-field/schema check on aggregate records
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: All 12 records include fixture_id, page_count, parser_mode, extracted_character_count, elapsed_milliseconds, outcome; schema_version=1; no raw-text record fields
+
+- Command/check: Threshold calculation against frozen 4/5 criterion
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Success = EXTRACTED_TEXT and char_count > 0; normal 5/5 and layout 5/5 both meet required 4; criterion fields unchanged (required=4, total=5, percent_floor=80.0, criterion_id=pdf_digital_agreed_majority_v1); no post-hoc threshold edit
+
+- Command/check: Repeated spot run for deterministic classification
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: A2 re-ran run_from_manifests(output_path=None); classification tuples (fixture_id, mode, outcome, char_count, page_count) equal on-disk aggregate for all 12 records (timing may vary)
+
+- Command/check: Raw-text leakage scan on aggregate and feasibility report
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Aggregate has no emails and no document-body fields; feasibility updates are metrics/decision narrative only; private filenames and PDF text absent
+
+- Command/check: Focused synthetic benchmark tests
+- Required: no
+- Reported result: passed (13)
+- Rerun result: passed (13 passed in 0.19s)
+- Status: passed
+- Notes: Confirms recorder still sound; not a substitute for digital corpus measurement
+
+## Acceptance Review
+- Task acceptance: Comparable results exist for every digital fixture in both modes and one mode meets the approved pass criterion; mode decision locked.
+- Status: satisfied
+- Evidence: Digital table complete for five fixtures x both modes with matching page counts and IDs; both modes meet frozen 4/5 with equal usable-char yields (1049/953/995/971/1038, total 5006); selected mode `layout` locked with master-plan equal-yield layout-path rationale; criterion not changed after results; 04D image-only exact-code gate correctly left open.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Both modes meet the frozen majority; layout is a documented equal-yield tie-break aligned with Master Plan 10.2 ingestion path, not a post-hoc threshold change.
+- Aggregate includes image-only dual-mode rows for corpus completeness; exact dual-mode `NO_EXTRACTABLE_TEXT` closure remains 04D.
+- Full PDF extraction compatibility decision-table row remains PENDING until 04D.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+
+---
+
+# Task Review Report - 04D
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - pypdf Extraction Compatibility Gate
+- Task ID: 04D
+- Task title: Verify exact image-only failure behavior and close the PDF gate
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04D-relevant):
+  - M backend/evaluation/reports/phase_0_feasibility.md (image-only 04D section; PDF gate PASS; inventory/locked-version updates)
+  - M docs/reports/report_1_execute_agent.md (04D execution block)
+  - ?? backend/tests/test_pdf_extraction_benchmark.py (04D exact-code and repeated-run tests; untracked from prior Batch04 work with 04D additions)
+  - ?? backend/evaluation/reports/pdf_extraction_benchmark.json (refreshed aggregate metrics from 04D re-run)
+- concurrent non-04D working-tree state (not attributed as 04D-only implementation): M backend/pyproject.toml; ?? benchmark_pdf_extraction.py / pdf_benchmark_schema.py / pdf_fixture_manifest.json from accepted 04A-04C; prior review/task progress edits
+
+## Files Reviewed
+- `backend/tests/test_pdf_extraction_benchmark.py`: in scope - exact-code normal/layout assertions, repeated-run stability, optional frozen private fixture dual-mode gate, OCR/alternate dependency searches
+- `backend/evaluation/reports/pdf_extraction_benchmark.json`: in scope - image-only both modes NO_EXTRACTABLE_TEXT / 0 chars; ocr_used=false; alternate_parser_used=false; parser_library=pypdf; metrics-only fields
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - 04D image-only section; PDF extraction compatibility decision-table row PASS; selected digital mode remains layout
+- `backend/evaluation/benchmark_pdf_extraction.py`: in scope (read-only) - pypdf-only extract_with_mode; classify_outcome maps zero usable chars to NO_EXTRACTABLE_TEXT; no OCR path
+- `backend/evaluation/pdf_benchmark_schema.py`: in scope (read-only) - ocr_used and alternate_parser_used locked Literal[False]; no raw-text record fields
+- `backend/pyproject.toml`: in scope (read-only) - pypdf pin; no OCR/alternate parser packages
+- `docs/reports/report_1_execute_agent.md`: in scope - complete 04D execution block
+- `docs/plans/Plan_1.md` section 7.3: source requires image-only NO_EXTRACTABLE_TEXT and no OCR
+
+## Validations Reviewed
+- Command/check: Focused exact-code assertions for normal and layout modes (pytest suite)
+- Required: yes
+- Reported result: passed (16)
+- Rerun result: passed (16 passed in 0.19s)
+- Status: passed
+- Notes: Includes synthetic exact-code, repeated-run, frozen-private-fixture-when-present, and OCR/pyproject searches
+
+- Command/check: Frozen private image-only dual-mode live assertion
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: private pdf_image_only_001 present; normal and layout both outcome=NO_EXTRACTABLE_TEXT, chars=0, pages=1; not EXTRACTION_ERROR
+
+- Command/check: Repeated image-only dual-mode stability (tests + private fixture loop)
+- Required: yes
+- Reported result: passed (3x)
+- Rerun result: passed
+- Status: passed
+- Notes: Synthetic 3x dual-mode in tests; frozen fixture path also exercises 3x dual-mode when present
+
+- Command/check: OCR / alternate parser dependency and source search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: pyproject pins pypdf only; evaluation sources free of pdfminer/pdfplumber/pymupdf/pytesseract/ocrmypdf/easyocr/paddleocr/pdf2image; aggregate flags ocr_used=false and alternate_parser_used=false
+
+- Command/check: Selected digital mode still meets 04C frozen 4/5 criterion
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: layout digital successes 5/5 (>=4); normal also 5/5; per-fixture usable char yields unchanged at 1049/953/995/971/1038 total 5006
+
+- Command/check: Raw-text leakage scan of aggregate
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Exact field-key scan has no extracted_text/document_text fields (substring match on extracted_text_count is not a document-body field); no long free-text string values; metrics-only aggregate
+
+- Command/check: Final PDF gate decision recorded
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: phase_0_feasibility.md 04D section documents both modes and exact failure rule; Final Decisions row PDF extraction compatibility = PASS with selected mode layout
+
+## Acceptance Review
+- Task acceptance: Both modes reproducibly return exact NO_EXTRACTABLE_TEXT with zero usable characters; no OCR path; selected digital layout mode still satisfies 04C; final PDF gate decision recorded PASS.
+- Status: satisfied
+- Evidence: Live private fixture dual-mode extraction, refreshed aggregate, focused 16/16 tests, OCR/alternate search, digital 5/5 layout reconfirm, and feasibility decision-table PASS all agree.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Elapsed milliseconds may vary slightly across runs; outcome codes and usable character counts are stable and are the acceptance signals.
+- Substring searches for extracted_text will hit metric field extracted_text_count; exact key scan is the correct leakage check.
+- Batch04 task checkboxes are all accepted after this review; batch completion and commit remain orchestrator/A3 responsibilities.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.

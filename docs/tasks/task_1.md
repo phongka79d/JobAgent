@@ -665,7 +665,7 @@ Later CV ingestion depends on predictable digital-PDF extraction and a clear non
 
 ### Tasks
 
-- [ ] (04A): Freeze the PDF fixture manifest and pass criterion
+- [x] (04A): Freeze the PDF fixture manifest and pass criterion
   - Source of Truth: `docs/plans/Plan_1.md` > `## 3. Prerequisites from Prior Phases`; `docs/plans/Plan_1.md` > `### 7.3 PDF benchmark record`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.1 Data policy`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - Use five to ten representative digital CV PDFs plus an image-only fixture.
@@ -687,7 +687,7 @@ Later CV ingestion depends on predictable digital-PDF extraction and a clear non
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when fixtures or the numeric pass criterion are missing.
   - Files: PDF manifest under `backend/evaluation/fixtures/`; private files under ignored `backend/evaluation/private/` or another documented ignored local path; `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (04B): Implement the focused pypdf benchmark recorder
+- [x] (04B): Implement the focused pypdf benchmark recorder
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.3 PDF benchmark record`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 3. Locked Technology Stack`
   - Source Requirements:
     - Compare pypdf normal and layout extraction only.
@@ -709,7 +709,7 @@ Later CV ingestion depends on predictable digital-PDF extraction and a clear non
   - Blocked Condition: None after (04A) is complete.
   - Files: Focused runner such as `backend/evaluation/benchmark_pdf_extraction.py`, focused backend tests, aggregate result output under `backend/evaluation/reports/`, `backend/pyproject.toml` if pypdf is not yet pinned.
 
-- [ ] (04C): Run the digital-PDF comparison and select a parser mode
+- [x] (04C): Run the digital-PDF comparison and select a parser mode
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.3 PDF benchmark record`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - Run normal and layout extraction across the same agreed digital fixtures.
@@ -731,7 +731,7 @@ Later CV ingestion depends on predictable digital-PDF extraction and a clear non
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when the pre-recorded threshold is unavailable or a disputed fixture classification requires user resolution.
   - Files: Aggregate PDF benchmark results, `backend/evaluation/reports/phase_0_feasibility.md`, benchmark runner/tests only when corrections are required.
 
-- [ ] (04D): Verify exact image-only failure behavior and close the PDF gate
+- [x] (04D): Verify exact image-only failure behavior and close the PDF gate
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.3 PDF benchmark record`; `docs/plans/Plan_1.md` > `## 5. Out of Scope`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - The image-only fixture must produce the exact outcome `NO_EXTRACTABLE_TEXT`.
