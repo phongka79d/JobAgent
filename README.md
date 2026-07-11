@@ -18,6 +18,10 @@ caller-transactional staged/active metadata operations are available under
 endpoints, health checks, Agent behavior, and user workflows remain for later
 plans and Plan 2 batches.
 
+**Plan 2 Batch04 is COMPLETE.** Neo4j remains derived-only behind reusable
+lifecycle/schema primitives, SQLite has a replay-safe graph outbox, and the
+rebuild command defaults to a safe dry run with explicit incomplete later stages.
+
 Batch01–Batch05 locked the scaffold and four compatibility gates (Astryx,
 ShopAIKey chat, pypdf extraction, ShopAIKey embeddings). Batch06 pinned exact
 dependency decisions, removed temporary demo/cache artifacts, completed global

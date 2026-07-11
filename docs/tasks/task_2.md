@@ -356,7 +356,7 @@ and full rebuild loaders remain deferred.
 
 ### Tasks
 
-- [ ] (04A): Implement Neo4j lifecycle, health probe, and idempotent schema bootstrap
+- [x] (04A): Implement Neo4j lifecycle, health probe, and idempotent schema bootstrap
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.4 Graph schema bootstrap`; `docs/plans/Master_plan.md` > `### 8.3 Constraints and indexes`; `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Own the async Neo4j driver lifecycle and a bounded health probe without making Neo4j canonical.
@@ -381,7 +381,7 @@ and full rebuild loaders remain deferred.
   - Blocked Condition: The selected Neo4j Community image/version cannot support the source-required vector-index syntax with driver `6.2.0`; changing graph technology or embedding dimensions requires approval.
   - Files: `backend/app/graph/client.py`, `backend/app/graph/schema.py`, `backend/tests/graph/test_client.py`, `backend/tests/graph/test_schema.py`
 
-- [ ] (04B): Implement the transactional replay-safe graph outbox repository
+- [x] (04B): Implement the transactional replay-safe graph outbox repository
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.5 Outbox contracts`; `docs/plans/Master_plan.md` > `## 21. SQLite-to-Neo4j Synchronization`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Support enqueue in the caller's SQLite transaction, bounded pending claims, mark-synced, and mark-failed with visible attempt count.
@@ -405,7 +405,7 @@ and full rebuild loaders remain deferred.
   - Blocked Condition: The approved SQLite schema lacks a field or uniqueness rule required for stable operation identity and cannot be corrected through the still-initial migration without contradicting the source.
   - Files: `backend/app/repositories/graph_outbox.py`, `backend/app/db/models/graph_outbox.py`, initial migration only if required, `backend/tests/repositories/test_graph_outbox.py`
 
-- [ ] (04C): Add the safe graph rebuild command skeleton
+- [x] (04C): Add the safe graph rebuild command skeleton
   - Source of Truth: `docs/plans/Plan_2.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`; `docs/plans/Master_plan.md` > `### 21.4 Rebuild`
   - Source Requirements:
     - Provide one infrastructure command that can safely clear only JobAgent-derived graph data and recreate constraints/vector index.

@@ -137,6 +137,7 @@ ACCEPTED
 - remaining issues: none.
 - updated outcome: ACCEPTED.
 
+---
 
 # Task Review Report - 01B
 
@@ -775,3 +776,381 @@ ACCEPTED
 - repairs verified: handle-bound fail-closed Windows operations; no outside read/create/move/delete; complete sanitized OS-error boundary; POSIX failure rollback; one shared canonical validator; focused <=300-line production modules; concern-split tests; accurate preserved execution evidence.
 - remaining issues: none.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04A
+- Task title: Implement Neo4j lifecycle, health probe, and idempotent schema bootstrap
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: modified `backend/pyproject.toml` and `docs/reports/report_2_execute_agent.md`; untracked `backend/app/graph/__init__.py`, `client.py`, `lifecycle.py`, `errors.py`, `schema.py`, and `backend/tests/graph/__init__.py`, `fakes.py`, `test_client.py`, `test_schema.py`
+
+## Files Reviewed
+- `backend/app/graph/__init__.py`: in scope - focused exports; importing the package does not import the Neo4j driver.
+- `backend/app/graph/client.py`: repaired in scope - delegates lifecycle ownership, includes construction in the health deadline, propagates caller cancellation, preserves parameter/session/result boundaries, and keeps public errors sanitized.
+- `backend/app/graph/lifecycle.py`: repaired in scope - every shared create task has a side-effect-free terminal observer; shielded waiters, off-loop construction, one-driver publication, close joining, failed-close retry ownership, late outcome observation, and retry semantics are coherent.
+- `backend/app/graph/errors.py`: in scope - stable code-only graph errors and component-health values; reviewed `str`, `repr`, cause, and context behavior.
+- `backend/app/graph/schema.py`: in scope - exactly four static named uniqueness constraints and one static named 1536-dimensional cosine `Job.embedding` vector index, all with `IF NOT EXISTS` and no graph deletion/data mutation.
+- `backend/tests/graph/fakes.py`: repaired in scope - failed/cancelled cleanup no longer pre-marks the fake resource closed; deterministic operation and close gates are real.
+- `backend/tests/graph/test_client.py`: repaired in scope - covers blocking first-use construction, simultaneous creation, first-use/active-operation close races, joined closes, failed-close retry, close-waiter cancellation, late factory failure observation/retry, and repaired-path redaction.
+- `backend/tests/graph/test_schema.py`: in scope - exact DDL, repeat application, dimension rejection, redaction, and canonical SQLite isolation; optional live Neo4j test is clearly skipped until a process password and service exist.
+- `backend/pyproject.toml`: in scope - preserves exact `neo4j==6.2.0`, promotes it minimally to main dependencies, and registers the optional live marker.
+- `docs/reports/report_2_execute_agent.md`: in-scope evidence - the updated matching 04A block is ASCII-clean, preserves repair history, and accurately reports the final lifecycle/schema evidence.
+- `.agent/handoff/a1_response.json`: live handoff evidence - selects exactly 04A and reports complete.
+- `backend/app/config.py` and `backend/app/db/session.py`: accepted dependency context - typed secret/dimension settings and canonical SQLite ownership remain isolated from the graph package.
+- `README.md`, `docs/plans/Plan_2.md`, `docs/plans/Master_plan.md`, and `docs/tasks/task_2.md`: source context reviewed for lifecycle, schema, derived-only, and failure contracts.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/graph/test_client.py tests/graph/test_schema.py`
+- Required: yes
+- Reported result: 34 passed, 1 skipped
+- Rerun result: 34 passed, 1 skipped in 0.71s
+- Status: passed
+- Notes: optional live Neo4j validation skipped as permitted; the fake suite includes delayed factory failure, loop exception capture, GC, retry, and single-close proof.
+
+- Command/check: `cd backend; python -m ruff check app/graph tests/graph; python -m mypy app/graph`
+- Required: yes
+- Reported result: passed
+- Rerun result: Ruff passed; mypy passed for 5 graph source files.
+- Status: passed
+- Notes: focused static quality gate is green.
+
+- Command/check: `cd backend; python -m pytest -q`
+- Required: no
+- Reported result: 312 passed, 2 skipped
+- Rerun result: 312 passed, 2 skipped in 5.86s
+- Status: passed
+- Notes: full backend regression suite is green.
+
+- Command/check: independent delayed first-use factory health probe
+- Required: yes
+- Reported result: full connectivity deadline includes off-loop first-use construction
+- Rerun result: a 0.010s deadline returned sanitized `neo4j_timeout` in 0.0169s instead of waiting 0.120s; the late-created driver remained owned and was closed exactly once
+- Status: passed
+- Notes: delayed successful construction no longer blocks the event loop or abandons the late result.
+
+- Command/check: independent failed, cancelled, and overlapping close probes
+- Required: yes
+- Reported result: close is joined, shielded from waiter cancellation, and retains failed cleanup ownership
+- Rerun result: simultaneous create, first-use/close, active query/close, active health/close, two closes, failed-close retry, and cancelled close waiter all passed; each created driver was closed once or explicitly retained until retry
+- Status: passed
+- Notes: independent event/thread-gated probes confirmed the reported lifecycle repair paths and terminal rejection of new work.
+
+- Command/check: independent delayed failing factory after health timeout with event-loop exception capture
+- Required: yes
+- Reported result: every create task has a lifecycle-owned terminal observer and delayed failure remains retryable without loop output
+- Rerun result: health returned sanitized `neo4j_timeout` in 0.0077s; after delayed failure, completion, and GC the temporary loop handler captured zero contexts; `_create_task` was cleared; retry created one driver and close released it exactly once; two active waiters still received sanitized `neo4j_unavailable` with zero contexts
+- Status: passed
+- Notes: static inspection confirms the done callback checks cancellation, calls `task.exception()` only on a completed task, catches callback-local cancellation/state/exception paths, does not log/rethrow/mutate ownership, and retains no completed task.
+
+- Command/check: independent import, schema, dependency, canonical-state, module-size, and scope scans
+- Required: yes
+- Reported result: lazy import, exact idempotent DDL, exact pin, no canonical-state mutation, and focused modules
+- Rerun result: passed; importing `app.graph.client` left `neo4j` unloaded; schema has 5 statements (4 constraints, 1 vector index), all `IF NOT EXISTS`, no DROP/DELETE/DETACH/SET/REMOVE, dimension 1536 and cosine; installed/pinned driver is 6.2.0; graph source has no SQLite/filesystem API; source files are 265/260/138/66/38 lines
+- Status: passed
+- Notes: static/fake evidence supports the schema syntax contract; live syntax remains an explicitly optional later check.
+
+## Acceptance Review
+- Task acceptance: schema, redaction, parameter forwarding, lazy import, exact dependency, canonical-state isolation, bounded construction, serialized create/close ownership, terminal task observation, and retry behavior are satisfied.
+- Status: satisfied
+- Evidence: required/final suites and independent probes prove a bounded stable timeout, zero loop exception contexts for late failure and active waiters, retry with single close, no raw error chain, exact idempotent schema, and no canonical-state access.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-11T19:03:00+07:00
+- what was re-checked: both prior A2 lifecycle findings, all current source and fake tests, delayed construction timing, simultaneous creation, first-use/query/health close races, joined closes, failed-close retry, close-waiter cancellation, late result ownership, redaction/cause/context, exact schema, dependency pin, canonical-state isolation, module sizes, full git scope, report encoding, focused quality/tests, and the full backend suite.
+- repairs verified: the complete health deadline now covers off-loop construction; late successful drivers remain owned; concurrent first use publishes once; close joins creation and other closes; failed cleanup remains retryable; cancelling a close waiter cannot cancel shared cleanup; prior schema/redaction/isolation behavior remains green.
+- remaining issues: a delayed factory exception after the only health waiter times out is never retrieved by lifecycle ownership and emits an event-loop warning with traceback.
+- updated outcome: REJECTED_WITH_WARNINGS.
+
+### 2026-07-11T19:15:00+07:00
+- what was re-checked: final observer source/callback paths, delayed failing factory timeout with temporary loop handler and forced GC, retry and single close, simultaneous active waiters, all prior create/close/query/health/cancellation probes, exact schema, dependency pin, canonical-state isolation, module sizes, report encoding, focused quality/tests, full backend suite, git scope, and checkbox integrity.
+- repairs verified: every create task receives the terminal observer; delayed failure produces zero loop contexts; callback cancellation/state/error branches cannot raise or log; failed creation clears for retry; active waiters retain code-only errors; late success and all prior lifecycle ownership behaviors remain correct.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04B
+- Task title: Implement the transactional replay-safe graph outbox repository
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- git diff cached reviewed: yes (empty)
+- changed files from git: 04B changes are `backend/app/repositories/graph_outbox.py`, `backend/app/db/models/outbox.py`, `backend/migrations/versions/c885a5846d85_initial_application_schema.py`, `backend/tests/repositories/test_graph_outbox.py`, and the matching execution-report block. Pre-existing uncommitted 04A graph, dependency, report/review, and task-checkbox artifacts were identified from status and not treated as 04B work.
+
+## Files Reviewed
+- `backend/app/repositories/graph_outbox.py`: in scope. The user-authorized repair uses one case-insensitive credential-assignment detector for `:` and `=` with optional whitespace. Both payload validation and `_sanitize_error` consume the shared detector.
+- `backend/app/db/models/outbox.py`: in scope; the unique `(operation, entity_id)` identity is represented in metadata.
+- `backend/migrations/versions/c885a5846d85_initial_application_schema.py`: in scope; initial migration mirrors the metadata unique constraint.
+- `backend/tests/repositories/test_graph_outbox.py`: in scope; direct, nested, and enqueue credential-assignment probes cover whitespace and tight `=` forms, and `mark_failed` asserts that no matching value is retained.
+- `docs/reports/report_2_execute_agent.md`: matching reopened-repair evidence was reviewed and independently verified.
+- `.agent/handoff/a1_response.json`: live handoff selects 04B and reports complete.
+- `README.md`, `docs/plans/Plan_2.md`, `docs/plans/Master_plan.md`, and `docs/tasks/task_2.md`: source context reviewed.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/repositories/test_graph_outbox.py`
+- Required: yes
+- Reported result: 25 passed
+- Rerun result: 25 passed in 1.94s
+- Status: passed
+- Notes: includes direct/nested and enqueue whitespace/equal-sign credential assignments plus `mark_failed` sanitization.
+
+- Command/check: `cd backend; python -m ruff check app/repositories/graph_outbox.py tests/repositories/test_graph_outbox.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+
+- Command/check: `cd backend; python -m mypy app/repositories/graph_outbox.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success: no issues found in 1 source file
+- Status: passed
+
+- Command/check: `cd backend; python -m pytest -q tests/integration/test_migrations.py tests/db/test_models.py tests/repositories/test_attachments.py`
+- Required: no
+- Reported result: 60 passed in the A1 combined run with the outbox suite
+- Rerun result: 60 passed in 4.30s
+- Status: passed
+- Notes: metadata, initial migration, and existing attachment behavior remain compatible.
+
+- Command/check: independent payload-boundary probe
+- Required: yes
+- Reported result: repository rejects all final A2-listed path, credential, and raw-document categories
+- Rerun result: direct and nested POSIX root/single/multi-segment paths, quoted/embedded case-variant `file:` URIs, URI userinfo, colon/equal-sign credentials, auth schemes, and transcript/transcription categories all reject with code-only errors. `password = <redacted>`, `X-Api-Key = <redacted>`, tab-separated assignment forms, and tight assignments reject; an ordinary `release = 2026.07` value remains allowed.
+- Status: passed
+- Notes: no payload probe echoed its submitted value.
+
+- Command/check: independent transaction, replay/terminal-state, and bounded-claim probes
+- Required: yes
+- Reported result: caller transaction, replay identity, terminal-state persistence, and bounded ordering are preserved
+- Rerun result: rollback removed the enqueue; failed replay returned the same row with attempts preserved; synced replay preserved terminal state; tied timestamps ordered by UUID with the requested bound and invalid limits rejected. `mark_failed` maps credential assignment values to `sync_failed` while preserving `neo4j_unavailable`.
+- Status: passed
+- Notes: transaction and terminal-state behavior remains unchanged.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied.
+- Evidence: task 04B's caller-owned transaction, identity, bounded-claim, state-transition, and no-worker contracts remain covered. The reopened repair closes the last payload-safety gap: ordinary-key credential labels using `:` or `=` with optional whitespace are rejected at the shared value detector, and the same shapes are replaced with `sync_failed` before persistence.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-11T19:40:00+07:00
+- what was re-checked: the prior A2 repair instructions; matching A1 same-task-repair report and live handoff; selected task/source requirements; all 04B model, migration, repository, test, and prospective-caller evidence; current git diff/status; caller-transaction rollback, replay/terminal state, deterministic bounded claims, migration parity, and no worker/poller/domain-scope drift.
+- repairs verified: direct and nested `active`/`staged` service-path, Basic-scheme credential, and `document` category probes now reject with generic errors that do not echo values. The focused 04B suite passed (21 passed), focused Ruff/mypy passed, and the requested outbox/migration/model/attachment regression suite passed (56 passed).
+- remaining issues: independent probes still accepted POSIX root/single-component and `file:` filesystem paths, credential-bearing URI/header value forms under ordinary keys, and raw document content under the alternate `transcript` category. None of the rejected-probe errors exposed their values.
+- updated outcome: REJECTED.
+
+### 2026-07-11T19:54:00+07:00
+- what was re-checked: final A1 repair report and live handoff; task/source contracts; all 04B model, migration, repository, tests, and caller searches; git status/diff; required focused pytest (24 passed), Ruff/mypy, and migration/model/attachment regression suite (59 passed); direct and nested path/credential/document probes; rollback, replay/terminal-state, bounded deterministic claim, and `mark_failed` sanitization probes.
+- repairs verified: all prior rejected POSIX/file URI, URI-userinfo, colon-header, and transcript/transcription probes now reject without echoing their values. Transaction rollback, stable logical identity, terminal-state preservation, bounded deterministic claims, unique migration parity, attempts, failure recovery, and non-worker scope remain sound.
+- remaining issues: ordinary-key credential assignments using optional whitespace around `=` are accepted by the payload validator, and that shape is retained in `last_error` rather than being replaced by the generic error code. This is a remaining source-contract failure, despite the repair cap.
+- updated outcome: REJECTED. No fourth same-task repair is authorized; do not advance the batch without an explicit user decision.
+
+### 2026-07-11T20:05:00+07:00
+- what was re-checked: user-authorized reopened A1 repair handoff and report; selected task/source requirements; repository, model, migration, tests, prospective callers, git status/diff, and task-checkbox integrity; required focused pytest (25 passed), Ruff, and mypy; requested migration/model/attachment regression (60 passed); direct and nested credential-assignment probes and persisted-error sanitization.
+- repairs verified: the shared case-insensitive credential-assignment detector rejects `:` and `=` separators with optional whitespace, including direct and nested `password =` and `X-Api-Key =` inputs. Independent probes also covered tabs, tight assignments, and preserved safe non-credential equality text. `_sanitize_error` now returns `sync_failed` for every tested credential assignment and retains only safe code-only errors.
+- remaining issues: none.
+- updated outcome: ACCEPTED. The selected checkbox was checked; no batch status was changed.
+
+---
+
+# Task Review Report - 04C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04C
+- Task title: Add the safe graph rebuild command skeleton
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- git diff cached reviewed: yes (empty)
+- changed files from git: `infrastructure/scripts/rebuild_graph.py`, `backend/tests/infrastructure/__init__.py`, `backend/tests/infrastructure/test_rebuild_graph.py`, and the matching execution-report block. Existing uncommitted 04A/04B artifacts were identified and not treated as 04C work.
+
+## Files Reviewed
+- `infrastructure/scripts/rebuild_graph.py`: in scope. The command defaults to an offline dry run, requires `--confirm-destructive` for execution, and lets `--dry-run` win when both flags appear. It reuses `Neo4jClient` and `ensure_graph_schema`, contains exactly four label-scoped `MATCH (n:Label) DETACH DELETE n` statements, and rejects database-wide/unlabeled delete shapes before execution.
+- `backend/tests/infrastructure/__init__.py`: package marker needed for focused test discovery.
+- `backend/tests/infrastructure/test_rebuild_graph.py`: in scope; fake-backed coverage exercises help, dry run, confirmation, clear scope, schema delegation, errors, redaction, and explicit incomplete-stage behavior.
+- `docs/reports/report_2_execute_agent.md`: matching 04C evidence was reviewed and corroborated.
+- `.agent/handoff/a1_response.json`: live A1 handoff selects 04C and reports complete.
+- `README.md`, `docs/plans/Plan_2.md`, `docs/plans/Master_plan.md`, and `docs/tasks/task_2.md`: source context reviewed.
+
+## Validations Reviewed
+- Command/check: `python infrastructure/scripts/rebuild_graph.py --help`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; help exits successfully and documents only the offline dry-run, explicit confirmation, scoped labels, schema reuse, deferred-stage boundary, and redaction policy.
+- Status: passed
+
+- Command/check: `cd backend; python -m pytest -q tests/infrastructure/test_rebuild_graph.py`
+- Required: yes
+- Reported result: 15 passed
+- Rerun result: 15 passed in 0.37s.
+- Status: passed
+
+- Command/check: `python infrastructure/scripts/rebuild_graph.py --dry-run`
+- Required: no
+- Rerun result: passed; exit 0, reports the four scoped statements, opens no connection, and loads no configuration values.
+- Status: passed
+
+- Command/check: `cd backend; python -m ruff check tests/infrastructure/test_rebuild_graph.py ../infrastructure/scripts/rebuild_graph.py`
+- Required: no
+- Rerun result: passed.
+- Status: passed
+
+- Command/check: independent import, dry-run isolation, and Cypher-scope probe
+- Required: yes
+- Rerun result: passed; direct module import plus `main([])` succeeds without a client/settings load, all clear statements remain label-bound, and dry-run output has no URI-shaped configuration text or executed `not_implemented` status.
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied.
+- Evidence: the only execution-capable path requires explicit confirmation and clears only the four approved labels; no global delete can pass its assertion. Schema setup delegates to 04A, while deferred SQLite loading, entity rebuild, embedding work, verification, and sync-state updates are visibly `not_implemented` and return non-success code `2`. Error paths emit stable codes only.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.

@@ -2,6 +2,9 @@
 
 Payloads store SQLite IDs and canonical data only — never filesystem paths,
 API keys, or raw document bytes. Processing semantics belong to later plans.
+
+Logical operation identity is ``(operation, entity_id)``: unique so replays
+cannot create a second durable row for the same graph operation.
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Integer, String
+from sqlalchemy import CheckConstraint, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -27,6 +30,12 @@ class GraphSyncOutbox(Base, TimestampMixin):
             name="outbox_status",
         ),
         CheckConstraint("attempts >= 0", name="outbox_attempts_non_negative"),
+        # Stable replay-safe identity: one logical operation per entity.
+        UniqueConstraint(
+            "operation",
+            "entity_id",
+            name="uq_graph_sync_outbox_operation_entity_id",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=new_uuid)

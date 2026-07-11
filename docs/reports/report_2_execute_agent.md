@@ -832,3 +832,508 @@ complete
   - updated 03A final repair log; encoding scan clean (no U+FFFD/mojibake); corrected prior 03A repair-entry punctuation that could surface as mojibake under wrong decoders
 - validations rerun: focused pytest 74 passed / 1 skipped; ruff All checks passed; mypy 12 source files Success; full backend pytest 278 passed / 1 skipped; git diff --check passed; line-count check passed; report encoding scan passed
 - outcome: complete - evidence correction items addressed; ready for third A2 decision
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - Derived Graph and Durable Synchronization Contracts
+
+## Task
+04A - Implement Neo4j lifecycle, health probe, and idempotent schema bootstrap
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04A
+- Task title: Implement Neo4j lifecycle, health probe, and idempotent schema bootstrap
+- Files allowed / repair scope: A2 final automatic repair for 04A only - lifecycle-owned terminal-outcome observer on every shared create task; late failing factory after health timeout must not emit Task exception was never retrieved; preserve retry/late-success/sanitized waiters/close join; add loop exception-handler regression; update 04A report. No 04B/04C, schema DDL/dependency pin changes, global loop handler suppression, checkbox, commit, or stage.
+
+## Completed Work
+- Original: focused Neo4j package with injectable client, bounded health, sanitized GraphError codes, parameter-bound query runner; idempotent IF NOT EXISTS constraints + 1536 cosine vector index; neo4j==6.2.0 pin; fake-driver tests; SQLite non-mutation on graph failure
+- Repair: complete health/connectivity deadline now includes first-use construction; sync factories run via asyncio.to_thread so they cannot block the event loop past the deadline
+- Repair: DriverLifecycle serializes create/close with shared shielded tasks - concurrent first use publishes one driver; close races join create; concurrent/repeated closes join one cleanup; failed close retains ownership for retry; cancelled close waiter cannot cancel cleanup
+- Repair: FakeDriver no longer marks closed before failed cleanup; added deterministic event/thread-gate tests for simultaneous first use, delayed factory health deadline, first-use/close, query/health/close, two closes, close exception, close cancellation, and full sanitization of repaired errors
+- Final repair: every shared create task gets a lifecycle-owned done callback that retrieves the terminal outcome without logging secrets; delayed factory failure after all health waiters time out no longer emits Task exception was never retrieved; failed create stays retryable; late success still owned/joined/closed; active waiters still receive sanitized GraphError mapping
+- Final repair: added test_late_failing_factory_after_health_timeout_is_observed (loop exception handler capture, GC, zero contexts, retry create + single close)
+- Schema static DDL, redaction, and canonical-state isolation preserved; modules remain focused and <=300 lines (lifecycle split out)
+
+## Files Created or Modified
+- backend/app/graph/__init__.py
+- backend/app/graph/client.py
+- backend/app/graph/lifecycle.py
+- backend/app/graph/errors.py
+- backend/app/graph/schema.py
+- backend/tests/graph/__init__.py
+- backend/tests/graph/fakes.py
+- backend/tests/graph/test_client.py
+- backend/tests/graph/test_schema.py
+- backend/pyproject.toml
+- docs/reports/report_2_execute_agent.md
+
+## Files Inspected Before Editing
+- docs/tasks/task_2.md (04A)
+- docs/plans/Plan_2.md section 7.4 / 8
+- docs/plans/Master_plan.md sections 8.3 / 8.4 / 20
+- README.md
+- docs/review/review_2_review_agent.md (04A REJECTED_WITH_WARNINGS + final repair instructions)
+- backend/app/graph/client.py
+- backend/app/graph/lifecycle.py (create-task observer target)
+- backend/app/graph/schema.py (preserve exact schema)
+- backend/app/graph/errors.py (preserve sanitization)
+- backend/tests/graph/fakes.py
+- backend/tests/graph/test_client.py
+- backend/tests/graph/test_schema.py
+- backend/app/config.py
+- docs/reports/report_2_execute_agent.md (in-place 04A update target)
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pytest -q tests/graph/test_client.py tests/graph/test_schema.py
+- required: yes
+- result: passed
+- evidence or reason: 34 passed, 1 skipped in 0.92s after final repair (optional live neo4j skipped without NEO4J_PASSWORD); includes late-failing-factory loop-exception regression, delayed-factory health deadline, simultaneous first use, close races, close exception/cancellation ownership, sanitized str/repr/cause/context
+
+- command/check: cd backend; python -m ruff check app/graph tests/graph; python -m mypy app/graph
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 5 source files
+
+- command/check: cd backend; python -m pytest -q
+- required: yes
+- result: passed
+- evidence or reason: 312 passed, 2 skipped in 5.83s (full backend suite; no regressions)
+
+- command/check: independent delayed failing factory after health timeout with event-loop exception capture
+- required: yes
+- result: passed
+- evidence or reason: health returned sanitized neo4j_timeout; after factory delay + GC, contexts_after_fail=0; retry get_driver succeeded; close once; contexts_final=0; no Task exception was never retrieved
+
+- command/check: production graph module line-count check
+- required: no
+- result: passed
+- evidence or reason: client.py 265, lifecycle.py 260, schema.py 138, errors.py 66, __init__.py 38 (all <=300)
+
+- command/check: strict 04A report U+FFFD and mojibake sequence scan
+- required: yes
+- result: passed
+- evidence or reason: 04A block is pure ASCII; zero U+FFFD; zero known mojibake sequences (em/en dash, smart quotes, ellipsis as cp1252 misreads of UTF-8)
+
+## Acceptance Check
+- condition: Two schema-setup runs issue only idempotent, parameter-safe operations and create no duplicate logical constraint or index
+- status: satisfied
+- evidence: test_ensure_graph_schema_is_idempotent_on_rerun records ten IF NOT EXISTS statements (5+5 identical static DDL); empty parameter maps; no DROP
+
+- condition: The vector index uses the configured value fixed at 1536 and cosine similarity; no alternate graph/vector store or canonical-only graph state exists
+- status: satisfied
+- evidence: JOB_EMBEDDING_VECTOR_INDEX static Cypher with vector.dimensions 1536 and cosine; schema_statements_for_dimensions rejects non-1536; only neo4j==6.2.0 driver
+
+- condition: Health/lifecycle failures expose only sanitized codes/status and never credentials, URIs with credentials, queries containing data, or stack traces
+- status: satisfied
+- evidence: GraphError code-only str/repr; exceptions re-raised outside except blocks so __cause__/__context__ are None; health returns stable down codes; client repr omits uri/user/password; repair tests assert sanitization on timeout/query/factory/close failure paths; observer never logs exception details
+
+- condition (A2 repair): complete health/connectivity operation obeys health_timeout_seconds including first-use construction; late driver owned or closed
+- status: satisfied
+- evidence: test_health_deadline_includes_blocking_first_use_factory - 0.01s deadline with 0.12s blocking factory returns TIMEOUT in <0.08s; late driver published then closed exactly once
+
+- condition (A2 repair): serialized lifecycle ownership; concurrent create/close cannot abandon drivers; failed/cancelled close retains retry/join
+- status: satisfied
+- evidence: simultaneous first-use (one factory call), first-use/close race, query/health/close races, two concurrent closes (one close_calls), close exception retains driver_created for retry, cancelled close joins shielded cleanup
+
+- condition (A2 final repair): every shared create task has a lifecycle-owned terminal-outcome observer; late factory failure after health timeout yields zero loop exception contexts and remains retryable
+- status: satisfied
+- evidence: DriverLifecycle._spawn_create_task attaches _observe_create_task_done; test_late_failing_factory_after_health_timeout_is_observed + independent probe: TIMEOUT health, GC, contexts==0, second create succeeds, close exactly once
+
+- condition (orchestrator evidence): 04A execution report block uses ASCII-safe punctuation without U+FFFD or mojibake sequences
+- status: satisfied
+- evidence: 04A block pure ASCII; encoding scan passed
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files (this final repair): backend/app/graph/lifecycle.py, backend/tests/graph/test_client.py, this report
+- changed files (lifecycle repair cumulative): backend/app/graph/client.py, backend/app/graph/lifecycle.py, backend/tests/graph/fakes.py, backend/tests/graph/test_client.py, this report
+- validations to rerun: focused graph pytest; ruff/mypy on app/graph and tests/graph; full backend pytest; independent loop-exception probe; 04A report encoding scan
+- risk areas: live Neo4j vector-index syntax still optional @pytest.mark.neo4j after Compose (05A); shielded create/close tasks continue after waiter cancel by design; observer retrieves outcomes without logging
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ### 7.4 Graph schema bootstrap
+- docs/plans/Master_plan.md > ### 8.3 Constraints and indexes
+- docs/plans/Master_plan.md > ### 8.4 Graph safety rules
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- README.md
+- docs/tasks/task_2.md
+- docs/review/review_2_review_agent.md (04A A2 REJECTED_WITH_WARNINGS repair instructions)
+
+## Dependency and User Action Check
+- dependencies: (01A) typed settings and FastAPI foundation present; used Settings / ALLOWED_EMBEDDING_DIMENSIONS
+- user action: none for fake-based tests; optional live neo4j path needs process NEO4J_PASSWORD only
+
+## Key Implementation Decisions
+- Protocol-based GraphDriver/GraphSession for dependency injection; FakeDriver records queries without network
+- Bounded health via asyncio.wait_for around full connectivity path including lazy construction (default 2s)
+- Sync/blocking factories offloaded with asyncio.to_thread; shared create/close tasks awaited under asyncio.shield so waiter cancel cannot cancel ownership work via Task._fut_waiter
+- Every shared create task gets a lifecycle-owned done callback that calls task.exception() to retrieve terminal outcomes without logging or re-raising; double observation with active waiters is safe
+- Failed create clears the create-task slot so a later get_driver can spawn a new observed task; completed tasks are not retained indefinitely
+- Ownership cleared only after successful driver.close(); failed close clears close task slot and retains _driver for retry
+- Schema statements fully static with IF NOT EXISTS; dimension validated against locked 1536 before apply
+- Sanitized errors raised outside except blocks to clear __context__ (attachment-storage pattern)
+- neo4j==6.2.0 moved from plan2 optional extra to main dependencies so production graph code resolves cleanly; langgraph remains plan2-only
+- Lifecycle internals split to lifecycle.py to keep production modules <=300 lines
+- Did not change the global production loop exception handler or suppress all task errors
+
+## Workflow Integrity Check
+- Executed only 04A same_task_repair final automatic repair; did not implement outbox repository, rebuild CLI, health API, Compose, or later tasks
+- Did not commit or stage; did not update task checkboxes or batch status
+- Did not modify schema DDL or dependency pins
+
+## Repair Log
+
+### 2026-07-11T18:49:51+07:00
+- reason for repair: A2 REJECTED 04A (1 of 3) - health deadline excluded first-use construction; close cleared driver before successful cleanup and abandoned ownership on failure/cancel/overlap; fakes pre-marked closed on failed close; missing adversarial lifecycle tests
+- changes made: introduced backend/app/graph/lifecycle.py with shielded shared create/close tasks and to_thread construction; client health deadline wraps full connectivity including construction; FakeDriver sets closed only after successful close; added event/thread-gated lifecycle regression tests; updated this report block
+- validations rerun: pytest tests/graph/test_client.py tests/graph/test_schema.py (33 passed, 1 skipped); ruff + mypy app/graph (5 files); full backend pytest (311 passed, 2 skipped)
+- outcome: complete - A2-listed lifecycle ownership and bounded-health repair items addressed; schema/redaction/canonical behavior preserved
+
+### 2026-07-11 (same_task_repair encoding-only after orchestrator evidence failure)
+- reason for repair: orchestrator evidence failure - 04A report block used U+2014 em dashes that surface as mojibake (cp1252 misread of UTF-8 bytes) under wrong decoders; repository report default is ASCII punctuation.
+- changes made: replaced all U+2014 em dashes in the 04A report block only with ASCII " - "; no implementation, tests, prior task history, checkbox, or lifecycle claim changes.
+- validations rerun: git diff --check; strict U+FFFD and mojibake sequence scan on 04A report block (graph tests not re-run; claims unchanged).
+- outcome: complete - 04A report encoding cleaned for A2 handoff
+
+### 2026-07-11 (same_task_repair final automatic; A2 REJECTED_WITH_WARNINGS 2 of 3)
+- reason for repair: delayed factory failure after all shielded health waiters timed out left the shared create task exception unobserved, emitting Task exception was never retrieved with GraphError traceback via the event loop handler.
+- changes made: DriverLifecycle._spawn_create_task attaches lifecycle-owned _observe_create_task_done on every create task to retrieve terminal outcomes without logging secrets; completed create tasks remain cleared for retry; added test_late_failing_factory_after_health_timeout_is_observed; updated this 04A report block with ASCII punctuation only. Schema/redaction/DDL/pins unchanged.
+- validations rerun: pytest tests/graph/test_client.py tests/graph/test_schema.py (34 passed, 1 skipped); ruff + mypy app/graph (5 files); full backend pytest (312 passed, 2 skipped); independent loop-exception probe (0 contexts, retry + single close); 04A report encoding scan.
+- outcome: complete - create-task terminal outcomes are lifecycle-owned and retrieved; late fail after health timeout no longer emits loop exception contexts; retry and late-success semantics preserved.
+
+---
+
+# Task Execution Report - 04B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - Derived Graph and Durable Synchronization Contracts
+
+## Task
+04B - Implement the transactional replay-safe graph outbox repository
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04B
+- Task title: Implement the transactional replay-safe graph outbox repository
+- Files allowed / repair scope: backend/app/repositories/graph_outbox.py; backend/tests/repositories/test_graph_outbox.py (A2 same-task repair: equal-sign/whitespace credential assignments + mark_failed sanitization). Preserve existing 04B identity/migration/transaction behavior and uncommitted 04A work. No 04C, worker, timer, domain payload builder, checkbox, commit, or stage.
+
+## Completed Work
+- Inspected GraphSyncOutbox model, enums, attachment repository transaction pattern, migration, and absence of outbox callers before defining the repository contract.
+- Added source-required uniqueness on logical identity (operation, entity_id) to the outbox model and the still-initial Alembic migration so replay cannot create a second durable row.
+- Implemented GraphOutboxRepository: enqueue without internal commit; identity pre-check + GraphOutboxDuplicateError on race; deterministic bounded claim_pending (created_at ASC, id ASC, limit 1..500); mark_synced; mark_failed with attempt increment and sanitized last_error; requeue_failed preserving attempts for explicit lifecycle retry.
+- Validated payloads at the repository boundary (structured mapping only); fail-closed on prohibited keys/content categories (paths, credentials, raw documents/bytes) without logging payload values.
+- Same-task repair #1: tightened validate_outbox_payload to reject relative service paths (active|staged/<uuid> and multi-segment relative paths), credential-bearing values (Basic/Bearer and related schemes), and raw-document field/content categories by category token; nested maps/lists use the same single root walker.
+- Same-task repair #2: completed repository-boundary policy for POSIX absolute/file URI, URI userinfo, colon-header credentials, and transcript categories.
+- Same-task repair #3 (user-authorized reopen after A2 REJECTED equal-sign gap): fixed credential assignment detection at the single secret-value root so case-insensitive credential labels with ':' or '=' separators (optional whitespace) fail closed under ordinary direct and nested keys; _sanitize_error returns sync_failed for those shapes; generic code-only errors preserved; no duplicate condition sets (PEM markers only outside the assignment regex).
+- Added direct + nested negative tests with redaction assertions for path, credential (colon and equal-sign), and document cases; mark_failed persistence assertion for equal-sign credentials; enqueue surface coverage; public https/neo4j URIs without userinfo still accepted.
+- Added concurrency-aware tests covering same-transaction rollback, same-session and cross-session replay, unique-constraint enforcement, race duplicate path, bounded/deterministic claims, attempt increments, failure recovery, ordering, and payload rejection.
+
+## Files Created or Modified
+- backend/app/repositories/graph_outbox.py (created; payload policy tightened on same-task repairs including equal-sign credential assignments)
+- backend/app/db/models/outbox.py (unique operation+entity_id identity; unchanged by this repair)
+- backend/migrations/versions/c885a5846d85_initial_application_schema.py (matching unique constraint; unchanged by this repair)
+- backend/tests/repositories/test_graph_outbox.py (created; A2 path/credential/document + equal-sign whitespace + mark_failed sanitization tests)
+- docs/reports/report_2_execute_agent.md (04B block append then in-place repair updates)
+
+## Files Inspected Before Editing
+- backend/app/db/models/outbox.py
+- backend/app/db/enums.py (OutboxStatus)
+- backend/app/repositories/attachments.py (caller-owned session pattern)
+- backend/app/repositories/graph_outbox.py (payload validation root; all walk branches and detectors)
+- backend/app/services/attachment_storage_paths.py (service path grammar for relative path probes)
+- backend/app/db/session.py
+- backend/migrations/versions/c885a5846d85_initial_application_schema.py
+- backend/tests/repositories/test_attachments.py
+- backend/tests/repositories/test_graph_outbox.py
+- backend/tests/db/test_models.py
+- backend/tests/integration/test_migrations.py
+- docs/plans/Plan_2.md section 7.5
+- docs/plans/Master_plan.md sections 20 and 21
+- docs/review/review_2_review_agent.md (04B REJECTED equal-sign credential repair instructions)
+- README.md
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/repositories/test_graph_outbox.py`
+- required: yes
+- result: passed
+- evidence or reason: 25 passed in 2.15s after equal-sign credential repair (prior cases + password/X-Api-Key equal-sign whitespace direct/nested + mark_failed sanitization)
+
+- command/check: `cd backend; python -m ruff check app/repositories/graph_outbox.py tests/repositories/test_graph_outbox.py; python -m mypy app/repositories/graph_outbox.py`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 1 source file
+
+- command/check: `cd backend; python -m pytest -q tests/repositories/test_graph_outbox.py tests/integration/test_migrations.py tests/db/test_models.py tests/repositories/test_attachments.py`
+- required: no (A2 requested regression rerun)
+- result: passed
+- evidence or reason: 60 passed in 4.34s (outbox + migration unique-constraint parity + models + attachments regression)
+
+- command/check: independent equal-sign credential + sanitize probe (direct + nested)
+- required: no (local confirmation of A2 repair instructions)
+- result: passed
+- evidence or reason: validate_outbox_payload rejects password = value, Password = value, X-Api-Key = value, x-api-key=value, api_key = value, password=value, and colon forms under ordinary keys (direct and nested) with prohibited content category only; _sanitize_error returns sync_failed for equal-sign credential errors and preserves neo4j_unavailable; public https without userinfo still accepted
+
+## Repair Log
+
+### 2026-07-11 A1 re-execution verification
+- reason for repair: orchestrated A1 re-invocation for 04B; deliverables already present in worktree from prior execution
+- changes made: no production/test code edits; re-inspected model, repository, migration uniqueness, callers (none), and source contracts; refreshed validation evidence in this report block
+- validations rerun: required pytest outbox suite (18 passed); ruff + mypy on graph_outbox (passed); optional regression 53 passed
+- outcome: complete at that time; later A2 rejected payload boundary gaps
+
+### 2026-07-11 same_task_repair after A2 REJECTED
+- reason for repair: A2 REJECTED 04B - payload validation accepted relative service path under attachment, Basic credential under configuration, and raw document under document; tests only covered selected key spellings and absolute/backslash paths
+- changes made: expanded category-oriented prohibited key tokens (document/content/attachment/path/auth families); path detector now rejects active|staged/<uuid> and multi-segment relative forward-slash paths; secret detector rejects Basic/Bearer/Digest/Token schemes and additional credential markers; added unit + enqueue tests for the three A2 probes, nested variants, alternate spellings, and no-value error redaction; only graph_outbox.py and test_graph_outbox.py edited for this repair
+- validations rerun: required pytest outbox suite (21 passed); ruff + mypy (passed); migration/model/attachment regression with outbox (56 passed)
+- outcome: later re-review still REJECTED remaining path/credential/transcript category gaps
+
+### 2026-07-11 same_task_repair after A2 REJECTED (path/URI/header/transcript categories)
+- reason for repair: A2 re-review REJECTED 04B - value detectors still accepted POSIX root/single-component absolute paths, file: filesystem URIs, credential-bearing URI userinfo and password-header forms under ordinary keys, and alternate raw-document category transcript.
+- changes made:
+  - backend/app/repositories/graph_outbox.py: path detector rejects any leading-slash POSIX absolute and any file: filesystem URI; secret detector rejects URI userinfo and header/colon credential forms; prohibited key tokens include transcript/transcription
+  - backend/tests/repositories/test_graph_outbox.py: direct and nested negative tests for those categories with redaction assertions
+- validations rerun: outbox 24 passed; ruff/mypy passed; regression 59 passed
+- outcome: later A2 re-review REJECTED remaining equal-sign whitespace credential assignment gap
+
+### 2026-07-11 same_task_repair after A2 REJECTED (user-authorized reopen: equal-sign credentials)
+- reason for repair: A2 REJECTED 04B - credential recognizers accepted case-insensitive label assignments with optional whitespace around '=' (password = value, X-Api-Key = value) under ordinary keys; _sanitize_error retained that shape in last_error. User explicitly reopened 04B for this additional repair only.
+- changes made:
+  - backend/app/repositories/graph_outbox.py: renamed/unified assignment detector to _CREDENTIAL_ASSIGNMENT_RE matching credential labels with ':' or '=' and optional whitespace (case-insensitive); removed duplicated no-whitespace password=/api_key= string markers so the single regex is the assignment root; _string_looks_like_secret_or_document and _sanitize_error both use that root so mark_failed persists sync_failed instead of credential text; PEM markers retained; caller-owned transaction, replay identity, claim, terminal state, and non-worker scope unchanged
+  - backend/tests/repositories/test_graph_outbox.py: direct and nested equal-sign credential cases (password/X-Api-Key with whitespace and tight forms) with redaction assertions; enqueue surface probes; test_mark_failed_sanitizes_equal_sign_credential_errors asserts last_error == sync_failed and preserves generic neo4j_unavailable
+- validations rerun:
+  - python -m pytest -q tests/repositories/test_graph_outbox.py -> 25 passed in 2.15s
+  - python -m ruff check app/repositories/graph_outbox.py tests/repositories/test_graph_outbox.py -> All checks passed
+  - python -m mypy app/repositories/graph_outbox.py -> Success: no issues found in 1 source file
+  - python -m pytest -q tests/repositories/test_graph_outbox.py tests/integration/test_migrations.py tests/db/test_models.py tests/repositories/test_attachments.py -> 60 passed in 4.34s
+  - independent equal-sign/colon credential + sanitize probes (direct/nested) -> all rejected with generic errors; safe public URL accepted; sanitize returns sync_failed for credential shapes
+- outcome: complete - equal-sign/whitespace credential category closed at validation root; mark_failed no longer retains credential assignment text; ready for A2 re-review of 04B only
+
+## Acceptance Check
+- condition: Rolling back a canonical SQLite write also rolls back its enqueue; replaying the same operation creates one logical row and never resets attempts or terminal state unexpectedly
+- status: satisfied
+- evidence: test_same_transaction_rollback_discards_enqueue; test_replay_enqueue_returns_same_row_without_reset; test_cross_session_replay_is_idempotent; unique constraint on (operation, entity_id)
+
+- condition: Claims are bounded and deterministic, state transitions are persisted, and Neo4j failure leaves retryable SQLite evidence
+- status: satisfied
+- evidence: claim_pending limit validation and created_at/id ordering; mark_failed increments attempts and stores sanitized last_error; requeue_failed restores pending without clearing attempts; equal-sign credential errors sanitize to sync_failed
+
+- condition: No timer, background loop, worker service, Candidate/Job payload builder, filesystem path, secret, or raw document is introduced; payload validation fails closed on paths, credentials, and raw documents without logging values
+- status: satisfied
+- evidence: repository surface is enqueue/claim/mark/requeue only; validate_outbox_payload rejects POSIX absolute forms, file: URIs, service-relative and multi-segment relative paths, auth schemes, URI userinfo credentials, credential label assignments with ':' or '=' (optional whitespace) including password = value and X-Api-Key = value, document/transcript category keys, and raw bytes; nested probes and generic code-only redaction tests; public https and neo4j without userinfo remain allowed; test_no_worker_timer_or_poll_surface; no domain payload builders added
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files this repair: backend/app/repositories/graph_outbox.py; backend/tests/repositories/test_graph_outbox.py; this report (prior 04B also owns model uniqueness + migration)
+- model lives at app/db/models/outbox.py (existing 02A path); task file listed graph_outbox.py but repository reuses the approved model module
+- validations to rerun: `python -m pytest -q tests/repositories/test_graph_outbox.py`; `python -m ruff check app/repositories/graph_outbox.py tests/repositories/test_graph_outbox.py`; `python -m mypy app/repositories/graph_outbox.py` from backend/; optional `tests/integration/test_migrations.py tests/db/test_models.py tests/repositories/test_attachments.py`
+- risk areas: uniqueness is one row per (operation, entity_id) for all terminal states (synced included); re-sync after later domain changes is out of scope for 04B; concurrent race raises GraphOutboxDuplicateError leaving session for caller rollback; payload policy is fail-closed on path/credential/document categories by shape and key-category, including equal-sign whitespace credential assignments
+- next task readiness: ready for A2 re-review of 04B only; do not start 04C from this handoff
+- preserve uncommitted 04A graph package and report/review artifacts; not modified by this repair
+- repairOf: A2 REJECTED 04B equal-sign/whitespace credential assignment + mark_failed sanitization (user-authorized reopen)
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ### 7.5 Outbox contracts
+- docs/plans/Master_plan.md > ## 21. SQLite-to-Neo4j Synchronization
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+- docs/tasks/task_2.md
+
+## Dependency and User Action Check
+- dependencies: (02B) initial schema and session manager present (satisfied)
+- user action: None
+
+## Key Implementation Decisions
+- Stable logical identity = (operation, entity_id) with UniqueConstraint; no new column required beyond approved fields
+- enqueue is get-or-return-existing on identity (no attempt/status/payload mutation on replay); IntegrityError path raises GraphOutboxDuplicateError without internal rollback
+- claim_pending is read-only selection of status=pending; no lease column or poller
+- requeue_failed supports explicit failure recovery without continuous retry
+- Payload validation centralized in validate_outbox_payload used by enqueue; category tokens + value shape detectors share one walk root (no duplicated enqueue-side policy)
+- Path detector treats any leading "/" as POSIX absolute and any file: occurrence as filesystem URI; credential detector uses unanchored URI userinfo search and a single assignment regex for credential labels with ':' or '=' (optional whitespace), plus auth schemes and PEM markers; transcript tokens join the document category set; _sanitize_error maps assignment-shaped errors to sync_failed
+
+## Workflow Integrity Check
+- Executed only 04B same_task_repair; did not implement 04C rebuild CLI, health API, Compose, worker, or domain payload builders
+- Did not commit or stage; did not update task checkboxes or batch status
+- Preserved uncommitted 04A graph/ changes; did not edit graph modules
+
+---
+
+# Task Execution Report - 04C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch04 - Derived Graph and Durable Synchronization Contracts
+
+## Task
+04C - Add the safe graph rebuild command skeleton
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Derived Graph and Durable Synchronization Contracts
+- Task ID: 04C
+- Task title: Add the safe graph rebuild command skeleton
+- Files allowed / repair scope: infrastructure/scripts/rebuild_graph.py; backend/tests/infrastructure/test_rebuild_graph.py
+
+## Completed Work
+- Searched existing CLI (argparse benchmarks), graph client/schema (04A), settings load_settings, and test fake-driver patterns before editing; no pre-existing rebuild script.
+- Implemented infrastructure/scripts/rebuild_graph.py as a dry-run-first rebuild skeleton that reuses Neo4jClient and ensure_graph_schema (no duplicated driver lifecycle or schema DDL).
+- Default path is non-destructive dry-run: prints planned stages and label-scoped clear Cypher without opening a connection or loading/printing configuration values.
+- Destructive path requires --confirm-destructive; clears only Candidate, Job, Skill, JobFamily via exact MATCH (n:Label) DETACH DELETE statements; guard rejects unlabeled/database-wide wipe patterns.
+- After clear, schema recreation delegates to ensure_graph_schema (04A). Deferred stages (load_sqlite_records, rebuild_entities, recompute_embeddings, verify_entity_counts, update_sync_states) return status=not_implemented and EXIT_INCOMPLETE (2) so partial skeleton cannot claim full rebuild success.
+- Failures surface sanitized codes only (GraphError codes / generic clear_failed/schema_failed); passwords, credential-bearing URIs, raw payloads, and document content are never printed.
+- Added backend/tests/infrastructure/test_rebuild_graph.py covering help, dry-run, confirmation, scoped Cypher, schema reuse, failure exits, secret-safe output, and unimplemented-stage result (15 tests).
+- Did not perform a destructive live Neo4j invocation; tests inject FakeDriver only.
+
+## Files Created or Modified
+- infrastructure/scripts/rebuild_graph.py (created)
+- backend/tests/infrastructure/__init__.py (created)
+- backend/tests/infrastructure/test_rebuild_graph.py (created)
+- docs/reports/report_2_execute_agent.md (this 04C block appended)
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (04C entry)
+- docs/plans/Plan_2.md section 8 Implementation Steps and 7.4 graph schema
+- docs/plans/Master_plan.md sections 8.4 Graph safety rules and 21.4 Rebuild
+- backend/app/graph/client.py
+- backend/app/graph/schema.py
+- backend/app/graph/errors.py
+- backend/app/graph/__init__.py
+- backend/app/config.py (load_settings, secret redaction)
+- backend/tests/graph/fakes.py
+- backend/tests/graph/test_schema.py
+- backend/tests/graph/test_client.py
+- backend/evaluation/benchmark_pdf_extraction.py (argparse CLI pattern)
+- infrastructure/scripts/ (empty placeholder only)
+- docs/reports/report_2_execute_agent.md (no prior 04C block)
+
+## Tests or Validations Run
+- command/check: `python infrastructure/scripts/rebuild_graph.py --help`
+- required: yes
+- result: passed
+- evidence or reason: usage and safety controls displayed (--dry-run, --confirm-destructive, JobAgent-only clear, schema reuse, secret non-print); exit 0; no configuration values or credentials printed
+
+- command/check: `cd backend; python -m pytest -q tests/infrastructure/test_rebuild_graph.py`
+- required: yes
+- result: passed
+- evidence or reason: 15 passed in 0.41s (help, dry-run, confirmation, scoped Cypher, schema reuse, failure exits, redaction, unimplemented stages)
+
+- command/check: `python infrastructure/scripts/rebuild_graph.py --dry-run`
+- required: no (local non-destructive smoke)
+- result: passed
+- evidence or reason: rebuild_mode=dry_run; four label-scoped clear_cypher lines; no connection; exit 0
+
+- command/check: `cd backend; python -m ruff check tests/infrastructure/test_rebuild_graph.py ../infrastructure/scripts/rebuild_graph.py`
+- required: no (focused quality)
+- result: passed
+- evidence or reason: All checks passed
+
+## Acceptance Check
+- condition: Default execution is non-destructive; destructive clearing requires explicit confirmation and contains no database-wide unlabeled delete
+- status: satisfied
+- evidence: default main() and --dry-run exit 0 without client; --confirm-destructive required for clear; CLEAR_STATEMENTS are four exact MATCH (n:Label) DETACH DELETE; assert_clear_statements_are_scoped rejects unlabeled wipe patterns; tests cover both
+
+- condition: Schema recreation delegates to 04A; deferred data-loading stages visible with non-success rather than fabricated completion
+- status: satisfied
+- evidence: ensure_schema injection/default ensure_graph_schema; deferred stages status=not_implemented; EXIT_INCOMPLETE=2 after successful clear+schema
+
+- condition: Command prints no password, credential-bearing URI, raw payload, or document content
+- status: satisfied
+- evidence: format_report_lines and error paths use codes/generic tokens only; sentinel secret tests; help/dry-run subprocess checks
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: infrastructure/scripts/rebuild_graph.py; backend/tests/infrastructure/__init__.py; backend/tests/infrastructure/test_rebuild_graph.py; docs/reports/report_2_execute_agent.md
+- validations to rerun: `python infrastructure/scripts/rebuild_graph.py --help`; `cd backend; python -m pytest -q tests/infrastructure/test_rebuild_graph.py`
+- risk areas: live destructive path loads root .env via load_settings only when --confirm-destructive without injected client; deferred stages intentionally fail closed with non-zero exit; do not treat EXIT_INCOMPLETE as full rebuild success
+- next task readiness: can_review
+- did not modify 04A/04B production modules beyond import reuse; did not start Batch05; no commit/stage; no live destructive graph operation
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 8. Implementation Steps
+- docs/plans/Master_plan.md > ### 8.4 Graph safety rules
+- docs/plans/Master_plan.md > ### 21.4 Rebuild
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+- docs/tasks/task_2.md
+
+## Dependency and User Action Check
+- dependencies: (04A) graph client/schema primitives present (satisfied); (04B) outbox present but not required for this skeleton
+- user action: destructive live confirmation only for real Neo4j runs; not required for --help or dry-run validation (satisfied)
+
+## Key Implementation Decisions
+- Single script entrypoint under infrastructure/scripts with sys.path bootstrap to backend/app for reuse
+- dry-run is default; --dry-run wins over --confirm-destructive when both are passed
+- EXIT_INCOMPLETE (2) distinguishes honest incomplete rebuild from hard failure (1)
+- CLEAR_STATEMENTS are static constants with runtime scope assertion before execution
+- main() accepts injectable client/ensure_schema/streams so tests never need real credentials or live Neo4j
+
+## Workflow Integrity Check
+- Executed only 04C; did not implement health API, Compose, Batch05, domain loaders, or workers
+- Did not commit or stage; did not update task checkboxes or batch status
+- Did not perform a destructive live Neo4j invocation

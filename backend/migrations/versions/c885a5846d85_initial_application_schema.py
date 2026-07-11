@@ -78,6 +78,11 @@ def upgrade() -> None:
             name=op.f("ck_graph_sync_outbox_outbox_attempts_non_negative"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_graph_sync_outbox")),
+        sa.UniqueConstraint(
+            "operation",
+            "entity_id",
+            name=op.f("uq_graph_sync_outbox_operation_entity_id"),
+        ),
     )
     with op.batch_alter_table("graph_sync_outbox", schema=None) as batch_op:
         batch_op.create_index(
