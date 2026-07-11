@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "data_class": "local_private",
+  "ignored_manifest_path": "backend/evaluation/private/pdf_manifest.local.json",
+  "fixtures": [
+    {
+      "fixture_id": "local_private_pdf_001",
+      "fixture_kind": "digital",
+      "local_path": "SET_IN_IGNORED_COPY",
+      "redaction_status": "PENDING_USER_CONFIRMATION",
+      "representative_status": "PENDING_USER_CONFIRMATION",
+      "benchmark_status": "PENDING"
+    },
+    {
+      "fixture_id": "local_private_image_pdf_001",
+      "fixture_kind": "image_only",
+      "local_path": "SET_IN_IGNORED_COPY",
+      "redaction_status": "PENDING_USER_CONFIRMATION",
+      "representative_status": "NOT_APPLICABLE",
+      "benchmark_status": "PENDING"
+    }
+  ]
+}

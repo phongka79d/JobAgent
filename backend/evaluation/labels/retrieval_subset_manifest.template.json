@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "data_class": "local_private",
+  "ignored_records_path": "backend/evaluation/private/retrieval_subset.local.json",
+  "seed": null,
+  "split_name": "validation",
+  "record_count": null,
+  "label_provenance": "PENDING_USER_CONFIRMATION",
+  "record_fields": [
+    "record_id",
+    "relevance_label"
+  ],
+  "benchmark_status": "PENDING"
+}

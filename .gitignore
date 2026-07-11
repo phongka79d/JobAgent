@@ -148,7 +148,9 @@ activemq-data/
 *.sage.py
 
 # Environments
-.env
+# JobAgent uses one user-owned root environment file. Nested app `.env` files
+# are intentionally not ignored so configuration drift remains visible.
+/.env
 .envrc
 .venv
 env/
@@ -156,6 +158,14 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# JobAgent local runtime and private evaluation inputs
+/backend/runtime/
+/backend/uploads/
+/data/
+/backend/evaluation/private/
+/backend/evaluation/fixtures/local-private/
+/backend/evaluation/labels/local-private/
 
 # Spyder project settings
 .spyderproject

@@ -264,7 +264,7 @@ Every compatibility gate depends on a common three-folder scaffold, one root con
   - Blocked Condition: None
   - Files: `frontend/package.json`, `frontend/src/`, `backend/app/`, `backend/evaluation/`, `backend/scripts/`, `backend/pyproject.toml`, `infrastructure/docker/`, `infrastructure/neo4j/`, `infrastructure/scripts/`, `README.md`.
 
-- [ ] (01C): Establish single-root configuration and ignore boundaries
+- [x] (01C): Establish single-root configuration and ignore boundaries
   - Source of Truth: `docs/plans/Plan_1.md` > `## 4. Scope`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 22. Security and Privacy` > `### 22.2 Secrets`; `docs/plans/Master_plan.md` > `## 23. Environment Configuration`
   - Source Requirements:
     - Use one root `.env`; do not create frontend or backend environment files.
@@ -285,7 +285,7 @@ Every compatibility gate depends on a common three-folder scaffold, one root con
   - Blocked Condition: None for placeholder creation; `BLOCKED_BY_USER_ACTION` only for later live validation when the user has not populated the ignored root `.env`.
   - Files: `.env.example`, `.gitignore`, local `.env` excluded from agent writes.
 
-- [ ] (01D): Create evaluation manifests and an evidence-first report skeleton
+- [x] (01D): Create evaluation manifests and an evidence-first report skeleton
   - Source of Truth: `docs/plans/Plan_1.md` > `## 6. Target Directory Structure`; `docs/plans/Plan_1.md` > `### 7.5 Feasibility report decision block`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.1 Data policy`
   - Source Requirements:
     - Keep real CV/JD and private evaluation data local and ignored; commit only synthetic fixtures, templates, manifests without sensitive content, and aggregate reports.
