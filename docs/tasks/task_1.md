@@ -477,7 +477,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
 
 ### Tasks
 
-- [ ] (03A): Build the secure isolated diagnostic foundation
+- [x] (03A): Build the secure isolated diagnostic foundation
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.1 Configuration`; `docs/plans/Master_plan.md` > `## 22. Security and Privacy` > `### 22.2 Secrets`; `docs/plans/Master_plan.md` > `## 22. Security and Privacy` > `### 22.4 Logging`
   - Source Requirements:
     - Read `SHOPAIKEY_BASE_URL`, `SHOPAIKEY_API_KEY`, and `LLM_MODEL` from the single root environment.
@@ -499,7 +499,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` for a live reliability claim until the repeat/pass criterion is approved; fake-tested implementation may continue.
   - Files: `backend/scripts/check_shopaikey_compatibility.py`, focused backend tests, `backend/pyproject.toml`, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (03B): Add model-discovery and basic-completion checks
+- [x] (03B): Add model-discovery and basic-completion checks
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.1 Configuration`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.2 Startup/diagnostic compatibility checks`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - The current master Phase 0 gate requires `gpt-4o-mini`; an equivalent may be characterized but cannot pass until the affected master-plan adapter decision is revised.
@@ -520,7 +520,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
   - Blocked Condition: None for implementation; (03F) is `BLOCKED_BY_USER_ACTION` when only an equivalent exists and the master-plan adapter decision has not been revised.
   - Files: `backend/scripts/check_shopaikey_compatibility.py`, focused backend tests, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (03C): Add function-call and tool-result round-trip checks
+- [x] (03C): Add function-call and tool-result round-trip checks
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.2 Startup/diagnostic compatibility checks`; `docs/plans/Master_plan.md` > `## 3. Locked Technology Stack`
   - Source Requirements:
     - Function calling must return the expected tool name and valid JSON arguments.
@@ -542,7 +542,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
   - Blocked Condition: None beyond missing live provider access already captured by (01A).
   - Files: `backend/scripts/check_shopaikey_compatibility.py`, focused backend tests, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (03D): Determine one reliable structured-schema mode
+- [x] (03D): Determine one reliable structured-schema mode
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.2 Startup/diagnostic compatibility checks`; `docs/plans/Master_plan.md` > `## 3. Locked Technology Stack`
   - Source Requirements:
     - Structured output must validate against a local Pydantic v2 model.
@@ -564,7 +564,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
   - Blocked Condition: None for implementation; (03F) is `BLOCKED_BY_USER_ACTION` when the reliability criterion is unapproved or every live permitted mode fails and an adapter revision is required.
   - Files: `backend/scripts/check_shopaikey_compatibility.py`, focused Pydantic schema/test files, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (03E): Characterize streaming and enforce diagnostic exit behavior
+- [x] (03E): Characterize streaming and enforce diagnostic exit behavior
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration` > `### 16.2 Startup/diagnostic compatibility checks`
   - Source Requirements:
     - Streaming must produce ordered text chunks or a documented unsupported result before Plan 2.
@@ -586,7 +586,7 @@ The later Agent and extraction phases depend on provider behavior that cannot be
   - Blocked Condition: None for implementation; an unknown live streaming result in (03F) keeps the gate incomplete until characterized.
   - Files: `backend/scripts/check_shopaikey_compatibility.py`, focused backend tests, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (03F): Execute the live provider smoke test and lock ShopAIKey decisions
+- [x] (03F): Execute the live provider smoke test and lock ShopAIKey decisions
   - Source of Truth: `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `## 24. Local Testing Strategy` > `### 24.2 Backend integration tests`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - Normal automated tests do not call the real API; the isolated compatibility smoke test may use the local user-owned key.

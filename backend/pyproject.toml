@@ -3,4 +3,17 @@ name = "jobagent-phase-0-backend"
 version = "0.0.0"
 description = "Phase 0 compatibility scaffold; no production service is implemented."
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "langchain-openai==1.0.3",
+    "pydantic>=2.12,<3",
+    "python-dotenv>=1.2,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = []

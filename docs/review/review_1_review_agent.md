@@ -1472,3 +1472,760 @@ ACCEPTED
 
 ## Repair Instructions
 - None.
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03A
+- Task title: Build the secure isolated diagnostic foundation
+- Executor status reported: complete
+- Source of Truth: Plan 1 section 7.1 and implementation steps; Master Plan sections 16.1, 22.2, and 22.4
+- Supplemental documents: README.md and prior 03A A2 rejections / repair instructions
+
+## Latest Report Selection
+- Latest report entry found: yes
+- Requested task ID, if any: 03A
+- Reviewed task ID: 03A
+- Correct selection: yes
+- Notes: Physical EOF execution entry is the third chronological 03A repair record (`same_task_repair`, status `complete`); committed report prefix is preserved and three 03A blocks exist.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- recent commits reviewed: not needed
+- changed files from git: `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml`, `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`; untracked `backend/scripts/check_shopaikey_compatibility.py` and `backend/tests/test_shopaikey_diagnostic_foundation.py`
+- untracked files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/test_shopaikey_diagnostic_foundation.py`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - configuration, deterministic records, model binding seam, `_normalize_secret_material()`, `_sanitize_text()` raw+normalized redaction, and fixed `diagnostic_failed` exception route reviewed.
+- `backend/tests/test_shopaikey_diagnostic_foundation.py`: in scope - fake-only suite including parametrized raw/normalized `record()` field regressions and surface scans.
+- `backend/pyproject.toml`: in scope - direct dependencies reviewed; `pip check` passes.
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - foundation status and reliability criterion only; all live capability results remain pending.
+- `docs/reports/report_1_execute_agent.md`: in scope - committed-prefix and three chronological 03A entries independently checked.
+
+## Reported Files Cross-Check
+- file from execution report: diagnostic script, focused tests, execution-report append
+- present in git/repo: yes
+- matches task scope: yes
+- notes: Feasibility skeleton and `pyproject.toml` remain in-scope foundation artifacts from 03A; no 03B-03F live capability implementation claimed.
+
+## Dependency Review
+- Required dependencies: 01C and 01D
+- Dependency status: satisfied by the committed Batch01 baseline
+- Missing or invalid dependency: None
+
+## Architecture Alignment
+- Passed: Typed pending-only harness, one root-config path, injectable `ChatOpenAI` factory, public `bind_tools()`, deterministic serialization, streaming excluded from required-pass capabilities, and one centralized redaction boundary covering raw and separator/case-normalized configured secrets on all sanitized text paths used by `record()`.
+- Failed: None.
+- Uncertain: None.
+
+## Implementation Reality
+- Real implementation: yes
+- Stub or fake logic found: no
+- Evidence: Production diagnostic foundation loads config, constructs models through an injectable factory, binds tools, and emits typed sanitized records. Normal tests use fakes only; no live provider path is required for 03A acceptance.
+
+## Hardcoding Review
+- Hardcoding found: no
+- Evidence: No fixed provider success, live result, model substitution, or fallback secret was found.
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q` from `backend/`
+- Required: yes
+- Reported result: 16 passed
+- Rerun result: 16 passed
+- Status: passed
+- Notes: Includes raw and normalized configured-sentinel cases through `evidence`, `failure_code`, and `selected_mode`.
+- Command/check: socket-blocked real `ChatOpenAI` constructor and `bind_tools()` probe
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Construction and binding completed while socket connections were blocked; no invoke, stream, provider request, root `.env`, or real key was used.
+- Command/check: `python -m pip check`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: No broken requirements were reported.
+- Command/check: credential query/fragment/userinfo URLs, header spelling variants, chained exception formatting, and raw/normalized sentinel scans through record fields and exception surfaces
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Prior leak closed: configured `sentinel-secret-never-emit` and normalized `SENTINEL_SECRET_NEVER_EMIT` do not appear via `record()` evidence/failure_code/selected_mode or render/str/repr/traceback; `safe_exception` remains `diagnostic_failed`.
+- Command/check: execution-report committed prefix, three chronological 03A entries, append-only EOF, staging, live-call/sibling-scope, and whitespace checks
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: HEAD prefix matches (LF-normalized); exactly three 03A execution entries; no staged files; no live invoke/stream or sibling capability behavior; `git diff --check` passes.
+
+## Acceptance Review
+- Task acceptance: secure isolated diagnostic foundation
+- Status: satisfied
+- Evidence: Valid configuration path, injectable provider seam, deterministic sanitized records, centralized redaction of raw and normalized configured secrets, fake-only test suite green, and no live/sibling capability claims.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Execution report entry: committed prefix matches; three chronological 03A records at EOF; latest is same_task_repair complete.
+- Review report entry: in-place update of the single 03A block with Re-Review Log.
+- Other: No implementation, staging, commit, sibling checkbox, or batch-status change was made by this reviewer.
+
+## Report Accuracy
+- accurate
+- Mismatches: None material. Latest A1 repair claims for normalized configured-secret redaction through `record()` fields match repository evidence and A2 reruns.
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- No live API call, real `.env`/key read, raw provider header, private document content, sibling capability behavior, staging, or commit occurred during this review. 03B-03F live capabilities remain pending by design.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-11 (same_task_repair re-review)
+- what was re-checked: Latest EOF 03A execution report (third chronological block); `_sanitize_text()` / `_normalize_secret_material()` / `_normalized_secrets`; parametrized record-field tests; git status/diff; adversarial probes; pytest; pip check; socket-blocked construct/bind; report prefix; staging; `git diff --check`.
+- repairs verified: Canonical separator/case-normalized comparison redacts configured secrets when raw or normalized material is present in `evidence`, `failure_code`, and `selected_mode`; fixed `diagnostic_failed` exception behavior preserved; 16-pass fake-only suite and all required repair validations pass; prior `SENTINEL_SECRET_NEVER_EMIT` record-field leak closed.
+- remaining issues: None for 03A.
+- updated outcome: ACCEPTED
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03B
+- Task title: Add model-discovery and basic-completion checks
+- Executor status reported: complete
+
+## Latest Report Selection
+- Latest report entry found: yes
+- Requested task ID: 03B
+- Reviewed task ID: 03B
+- Correct selection: yes
+- Notes: Matching `# Task Execution Report - 03B` block at physical EOF of the execution report; status `complete`.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- recent commits reviewed: not_needed
+- changed files from git (working tree): modified `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml` (Batch03/03A dep baseline), `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`, `docs/tasks/task_1.md`; untracked `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/`
+- A1-reported 03B files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/test_shopaikey_model_and_completion.py`, `backend/evaluation/reports/phase_0_feasibility.md`, `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - `MASTER_LOCKED_CHAT_MODEL`, `MINIMAL_COMPLETION_PROMPT`, injectable `check_model_discovery` / `check_basic_completion`, bounded evidence, silent-substitution rejection, default live transports present but not wired into `main()` results
+- `backend/tests/test_shopaikey_model_and_completion.py`: in scope - fake-provider classification and secret-safe error tests for required cases
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - ShopAIKey model-discovery/basic-completion rows remain PENDING for live; fake-tested note only
+- `docs/reports/report_1_execute_agent.md`: in scope - 03B execution evidence append
+- `backend/pyproject.toml`: prior 03A dependency baseline; not required as a 03B delta and not claimed as 03B-only
+- No 03C-03F tool-call, structured-schema, streaming, exit-aggregation, or live smoke logic beyond injectable discovery/completion seams needed for 03B
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q` from `backend/`
+- Required: yes
+- Reported result: passed (24 tests: 16 foundation + 8 model/completion)
+- Rerun result: passed (24 passed in 0.04s)
+- Status: passed
+- Notes: Must be run with CWD `backend/` so `scripts` is importable.
+
+- Command/check: Fake-provider coverage for gpt-4o-mini present, model absent, equivalent requiring source revision, non-empty response, empty response, silent substitution, safe error output
+- Required: yes
+- Reported result: passed
+- Rerun result: passed via suite + adversarial secret probe
+- Status: passed
+- Notes: Classification matrix matches source (exact master lock only for discovery PASS; no live PASS claimed).
+
+- Command/check: Secret/header scan of 03B artifacts and rendered provider_error evidence
+- Required: yes (acceptance: no secrets/headers in output)
+- Reported result: passed (A1 safe-error test)
+- Rerun result: passed
+- Status: passed
+- Notes: Sentinel secret, Authorization, and Bearer material absent from FAIL evidence summaries.
+
+- Command/check: Live ShopAIKey provider smoke
+- Required: no for 03B
+- Reported result: not_run
+- Rerun result: not_run
+- Status: not_run
+- Notes: Live results intentionally deferred to 03F; feasibility rows remain PENDING.
+
+## Acceptance Review
+- Task acceptance: Fake-provider tests prove correct classification of gpt-4o-mini, equivalent-only, missing-model, non-empty-response, and empty-response cases without claiming live compatibility; live results remain pending; no secrets/headers in output; scope limited to 03B.
+- Status: satisfied
+- Evidence: Implemented `check_model_discovery` / `check_basic_completion` with injectable fakes; required tests pass; feasibility Model discovery and Basic completion remain PENDING with locked decision PENDING; `main()` still emits PENDING for all capabilities; no live compatibility claim.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes unchanged: yes (only 03B set to checked)
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Silent-substitution evidence sets `response_non_empty` to false before the emptiness check; classification is still correct and FAIL is correct.
+- Default list-models transport imports `openai.OpenAI` transitively via the langchain-openai stack; not exercised by normal tests.
+- `backend/pyproject.toml` remains dirty from the accepted 03A Batch03 baseline and is not a 03B-only change.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 03C
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03C
+- Task title: Add function-call and tool-result round-trip checks
+- Executor status reported: complete
+
+## Latest Report Selection
+- Latest report entry found: yes
+- Requested task ID: 03C
+- Reviewed task ID: 03C
+- Correct selection: yes
+- Notes: Matching `# Task Execution Report - 03C` block in the execution report; status `complete`. A1_EVIDENCE_SOURCE was live_handoff; repository evidence matched.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- recent commits reviewed: not_needed
+- changed files from git (working tree): modified `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml` (Batch03/03A dep baseline), `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`, `docs/tasks/task_1.md`; untracked `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/`
+- A1-reported 03C files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/test_shopaikey_function_call_and_tool_round_trip.py`, `backend/evaluation/reports/phase_0_feasibility.md`, `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - synthetic `echo_label` / `EchoLabelArgs`, `check_function_call`, `check_tool_round_trip`, `bind_diagnostic_tools` -> `ChatOpenAI.bind_tools()`, injectable invoke seams, default live transports present but not wired into `main()` results; evidence flags only
+- `backend/tests/test_shopaikey_function_call_and_tool_round_trip.py`: in scope - fake-provider pass/fail matrix and secret-safe provider_error coverage
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - Function call and Tool-call round trip remain PENDING for live; fake-tested implementation note only
+- `docs/reports/report_1_execute_agent.md`: in scope - 03C execution evidence append
+- `backend/pyproject.toml`: prior 03A dependency baseline; not a 03C-only delta and not claimed as one
+- No 03D structured-schema mode selection, 03E streaming/exit aggregation, or 03F live smoke claims beyond reusable tool-call seams needed for 03C
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q` from `backend/`
+- Required: yes
+- Reported result: passed (36 tests: 16 foundation + 8 model/completion + 12 function-call/tool-round-trip)
+- Rerun result: passed (36 passed in 0.07s)
+- Status: passed
+- Notes: Must be run with CWD `backend/` so `scripts` is importable. Root-cwd collection fails with ModuleNotFoundError (environment note only; A1 command path is correct).
+
+- Command/check: Fake-provider coverage for valid tool name/typed args, JSON-string args, malformed JSON, wrong tool, missing tool call, multiple unexpected calls, invalid typed args, non-empty final response, missing final response, safe provider failures
+- Required: yes
+- Reported result: passed
+- Rerun result: passed via full suite + independent offline probe
+- Status: passed
+- Notes: Named failure branches and accept path match task validation list; raw argument values and final body text absent from durable evidence.
+
+- Command/check: Secret/header scan of 03C artifacts and rendered provider_error evidence
+- Required: yes (acceptance: no secrets/headers)
+- Reported result: passed (A1 safe-error test)
+- Rerun result: passed
+- Status: passed
+- Notes: Sentinel secret, Authorization, Bearer, and api_key material absent from rendered FAIL evidence; only intentional sentinel-bearing exception construction appears inside tests as input-to-redact.
+
+- Command/check: Socket-blocked ChatOpenAI construct plus bind_tools with synthetic echo_label
+- Required: no
+- Reported result: passed
+- Rerun result: passed (`bind_ok _ChatModelBinding`)
+- Status: passed
+- Notes: Confirms bind_tools through ChatOpenAI seam offline without network or root .env.
+
+- Command/check: Live ShopAIKey provider smoke
+- Required: no for 03C
+- Reported result: not_run
+- Rerun result: not_run
+- Status: not_run
+- Notes: Live results intentionally deferred to 03F; feasibility Function call and Tool-call round trip rows remain PENDING; `main()` still emits PENDING for all capabilities.
+
+## Acceptance Review
+- Task acceptance: Fake-provider tests prove accept path for expected tool name, valid typed args, and final response; rejects malformed JSON, wrong tool, missing tool call, multiple unexpected calls, missing final response, and safe failures; live results not claimed; bind_tools via ChatOpenAI seam; no secrets/headers.
+- Status: satisfied
+- Evidence: Implemented `check_function_call` / `check_tool_round_trip` with injectable fakes and default transports using `bind_diagnostic_tools` -> `ChatOpenAI.bind_tools()`; 36-pass suite and independent secret/bind probes; feasibility live rows PENDING; no live compatibility claim.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes unchanged: yes (only 03C set to checked)
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Failure code `invalid_typed_arguments` intentionally avoids the harness sensitive marker `toolarguments`; behavior is correct and documented by A1.
+- Default function-call and round-trip transports exist for 03F but are not invoked by `main()`; current CLI remains PENDING-only.
+- `backend/pyproject.toml` remains dirty from the accepted 03A Batch03 baseline and is not a 03C-only change.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+
+---
+
+# Task Review Report - 03D
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03D
+- Task title: Determine one reliable structured-schema mode
+- Executor status reported: complete
+
+## Latest Report Selection
+- Latest report entry found: yes
+- Requested task ID: 03D
+- Reviewed task ID: 03D
+- Correct selection: yes
+- Notes: Matching `# Task Execution Report - 03D` block; status `complete`. A1_EVIDENCE_SOURCE was live_handoff; repository evidence matched.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- recent commits reviewed: not_needed
+- changed files from git (working tree): modified `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml` (Batch03/03A dep baseline), `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`, `docs/tasks/task_1.md`; untracked `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/`
+- A1-reported 03D files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/test_shopaikey_structured_schema.py`, `backend/evaluation/reports/phase_0_feasibility.md`, `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - `SchemaProbeResponse`, permitted modes (`strict_schema`, `function_schema`, `json_mode`), `validate_schema_probe_payload`, `run_structured_schema_attempt` (one-repair ceiling), `evaluate_mode_reliability` (03A three-consecutive-pass rule), `check_structured_schema` with `live_mode_locked=false`; default transport present but not wired into `main()`
+- `backend/tests/test_shopaikey_structured_schema.py`: in scope - fake-provider coverage for all required validation branches plus secret-safe failure rendering
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - 03A reliability criterion confirmed (not invented); Structured schema and Locked Versions schema mode remain PENDING for live selection
+- `docs/reports/report_1_execute_agent.md`: in scope - 03D execution evidence append
+- `backend/pyproject.toml`: prior 03A dependency baseline; not a 03D-only delta and not claimed as one
+- No 03E streaming/exit aggregation and no 03F live smoke or live mode lock claimed
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q` from `backend/`
+- Required: yes
+- Reported result: passed (54 tests including 18 structured-schema tests)
+- Rerun result: passed (54 passed in 0.08s)
+- Status: passed
+- Notes: Must be run with CWD `backend/` so `scripts` is importable. Root-cwd collection fails with ModuleNotFoundError (environment note only; A1 command path is correct).
+
+- Command/check: Required fake-provider branches — valid output, first-response repair success, second failure after one repair, strict incompatibility, invalid types, repair-limit enforcement (zero repairs and ceiling clamp), reliability pass/fail, mode cascade, no live lock claim, safe errors
+- Required: yes
+- Reported result: passed
+- Rerun result: passed via full suite + independent offline probe
+- Status: passed
+- Notes: All task-listed validation cases present; `live_mode_locked` always false on PASS and FAIL; selected_mode means run-level selection only.
+
+- Command/check: Confirm 03A pre-recorded reliability criterion (do not invent)
+- Required: yes (acceptance)
+- Reported result: passed (constants match feasibility protocol)
+- Rerun result: passed
+- Status: passed
+- Notes: Feasibility records three consecutive attempts, all must pass Pydantic, at most one repair per attempt. Code constants `APPROVED_RELIABILITY_ATTEMPT_COUNT=3` and `APPROVED_MAX_REPAIR_REQUESTS_PER_ATTEMPT=1` match that text.
+
+- Command/check: Secret/header scan of 03D artifacts and rendered provider_error evidence
+- Required: yes (acceptance: no secrets/headers)
+- Reported result: passed (A1 safe-error test)
+- Rerun result: passed
+- Status: passed
+- Notes: Sentinel secret, Authorization, and Bearer absent from rendered FAIL evidence; only intentional sentinel-bearing exception construction appears inside tests as input-to-redact. Feasibility mentions headers only as a prohibition.
+
+- Command/check: Live ShopAIKey structured-schema smoke
+- Required: no for 03D
+- Reported result: not_run
+- Rerun result: not_run
+- Status: not_run
+- Notes: Live mode selection intentionally deferred to 03F; feasibility Structured schema row and Locked Versions completion schema mode remain PENDING; `main()` still emits PENDING for all capabilities and does not call `check_structured_schema`.
+
+## Acceptance Review
+- Task acceptance: Fake-provider tests prove permitted modes, Pydantic validation, approved reliability rule, and one-repair limit without claiming a live selected schema mode; 03A criterion confirmed; no secrets/headers.
+- Status: satisfied
+- Evidence: Implemented structured-schema strategy cascade with injectable fakes; 54-pass suite and independent constant/cascade/secret probes; feasibility live rows PENDING; no live compatibility or locked schema-mode claim.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes unchanged: yes (only 03D set to checked)
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- `STRICT_ENABLED_BY_DEFAULT` remains false; strict is observed only via explicit `strict_schema` mode then cascade continues.
+- Default `_default_structured_schema` transport exists for 03F but is not invoked by `main()`; current CLI remains PENDING-only.
+- `backend/pyproject.toml` remains dirty from the accepted 03A Batch03 baseline and is not a 03D-only change.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+
+---
+
+# Task Review Report - 03E
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03E
+- Task title: Characterize streaming and enforce diagnostic exit behavior
+- Executor status reported: complete
+
+## Latest Report Selection
+- Latest report entry found: yes
+- Requested task ID: 03E
+- Reviewed task ID: 03E
+- Correct selection: yes
+- Notes: Matching `# Task Execution Report - 03E` block; status `complete`. A1_EVIDENCE_SOURCE was live_handoff; repository evidence matched.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- recent commits reviewed: not_needed
+- changed files from git (working tree): modified `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml` (Batch03/03A dep baseline), `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`, `docs/tasks/task_1.md`; untracked `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/`
+- A1-reported 03E files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/test_shopaikey_streaming_and_exit.py`, `backend/evaluation/reports/phase_0_feasibility.md`, `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - `STREAMING_PROMPT`, `StreamChunkMeta` / `StreamingObservation`, injectable `StreamingFn`, `check_streaming` (ordered pass / explicit unsupported / empty / out-of-order / unknown_failure), `_default_streaming` live transport present but not used by normal tests or by `main()` live results, `compute_diagnostic_exit_code`, `format_sanitized_summary`; `Capability.STREAMING` excluded from `REQUIRED_PASS_CAPABILITIES`
+- `backend/tests/test_shopaikey_streaming_and_exit.py`: in scope - 19 fake-provider tests covering required classification, exit aggregation, and secret-safe summary paths
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - Streaming classifier READY_FOR_FAKE_TESTS note; Streaming behavior row Result and Locked decision remain PENDING; no live claim
+- `docs/reports/report_1_execute_agent.md`: in scope - 03E execution evidence append
+- `backend/pyproject.toml`: prior 03A dependency baseline; not a 03E-only delta and not claimed as one
+- No 03F live smoke or live streaming status lock claimed
+
+## Validations Reviewed
+- Command/check: `python -m pytest tests/test_shopaikey_streaming_and_exit.py -q` then full `python -m pytest -q` from `backend/`
+- Required: yes
+- Reported result: passed (19 focused streaming/exit; full suite 73)
+- Rerun result: passed (19 passed in 0.04s; 73 passed in 0.11s)
+- Status: passed
+- Notes: Must be run with CWD `backend/` so `scripts` is importable. Root-cwd collection fails with ModuleNotFoundError (environment note only; A1 command path is correct).
+
+- Command/check: Required fake-provider branches — ordered chunks, out-of-order/empty chunks, explicit unsupported, unknown failure, exit-code aggregation (required failures non-zero; streaming unsupported/fail alone still zero), sanitized output
+- Required: yes
+- Reported result: passed
+- Rerun result: passed via full suite + independent offline probe
+- Status: passed
+- Notes: Independent probe confirmed streaming not in required-pass set; PASS/UNSUPPORTED/FAIL classification; exit 0 when only streaming is unsupported or fail; exit 1 for function_call/structured_schema fail, pending required, or missing required capability; sentinel secret and Authorization absent from evidence and summary; `live_streaming_claimed` always false.
+
+- Command/check: Live ShopAIKey streaming smoke
+- Required: no for 03E
+- Reported result: not_run
+- Rerun result: not_run
+- Status: not_run
+- Notes: Live streaming status intentionally deferred to 03F; feasibility Streaming behavior remains PENDING.
+
+## Acceptance Review
+- Task acceptance: Fake-provider tests prove supported/unsupported/unknown streaming classification; non-zero exit when required-pass fails or remains unknown; unsupported streaming alone does not fail the required gate; ordered/out-of-order/empty/unsupported/unknown/exit-aggregation coverage; no live streaming claim; sanitized output.
+- Status: satisfied
+- Evidence: Implemented `check_streaming` and `compute_diagnostic_exit_code` with injectable fakes; 19+73 pytest pass; independent probes match acceptance; feasibility live streaming PENDING; `main()` still emits PENDING rows and non-zero exit because required-pass is unknown until 03F.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes unchanged: yes (only 03E set to checked; 03F remains unchecked)
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Default `_default_streaming` transport exists for 03F but is not invoked by `main()`; current CLI remains PENDING-only with non-zero exit under the new contract.
+- Streaming FAIL alone is treated as knowledge-only for exit aggregation (exit 0 when all required-pass are PASS), matching Plan 1 that only required tool-call/schema failures force non-zero exit and unsupported streaming is a known outcome.
+- `backend/pyproject.toml` remains dirty from the accepted 03A Batch03 baseline and is not a 03E-only change.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 03F
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - ShopAIKey Compatibility Gate
+- Task ID: 03F
+- Task title: Execute the live provider smoke test and lock ShopAIKey decisions
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: modified `backend/evaluation/reports/phase_0_feasibility.md`, `backend/pyproject.toml` (prior Batch03 baseline), `docs/reports/report_1_execute_agent.md`, `docs/review/review_1_review_agent.md`, `docs/tasks/task_1.md`; untracked `backend/scripts/check_shopaikey_compatibility.py`, `backend/tests/`
+- A1-reported 03F files: `backend/scripts/check_shopaikey_compatibility.py`, `backend/evaluation/reports/phase_0_feasibility.md`, `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/scripts/check_shopaikey_compatibility.py`: in scope - `run_live_compatibility_checks` wires all six capability checks once; `main()` loads root config, runs live orchestration, prints sanitized summary + JSON, returns aggregated exit code; `MASTER_LOCKED_CHAT_MODEL = gpt-4o-mini`; structured reliability uses 03A constants (3 attempts, max 1 repair); streaming knowledge-only vs required-pass set verified offline
+- `backend/evaluation/reports/phase_0_feasibility.md`: in scope - ShopAIKey live matrix all six capabilities PASS with sanitized aggregates; Locked Versions for model/tool/schema/streaming; Final Decisions ShopAIKey PASS with locked modes; no secret or Bearer token values
+- `docs/reports/report_1_execute_agent.md`: in scope - 03F execution block claims exit 0, gpt-4o-mini, six-capability matrix, leakage scan clean, fake suite first
+- `backend/tests/` (five ShopAIKey modules): in scope for fake-provider rerun only; inject fakes/sentinels; no live `run_live_compatibility_checks` invocation from tests
+- `backend/pyproject.toml`: prior 03A Batch03 dependency baseline; not a 03F-only delta
+- No out-of-scope product implementation observed for this task
+
+## Validations Reviewed
+- Command/check: focused fake-provider pytest suite (five ShopAIKey modules) from `backend/`
+- Required: yes
+- Reported result: passed (73)
+- Rerun result: passed (73 passed in 0.09s)
+- Status: passed
+- Notes: Tests use injectable fakes and example base URLs only; no live network path observed.
+
+- Command/check: live single-purpose diagnostic `python backend/scripts/check_shopaikey_compatibility.py`
+- Required: yes (task); A2 did not re-run live
+- Reported result: passed (exit 0; all six capabilities pass under gpt-4o-mini)
+- Rerun result: not_run (prefer inspect evidence; avoid re-calling provider)
+- Status: passed
+- Notes: Credible live claim cross-checked against wired `main()`/`run_live_compatibility_checks`, feasibility locked aggregates (including streaming chunk counts), required-pass exit contract, and model lock `gpt-4o-mini` (not equivalent-only).
+
+- Command/check: exit-code check for required-pass aggregation
+- Required: yes
+- Reported result: passed (exit 0)
+- Rerun result: offline probe of `compute_diagnostic_exit_code` with all capabilities PASS yields 0; required set is discovery/completion/function_call/tool_round_trip/structured_schema
+- Status: passed
+- Notes: Streaming is knowledge-only and is not in `REQUIRED_PASS_CAPABILITIES`.
+
+- Command/check: exact secret and prohibited-output scan
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: Configured `SHOPAIKEY_API_KEY` substring absent from execution report, feasibility report, review report, and diagnostic script; no `sk-` token patterns; "Bearer"/"Authorization" hits are descriptive leakage-scan prose only, not credentials; no private CV/JD document content in evidence artifacts.
+
+## Acceptance Review
+- Task acceptance: Fake-provider tests pass without real network; live diagnostic reported exit 0 with six sanitized capability results; gpt-4o-mini used for required tool-call and schema paths; tool-call round trip and one reliable schema mode (`strict_schema`, 3/3, 0 repairs) pass; streaming known (`streaming_text`); leakage scan clean; locked decisions recorded in feasibility report (matrix, Locked Versions, Final Decisions PASS).
+- Status: satisfied
+- Evidence: Independent 73-test fake suite pass; code inspection of live orchestration; feasibility `LOCKED_PASS` matrix and decision tables; secret substring scan clean; no equivalent-model path claimed.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes unchanged: yes (only 03F set to checked; 03A-03E already checked from prior accepts)
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+### Warnings
+- None.
+
+### Observations
+- Diagnostic structured-schema evidence still sets `live_mode_locked: false` on the per-run result; durable lock is correctly recorded in `phase_0_feasibility.md` as required by 03F.
+- Root `README.md` still describes ShopAIKey as pending; updating README is outside the 03F file list and left for later consolidation.
+- Live diagnostic was not re-executed by A2; acceptance relies on consistent A1 aggregates, feasibility locks, wiring inspection, fake suite, and secret scans.
+- PowerShell BOM capture artifact noted by A1 is not present in committed evidence and does not affect acceptance.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
