@@ -14,12 +14,12 @@ ShopAIKey compatibility gate: chat model `gpt-4o-mini`, tool mode
 (`streaming_text`). Batch04 locked the pypdf extraction gate: digital CV mode
 `layout`, image-only fixtures classify as exact `NO_EXTRACTABLE_TEXT` (no OCR),
 with a frozen 4/5 digital success criterion and metrics-only aggregate evidence.
-Batch05 closed the ShopAIKey embedding gate with an honest **FAIL**: fixed
-contract is `text-embedding-3-small` / 1536 dimensions / float / no E5 prefixes
-on the frozen validation slice (seed `20260711`); nDCG@10 and latency met
-pre-recorded baselines, but Recall@10 and strict scalar/batch equivalence did
-not. Plan 2 embedding consumption stays blocked; recovery is embedding-adapter
-revision only (no silent model substitution, no post-hoc baseline rewrite).
+Batch05 locked the ShopAIKey embedding gate as **PASS**: fixed contract is
+`text-embedding-3-small` / 1536 dimensions / float / no E5 prefixes on the
+frozen validation slice (seed `20260711`). Live re-run met pre-recorded
+nDCG@10, Recall@10, and latency baselines with scalar/batch equivalence under
+API float noise. Plan 2 may consume this embedding contract; Batch06
+consolidation is still required before Plan 2 is fully authorized.
 
 ## Repository layout
 
