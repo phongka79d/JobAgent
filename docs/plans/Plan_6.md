@@ -18,7 +18,7 @@ Deliver measurable top-10 job matching for the active Candidate Profile using Ne
 - [ ] An approved Candidate Profile and Job Preferences exist in SQLite.
 - [ ] Active `full|partial` Jobs have canonical fields, embeddings, and synchronized Neo4j IDs.
 - [ ] Ignored duplicates and unscorable Jobs are excluded from the vector index.
-- [ ] The embedding model/dimension and E5 prefix policy are fixed.
+- [ ] The ShopAIKey `text-embedding-3-small` model, 1536 dimensions, and no-prefix preprocessing policy are fixed.
 - [ ] Direct/alias skills and verified/provisional relationship status are queryable.
 - [ ] Pending graph operations can be retried before a match request.
 
@@ -32,14 +32,16 @@ Deliver measurable top-10 job matching for the active Candidate Profile using Ne
 - Produce deterministic score breakdowns, matched/missing skill evidence, and final top 10.
 - Implement `match_jobs` and extend bounded `query_jobs` with score details.
 - Build local relevance, extraction, and tool-selection datasets under the locked privacy policy.
-- Benchmark embeddings, tune weights on validation only, evaluate once on held-out data, and run graph ablation.
+- Benchmark the locked embedding retrieval baseline, tune weights on validation only, evaluate once on held-out data, and run graph ablation.
 - Apply the locked graph-disable rule when related-skill boosts do not improve held-out `nDCG@10`.
 - Implement Astryx match cards and collapsible component breakdowns.
 - Generate an aggregate report with limitations and locked configuration.
 
+Candidate embedding text must reuse Plan 4's deterministic PII-redaction service before calling ShopAIKey; a redaction failure blocks the external request. Tests must assert that contact PII never reaches the fake embedding adapter.
+
 ## 5. Out of Scope
 
-- LLM-generated numerical scores, ShopAIKey/Jina reranking, new embedding candidates, or BGE-M3.
+- LLM-generated numerical scores, ShopAIKey/Jina reranking, alternate embedding models/dimensions, or local embedding runtimes.
 - Population-level ranking claims, automatic public data collection, or committed real CV/JD data.
 - Re-extraction, Job mutation, ontology expansion, or provisional relationship boosts.
 - Application tracking, auto-apply, cover letters, interview preparation, or dashboards.
@@ -131,7 +133,7 @@ Each result includes Job ID, title, company, location, work mode, final score, q
 - Relevance: 150-200 public JDs, labels 0-3, fixed seeded 60/20/20 split.
 - Extraction: at least 30 manually annotated JDs.
 - Tool selection: at least 50 scenarios including failures and prompt injection.
-- Tune embedding choice/weights only on development/validation; lock before one held-out evaluation.
+- Tune ranking weights only on development/validation; keep the embedding contract fixed before one held-out evaluation.
 - Compare semantic-only, exact-skill-only, semantic+exact skill, semantic+skill graph, and full hybrid.
 - Disable related-skill boosts if graph expansion does not improve held-out `nDCG@10`.
 

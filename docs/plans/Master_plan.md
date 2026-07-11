@@ -101,7 +101,7 @@ Otherwise, it remains outside the MVP.
 | Relational data | SQLite + SQLAlchemy 2 + aiosqlite | Source of truth |
 | Migrations | Alembic | SQLite schema management |
 | Graph/vector data | Neo4j Community | Derived skill graph and job vector index |
-| Embeddings baseline | `intfloat/multilingual-e5-small` | Local multilingual CPU embeddings |
+| Embeddings | ShopAIKey `text-embedding-3-small` (1536 dimensions) | OpenAI-compatible hosted embeddings |
 | PDF parser baseline | pypdf | Digitally born PDF text extraction |
 | Web extraction | Trafilatura | Public HTML main-text extraction |
 | HTTP client | httpx | Controlled URL download and ShopAIKey connectivity checks |
@@ -121,7 +121,7 @@ flowchart TD
     SERVICES --> SQLITE["SQLite source of truth"]
     SERVICES --> NEO4J["Neo4j graph + vectors"]
     SERVICES --> LLM["ShopAIKey gpt-4o-mini"]
-    SERVICES --> EMBED["Local multilingual E5"]
+    SERVICES --> EMBED["ShopAIKey text-embedding-3-small"]
 ```
 
 ### 4.1 Ownership rules
@@ -362,7 +362,7 @@ The classifier must return reasons for `partial` and `unscorable` states.
 - Unique constraint on `Skill.canonical_key`.
 - Unique constraint on `JobFamily.canonical_key`.
 - Vector index on `Job.embedding` using cosine similarity.
-- Vector dimension comes from the selected embedding model and must be recorded in application settings.
+- Vector dimension is fixed at 1536 by the locked embedding contract and must be recorded in application settings.
 
 Changing the embedding model or dimensions requires a complete embedding and vector-index rebuild.
 
@@ -786,20 +786,23 @@ Each top result shows:
 ```text
 SHOPAIKEY_BASE_URL=https://api.shopaikey.com/v1
 LLM_MODEL=gpt-4o-mini
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
 ```
 
-Use `ChatOpenAI` with the custom base URL and `bind_tools()`.
+Use `ChatOpenAI` with the custom base URL and `bind_tools()` for chat. Use an OpenAI-compatible embeddings client with the same base URL and API key for `POST /v1/embeddings`.
 
 ### 16.2 Startup/diagnostic compatibility checks
 
 Phase 0 must verify:
 
-1. `/v1/models` contains the requested model ID or an explicitly approved equivalent ID.
+1. `/v1/models` contains the requested chat and embedding model IDs or explicitly approved equivalent IDs.
 2. Basic Chat Completions.
 3. Function calling.
 4. Tool-result round trip.
 5. Structured tool schema behavior.
 6. Streaming text behavior.
+7. Embedding request/response behavior for string and batch inputs, fixed 1536-dimensional float output, input ordering, and provider error handling.
 
 `strict=True` remains disabled until verified. If strict schemas fail:
 
@@ -807,24 +810,19 @@ Phase 0 must verify:
 - Validate with Pydantic.
 - Allow exactly one schema-repair request.
 
-Do not silently switch to another LLM model.
+Do not silently switch either provider model or change embedding dimensions.
 
 ---
 
 ## 17. Embedding and Retrieval
 
-### 17.1 Candidate models
+### 17.1 Locked embedding contract
 
-Benchmark only:
+Use only ShopAIKey `text-embedding-3-small` through `POST /v1/embeddings`, with `dimensions=1536` and float encoding. Candidate and Job embeddings must use the same model, dimensions, normalization policy, and versioned text-builder contract. Do not add a local embedding runtime or silently substitute another model.
 
-1. `intfloat/multilingual-e5-small` — default baseline.
-2. `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` — lightweight comparison.
+### 17.2 Provider compatibility gate
 
-Do not include BGE-M3 in the MVP CPU serving path.
-
-### 17.2 Model selection gate
-
-Choose the model using validation-set `nDCG@10`, Recall@10, encoding latency, and memory usage. Prefer E5 unless the other model provides a meaningful measured advantage.
+Phase 0 must verify model availability, scalar and batch input support, stable input/output ordering, exactly 1536 finite float values per input, and sanitized timeout/rate-limit/invalid-response behavior. Record median/P95 request latency and validation-set `nDCG@10` and Recall@10 as baseline evidence; these measurements validate the locked adapter and do not select among models.
 
 ### 17.3 Text representations
 
@@ -834,13 +832,15 @@ Candidate representation:
 target roles + profile summary + verified skills + experience titles + preferences
 ```
 
+The Candidate representation must pass through the shared deterministic PII-redaction boundary before any embedding request. If redaction fails, do not call ShopAIKey. Public Job representations still pass through the same normalization and logging-safety boundary.
+
 Job representation:
 
 ```text
 title + summary + responsibilities + required skills + preferred skills
 ```
 
-When using E5, apply the expected query/passage prefixes consistently.
+No E5 query/passage prefixes are used. Apply the same documented whitespace normalization and versioned representation builders before sending text to ShopAIKey.
 
 ### 17.4 Retrieval flow
 
@@ -1128,8 +1128,8 @@ SHOPAIKEY_API_KEY=
 LLM_MODEL=gpt-4o-mini
 LLM_TEMPERATURE=0
 
-EMBEDDING_MODEL=intfloat/multilingual-e5-small
-EMBEDDING_DEVICE=cpu
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
 
 MAX_PDF_SIZE_MB=10
 MAX_PDF_PAGES=10
@@ -1220,7 +1220,7 @@ Tasks:
 - [ ] Implement a temporary ShopAIKey compatibility script for model listing, chat completion, function calling, tool-result round trip, structured schema, and streaming.
 - [ ] Benchmark pypdf normal/layout extraction on 5–10 representative digital CV PDFs.
 - [ ] Verify `NO_EXTRACTABLE_TEXT` behavior on an image-only PDF fixture.
-- [ ] Benchmark E5-small and multilingual MiniLM on an initial labeled retrieval subset and CPU latency.
+- [ ] Verify ShopAIKey `text-embedding-3-small` scalar/batch compatibility, 1536-dimensional output, retrieval quality baseline, and request latency.
 - [ ] Record results in `backend/evaluation/reports/phase_0_feasibility.md`.
 
 Exit gate:
@@ -1229,7 +1229,7 @@ Exit gate:
 - At least one schema strategy passes Pydantic validation reliably.
 - Astryx has all required public components or a documented composition path.
 - pypdf succeeds on the agreed majority of digital CV fixtures.
-- One local embedding model meets the initial latency and quality baseline.
+- ShopAIKey `text-embedding-3-small` passes the compatibility contract and its 1536-dimensional retrieval/latency baseline is recorded.
 
 If any gate fails, revise the affected adapter only. Do not add broad fallback stacks.
 
@@ -1315,7 +1315,7 @@ Tasks:
 - [ ] Implement exact and normalized duplicate policy.
 - [ ] Implement skill normalization, provisional creation, and seed aliases.
 - [ ] Implement `save_job` and `query_jobs`.
-- [ ] Generate local job embeddings for scorable active records.
+- [ ] Generate ShopAIKey job embeddings for scorable active records.
 - [ ] Synchronize Job, Skill, and JobFamily graph data.
 - [ ] Add sanitized Job tool status and saved-job card to chat.
 
@@ -1425,7 +1425,7 @@ Only consider these after MVP metrics and reliability pass:
 - Public cloud deployment and authentication.
 - Qdrant comparison when corpus/retrieval requirements justify it.
 - API reranking when an ablation demonstrates measurable improvement.
-- Larger embedding models when CPU constraints change.
+- Alternate embedding models or dimensions when measured retrieval requirements justify a full rebuild.
 - Multiple-candidate evaluation for population-level claims.
 
 Future work must not be silently implemented during MVP phases.
@@ -1487,5 +1487,4 @@ The following primary documentation supports the material technical decisions in
 - [Trafilatura Documentation](https://trafilatura.readthedocs.io/)
 - [Trafilatura Core Functions](https://trafilatura.readthedocs.io/en/latest/corefunctions.html)
 - [Trafilatura Troubleshooting](https://trafilatura.readthedocs.io/en/latest/troubleshooting.html)
-- [Multilingual E5 Small model card](https://huggingface.co/intfloat/multilingual-e5-small)
-- [Multilingual MiniLM model card](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)
+- [ShopAIKey OpenAI Format - Embeddings API](https://shopaikey.com/docs/openai-format)

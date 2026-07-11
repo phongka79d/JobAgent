@@ -2,7 +2,7 @@
 
 ## 1. Objective
 
-Implement persistence-first ingestion for public JD URLs and raw text, secure extraction, structured Job records, explicit quality/status dimensions, exact and normalized duplicate handling, shared skill normalization, local embeddings, and rebuildable Job/Skill/JobFamily synchronization to Neo4j.
+Implement persistence-first ingestion for public JD URLs and raw text, secure extraction, structured Job records, explicit quality/status dimensions, exact and normalized duplicate handling, shared skill normalization, ShopAIKey embeddings, and rebuildable Job/Skill/JobFamily synchronization to Neo4j.
 
 ## 2. Source of Truth
 
@@ -19,7 +19,7 @@ Implement persistence-first ingestion for public JD URLs and raw text, secure ex
 
 - [ ] `job_posts` and `graph_sync_outbox` tables are migrated.
 - [ ] Agent tool registration, SSE status, and structured chat cards are stable.
-- [ ] ShopAIKey schema mode and the selected local embedding model/dimension are locked.
+- [ ] ShopAIKey schema mode and the `text-embedding-3-small` 1536-dimensional contract are locked.
 - [ ] Shared `SkillRef` canonicalization, verified aliases, and provisional-skill rules exist.
 - [ ] Neo4j constraints/vector index and replay-safe outbox processing are available.
 
@@ -34,7 +34,7 @@ Implement persistence-first ingestion for public JD URLs and raw text, secure ex
 - Implement exact-content and normalized company/title/location duplicate policies, including explicit `force_new` authorization.
 - Reuse shared skill normalization and seed aliases; create deterministic provisional skills.
 - Implement `save_job` and read-only `query_jobs` tools.
-- Generate local embeddings for active scorable records.
+- Generate ShopAIKey embeddings for active scorable records.
 - Synchronize active Job, Skill, and JobFamily graph data through the outbox.
 - Render sanitized JD tool status and a saved-job card in chat.
 
@@ -106,7 +106,7 @@ Use one shared pipeline: Unicode normalization, whitespace collapse, lowercase c
 
 ### 7.6 Embedding and graph synchronization
 
-Embed only active `full|partial` jobs using the selected Plan 1 model and the master Job representation: title + summary + responsibilities + required skills + preferred skills. Apply E5 passage prefixes when E5 is selected. Store model identity with canonical Job state and enqueue Job sync. Outbox processing `MERGE`s Job, Skill, JobFamily, `REQUIRES`, `PREFERS`, and `IN_FAMILY` by SQLite IDs/canonical keys. Replays must not duplicate data. Ignored duplicates and unscorable jobs never enter Neo4j.
+Embed only active `full|partial` jobs through ShopAIKey `text-embedding-3-small` with `dimensions=1536`, using the master Job representation: title + summary + responsibilities + required skills + preferred skills. Use bounded batches, preserve input/output ordering, and apply no E5 prefixes. Store model and dimension identity with canonical Job state and enqueue Job sync. Outbox processing `MERGE`s Job, Skill, JobFamily, `REQUIRES`, `PREFERS`, and `IN_FAMILY` by SQLite IDs/canonical keys. Replays must not duplicate data. Ignored duplicates and unscorable jobs never enter Neo4j.
 
 ### 7.7 Tool outputs
 
@@ -121,7 +121,7 @@ Embed only active `full|partial` jobs using the selected Plan 1 model and the ma
 - [ ] Implement exact-hash deduplication before extraction and normalized-key deduplication after extraction.
 - [ ] Consolidate skill normalization into the shared service and add the small verified `skills_seed.yaml`.
 - [ ] Implement `save_job` authorization/orchestration and bounded `query_jobs` reads.
-- [ ] Implement local embedding text builder/encoder using the selected model.
+- [ ] Implement the embedding text builder and ShopAIKey batch adapter using the locked contract.
 - [ ] Implement Job graph payloads, outbox processing, replay safety, and rebuild data loader.
 - [ ] Add sanitized tool events and saved-job chat card.
 - [ ] Add unit, integration, Agent-tool, graph, and frontend tests.
@@ -145,7 +145,7 @@ The phase exits only when raw inputs survive failures, duplicate rules are exact
 
 Plan 6 receives:
 
-- Active `full|partial` Job records with canonical structured fields and local embeddings.
+- Active `full|partial` Job records with canonical structured fields and ShopAIKey embeddings.
 - Ignored/unscorable records explicitly excluded from retrieval.
 - Candidate and Job Skill nodes with direct/alias data and only verified score-bearing relationships.
 - Rebuildable Neo4j Job vector index and synchronized SQLite IDs.

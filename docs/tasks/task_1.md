@@ -13,7 +13,7 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 - No README/source conflict was found because the README contains no task requirements; `docs/plans/Plan_1.md` and its controlling references in `docs/plans/Master_plan.md` remain authoritative.
 - Source clarification: Plan 1 section 7.2 names ten Astryx components, while the controlling master-plan frontend matrix names six additional required components. Because Plan 1 explicitly says the master plan wins, Batch02 validates the union of both lists.
 - Source clarification: Plan 1 allows an explicitly approved equivalent model ID, while the controlling master Phase 0 exit gate requires a successful `gpt-4o-mini` tool-call round trip. An equivalent model cannot pass this task until the affected master-plan adapter decision is explicitly revised.
-- Source ambiguity: neither source defines the numeric PDF success threshold, the initial embedding quality/latency baselines, or a numeric MiniLM materiality rule. The relevant tasks require those criteria to be agreed and recorded before results are evaluated; peak memory is always recorded but is not an independent blocker unless the approved source is revised to make it one.
+- Source ambiguity: neither source defines the numeric PDF success threshold or initial embedding quality/latency baselines. The relevant tasks require those criteria to be agreed and recorded before results are evaluated.
 
 ## Authority and Scope
 
@@ -35,7 +35,7 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 - `docs/plans/Plan_1.md` > `### 7.1 ShopAIKey compatibility matrix` -> provider capabilities, evidence, schema fallback, and secret-safety rules.
 - `docs/plans/Plan_1.md` > `### 7.2 Astryx component matrix` -> public import and composition evidence.
 - `docs/plans/Plan_1.md` > `### 7.3 PDF benchmark record` -> per-fixture metrics and `NO_EXTRACTABLE_TEXT` behavior.
-- `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record` -> candidate models, quality metrics, CPU metrics, and selection rule.
+- `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record` -> locked ShopAIKey adapter, response validation, quality metrics, and request-latency baseline.
 - `docs/plans/Plan_1.md` > `### 7.5 Feasibility report decision block` -> required decision-table fields and all-pass exit rule.
 - `docs/plans/Plan_1.md` > `## 8. Implementation Steps` -> required execution sequence and cleanup.
 - `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan` -> minimum automated and local evidence.
@@ -49,9 +49,9 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 - `docs/plans/Master_plan.md` > `### 16.1 Configuration` -> model, base URL, `ChatOpenAI`, and `bind_tools()` requirements.
 - `docs/plans/Master_plan.md` > `### 16.2 Startup/diagnostic compatibility checks` -> six provider checks, schema fallback order, and model-switch prohibition.
 - `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` -> embedding/retrieval boundary.
-- `docs/plans/Master_plan.md` > `### 17.1 Candidate models` -> exact two-model allowlist.
-- `docs/plans/Master_plan.md` > `### 17.2 Model selection gate` -> quality, latency, memory, and E5-preference rule.
-- `docs/plans/Master_plan.md` > `### 17.3 Text representations` -> candidate/job representations and E5 prefixes.
+- `docs/plans/Master_plan.md` > `### 17.1 Locked embedding contract` -> ShopAIKey model, dimensions, format, and no-substitution rule.
+- `docs/plans/Master_plan.md` > `### 17.2 Provider compatibility gate` -> scalar/batch, ordering, dimension, quality, latency, and failure checks.
+- `docs/plans/Master_plan.md` > `### 17.3 Text representations` -> candidate/job representations and no-prefix normalization policy.
 - `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` -> evaluation boundary.
 - `docs/plans/Master_plan.md` > `### 19.1 Data policy` -> local-private data and aggregate-report policy.
 - `docs/plans/Master_plan.md` > `### 19.2 Relevance labels` -> fixed seeded split and no test-set tuning.
@@ -69,7 +69,7 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 
 - Keep exactly three product working folders: `frontend`, `backend`, and `infrastructure`; root documentation and configuration files are not a fourth working folder.
 - Use React, TypeScript, Vite, and a pinned Astryx version for the frontend scaffold, without implementing product flows.
-- Use Python, Pydantic v2, pypdf, the two locked sentence-transformer candidates, and a temporary ShopAIKey diagnostic in the backend evaluation scaffold.
+- Use Python, Pydantic v2, pypdf, an OpenAI-compatible embeddings client, and a temporary ShopAIKey diagnostic in the backend evaluation scaffold.
 - Use ShopAIKey through the OpenAI-compatible contract with `gpt-4o-mini`; do not silently switch models or providers.
 - Keep all configurable values in one root `.env`, document placeholders in `.env.example`, and keep real secrets and private CV/JD data untracked.
 - Treat Phase 0 output as measured evidence and locked adapter decisions. Production FastAPI, LangGraph, persistence, graph, matching, and frontend product behavior remain out of scope.
@@ -87,7 +87,7 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 - Separate user-owned inputs from agent work. Agents must not create API keys, real credentials, private CV/JD content, or labels that pretend to be user-provided evidence.
 - Never print, log, report, commit, or expose API keys, Authorization headers, raw provider headers, raw CV/JD content, contact PII, or private evaluation records.
 - Normal automated tests must use fakes or mocks and must not call the real ShopAIKey API. The explicitly authorized compatibility smoke test is the only live provider check.
-- Use the same seeded evaluation inputs and measurement protocol for both embedding candidates. Do not inspect held-out test results while choosing models or thresholds.
+- Use the fixed seeded validation inputs and pre-registered measurement protocol for the locked embedding model. Do not inspect held-out test results while setting thresholds.
 - Record observed failures honestly. Never mark a gate `PASS`, infer a compatibility result, or claim a user action completed without evidence.
 - If a gate fails, stop the Phase 1 handoff and revise only the affected adapter decision. Do not introduce an unapproved fallback provider, UI system, parser, embedding model, or deployment path.
 
@@ -119,8 +119,8 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 - Required ShopAIKey failures return non-zero and normal automated tests do not reach the real provider.
 - PDF normal/layout measurements use the same frozen digital fixtures and the selected mode passes the pre-recorded threshold.
 - The image-only fixture returns exactly `NO_EXTRACTABLE_TEXT` in both normal and layout modes with no OCR or alternate parser.
-- Embedding candidates use the same validation slice from the fixed seeded 60/20/20 split, the exact `0`-`3` labels, CPU protocol, metrics, and registered quality/latency baselines.
-- Only E5-small and multilingual MiniLM were benchmarked; the selected model/dimension follows the E5-default/materiality rule.
+- ShopAIKey `text-embedding-3-small` uses the validation slice from the fixed seeded 60/20/20 split, exact `0`-`3` labels, registered quality/latency baselines, and fixed 1536-dimensional output.
+- Scalar and batch requests preserve ordering, return finite floats, and use no E5 query/passage prefixes.
 - Held-out results were not inspected for Phase 0 tuning or selection.
 - Exact dependency/mode/version decisions and single-purpose commands are recorded for Plan 2.
 - Temporary, duplicate, unused, raw, or out-of-scope artifacts and dependencies were removed.
@@ -137,7 +137,7 @@ Turn `docs/plans/Plan_1.md` into an executable, evidence-first Phase 0 workflow 
 | Batch02 - Astryx Compatibility Gate | Astryx compatibility locked; exit evidence: Pinned version plus public import/composition matrix for every required component | (02A), (02B), (02C) | Batch01 |
 | Batch03 - ShopAIKey Compatibility Gate | ShopAIKey compatibility locked; exit evidence: Safe diagnostic evidence for all six provider capabilities | (03A), (03B), (03C), (03D), (03E), (03F) | Batch01 |
 | Batch04 - pypdf Extraction Compatibility Gate | pypdf extraction behavior locked; exit evidence: Comparable normal/layout metrics and verified image-only classification | (04A), (04B), (04C), (04D) | Batch01 |
-| Batch05 - Embedding Selection Compatibility Gate | Embedding model locked; exit evidence: Comparable seeded quality/CPU measurements and selected model/dimension | (05A), (05B), (05C), (05D) | Batch01 |
+| Batch05 - ShopAIKey Embedding Compatibility Gate | Locked embedding adapter verified; exit evidence: API compatibility, fixed dimensions, seeded quality, and request latency | (05A), (05B), (05C), (05D) | Batch01, Batch03 |
 | Batch06 - Evidence Consolidation and Phase 0 Exit Gate | Phase 0 decisions consolidated; exit evidence: Complete all-pass report, pinned decisions, clean scaffold, and Plan 2 handoff | (06A), (06B), (06C) | Batch02, Batch03, Batch04, Batch05 |
 
 **Execution order and recovery**
@@ -221,7 +221,7 @@ Every compatibility gate depends on a common three-folder scaffold, one root con
 
 ### Tasks
 
-- [ ] (01A): Verify local tools and user-owned gate inputs
+- [x] (01A): Verify local tools and user-owned gate inputs
   - Source of Truth: `docs/plans/Plan_1.md` > `## 3. Prerequisites from Prior Phases`; `docs/plans/Master_plan.md` > `## 22. Security and Privacy` > `### 22.2 Secrets`; `docs/plans/Master_plan.md` > `## 24. Local Testing Strategy`
   - Source Requirements:
     - Python, Node.js/npm, and Docker with Compose must be available locally.
@@ -242,7 +242,7 @@ Every compatibility gate depends on a common three-folder scaffold, one root con
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` for any live gate whose required key, fixture set, label set, or threshold approval is unavailable.
   - Files: No product file is required for this check; the future execution report records the sanitized result, while local root `.env` and private fixture paths remain read-only user-owned inputs.
 
-- [ ] (01B): Create the exact three-folder Phase 0 scaffold
+- [x] (01B): Create the exact three-folder Phase 0 scaffold
   - Source of Truth: `docs/plans/Plan_1.md` > `## 4. Scope`; `docs/plans/Plan_1.md` > `## 6. Target Directory Structure`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 5. Repository Structure`
   - Source Requirements:
     - The product scaffold must contain exactly `frontend`, `backend`, and `infrastructure` as its three top-level working folders.
@@ -752,23 +752,24 @@ Later CV ingestion depends on predictable digital-PDF extraction and a clear non
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` only when a failed gate requires an approved parser-adapter revision.
   - Files: Focused benchmark tests, aggregate PDF benchmark results, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-## Mandatory Batch05 - Embedding Selection Compatibility Gate
+## Mandatory Batch05 - ShopAIKey Embedding Compatibility Gate
 
 ### Goal
 
-Compare only the two locked multilingual CPU embedding candidates on one frozen seeded subset, then lock the selected model and vector dimension for Plan 2.
+Verify the locked ShopAIKey `text-embedding-3-small` adapter with 1536-dimensional output, then record retrieval-quality and request-latency baselines for Plan 2.
 
 ### Dependencies
 
-- Mandatory Batch01 complete through (01D).
+- Mandatory Batch01 complete through (01D) and the Batch03 ShopAIKey diagnostic foundation available.
 - User-provided or user-confirmed initial labeled retrieval subset.
-- Pre-recorded quality and CPU-latency baselines sufficient to decide whether at least one model passes; peak memory remains a required comparison metric, not an independent pass blocker.
+- Explicit authorization for the live ShopAIKey embedding smoke test.
+- Pre-recorded quality and request-latency baselines for validating the fixed adapter.
 
 ### Scope Boundary
 
 **Why this batch exists**
 
-The relational/graph foundation and later ranking work require one vector dimension and model contract. Choosing it after schema or index implementation would create avoidable rework.
+The relational/graph foundation and later ranking work require a verified provider contract before schema or vector-index implementation. This gate confirms that ShopAIKey actually honors the fixed model, dimension, batching, and response-shape requirements.
 
 **Files or modules likely created or updated**
 
@@ -784,119 +785,80 @@ The relational/graph foundation and later ranking work require one vector dimens
 **Required outputs or artifacts**
 
 - Frozen validation slice from the seeded 60/20/20 split, locked `0`-`3` labels, and pre-registered quality/latency baselines.
-- Comparable E5 and MiniLM quality/CPU/memory/dimension results.
-- One locked model/dimension/preprocessing contract.
+- Sanitized scalar/batch compatibility and failure-path evidence.
+- Retrieval quality and provider request-latency baseline results.
+- One locked ShopAIKey model/dimension/preprocessing contract.
 
 **Batch acceptance**
 
-- Only the two approved candidates are evaluated.
-- At least one model passes all approved initial quality/latency baselines, with peak memory recorded for comparison.
-- Selection follows the E5-default rule unless MiniLM meets a pre-approved measured-advantage rule.
+- Only ShopAIKey `text-embedding-3-small` with `dimensions=1536` is exercised.
+- Scalar and batch inputs return ordered, finite float vectors with exactly 1536 values each.
+- The fixed adapter passes the approved initial quality and request-latency baselines.
 
 **Batch validation**
 
-- Metric, percentile, dimension, prefix, allowlist, and seed-handling tests.
-- Same-input fingerprint comparison.
+- Metric, percentile, dimension, response-order, finite-value, allowlist, and seed-handling tests.
+- Scalar/batch equivalence checks for identical inputs.
 - Aggregate result completeness and private-data scans.
-- Independent selection-rule recalculation.
+- Failure-path and secret-safety checks.
 
 **Explicit non-goals**
 
-- BGE-M3, additional candidates, GPU serving, Neo4j indexes, production retrieval, ranking-weight tuning, held-out ranking claims, or full Phase 5 evaluation.
-- Post-hoc baselines or threshold changes made after candidate results are visible.
+- Alternate embedding models or dimensions, local/GPU embedding serving, Neo4j indexes, production retrieval, ranking-weight tuning, held-out ranking claims, or full Phase 5 evaluation.
+- Post-hoc baselines or threshold changes made after results are visible.
 
 ### Tasks
 
-- [ ] (05A): Freeze the seeded retrieval subset and decision protocol
-  - Source of Truth: `docs/plans/Plan_1.md` > `## 3. Prerequisites from Prior Phases`; `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.1 Candidate models`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.2 Model selection gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
+- [ ] (05A): Freeze the seeded retrieval subset and embedding validation protocol
+  - Source of Truth: `docs/plans/Plan_1.md` > `## 3. Prerequisites from Prior Phases`; `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
   - Source Requirements:
-    - Compare both candidates on the same fixed seeded validation inputs.
-    - Use the locked relevance labels `0`, `1`, `2`, and `3` and the validation slice of a fixed seeded 60% development / 20% validation / 20% held-out split.
-    - Do not inspect held-out test results while choosing the model; constructing the full evaluation corpus remains deferred to its master-plan phase.
-    - A model must meet an initial quality/latency baseline, but the sources do not define numeric thresholds.
-    - Peak memory must be recorded and considered comparatively but is not an independent Phase 0 blocker under the current source.
-    - Prefer E5 unless MiniLM has a meaningful measured advantage.
+    - Lock ShopAIKey `text-embedding-3-small`, `dimensions=1536`, float encoding, and no E5 prefixes before execution.
+    - Use relevance labels `0`-`3` and the validation slice of the fixed seeded 60/20/20 split; do not inspect held-out results.
+    - Record numeric `nDCG@10`, Recall@10, and median/P95 provider-latency baselines before execution.
   - Dependencies: (01D)
-  - User Action: Confirm label provenance and the fixed seeded 60/20/20 split; approve numeric `nDCG@10`, Recall@10, and median/P95 CPU-latency baselines; approve a pre-recorded materiality rule only if MiniLM may replace a passing E5 baseline.
-  - Agent Work: Freeze the Phase 0 subset, seed, metrics, hardware record, pass baselines, and any allowed MiniLM materiality rule before model results are observed. Validate safe aggregate metadata, freeze the validation subset, and document the comparison protocol without accessing held-out outcomes.
-    1. Record the dataset/subset identifier, seed, fixed 60/20/20 parent split, validation-slice record/query counts, exact `0`-`3` label scale, and safe provenance metadata.
-    2. Record the exact candidate/job text representations from the controlling master plan.
-    3. Record the CPU/hardware description and measurement boundaries used for latency and peak memory.
-    4. Record numeric quality and CPU-latency pass baselines before execution; record peak-memory measurement rules without turning memory into an independent blocker.
-    5. State that E5 remains the default when it passes unless a pre-approved MiniLM advantage rule is satisfied.
-  - Output: Frozen retrieval-subset manifest and pre-registered embedding decision protocol.
-  - Acceptance:
-    - Both models will receive the identical validation slice from the locked seeded 60/20/20 split, use `0`-`3` labels and identical metrics, and apply pre-recorded quality/latency baselines while held-out data remains uninspected.
-  - Validation:
-    - Required: Manifest/schema check, seed/split integrity check, timestamp/order review for decision criteria, and confirmation that no held-out metrics were loaded.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when the `0`-`3` labels, fixed split confirmation, or numeric quality/latency pass baselines are missing.
-  - Files: Retrieval manifest under `backend/evaluation/labels/` or an aligned existing path, ignored local data paths, `backend/evaluation/reports/phase_0_feasibility.md`.
+  - User Action: Confirm label provenance and split; approve the numeric quality/latency baselines and live embedding-call authorization.
+  - Agent Work: Freeze safe subset metadata, representations, request boundaries, batching ceiling, timeout policy, and pass criteria before live results are observed.
+  - Output: Frozen retrieval-subset manifest and pre-registered ShopAIKey embedding validation protocol.
+  - Acceptance: The protocol fixes model, dimensions, encoding, preprocessing, inputs, metrics, thresholds, and failure criteria without loading held-out outcomes.
+  - Validation: Required manifest/schema, seed/split integrity, threshold timestamp/order, and held-out-access checks.
+  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when labels/split, numeric baselines, or live-use authorization are missing.
+  - Files: Retrieval manifest, ignored local data paths, and `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (05B): Implement the focused two-model CPU benchmark
-  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.1 Candidate models`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.3 Text representations`
-  - Source Requirements:
-    - Benchmark only `intfloat/multilingual-e5-small` and `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
-    - Record model ID, vector dimension, validation `nDCG@10`, Recall@10, median/P95 CPU encoding latency, and peak memory.
-    - Apply expected query/passage prefixes consistently for E5.
-    - Do not add BGE-M3 or another candidate.
-  - Dependencies: (05A)
-  - User Action: Provide local model-download/cache access when the locked candidates are not already available.
-  - Agent Work: Create one repeatable runner that normalizes inputs and measurement boundaries while preserving model-specific required prefixes. Search for existing embedding/evaluation utilities, reuse aligned metrics, and implement only the missing two-model comparison logic.
-    1. Load the frozen validation subset and build the approved candidate/job text representations.
-    2. Define exactly the two locked model configurations on CPU.
-    3. Apply E5 query/passage prefixes only as required by that model contract.
-    4. Measure vector dimension, retrieval metrics, encoding latency distribution, and peak memory using the pre-registered boundaries.
-    5. Emit typed aggregate results without raw private texts or a model-selection decision.
-  - Output: Focused two-model embedding benchmark runner and typed aggregate result schema.
-  - Acceptance:
-    - Runner accepts only the two locked candidates, produces every required metric, uses CPU, and treats the seeded subset identically apart from required model preprocessing.
-  - Validation:
-    - Required: Safe synthetic tests for metric calculation, percentile calculation, dimension capture, candidate allowlist, E5 prefixes, deterministic seed handling, and private-text suppression.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when model artifacts cannot be downloaded/accessed locally.
-  - Files: Focused runner such as `backend/evaluation/benchmark_embeddings.py`, focused benchmark tests, `backend/pyproject.toml`, aggregate result path under `backend/evaluation/reports/`.
+- [ ] (05B): Implement the focused ShopAIKey embedding diagnostic and benchmark
+  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md` > `### 17.3 Text representations`
+  - Source Requirements: Call only `text-embedding-3-small` with `dimensions=1536`; support scalar and bounded batch inputs; validate ordering, exactly 1536 finite floats, and sanitized provider failures; apply no E5 prefixes.
+  - Dependencies: (03A), (05A)
+  - User Action: None beyond the authorized local ShopAIKey credentials.
+  - Agent Work: Reuse the Batch03 provider configuration/HTTP boundary and existing metrics; add only the missing embedding request, validation, and aggregate benchmark behavior.
+  - Output: Focused ShopAIKey embedding runner and typed aggregate result schema.
+  - Acceptance: The runner rejects alternate models/dimensions, never logs sensitive inputs or credentials, and produces all required compatibility, quality, and latency fields.
+  - Validation: Required synthetic tests for metrics, percentiles, scalar/batch response ordering, dimension/finite values, allowlist, deterministic seed handling, provider failures, and private-text suppression.
+  - Blocked Condition: None; live execution is deferred to (05C).
+  - Files: Focused runner/tests, `backend/pyproject.toml`, and aggregate report path.
 
-- [ ] (05C): Execute comparable CPU benchmarks for both candidates
-  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.2 Model selection gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
-  - Source Requirements:
-    - Both candidates must run on the same seeded validation split and emit comparable quality, latency, memory, and dimension records.
-    - Results used for selection must be validation results, not held-out test results.
+- [ ] (05C): Execute the live ShopAIKey embedding compatibility and baseline run
+  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
+  - Source Requirements: Use only redacted or synthetic text from the frozen validation slice and pre-registered protocol; run scalar, batch, invalid-response/failure handling, retrieval metrics, and latency measurements without exposing raw text.
   - Dependencies: (05B)
-  - User Action: None after required local inputs/model artifacts are available.
-  - Agent Work: Produce a complete, reproducible comparison table without changing inputs or criteria between runs. Run both candidates under the same recorded conditions, validate coverage, and preserve sanitized aggregate results.
-    1. Record the active seed, split identifier, CPU/hardware context, warm-up policy, and runner version.
-    2. Run E5 on the frozen validation subset and capture all required metrics.
-    3. Run MiniLM on the identical subset and capture the same metrics.
-    4. Verify query/document counts, labels, ordering, and measurement boundaries match.
-    5. Store aggregate results and rerun any failed measurement without changing the registered protocol.
-  - Output: Complete two-row candidate comparison with model ID, dimension, `nDCG@10`, Recall@10, median/P95 latency, and peak memory.
-  - Acceptance:
-    - Both rows are complete and comparable, and no held-out metric or raw private text appears in evidence.
-  - Validation:
-    - Required: Input-fingerprint equality, required-field/schema check, metric recomputation spot check, candidate allowlist check, and held-out/private-data access scan.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when local model access or the frozen labeled subset becomes unavailable.
-  - Files: Aggregate embedding result artifact, `backend/evaluation/reports/phase_0_feasibility.md`, benchmark runner/tests only when corrections are required.
+  - User Action: Ensure the ignored credentials and approved labeled subset remain available.
+  - Agent Work: Execute the authorized live run, confirm scalar/batch equivalence and ordering, record dimension/finite-value checks, and store sanitized aggregate metrics.
+  - Output: Complete compatibility record plus model ID, dimension, `nDCG@10`, Recall@10, and median/P95 request latency.
+  - Acceptance: Every required field is complete, all vectors have 1536 finite floats in source order, and no held-out metric or raw private text appears.
+  - Validation: Required schema/dimension/order checks, metric recomputation, model allowlist, failure-path check, and held-out/private-data scan.
+  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when live authorization, credentials, or the frozen labeled subset is unavailable.
+  - Files: Aggregate embedding result, feasibility report, and runner/tests only when corrections are required.
 
-- [ ] (05D): Select and lock the embedding model and dimension
-  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.2 Model selection gate`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
-  - Source Requirements:
-    - Select one model before Plan 2 and lock its vector dimension.
-    - Prefer E5 unless MiniLM supplies a meaningful measured advantage.
-    - At least one model must meet the pre-recorded initial quality and latency baselines; peak memory remains a required comparative metric, not an independent blocker.
+- [ ] (05D): Lock the verified ShopAIKey embedding handoff
+  - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
+  - Source Requirements: The downstream contract is fixed as ShopAIKey `text-embedding-3-small`, 1536 dimensions, float encoding, no E5 prefixes, and the versioned text representations; it passes only when compatibility and pre-recorded quality/latency gates pass.
   - Dependencies: (05C)
-  - User Action: Approve a master-plan embedding-adapter revision only when neither locked candidate passes; no action is required for the default rule.
-  - Agent Work: Apply the pre-registered rule mechanically and produce one downstream model/dimension contract. Evaluate both rows against the pre-recorded quality/latency baselines, consider the required peak-memory measurement in the approved comparison rule, apply E5 preference/materiality logic, and record `PASS` or `FAIL` with Phase impact.
-    1. Calculate pass/fail for each model against every pre-recorded quality/latency baseline and report peak memory separately.
-    2. Select E5 when it passes unless MiniLM satisfies the pre-approved meaningful-advantage rule.
-    3. Select MiniLM only when the recorded rule is satisfied and cite the measured advantage.
-    4. Record the exact model ID, dimension, required preprocessing, metrics, and rationale.
-    5. If neither passes, mark Plan 2 blocked and revise only the embedding adapter decision after approval.
-  - Output: Locked embedding model, vector dimension, preprocessing contract, and evidence-backed gate result.
-  - Acceptance:
-    - Exactly one quality/latency-passing model/dimension is selected through the pre-registered rule with peak memory recorded, or the gate honestly fails and blocks Plan 2.
-  - Validation:
-    - Required: Independent recalculation of quality/latency baselines and the materiality rule, peak-memory record check, selected-model allowlist check, dimension consistency check, and source/report cross-check.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when numeric quality/latency baselines were never approved or a failed gate requires a master-plan adapter revision.
-  - Files: Aggregate embedding results, `backend/evaluation/reports/phase_0_feasibility.md`, `.env.example` when the selected model placeholder changes from the baseline.
+  - User Action: Approve an embedding-adapter revision only if the locked provider contract fails.
+  - Agent Work: Recalculate gate results, record the exact request/preprocessing/batching/error contract and evidence, then mark `PASS` or block Plan 2 without substituting a model.
+  - Output: Verified embedding adapter handoff and evidence-backed gate result.
+  - Acceptance: The exact fixed contract is recorded and passes every gate, or Phase 0 honestly blocks with only the adapter revision path identified.
+  - Validation: Required independent quality/latency recalculation, model/dimension/order checks, failure evidence, and source/report cross-check.
+  - Blocked Condition: `BLOCKED_BY_USER_ACTION` when baselines were not approved or a failed gate requires an approved adapter revision.
+  - Files: Aggregate embedding results, feasibility report, and `.env.example`.
 
 ## Mandatory Batch06 - Evidence Consolidation and Phase 0 Exit Gate
 
@@ -1009,7 +971,7 @@ Individual diagnostics are not a phase exit. Plan 2 requires one coherent, repro
 - [ ] (06C): Enforce the Phase 0 exit gate and produce the Plan 2 handoff
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.5 Feasibility report decision block`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`; `docs/plans/Master_plan.md` > `### Phase 1 — Foundation, Docker, and source-of-truth data`
   - Source Requirements:
-    - Plan 2 receives exact pinned dependency decisions, verified ShopAIKey behavior, verified Astryx APIs, selected PDF mode/rule, selected embedding model/dimension, and the safe scaffold.
+    - Plan 2 receives exact pinned dependency decisions, verified ShopAIKey behavior, verified Astryx APIs, selected PDF mode/rule, the locked `text-embedding-3-small`/1536 contract, and the safe scaffold.
     - Every required gate must be `PASS`; any `FAIL`, `BLOCKED`, or unknown result blocks Plan 2.
     - A failed gate may revise only its affected adapter; no broad fallback stack is allowed.
   - Dependencies: (06B)

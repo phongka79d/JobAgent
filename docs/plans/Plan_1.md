@@ -23,7 +23,7 @@ If this plan conflicts with `Master_plan.md`, the master plan wins.
 - [ ] Python, Node.js/npm, and Docker with Compose are available locally.
 - [ ] A local, gitignored ShopAIKey API key is available for the compatibility smoke test.
 - [ ] Five to ten representative, digitally born PDF CV fixtures are available locally; real data is redacted and gitignored.
-- [ ] An initial labeled retrieval subset exists for comparing the two locked embedding candidates.
+- [ ] An initial labeled retrieval subset exists for validating the locked ShopAIKey embedding contract.
 
 ## 4. Scope
 
@@ -31,9 +31,9 @@ If this plan conflicts with `Master_plan.md`, the master plan wins.
 - Create root configuration placeholders without implementing production services.
 - Pin one stable Astryx version and run its required initialization command.
 - Verify the documented composition path for every required Astryx component.
-- Implement a temporary ShopAIKey diagnostic covering model listing, chat completion, function calling, tool-result round trip, structured schema behavior, and streaming text.
+- Implement a temporary ShopAIKey diagnostic covering model listing, chat completion, function calling, tool-result round trip, structured schema behavior, streaming text, and embeddings.
 - Benchmark pypdf normal and layout extraction, including an image-only fixture.
-- Benchmark `intfloat/multilingual-e5-small` against `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` on quality, CPU latency, and memory.
+- Verify `text-embedding-3-small` scalar/batch requests, fixed 1536-dimensional output, ordering, retrieval quality, request latency, and provider failures through ShopAIKey.
 - Record evidence and pass/fail decisions in `backend/evaluation/reports/phase_0_feasibility.md`.
 
 ## 5. Out of Scope
@@ -99,7 +99,7 @@ For each fixture record fixture ID, page count, parser mode, extracted character
 
 ### 7.4 Embedding benchmark record
 
-Compare only the two locked candidate models. Record model ID, vector dimension, validation `nDCG@10`, Recall@10, median/P95 CPU encoding latency, and peak memory. Select one model before Phase 1. Prefer E5 unless MiniLM provides a meaningful measured advantage.
+Exercise only the locked ShopAIKey `text-embedding-3-small` contract with `dimensions=1536`. Record scalar/batch response compatibility, ordering, finite float validation, vector dimension, validation `nDCG@10`, Recall@10, and median/P95 provider request latency. This gate validates the fixed adapter; it does not select among models.
 
 ### 7.5 Feasibility report decision block
 
@@ -114,8 +114,8 @@ The report must end with a decision table containing `Gate`, `Result`, `Evidence
 - [ ] Add the isolated ShopAIKey diagnostic and execute all six compatibility checks.
 - [ ] Create synthetic and local-private PDF fixture manifests; do not commit real content.
 - [ ] Run pypdf normal/layout benchmarks and verify the image-only failure code.
-- [ ] Run the two-model embedding benchmark on the same seeded retrieval subset.
-- [ ] Write the feasibility report, lock the provider schema mode, Astryx composition, parser mode, embedding model, dimension, and pinned versions.
+- [ ] Run the ShopAIKey embedding compatibility and baseline benchmark on the seeded retrieval subset.
+- [ ] Write the feasibility report, lock the provider schema mode, Astryx composition, parser mode, embedding adapter contract, and pinned versions.
 - [ ] Remove any temporary dependency or scaffold artifact not required by a locked gate.
 
 ## 9. Verification & Testing Plan
@@ -125,7 +125,7 @@ Automated/local commands must be single-purpose and documented in the Phase 0 re
 - The ShopAIKey diagnostic exits non-zero when a required tool-call or schema gate fails.
 - The diagnostic output contains no configured secret value.
 - The PDF benchmark classifies the image-only fixture as `NO_EXTRACTABLE_TEXT`.
-- Both embedding candidates run against the same seeded split and emit comparable metrics.
+- ShopAIKey embedding scalar/batch outputs preserve input ordering and contain exactly 1536 finite floats per input; baseline retrieval and latency metrics are recorded.
 - `npm` resolves the pinned Astryx package and its required public APIs.
 - The repository root contains no fourth working folder and no committed `.env` or private fixture.
 
@@ -139,7 +139,7 @@ Plan 2 receives:
 - Verified ShopAIKey model ID, tool-call mode, structured-output mode, and streaming capability.
 - Verified Astryx public component/import matrix.
 - Selected PDF extraction mode and `NO_EXTRACTABLE_TEXT` rule.
-- Selected embedding model and vector dimension.
+- Verified ShopAIKey embedding model, 1536-dimensional contract, batching behavior, and baseline metrics.
 - The three-folder scaffold and root configuration placeholders.
 
 Plan 2 must consume these decisions without repeating the benchmarks or adding alternate provider/UI/parser/embedding stacks. Any failed gate blocks Plan 2.

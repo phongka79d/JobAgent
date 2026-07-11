@@ -15,7 +15,7 @@ Establish the runnable local foundation: backend and frontend projects, one root
 ## 3. Prerequisites from Prior Phases
 
 - [ ] All Plan 1 feasibility gates pass.
-- [ ] Dependency versions, Astryx APIs, ShopAIKey mode, pypdf mode, embedding model, and vector dimension are recorded.
+- [ ] Dependency versions, Astryx APIs, ShopAIKey chat/embedding modes, pypdf mode, and the fixed `text-embedding-3-small` 1536-dimensional contract are recorded.
 - [ ] `frontend/`, `backend/`, and `infrastructure/` scaffolds exist.
 - [ ] Root secret and private-data ignore rules are active.
 
