@@ -5,7 +5,6 @@ import logging
 import traceback
 
 import pytest
-
 from scripts.check_shopaikey_compatibility import (
     DIAGNOSTIC_EXIT_REQUIRED_FAILURE,
     DIAGNOSTIC_EXIT_SUCCESS,
@@ -23,7 +22,6 @@ from scripts.check_shopaikey_compatibility import (
     compute_diagnostic_exit_code,
     format_sanitized_summary,
 )
-
 
 SENTINEL_SECRET = "sentinel-secret-never-emit"
 

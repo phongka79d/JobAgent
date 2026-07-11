@@ -9,21 +9,19 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pytest
-
 from evaluation.benchmark_embeddings import (
     ALLOWED_EMBEDDING_DIMENSIONS,
     ALLOWED_EMBEDDING_MODEL,
+    REDACTED,
     ConfigurationError,
     EmbeddingConfig,
     EmbeddingProviderError,
     EmbeddingRequestResult,
     EmbeddingVector,
-    REDACTED,
-    build_aggregate,
     compute_quality_metrics,
     cosine_similarity,
     embed_batch,
@@ -50,7 +48,6 @@ from evaluation.embedding_benchmark_schema import (
     PassCriteriaSnapshot,
     QualityMetrics,
 )
-
 
 SENTINEL_SECRET = "sentinel-embedding-secret-never-emit"
 PRIVATE_MARKER = "PRIVATE_QUERY_DOCUMENT_TEXT_MUST_NOT_APPEAR"
@@ -456,7 +453,7 @@ def test_scalar_and_batch_preserve_ordering_and_equivalence() -> None:
     ]
     batch = embed_batch(config, texts, client=client)
     assert [vector.index for vector in batch.vectors] == [0, 1, 2]
-    for index, text in enumerate(texts):
+    for index, _text in enumerate(texts):
         assert batch.vectors[index].values == scalar_vectors[index]
         assert len(batch.vectors[index].values) == ALLOWED_EMBEDDING_DIMENSIONS
         assert all(math.isfinite(v) for v in batch.vectors[index].values)

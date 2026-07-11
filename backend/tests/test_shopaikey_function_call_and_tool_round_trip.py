@@ -5,7 +5,6 @@ import logging
 import traceback
 
 import pytest
-
 from scripts.check_shopaikey_compatibility import (
     EXPECTED_ECHO_LABEL,
     FUNCTION_CALL_PROMPT,
@@ -24,7 +23,6 @@ from scripts.check_shopaikey_compatibility import (
     check_tool_round_trip,
     synthetic_echo_label_tool,
 )
-
 
 SENTINEL_SECRET = "sentinel-secret-never-emit"
 

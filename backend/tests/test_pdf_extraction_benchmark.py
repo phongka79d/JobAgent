@@ -10,8 +10,6 @@ import re
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from evaluation.benchmark_pdf_extraction import (
     AggregateBenchmarkResult,
     BenchmarkRecord,
@@ -21,14 +19,13 @@ from evaluation.benchmark_pdf_extraction import (
     build_aggregate,
     classify_outcome,
     load_frozen_fixture_entries,
-    load_private_path_mapping,
     resolve_fixture_paths,
     run_benchmark,
     run_from_manifests,
     run_single,
     write_aggregate,
 )
-
+from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
 # Synthetic PDF builders (no private corpus, no third-party PDF writer)

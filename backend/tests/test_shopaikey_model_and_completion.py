@@ -5,7 +5,6 @@ import logging
 import traceback
 
 import pytest
-
 from scripts.check_shopaikey_compatibility import (
     MASTER_LOCKED_CHAT_MODEL,
     MINIMAL_COMPLETION_PROMPT,
@@ -17,7 +16,6 @@ from scripts.check_shopaikey_compatibility import (
     check_basic_completion,
     check_model_discovery,
 )
-
 
 SENTINEL_SECRET = "sentinel-secret-never-emit"
 

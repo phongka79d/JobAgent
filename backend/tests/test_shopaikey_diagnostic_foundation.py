@@ -5,7 +5,6 @@ import logging
 import traceback
 
 import pytest
-
 from scripts.check_shopaikey_compatibility import (
     Capability,
     ConfigurationError,
@@ -15,7 +14,6 @@ from scripts.check_shopaikey_compatibility import (
     bind_diagnostic_tools,
     load_config,
 )
-
 
 SENTINEL_SECRET = "sentinel-secret-never-emit"
 

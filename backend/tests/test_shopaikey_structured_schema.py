@@ -5,7 +5,6 @@ import logging
 import traceback
 
 import pytest
-
 from scripts.check_shopaikey_compatibility import (
     APPROVED_MAX_REPAIR_REQUESTS_PER_ATTEMPT,
     APPROVED_RELIABILITY_ATTEMPT_COUNT,
@@ -27,7 +26,6 @@ from scripts.check_shopaikey_compatibility import (
     run_structured_schema_attempt,
     validate_schema_probe_payload,
 )
-
 
 SENTINEL_SECRET = "sentinel-secret-never-emit"
 
