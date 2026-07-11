@@ -251,10 +251,27 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Current limitations (Plan 2 / Phase 1)
+## Plan 3 progress (Batch01)
 
-- No chat transport, SSE, LangGraph execution, or ShopAIKey production calls in
-  the application path.
+Batch01 establishes the durable chat and SSE contract foundation only:
+
+- Singleton conversation/history, Agent-run/idempotency, and sanitized tool-execution repositories now use the existing SQLite transaction boundary.
+- The additive Plan 3 Alembic head adds durable turn/resume idempotency fields without application-owned LangGraph checkpoint tables.
+- Backend owns an exact validated eight-event SSE union and producer-side ordering boundary; no public chat route exists yet.
+
+Focused Batch01 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/repositories/test_conversations.py tests/repositories/test_agent_runs.py tests/repositories/test_tool_executions.py tests/integration/test_migrations.py tests/schemas/test_sse.py
+python -m ruff check app/db app/repositories app/schemas tests/repositories tests/schemas tests/integration/test_migrations.py
+python -m mypy app/db app/repositories app/schemas
+```
+
+## Current limitations (after Plan 3 Batch01)
+
+- No public chat transport, LangGraph execution, or ShopAIKey production calls in
+  the application path; the SSE contract is not yet exposed by FastAPI.
 - No CV/JD extraction, profile approval, matching, ranking, or evaluation UI.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.

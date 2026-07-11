@@ -71,7 +71,13 @@ class ChatMessage(Base, TimestampMixin):
 
 
 class AgentRun(Base, TimestampMixin):
-    """One LangGraph run per user turn (application row, not checkpoint tables)."""
+    """One LangGraph run per user turn (application row, not checkpoint tables).
+
+    ``id`` is the stable LangGraph ``thread_id`` for the turn (resume reuses it).
+    ``turn_idempotency_key`` makes duplicate turn POSTs resolve to the same run.
+    ``resume_idempotency_key`` stores the last applied resume key so replay does
+    not re-apply a resume action.
+    """
 
     __tablename__ = "agent_runs"
     __table_args__ = (
@@ -100,12 +106,29 @@ class AgentRun(Base, TimestampMixin):
         default=False,
     )
     error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Durable client turn key; unique when present (nullable for pre-Plan-3 rows).
+    turn_idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    # Last successfully applied resume key for this run (replay is a no-op write).
+    resume_idempotency_key: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
 
     message: Mapped[ChatMessage] = relationship(back_populates="agent_run")
     tool_executions: Mapped[list[ToolExecution]] = relationship(
         back_populates="agent_run",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def thread_id(self) -> str:
+        """Stable LangGraph thread identity: string form of the durable run id."""
+        return str(self.id)
 
 
 class ToolExecution(Base, TimestampMixin):

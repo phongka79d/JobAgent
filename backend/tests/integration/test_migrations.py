@@ -1,9 +1,10 @@
-"""Integration tests for the initial Alembic migration lifecycle.
+"""Integration tests for the Alembic migration lifecycle.
 
 Proves:
 - Fresh ``upgrade head`` materializes the eleven application tables.
 - A second ``upgrade head`` on the same file is a no-op (no duplicate objects).
-- Initialized row data survives re-upgrade.
+- Initialized Plan 2 schema upgrades additively to Plan 3 run idempotency.
+- Initialized row data survives re-upgrade and additive revisions.
 - Migrated schema agrees with SQLAlchemy model metadata (columns, FKs, uniques,
   indexes, check constraints).
 - No LangGraph checkpoint tables are created.
@@ -36,7 +37,9 @@ from sqlalchemy.schema import Index
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 EXPECTED_TABLES = frozenset(APPLICATION_TABLE_NAMES)
-EXPECTED_HEAD = "c885a5846d85"
+PLAN2_HEAD = "c885a5846d85"
+PLAN3_IDEMPOTENCY_HEAD = "d4e5f6a7b8c9"
+EXPECTED_HEAD = PLAN3_IDEMPOTENCY_HEAD
 LANGGRAPH_CHECKPOINT_MARKERS = frozenset(
     {
         "checkpoints",
@@ -72,6 +75,12 @@ def upgrade_head(db_path: Path) -> None:
     """Run ``alembic upgrade head`` against a temporary SQLite file path."""
     with _sqlite_path_env(db_path):
         command.upgrade(_alembic_config(), "head")
+
+
+def upgrade_to(db_path: Path, revision: str) -> None:
+    """Run ``alembic upgrade <revision>`` against a temporary SQLite file path."""
+    with _sqlite_path_env(db_path):
+        command.upgrade(_alembic_config(), revision)
 
 
 def list_user_tables(db_path: Path) -> set[str]:
@@ -476,26 +485,158 @@ def test_upgrade_preserves_initialized_data_and_constraints(tmp_path: Path) -> N
 
 
 def test_migration_file_has_no_checkpoint_or_destructive_reset() -> None:
-    """Static guard: initial revision must not create checkpoint objects or reset."""
-    revision = (
+    """Static guard: revisions must not create checkpoint objects or reset."""
+    initial = (
         BACKEND_ROOT
         / "migrations"
         / "versions"
         / "c885a5846d85_initial_application_schema.py"
     )
-    text = revision.read_text(encoding="utf-8")
-    upgrade_section = text.split("def downgrade", 1)[0]
-    # No LangGraph checkpoint table creation in upgrade.
-    for marker in LANGGRAPH_CHECKPOINT_MARKERS:
-        assert f'"{marker}"' not in upgrade_section
-        assert f"'{marker}'" not in upgrade_section
-    # No broad reset helpers in upgrade path.
-    assert "drop_all" not in upgrade_section
-    assert "metadata.drop" not in upgrade_section
-    assert "DROP DATABASE" not in upgrade_section.upper()
-    # upgrade must create, not drop tables.
-    assert "op.create_table" in upgrade_section
-    assert "op.drop_table" not in upgrade_section
+    plan3 = (
+        BACKEND_ROOT
+        / "migrations"
+        / "versions"
+        / "d4e5f6a7b8c9_plan3_run_idempotency.py"
+    )
+    for revision in (initial, plan3):
+        text = revision.read_text(encoding="utf-8")
+        upgrade_section = text.split("def downgrade", 1)[0]
+        # No LangGraph checkpoint table creation in upgrade.
+        for marker in LANGGRAPH_CHECKPOINT_MARKERS:
+            assert f'"{marker}"' not in upgrade_section
+            assert f"'{marker}'" not in upgrade_section
+        # No broad reset helpers in upgrade path.
+        assert "drop_all" not in upgrade_section
+        assert "metadata.drop" not in upgrade_section
+        assert "DROP DATABASE" not in upgrade_section.upper()
+        # Additive path must not drop tables.
+        assert "op.drop_table" not in upgrade_section
+
+    initial_upgrade = initial.read_text(encoding="utf-8").split("def downgrade", 1)[0]
+    assert "op.create_table" in initial_upgrade
+    plan3_upgrade = plan3.read_text(encoding="utf-8").split("def downgrade", 1)[0]
+    assert "add_column" in plan3_upgrade
+    assert "op.create_table" not in plan3_upgrade
+    assert "op.drop_table" not in plan3_upgrade
+
+
+def test_plan2_initialized_schema_upgrades_additively_with_data(
+    tmp_path: Path,
+) -> None:
+    """Accepted Plan 2 head upgrades to Plan 3 without destructive recreation."""
+    db_path = tmp_path / "plan2_then_plan3.db"
+    upgrade_to(db_path, PLAN2_HEAD)
+    assert alembic_version(db_path) == PLAN2_HEAD
+
+    tables_at_plan2 = list_user_tables(db_path)
+    assert "agent_runs" in tables_at_plan2
+    plan2_agent_cols = set(column_info(db_path, "agent_runs"))
+    assert "turn_idempotency_key" not in plan2_agent_cols
+    assert "resume_idempotency_key" not in plan2_agent_cols
+
+    message_id = str(uuid4()).replace("-", "")
+    run_id = str(uuid4()).replace("-", "")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            "INSERT INTO conversation (id, created_at, updated_at) "
+            "VALUES (1, '2020-01-01 00:00:00', '2020-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO chat_messages "
+            "(id, conversation_id, role, content, structured_payload, "
+            "created_at, updated_at) VALUES "
+            "(?, 1, 'user', 'hello from plan2', NULL, "
+            "'2020-01-01 00:00:00', '2020-01-01 00:00:00')",
+            (message_id,),
+        )
+        conn.execute(
+            "INSERT INTO agent_runs "
+            "(id, message_id, state, pending_approval, error, "
+            "created_at, updated_at) VALUES "
+            "(?, ?, 'interrupted', 1, NULL, "
+            "'2020-01-01 00:00:00', '2020-01-01 00:00:00')",
+            (run_id, message_id),
+        )
+        conn.commit()
+
+    upgrade_head(db_path)
+
+    assert alembic_version(db_path) == EXPECTED_HEAD
+    assert list_user_tables(db_path) == tables_at_plan2
+    assert_schema_matches_metadata(db_path)
+
+    cols = column_info(db_path, "agent_runs")
+    assert "turn_idempotency_key" in cols
+    assert "resume_idempotency_key" in cols
+    assert int(cols["turn_idempotency_key"]["notnull"]) == 0
+    assert int(cols["resume_idempotency_key"]["notnull"]) == 0
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, message_id, state, pending_approval, "
+            "turn_idempotency_key, resume_idempotency_key "
+            "FROM agent_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        msg = conn.execute(
+            "SELECT content FROM chat_messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+    assert row is not None
+    assert row[0] == run_id
+    assert row[1] == message_id
+    assert row[2] == "interrupted"
+    assert int(row[3]) == 1
+    assert row[4] is None
+    assert row[5] is None
+    assert msg is not None
+    assert msg[0] == "hello from plan2"
+
+    # Unique turn key enforced after additive upgrade.
+    message_id_2 = str(uuid4()).replace("-", "")
+    run_id_2 = str(uuid4()).replace("-", "")
+    run_id_3 = str(uuid4()).replace("-", "")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            "INSERT INTO chat_messages "
+            "(id, conversation_id, role, content, structured_payload, "
+            "created_at, updated_at) VALUES "
+            "(?, 1, 'user', 'second', NULL, "
+            "'2020-01-01 00:00:01', '2020-01-01 00:00:01')",
+            (message_id_2,),
+        )
+        conn.execute(
+            "INSERT INTO agent_runs "
+            "(id, message_id, state, pending_approval, error, "
+            "turn_idempotency_key, resume_idempotency_key, "
+            "created_at, updated_at) VALUES "
+            "(?, ?, 'pending', 0, NULL, 'dup-key', NULL, "
+            "'2020-01-01 00:00:01', '2020-01-01 00:00:01')",
+            (run_id_2, message_id_2),
+        )
+        conn.commit()
+        message_id_3 = str(uuid4()).replace("-", "")
+        conn.execute(
+            "INSERT INTO chat_messages "
+            "(id, conversation_id, role, content, structured_payload, "
+            "created_at, updated_at) VALUES "
+            "(?, 1, 'user', 'third', NULL, "
+            "'2020-01-01 00:00:02', '2020-01-01 00:00:02')",
+            (message_id_3,),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO agent_runs "
+                "(id, message_id, state, pending_approval, error, "
+                "turn_idempotency_key, resume_idempotency_key, "
+                "created_at, updated_at) VALUES "
+                "(?, ?, 'pending', 0, NULL, 'dup-key', NULL, "
+                "'2020-01-01 00:00:02', '2020-01-01 00:00:02')",
+                (run_id_3, message_id_3),
+            )
+        conn.rollback()
 
 
 def test_env_uses_sqlite_path_without_loading_root_env(
