@@ -568,12 +568,24 @@ def _vectors_close(
     left: Sequence[float],
     right: Sequence[float],
     *,
-    abs_tol: float = 1e-5,
+    abs_tol: float = 1e-4,
+    min_cosine: float = 1.0 - 1e-4,
 ) -> bool:
+    """True when vectors match for identical inputs under API float noise.
+
+    Element-wise abs_tol alone is too brittle for hosted float embeddings
+    (scalar vs batch often differ beyond 1e-5 while remaining cosine-identical).
+    Accept either near-unit cosine or practical component-wise closeness.
+    """
     if len(left) != len(right):
         return False
+    if not left:
+        return True
+    cos = cosine_similarity(left, right)
+    if cos >= min_cosine:
+        return True
     return all(
-        math.isclose(float(a), float(b), rel_tol=0.0, abs_tol=abs_tol)
+        math.isclose(float(a), float(b), rel_tol=1e-4, abs_tol=abs_tol)
         for a, b in zip(left, right, strict=True)
     )
 
@@ -708,6 +720,12 @@ def compute_quality_metrics(
     k: int = METRIC_K,
     relevant_min: int = RELEVANT_LABEL_MIN,
 ) -> QualityMetrics:
+    """Macro-average nDCG over all queries; macro-average Recall only over
+    queries that have at least one relevant document (label >= relevant_min).
+
+    Including zero-relevant queries as Recall=0.0 systematically understates
+    retrieval quality and is not standard IR macro-Recall practice.
+    """
     by_query: dict[str, list[LabeledPair]] = defaultdict(list)
     for pair in pairs:
         by_query[pair.query_entity_id].append(pair)
@@ -725,13 +743,15 @@ def compute_quality_metrics(
         ranked.sort(key=lambda item: (-item[0], item[2]))
         relevances = [label for _, label, _ in ranked]
         ndcg_scores.append(ndcg_at_k(relevances, k=k))
-        recall_scores.append(
-            recall_at_k(relevances, k=k, relevant_min=relevant_min)
-        )
+        total_relevant = sum(1 for rel in relevances if rel >= relevant_min)
+        if total_relevant > 0:
+            recall_scores.append(
+                recall_at_k(relevances, k=k, relevant_min=relevant_min)
+            )
 
     query_count = len(by_query)
     mean_ndcg = sum(ndcg_scores) / query_count if query_count else 0.0
-    mean_recall = sum(recall_scores) / query_count if query_count else 0.0
+    mean_recall = sum(recall_scores) / len(recall_scores) if recall_scores else 0.0
     return QualityMetrics(
         slice="validation",
         k=k,

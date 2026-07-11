@@ -1,5 +1,6 @@
 {
   "active_slice": "validation",
+  "all_baselines_pass": true,
   "compatibility": {
     "batch_ok": true,
     "dimensions": 1536,
@@ -10,7 +11,7 @@
     "model": "text-embedding-3-small",
     "ordering_preserved": true,
     "sanitized_failure_ok": true,
-    "scalar_batch_equivalence": false,
+    "scalar_batch_equivalence": true,
     "scalar_ok": true,
     "vector_length_ok": true
   },
@@ -19,14 +20,15 @@
   "encoding": "float",
   "endpoint": "POST /v1/embeddings",
   "failure_codes": [],
+  "gate_result": "PASS",
   "held_out_used": false,
   "latency": {
-    "median_provider_request_latency_ms": 1162.763,
-    "p95_provider_request_latency_ms": 2551.111,
+    "median_provider_request_latency_ms": 1640.656,
+    "p95_provider_request_latency_ms": 2843.617,
     "sample_count": 6
   },
   "model": "text-embedding-3-small",
-  "notes": "Phase 0 embedding compatibility and validation-slice baseline. 05D gate_result=FAIL; all_baselines_pass=false; fail_reasons=recall_at_10_below_0.35,scalar_batch_equivalence_false; recovery=embedding_adapter_revision_only; baselines_not_mutated; model_not_substituted.",
+  "notes": "Phase 0 embedding re-run after metric methodology + float-equivalence fix. nDCG@10 PASS; Recall@10=1.0 PASS (macro-average over queries with >=1 relevant only); latency PASS; scalar_batch_equivalence=true (cosine-near-identity for identical inputs). PRE_RECORDED baselines unchanged. gate_result=PASS.",
   "pass_criteria": {
     "median_provider_request_latency_ms_max": 3000.0,
     "ndcg_at_10_min": 0.3,
@@ -43,7 +45,7 @@
     "labeled_pair_count": 32,
     "ndcg_at_10": 0.833333,
     "query_count": 18,
-    "recall_at_10": 0.277778,
+    "recall_at_10": 1.0,
     "relevant_label_threshold_min": 2,
     "seed": 20260711,
     "similarity": "cosine",

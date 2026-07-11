@@ -347,6 +347,54 @@ def test_recall_at_k_threshold() -> None:
     assert recall_at_k([0, 1, 0], k=10, relevant_min=2) == 0.0
 
 
+def test_compute_quality_skips_zero_relevant_queries_for_mean_recall() -> None:
+    """Macro-Recall averages only queries that have at least one relevant doc."""
+    from evaluation.benchmark_embeddings import LabeledPair
+
+    # q1: one relevant doc ranked first; q2: only non-relevant labels.
+    pairs = [
+        LabeledPair(
+            record_id="r1",
+            query_entity_id="q1",
+            document_entity_id="d1",
+            query_text="query one",
+            document_text="relevant doc",
+            relevance_label=3,
+            split="validation",
+        ),
+        LabeledPair(
+            record_id="r2",
+            query_entity_id="q1",
+            document_entity_id="d2",
+            query_text="query one",
+            document_text="noise doc",
+            relevance_label=0,
+            split="validation",
+        ),
+        LabeledPair(
+            record_id="r3",
+            query_entity_id="q2",
+            document_entity_id="d3",
+            query_text="query two",
+            document_text="unrelated",
+            relevance_label=0,
+            split="validation",
+        ),
+    ]
+    # Orthogonal embeddings so ranking is determined by alignment with query.
+    embeddings = {
+        "q1": (1.0, 0.0, 0.0),
+        "d1": (1.0, 0.0, 0.0),
+        "d2": (0.0, 1.0, 0.0),
+        "q2": (0.0, 0.0, 1.0),
+        "d3": (0.0, 1.0, 0.0),
+    }
+    metrics = compute_quality_metrics(pairs, embeddings, seed=1, k=10)
+    assert metrics.query_count == 2
+    assert metrics.recall_at_10 == pytest.approx(1.0)
+    assert 0.0 <= metrics.ndcg_at_10 <= 1.0
+
+
 def test_median_and_percentile() -> None:
     values = [10.0, 20.0, 30.0, 40.0, 100.0]
     assert median(values) == 30.0
