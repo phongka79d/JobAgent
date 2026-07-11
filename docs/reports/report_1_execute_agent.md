@@ -3297,3 +3297,460 @@ complete
 - validations to rerun: independent gate recalc (Recall FAIL, scalar_batch_equivalence FAIL); protocol PRE_RECORDED baselines still 0.3/0.35/3000/8000; AggregateEmbeddingResult validate; feasibility FAIL + adapter-only path language; .env.example contract placeholders present
 - risk areas: do not reclassify FAIL as PASS; do not post-hoc edit baselines; ensure no private text in notes
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 06A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+
+## Task
+06A - Assemble feasibility evidence and a provisional decision table
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+- Task ID: 06A
+- Task title: Assemble feasibility evidence and a provisional decision table
+- Files allowed / repair scope: backend/evaluation/reports/phase_0_feasibility.md and existing sanitized aggregate artifacts only. No 06B cleanup, no 06C final handoff beyond provisional table. No checkbox/commit/stage.
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ### 7.5 Feasibility report decision block
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_1.md > ## 10. Handoff Notes for Plan 2 (Master Phase 1)
+- docs/plans/Master_plan.md > ### Phase 0 — Feasibility and compatibility gates
+
+## Supplemental Documents Used
+- docs/tasks/task_1.md (selected 06A entry)
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- backend/evaluation/reports/phase_0_feasibility.md
+- backend/evaluation/reports/pdf_extraction_benchmark.json
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/evaluation/fixtures/pdf_fixture_manifest.json
+- frontend/package.json
+- backend/pyproject.toml
+- .env.example
+- .gitignore
+
+## Dependency and User Action Check
+- dependencies: (02C), (03F), (04D), (05D) ACCEPTED per envelope; embedding gate re-run PASS after methodology fix reflected in aggregate gate_result=PASS
+- user action: No new secrets or private content requested; no pending user approval blocked this draft consolidation
+- status: Dependencies satisfied for provisional assembly
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (06A block)
+- backend/evaluation/reports/phase_0_feasibility.md
+- backend/evaluation/reports/pdf_extraction_benchmark.json
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/labels/embedding_validation_protocol.json
+- README.md
+- frontend/package.json
+- backend/pyproject.toml
+- docs/reports/report_1_execute_agent.md (confirm no prior 06A block)
+
+## Completed Work
+- Assembled evidence-complete draft of phase_0_feasibility.md from existing sanitized gate aggregates only (no raw provider payloads, private texts, or unverified claims).
+- Added/completed sections: Scaffold safety; Measurement protocols and thresholds; Single-purpose commands and artifacts; Security and privacy boundaries; Locked versions and adapter modes (gate-level).
+- Linked reproducible local artifacts and single-purpose commands for scaffold, Astryx, ShopAIKey, PDF, and embeddings gates.
+- Cross-checked claimed selections against aggregate results and frozen PRE_RECORDED / pre-benchmark criteria (embedding gate_result=PASS; nDCG/Recall/latency floors met; PDF layout selection + image-only NO_EXTRACTABLE_TEXT dual-mode).
+- Replaced Final Decisions with a **PROVISIONAL** decision table at physical EOF containing required columns Gate/Result/Evidence/Selected mode/version/Phase impact.
+- Populated rows: Scaffold safety PASS; Astryx PASS; ShopAIKey PASS; PDF PASS; Embedding PASS; Cleanup BLOCKED pending (06B). No incomplete gate marked PASS. No final Phase 0 completion or Plan 2 authorization claim.
+- Updated Handoff to state draft/provisional status only; Plan 2 remains blocked until (06B)/(06C).
+- Did not implement 06B cleanup or 06C final handoff. Did not update checkboxes, stage, or commit.
+
+## Files Created or Modified
+- backend/evaluation/reports/phase_0_feasibility.md (06A evidence consolidation + provisional decision table at EOF)
+- docs/reports/report_1_execute_agent.md (this block)
+
+## Tests or Validations Run
+- command/check: Source-to-report requirement checklist (scaffold/Astryx/ShopAIKey/PDF/embeddings evidence; protocols; commands; security; provisional table columns)
+- required: yes
+- result: passed
+- evidence or reason: All required sections present; five compatibility gates evidence-backed PASS; cleanup BLOCKED; Plan 2 not authorized language present
+
+- command/check: Artifact existence for named aggregates/manifests/commands
+- required: yes
+- result: passed
+- evidence or reason: pdf_extraction_benchmark.json, embedding_benchmark.json, embedding_validation_protocol.json, retrieval_subset_manifest.json, pdf_fixture_manifest.json, check_shopaikey_compatibility.py, frontend/package.json, .env.example, .gitignore all exist
+
+- command/check: Heading/order and provisional-table EOF
+- required: yes
+- result: passed
+- evidence or reason: Report ends with ## Provisional decision table (06A); last non-empty line is the Cleanup BLOCKED table row; no narrative after table
+
+- command/check: Gate-status consistency vs aggregates
+- required: yes
+- result: passed
+- evidence or reason: embedding_benchmark.json gate_result=PASS, all_baselines_pass=true, nDCG@10=0.833333, Recall@10=1.0, model text-embedding-3-small dims 1536 scalar_batch_equivalence=true; PDF aggregate ocr_used=false, image-only normal+layout NO_EXTRACTABLE_TEXT with 0 chars; Astryx pins 0.1.4 in package.json; ShopAIKey locked decisions retained from 03F evidence already in report
+
+- command/check: Secret/private-data scan on report + aggregates
+- required: yes
+- result: passed
+- evidence or reason: No sk- keys, Authorization values, private keys, query_text, or document_text fields. Mentions of the word Bearer only as prohibited-data class names in security wording (false-positive pattern match, not a credential)
+
+## Acceptance Check
+- condition: Every draft claim traces to sanitized artifact/command; all required columns populated; no incomplete gate marked PASS; no final Phase 0 completion claim
+- status: satisfied
+- evidence: Provisional table has all five required columns; incomplete cleanup is BLOCKED not PASS; Handoff and table marker state provisional pending (06B) and do not authorize Plan 2; selections match aggregate thresholds
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Used PASS/FAIL/BLOCKED only in the provisional decision table; incomplete cleanup is BLOCKED pending 06B rather than implied PASS.
+- Kept embedding gate as honest PASS from post-fix live re-run aggregate (not the earlier 05D FAIL snapshot superseded by methodology fix).
+- Did not perform 06B artifact deletion, dependency lock expansion, or Git tracked-file audit.
+- Did not claim Phase 0 complete or Plan 2 authorized.
+
+## Risks or Open Issues
+- Cleanup/global Git proof remains BLOCKED until 06B; provisional PASS rows must be revalidated after cleanup.
+- Root may contain non-product folders (e.g. docs, tooling); product working folders remain the three required ones only.
+- Character encoding of comparison symbols may render differently in some consoles; source file uses UTF-8.
+
+## Workflow Integrity Check
+- Executed only 06A. No checkbox/batch status/stage/commit. No 06B cleanup. No 06C final handoff. No secrets or private document text written. Decision table is physical EOF and marked provisional.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/reports/phase_0_feasibility.md; docs/reports/report_1_execute_agent.md
+- validations to rerun: provisional-table EOF; gate-status vs embedding/PDF aggregates; secret scan; confirm no Plan 2 authorization claim; confirm cleanup not PASS
+- risk areas: do not treat provisional PASS as final Phase 0 exit; do not run 06B work under 06A review scope
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 06B
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+
+## Task
+06B - Lock versions, remove temporary artifacts, and run global safety checks
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+- Task ID: 06B
+- Task title: Lock versions, remove temporary artifacts, and run global safety checks
+- Files allowed / repair scope: backend/pyproject.toml, frontend package files, .env.example, .gitignore, README.md, phase_0_feasibility.md, gate-required scripts/tests/artifacts; cleanup of temporary artifacts
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ## 8. Implementation Steps
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_1.md > ## 10. Handoff Notes for Plan 2 (Master Phase 1)
+- docs/plans/Master_plan.md > ## 3. Locked Technology Stack
+- docs/plans/Master_plan.md > ## 23. Environment Configuration
+- docs/plans/Master_plan.md > ## 24. Local Testing Strategy > ### 24.5 Local verification commands
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- backend/evaluation/reports/phase_0_feasibility.md
+
+## Dependency and User Action Check
+- Dependencies: (06A) ACCEPTED — satisfied
+- User Action: Git metadata usable; no local private file needed commit confirmation beyond ignore/tracked proof — satisfied (no secrets/private fixtures tracked)
+
+## Files Inspected Before Editing
+- backend/pyproject.toml
+- frontend/package.json
+- frontend/package-lock.json
+- .gitignore
+- .env.example
+- README.md
+- backend/evaluation/reports/phase_0_feasibility.md
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/reports/pdf_extraction_benchmark.json
+- docs/tasks/task_1.md (06B block)
+- docs/plans/Master_plan.md (Locked Technology Stack)
+- docs/plans/Plan_1.md (sections 8-10)
+
+## Completed Work
+- Pinned Phase 0 gate-proven backend dependencies to exact versions: langchain-openai==1.0.3, pydantic==2.12.5, pypdf==6.12.2, python-dotenv==1.2.2; test extra pytest==8.4.2.
+- Recorded Plan 2 production pins under optional extra plan2 without installing them for Phase 0 gates: fastapi==0.139.0 (>=0.135.0), langgraph==1.2.9, neo4j==6.2.0.
+- Confirmed frontend Astryx exact pins remain 0.1.4 for core and cli; documented React+TypeScript+Vite as Plan 2 scaffold stack (not yet product-installed).
+- Removed temporary demo tree output/pdf/*.pdf; removed local __pycache__, *.egg-info, and .pytest_cache.
+- Preserved required aggregates (pdf_extraction_benchmark.json, embedding_benchmark.json), protocols/manifests, diagnostic script, focused tests, Astryx check script.
+- Documented single-purpose Phase 0 commands in README and feasibility report; marked production run/build as not yet available; no CI added.
+- Updated phase_0_feasibility.md with post-cleanup evidence, full lock tables, Cleanup PASS rows; kept provisional decision table at physical EOF with cleanup gate PASS (finalization still 06C).
+- Ran global safety matrix: backend install+pytest, npm ci + check:astryx, three-folder audit, root env rules, secret/private scan, Git tracked/ignore audit, aggregate image-only dual-mode and embedding metrics verification.
+
+## Files Created or Modified
+- backend/pyproject.toml
+- README.md
+- backend/evaluation/reports/phase_0_feasibility.md
+- docs/reports/report_1_execute_agent.md
+- Deleted (untracked temporary): output/ tree; local caches (__pycache__, egg-info, .pytest_cache)
+
+## Tests or Validations Run
+- command/check: Backend pin install + focused tests (`cd backend; python -m pip install -e ".[test]"; python -m pytest -q`)
+- required: yes
+- result: passed
+- evidence or reason: 121 passed in 0.67s; installed pins pypdf 6.12.2, pydantic 2.12.5, langchain-openai 1.0.3, python-dotenv 1.2.2, pytest 8.4.2
+
+- command/check: Frontend npm resolution + Astryx check (`cd frontend; npm ci --ignore-scripts; npm run check:astryx; npm ls --depth=0`)
+- required: yes
+- result: passed
+- evidence or reason: PASS Astryx 0.1.4 exposes all 16 required public components; npm ls shows @astryxdesign/core@0.1.4 and cli@0.1.4
+
+- command/check: ShopAIKey failure exits and secret-safe output (focused suite coverage)
+- required: yes
+- result: passed
+- evidence or reason: test_shopaikey_streaming_and_exit.py exit non-zero on required failures and sanitized summary hide-secret tests included in 121-pass suite
+
+- command/check: Image-only dual-mode classification (aggregate + retained gate evidence)
+- required: yes
+- result: passed
+- evidence or reason: pdf_extraction_benchmark.json records pdf_image_only_001 normal+layout both NO_EXTRACTABLE_TEXT with 0 chars; ocr_used/alternate_parser false
+
+- command/check: Fixed-split embedding metrics (aggregate)
+- required: yes
+- result: passed
+- evidence or reason: embedding_benchmark.json gate_result=PASS; model text-embedding-3-small dims 1536; nDCG@10=0.833333; Recall@10=1.0; median 1640.656 ms; P95 2843.617 ms; all_baselines_pass=true; held_out_used=false; scalar_batch_equivalence=true
+
+- command/check: Three-folder boundary + single-root env + private-data ignore
+- required: yes
+- result: passed
+- evidence or reason: product folders frontend/backend/infrastructure present; nested app .env count=0; .gitignore covers /.env and /backend/evaluation/private/
+
+- command/check: Filesystem cleanup audit
+- required: yes
+- result: passed
+- evidence or reason: output/ removed; no residual __pycache__ under repo; gate-required aggregates/scripts/tests retained
+
+- command/check: Dependency/source pin search
+- required: yes
+- result: passed
+- evidence or reason: pyproject.toml contains exact Phase 0 pins and plan2 fastapi==0.139.0, langgraph==1.2.9, neo4j==6.2.0; frontend package.json exact Astryx 0.1.4
+
+- command/check: Secret/private-data scan on report + aggregates
+- required: yes
+- result: passed
+- evidence or reason: aggregates clean; feasibility report only matches word "Bearer" as prohibited-data class wording (false positive), no credentials or private text fields
+
+- command/check: Git tracked/ignore audit
+- required: yes
+- result: passed
+- evidence or reason: git check-ignore confirms .env and private paths; git ls-files has no .env, no evaluation/private/, no output/, no PDFs; 48 tracked files
+
+- command/check: Decision table remains physical EOF (provisional for 06C)
+- required: yes
+- result: passed
+- evidence or reason: last H2 is Provisional decision table (06A/06B); no later headings; cleanup row PASS; no Plan 2 authorization claim
+
+- command/check: Live ShopAIKey chat / live embedding / private PDF re-benchmark commands
+- required: no
+- result: not_run
+- evidence or reason: optional live re-runs not required after prior gate PASS aggregates; focused fakes + aggregate re-verification used; commands remain documented for local use
+
+## Acceptance Check
+- condition: Only gate-required artifacts/dependencies remain; decisions pinned; validation complete; no secret/private data exposed
+- status: satisfied
+- evidence: Phase 0 deps exact-pinned; plan2 optional pins recorded with FastAPI>=0.135.0; temp demo/caches removed; required aggregates retained; validations passed; Git/ignore clean; decision table EOF provisional for 06C
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode - A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Kept FastAPI/LangGraph/neo4j out of Phase 0 runtime dependencies; recorded exact Plan 2 pins under optional extra plan2 only.
+- Deleted untracked demo output/ PDFs rather than committing them; private evaluation corpus under backend/evaluation/private/ left in place and ignored.
+- Did not invent production run commands; README explicitly states they are not yet available.
+- Did not finalize Plan 2 authorization (06C scope).
+
+## Risks or Open Issues
+- Plan 2 FastAPI/LangGraph/neo4j pins are decision locks, not Phase 0 runtime-proven integrations; Plan 2 must install and exercise them.
+- React/TypeScript/Vite exact npm versions remain deferred until Plan 2 scaffolds the frontend app (Astryx 0.1.4 is locked now).
+- Final all-pass Phase 0 exit claim is reserved for 06C.
+
+## Workflow Integrity Check
+- Executed only 06B. No checkbox/batch status/stage/commit. No 06C finalization. Decision table remains physical EOF and provisional. No secrets or private document text written.
+
+## Notes for Review Agent
+- changed files: backend/pyproject.toml; README.md; backend/evaluation/reports/phase_0_feasibility.md; docs/reports/report_1_execute_agent.md; deleted untracked output/ and local caches
+- validations to rerun: backend pytest; frontend npm ci + check:astryx; git ls-files secret/private audit; decision-table EOF; FastAPI pin >=0.135.0 in pyproject plan2 extra
+- risk areas: do not treat 06B as Plan 2 authorization; optional plan2 packages not installed by default
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 06C
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+
+## Task
+06C - Enforce the Phase 0 exit gate and produce the Plan 2 handoff
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch06 - Evidence Consolidation and Phase 0 Exit Gate
+- Task ID: 06C
+- Task title: Enforce the Phase 0 exit gate and produce the Plan 2 handoff
+- Files allowed / repair scope: phase_0_feasibility.md, README.md, dependency/configuration locks (read/verify); task file checkbox reserved for A2 only
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ### 7.5 Feasibility report decision block
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_1.md > ## 10. Handoff Notes for Plan 2 (Master Phase 1)
+- docs/plans/Master_plan.md > ### Phase 0 — Feasibility and compatibility gates
+- docs/plans/Master_plan.md > ### Phase 1 — Foundation, Docker, and source-of-truth data
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- backend/evaluation/reports/phase_0_feasibility.md
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/reports/pdf_extraction_benchmark.json
+- docs/tasks/task_1.md (selected 06C entry)
+- docs/reports/report_1_execute_agent.md (06B complete evidence)
+
+## Dependency and User Action Check
+- Dependencies: (06B) ACCEPTED per envelope; execution report Status complete; checkbox [x] for 06B — satisfied
+- User Action: none required when all rows pass — satisfied (all required gates PASS; no adapter revision approval needed)
+- status: Dependencies and user actions satisfied
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (06C block)
+- backend/evaluation/reports/phase_0_feasibility.md
+- README.md
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/reports/pdf_extraction_benchmark.json
+- backend/pyproject.toml
+- frontend/package.json
+- docs/reports/report_1_execute_agent.md (06A/06B blocks; no prior 06C)
+- docs/plans/Plan_1.md (sections 7.5, 9, 10)
+- docs/plans/Master_plan.md (Phase 0 exit / Phase 1 boundary)
+
+## Completed Work
+- Confirmed mandatory Batch06 dependency chain: 06A and 06B complete with evidence; prior gates 02C/03F/04D/05D reflected as PASS in feasibility report and aggregates.
+- Replaced provisional handoff and provisional decision table with final Plan 2 handoff contract and final decision table at physical EOF.
+- Final decision table contains seven required gates, all PASS: Scaffold safety, Astryx, ShopAIKey, PDF extraction, Embedding, Cleanup and evidence consolidation, Global safety.
+- Recorded exact pins, adapter modes, embedding 1536 contract, Astryx public matrix pointer, single-purpose commands, scaffold artifacts, and adapter-only revision path for Plan 2 consumption without re-benchmarking.
+- Authorized Plan 2 only after all-pass assertion; no FAIL/BLOCKED/unknown rows present.
+- Updated README Phase 0 status: COMPLETE; Plan 2 AUTHORIZED; removed provisional exit-pending wording.
+- Removed provisional/draft markers from feasibility report handoff and measurement/security wording where they still implied non-final status.
+- Did not update task checkboxes (orchestrated mode; A2 owns checkboxes). Did not stage or commit. Did not start Plan 2 implementation.
+
+## Files Created or Modified
+- backend/evaluation/reports/phase_0_feasibility.md
+- README.md
+- docs/reports/report_1_execute_agent.md (this block)
+
+## Tests or Validations Run
+- command/check: Final decision-table all-pass assertion (7 gates all Result=PASS; Final decision table last H2 at physical EOF; no narrative after table)
+- required: yes
+- result: passed
+- evidence or reason: Parsed final table rows all PASS; last H2 is `## Final decision table (06C)`; provisional table heading removed; provisional markers empty
+
+- command/check: Handoff completeness checklist (Plan 1 §10 fields)
+- required: yes
+- result: passed
+- evidence or reason: Present: Python/frontend/FastAPI/Astryx/LangGraph/neo4j pins; gpt-4o-mini; bind_tools; strict_schema; streaming_text; Astryx 0.1.4 matrix; PDF layout + NO_EXTRACTABLE_TEXT; text-embedding-3-small/1536; three-folder scaffold; single-purpose commands; adapter-only revision path
+
+- command/check: README / report status comparison
+- required: yes
+- result: passed
+- evidence or reason: README states Phase 0 COMPLETE and Plan 2 AUTHORIZED; feasibility report Plan 2 handoff AUTHORIZED and Final decision table FINAL all-pass; no remaining provisional decision table
+
+- command/check: Out-of-scope / fallback search
+- required: yes
+- result: passed
+- evidence or reason: No product OCR/Qdrant/fallback stacks in backend sources (test assertion patterns only); no .github CI; no nested frontend/backend .env; product folders remain three plus docs
+
+- command/check: Backend focused tests (`cd backend; python -m pytest -q`)
+- required: yes (supporting global safety / provider fake suite re-check)
+- result: passed
+- evidence or reason: 121 passed in 0.37s
+
+- command/check: Astryx focused check (`cd frontend; npm run check:astryx`)
+- required: yes (supporting Astryx gate re-check)
+- result: passed
+- evidence or reason: PASS: Astryx 0.1.4 exposes all 16 required public components
+
+- command/check: Aggregate gate re-verification (embedding + PDF)
+- required: yes
+- result: passed
+- evidence or reason: embedding_benchmark.json gate_result=PASS, all_baselines_pass=true, model text-embedding-3-small dims 1536, nDCG@10=0.833333, Recall@10=1.0; pdf aggregate ocr_used=false, alternate_parser_used=false, digital 5/5 both modes, image-only NO_EXTRACTABLE_TEXT both modes
+
+- command/check: Git tracked/ignore + pin audit
+- required: yes
+- result: passed
+- evidence or reason: git check-ignore covers .env and backend/evaluation/private/; git ls-files has no .env/private/output/pdf; pyproject Phase 0 + plan2 pins exact; frontend Astryx 0.1.4 exact
+
+- command/check: Canonical task-checkbox synchronization
+- required: yes (task lists it; orchestrated mode assigns ownership to A2)
+- result: passed
+- evidence or reason: A1 did not update task_1.md checkboxes per ORCHESTRATED_MODE / envelope HARD_RULES; 06C remains unchecked for A2 acceptance; 06B remains checked as dependency evidence
+
+## Acceptance Check
+- condition: Plan 2 authorized only when every required gate is PASS; otherwise blocking reason and adapter-only repair scope explicit
+- status: satisfied
+- evidence: All seven final decision-table gates PASS; Plan 2 AUTHORIZED in report handoff and README; adapter-only revision path documented for future failures; no FAIL/BLOCKED rows; decision table remains physical EOF
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status; A2 owns 06C checkbox on ACCEPTED
+
+## Key Implementation Decisions
+- Added explicit Global safety decision-table row so scaffold/Astryx/provider/PDF/embedding/cleanup/safety are each PASS-asserted at exit.
+- Kept production FastAPI/LangGraph/neo4j as optional plan2 pins only; did not install or exercise them as Phase 0 runtime.
+- Authorized Plan 2 on evidence only; did not invent production run/build commands.
+- Deferred task checkbox update to A2 per orchestrated rules despite task wording that mentions checkbox sync.
+
+## Risks or Open Issues
+- Plan 2 FastAPI/LangGraph/neo4j pins are decision locks, not Phase 0 runtime-proven integrations.
+- React/TypeScript/Vite exact npm versions remain for Plan 2 app scaffold (Astryx 0.1.4 locked now).
+- Live ShopAIKey chat/embedding re-runs were not required for 06C after prior PASS aggregates; focused fakes + aggregate re-verification used.
+
+## Workflow Integrity Check
+- Executed only 06C. No sibling tasks. No Plan 2 product implementation. No checkbox/batch status/stage/commit. Decision table is final and at physical EOF with no narrative after it. No secrets or private document text written.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/reports/phase_0_feasibility.md; README.md; docs/reports/report_1_execute_agent.md
+- validations to rerun: final decision-table all-pass + EOF; handoff completeness; README/report status match; out-of-scope search; backend pytest; frontend check:astryx; aggregate gate_result checks
+- risk areas: ensure provisional wording is fully gone; ensure Plan 2 authorization is not treated as permission to skip A2/A3; checkbox still unchecked until A2
+- next task readiness: can_review

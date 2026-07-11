@@ -921,7 +921,7 @@ Individual diagnostics are not a phase exit. Plan 2 requires one coherent, repro
 
 ### Tasks
 
-- [ ] (06A): Assemble feasibility evidence and a provisional decision table
+- [x] (06A): Assemble feasibility evidence and a provisional decision table
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.5 Feasibility report decision block`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - The report must contain evidence and decisions for scaffold safety, Astryx, ShopAIKey, PDF extraction, and embeddings.
@@ -943,7 +943,7 @@ Individual diagnostics are not a phase exit. Plan 2 requires one coherent, repro
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when a required user input/approval prevents a gate decision; otherwise a failed technical gate is recorded as `FAIL`.
   - Files: `backend/evaluation/reports/phase_0_feasibility.md` and existing sanitized aggregate artifacts only.
 
-- [ ] (06B): Lock versions, remove temporary artifacts, and run global safety checks
+- [x] (06B): Lock versions, remove temporary artifacts, and run global safety checks
   - Source of Truth: `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `## 3. Locked Technology Stack`; `docs/plans/Master_plan.md` > `## 23. Environment Configuration`; `docs/plans/Master_plan.md` > `## 24. Local Testing Strategy` > `### 24.5 Local verification commands`
   - Source Requirements:
     - Lock exact compatible Python/frontend/FastAPI/Astryx/LangGraph/Neo4j-driver/evaluation dependency decisions for Plan 2; FastAPI must be at least `0.135.0`.
@@ -968,7 +968,7 @@ Individual diagnostics are not a phase exit. Plan 2 requires one coherent, repro
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when unusable Git metadata prevents required proof that `.env` and private fixtures are not committed; other validation failures remain technical `FAIL` results.
   - Files: `backend/pyproject.toml`, backend lockfile if used, `frontend/package.json`, frontend package lock, `.env.example`, `.gitignore`, `README.md`, `backend/evaluation/reports/phase_0_feasibility.md`, gate-required scripts/tests/artifacts.
 
-- [ ] (06C): Enforce the Phase 0 exit gate and produce the Plan 2 handoff
+- [x] (06C): Enforce the Phase 0 exit gate and produce the Plan 2 handoff
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.5 Feasibility report decision block`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`; `docs/plans/Master_plan.md` > `### Phase 1 — Foundation, Docker, and source-of-truth data`
   - Source Requirements:
     - Plan 2 receives exact pinned dependency decisions, verified ShopAIKey behavior, verified Astryx APIs, selected PDF mode/rule, the locked `text-embedding-3-small`/1536 contract, and the safe scaffold.

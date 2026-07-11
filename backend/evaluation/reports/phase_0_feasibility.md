@@ -17,8 +17,56 @@ Sanitized readiness transferred from task 01A:
 | Image-only PDF fixture | READY | One image-only fixture frozen as `pdf_image_only_001`; dual-mode exact `NO_EXTRACTABLE_TEXT` verified in 04D (normal + layout, repeated runs) | Exact dual-mode rule closed PASS in 04D |
 | Labeled retrieval subset | READY | User Option B synthetic Phase 0 set: seed `20260711`, 160 pairs (96/32/32), validation-only active; private records ignored; safe IDs/labels committed | Keep held-out sealed; no post-hoc label edits |
 | PDF decision criterion | READY | Pre-benchmark rule recorded: at least 4 of 5 digital fixtures must yield extractable text; image-only must be `NO_EXTRACTABLE_TEXT` | Criterion unchanged after 04C measurement; do not revise post-hoc |
-| Embedding decision criteria | READY | Pre-recorded before live results (unchanged): nDCG@10 ≥ 0.30, Recall@10 ≥ 0.35, median latency ≤ 3000 ms, P95 ≤ 8000 ms. Live 05C measured against these without post-hoc edits | Baselines remain PRE_RECORDED; 05D decides gate PASS/FAIL |
+| Embedding decision criteria | READY | Pre-recorded before live results (unchanged): nDCG@10 ≥ 0.30, Recall@10 ≥ 0.35, median latency ≤ 3000 ms, P95 ≤ 8000 ms. Live re-run measured against these without post-hoc edits | Baselines remain PRE_RECORDED; embedding gate **PASS** after methodology fix re-run |
 | Committed manifest metadata | CONFIRMED | Generic non-identifying identifiers and metadata were approved | Keep real names, paths, text, and personal data in ignored local files |
+
+## Scaffold safety
+
+| Check | Result | Evidence |
+|---|---|---|
+| Exactly three product working folders | PASS | Root product folders are only `frontend`, `backend`, and `infrastructure` (docs/config/metadata are not product working folders) |
+| No production service behavior | PASS | No FastAPI app routes, LangGraph runtime, Neo4j production wiring, OCR, Qdrant, CI, or product UI flows in Phase 0 scaffold |
+| Single-root environment contract | PASS | Root `.env.example` documents placeholders; ignored root `.env` is user-owned; no nested frontend/backend `.env` required |
+| Private evaluation boundary | PASS | `.gitignore` covers root `.env` and `backend/evaluation/private/`; committed manifests use generic IDs/digests only |
+| Phase 0 evaluation destination | PASS | This report at `backend/evaluation/reports/phase_0_feasibility.md` plus sanitized aggregates under `backend/evaluation/reports/` |
+
+Scaffold safety was established in Batch01. Task (06B) reconfirmed the three-folder product boundary, single-root environment contract, private-data ignore rules, and Git tracked/ignore proof after cleanup.
+
+## Measurement protocols and thresholds
+
+| Domain | Protocol / criterion ID | Recorded before measurement | Pass rule (frozen) | Outcome |
+|---|---|---|---|---|
+| PDF digital majority | `pdf_digital_agreed_majority_v1` | Yes (04A) | ≥ 4 of 5 digital fixtures with usable extracted characters > 0 | Met: 5/5 under selected `layout` |
+| PDF image-only | exact code contract | Yes (04A) | Outcome exactly `NO_EXTRACTABLE_TEXT` with 0 usable chars in normal and layout; `ocr_allowed=false` | Met: dual-mode exact code on repeated runs |
+| Embeddings quality/latency | `phase0_shopaikey_embedding_validation_v1` (`status=FROZEN`, criteria `PRE_RECORDED` at `2026-07-11T05:39:44+00:00`) | Yes (05A) | nDCG@10 ≥ 0.30; Recall@10 ≥ 0.35; median ≤ 3000 ms; P95 ≤ 8000 ms; model/dims/order/finite/no-E5/scalar-batch | Met on post-fix live re-run |
+| ShopAIKey schema reliability | 03A criterion | Yes (before live 03F) | 3 consecutive validated structured-schema attempts; max 1 repair per attempt | Met: `strict_schema`, 3/3, repairs_used_total=0 |
+| ShopAIKey model lock | master Phase 0 gate | Source-locked | Exact `gpt-4o-mini` (no silent equivalent) | Met: `exact_master_lock` |
+| Astryx coverage | Plan 1 ∪ master UX matrix | Version pin before matrix | All 16 required needs via public import/composition on pinned `0.1.4` | Met: 16/16 + `npm run check:astryx` |
+
+No post-hoc threshold edits were applied after measurement for any gate.
+
+## Single-purpose commands and artifacts
+
+| Gate | Single-purpose command | Primary sanitized artifact(s) |
+|---|---|---|
+| Scaffold / prerequisites | `python --version`; `node --version`; `npm --version`; `docker compose version` | This report Prerequisites + Scaffold safety sections |
+| Astryx pin / matrix / lock | From `frontend/`: `npx astryx --json component <Name>`; `npm run check:astryx`; package lock resolution for `@astryxdesign/core` and `@astryxdesign/cli` | `frontend/package.json`, `frontend/package-lock.json`, this report Astryx matrix |
+| ShopAIKey compatibility | Fake suite from `backend/`: `python -m pytest -q` (no network); live: `python backend/scripts/check_shopaikey_compatibility.py` (root `.env` only) | Sanitized capability summaries in this report; harness `backend/scripts/check_shopaikey_compatibility.py` |
+| PDF extraction | From `backend/`: `python -m evaluation.benchmark_pdf_extraction` (ignored private corpus) | `backend/evaluation/reports/pdf_extraction_benchmark.json`; manifests under `backend/evaluation/fixtures/` |
+| Embeddings | From `backend/`: `python -m evaluation.benchmark_embeddings` (validation slice only) | `backend/evaluation/reports/embedding_benchmark.json`; protocol `backend/evaluation/labels/embedding_validation_protocol.json`; inventory `backend/evaluation/labels/retrieval_subset_manifest.json` |
+
+Commands above are local-only Phase 0 diagnostics. No application run/build command exists yet. Aggregate artifacts store metrics and generic IDs only — never secrets, Authorization headers, raw provider payloads, or private CV/JD/label text.
+
+## Security and privacy boundaries
+
+| Boundary | Status | Evidence |
+|---|---|---|
+| Secrets ownership | READY | Real key only in ignored root `.env`; `.env.example` placeholders only |
+| Live diagnostic isolation | PASS (prior gates) | Normal automated tests use fakes; live ShopAIKey chat and embedding runs are explicit single-purpose commands |
+| Secret/leakage reporting | PASS (prior gates) | 03F and embedding aggregate scans reported no configured secret, Bearer tokens, or raw private text in sanitized outputs |
+| Private PDF / retrieval data | READY | Ignored under `backend/evaluation/private/`; committed manifests use non-identifying IDs and digests |
+| Aggregate-only reports | PASS | This report and `*_benchmark.json` contain metrics, codes, counts, and generic IDs only |
+| Final tracked-file/ignore proof | PASS (06B) | `git check-ignore` covers root `.env`, `backend/evaluation/private/`, and demo `output/`; `git ls-files` contains no `.env`, no private PDFs/records, no `output/` paths |
 
 ## Astryx
 
@@ -274,38 +322,127 @@ Log prohibitions remain: API keys, Authorization headers, raw provider headers, 
 
 Until that re-run passes, Phase 0 must not authorize Plan 2 embedding consumption.
 
-## Locked Versions
+## Locked versions and adapter modes (06B)
 
-| Dependency or mode | Selected version or mode | Evidence |
+Exact dependency and adapter decisions for Plan 2 handoff. Phase 0 runtime installs only gate-required packages; Plan 2 production pins are recorded in `backend/pyproject.toml` optional extra `plan2` and must not be treated as Phase 0 runtime requirements.
+
+### Toolchain and runtimes
+
+| Decision | Locked value | Evidence |
 |---|---|---|
-| Astryx | `@astryxdesign/core` `0.1.4`; `@astryxdesign/cli` `0.1.4` | Official npm `latest` metadata on 2026-07-11, exact package/lockfile declarations, CLI `--version`, and successful initializer |
-| ShopAIKey chat model | `gpt-4o-mini` | Live 03F model discovery exact master lock; tool-call and completion on same model |
-| ShopAIKey tool-call mode | `bind_tools` + `tool_result_round_trip` | Live 03F function-call and tool-result checks |
-| ShopAIKey completion schema mode | `strict_schema` | Live 03F three consecutive validated attempts; repairs_used_total=0; max 1 repair/attempt policy |
-| ShopAIKey streaming | supported (`streaming_text`) | Live 03F ordered non-empty text chunks; knowledge-only |
-| PDF extraction mode | `layout` (digital; Batch04 closed) | 04C: both digital modes 5/5 vs frozen 4/5 with equal yield; layout locked; 04D: image-only dual-mode exact `NO_EXTRACTABLE_TEXT` PASS |
-| Embedding adapter contract | **PASS** | Fixed ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 / `phase0_v1_synthetic` / max_batch=16 / fail-closed errors; re-run: nDCG@10=0.833333, Recall@10=1.0, latency PASS, scalar_batch_equivalence PASS; PRE_RECORDED baselines unchanged |
+| Python | 3.13.x (`requires-python = ">=3.13"`); Phase 0 host measured `Python 3.13.7` | Prerequisite inventory; backend package metadata |
+| Node.js | v24.x; Phase 0 host measured `v24.11.0` | Prerequisite inventory; Astryx npm resolution |
+| npm | 11.x; Phase 0 host measured `11.6.1` | Prerequisite inventory |
+| Frontend product stack (Plan 2) | React + TypeScript + Vite (versions installed when Plan 2 scaffolds the app) with locked Astryx `0.1.4` | Master stack; Phase 0 frontend is Astryx-only compatibility scaffold — no product UI yet |
+| Docker Compose | Available locally (measured `v5.1.1`); not used by Phase 0 gates | Prerequisite inventory only |
 
-## Cleanup
+### Backend / evaluation pins (`backend/pyproject.toml`)
+
+| Package / decision | Locked value | Role |
+|---|---|---|
+| ShopAIKey chat adapter | `langchain-openai==1.0.3` (`ChatOpenAI` OpenAI-compatible) | Phase 0 proven diagnostic dependency |
+| Pydantic | `pydantic==2.12.5` (v2) | Phase 0 proven validation dependency |
+| pypdf | `pypdf==6.12.2` | Phase 0 proven PDF extraction library |
+| python-dotenv | `python-dotenv==1.2.2` | Root `.env` loading for live diagnostics only |
+| pytest (optional `test`) | `pytest==8.4.2` | Focused fake/synthetic tests |
+| FastAPI (optional `plan2`) | `fastapi==0.139.0` (**≥ 0.135.0** master-plan SSE floor) | Plan 2 decision only; not installed for Phase 0 gates |
+| LangGraph (optional `plan2`) | `langgraph==1.2.9` | Plan 2 decision only; not exercised in Phase 0 |
+| Neo4j driver (optional `plan2`) | `neo4j==6.2.0` | Plan 2 decision only; not exercised in Phase 0 |
+
+### Frontend pins (`frontend/package.json` + lockfile)
+
+| Package | Locked value | Role |
+|---|---|---|
+| `@astryxdesign/core` | `0.1.4` (exact) | Public component matrix |
+| `@astryxdesign/cli` | `0.1.4` (exact, devDependency) | Component documentation + init |
+
+### Adapter modes (unchanged from gate evidence)
+
+| Dependency or mode | Selected version or mode | Source result match |
+|---|---|---|
+| Astryx packages | `@astryxdesign/core` `0.1.4`; `@astryxdesign/cli` `0.1.4` | Matches frontend package/lock pins and Batch02 matrix evidence |
+| ShopAIKey chat model | `gpt-4o-mini` | Matches live 03F `exact_master_lock` and master Phase 0 model lock |
+| ShopAIKey tool-call mode | `bind_tools` + `tool_result_round_trip` | Matches live 03F function-call and tool-result PASS rows |
+| ShopAIKey structured schema | `strict_schema` (max 1 repair/attempt) | Matches live 03F 3/3 validated attempts, repairs_used_total=0 |
+| ShopAIKey streaming | supported (`streaming_text`) | Matches live 03F ordered-chunk classification (knowledge-only) |
+| PDF digital parser mode | pypdf `layout` | Matches 04C selection; digital 5/5 vs frozen 4/5; equal yield vs normal |
+| PDF image-only failure | exact `NO_EXTRACTABLE_TEXT` (0 usable chars; both modes) | Matches 04D dual-mode repeated runs and aggregate `ocr_used=false` |
+| Embedding model | ShopAIKey `text-embedding-3-small` only | Matches aggregate `model` and protocol allowlist |
+| Embedding dimensions / encoding | 1536 / float | Matches aggregate `dimensions=1536`, `encoding=float`, `vector_length_ok=true` |
+| Embedding preprocessing | no E5 prefixes; builders `phase0_v1_synthetic` | Matches aggregate `e5_prefixes_applied=false` and protocol |
+| Embedding quality/latency | nDCG@10=0.833333; Recall@10=1.0; median 1640.656 ms; P95 2843.617 ms | All meet PRE_RECORDED floors in protocol; `all_baselines_pass=true`; `gate_result=PASS` |
+
+## Cleanup (06B)
 
 | Check | Result | Evidence |
 |---|---|---|
-| Temporary dependencies removed | PENDING | Pending Phase 0 consolidation |
-| Duplicate or unused scaffold removed | PENDING | Pending Phase 0 consolidation |
-| Private inputs remain ignored and untracked | PENDING | Pending final Git audit |
-| Aggregate evidence contains no private content | PENDING | Pending final privacy audit |
+| Temporary dependencies removed | PASS | Phase 0 `dependencies` contain only gate-proven packages; production FastAPI/LangGraph/neo4j live solely under optional `plan2` and are not required to run gates |
+| Demo / temporary artifacts removed | PASS | Deleted untracked demo tree `output/pdf/*.pdf`; removed local `__pycache__/`, `*.egg-info/`, and `.pytest_cache/` |
+| Gate-required artifacts retained | PASS | Kept `pdf_extraction_benchmark.json`, `embedding_benchmark.json`, protocols/manifests, diagnostic script, focused tests, Astryx check script |
+| Exact multi-package version lock set for Plan 2 | PASS | Exact pins recorded above and in `backend/pyproject.toml` / `frontend/package.json`; FastAPI `0.139.0` satisfies ≥ `0.135.0` |
+| Private inputs remain ignored and untracked | PASS | `.gitignore` covers `/.env` and `/backend/evaluation/private/`; Git audit: no tracked secrets or private fixtures |
+| Aggregate evidence contains no private content | PASS | 06B re-scan of this report and named aggregates: no API keys, Authorization values, or private document text fields |
+| CI not introduced | PASS | No CI workflow added; validation remains local-only |
 
-## Handoff
+## Plan 2 handoff contract (final)
 
-Plan 2 remains blocked until every required Phase 0 gate is measured, supported by evidence, and marked `PASS`. The embedding compatibility gate is now **PASS** (live re-run after Recall macro-average and float-equivalence fixes; PRE_RECORDED baselines unchanged). Batch06 consolidation is still required before Plan 2 is authorized.
+**Phase 0 status:** COMPLETE — all required gates are evidence-backed **PASS**.
 
-## Final Decisions
+**Plan 2 authorization:** **AUTHORIZED**. Plan 2 (Master Phase 1) may consume the locked decisions below without re-benchmarking Phase 0 gates. Production application run/build/start commands remain **not yet available** until Plan 2 implements them.
+
+**Blocking rule:** If any required gate later fails re-validation, Plan 2 must stop and revise **only** the affected adapter decision (no broad fallback provider/UI/parser/embedding/deployment stack).
+
+### Exact pins Plan 2 must consume
+
+| Area | Locked value | Artifact |
+|---|---|---|
+| Python | `>=3.13` (Phase 0 host `3.13.7`) | `backend/pyproject.toml` `requires-python` |
+| Frontend product stack | React + TypeScript + Vite (install versions when Plan 2 scaffolds the app) | README + this handoff |
+| Astryx | `@astryxdesign/core` `0.1.4`; `@astryxdesign/cli` `0.1.4` (exact) | `frontend/package.json`, `frontend/package-lock.json` |
+| ShopAIKey chat adapter | `langchain-openai==1.0.3`; model `gpt-4o-mini`; tools `bind_tools` + `tool_result_round_trip`; schema `strict_schema` (max 1 repair/attempt); streaming `streaming_text` | Live 03F matrix + this report ShopAIKey section |
+| Validation | `pydantic==2.12.5` | `backend/pyproject.toml` |
+| PDF | `pypdf==6.12.2`; digital mode `layout`; image-only exact `NO_EXTRACTABLE_TEXT` (0 usable chars; both modes; no OCR) | Aggregate `pdf_extraction_benchmark.json` |
+| Embeddings | ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 prefixes; builders `phase0_v1_synthetic`; max_batch_size `16`; timeout 30s fail-closed | Aggregate `embedding_benchmark.json` + protocol |
+| FastAPI (Plan 2 install) | `fastapi==0.139.0` (meets master floor ≥ `0.135.0`) | optional extra `plan2` |
+| LangGraph (Plan 2 install) | `langgraph==1.2.9` | optional extra `plan2` |
+| Neo4j driver (Plan 2 install) | `neo4j==6.2.0` | optional extra `plan2` |
+
+### Verified Astryx public API matrix (consume; do not re-benchmark)
+
+Sixteen required needs all PASS on pin `0.1.4` via public imports only (see Astryx section above): `AppShell`, `ChatLayout`, `ChatComposer`, `ChatToolCalls`, `ChatMessage`, `ButtonGroup`, `Button`, `Card`, `Collapsible`, `ProgressBar`, `ChatMessageList`, `ChatSystemMessage`, `MetadataList`, `Badge`, `Banner`, `Toast`. Focused command: from `frontend/`, `npm ci --ignore-scripts` then `npm run check:astryx`.
+
+### Scaffold artifacts Plan 2 must preserve
+
+- Product folders only: `frontend/`, `backend/`, `infrastructure/`
+- Root config: `.env.example` placeholders; ignored user-owned root `.env`; no nested frontend/backend `.env`
+- Private evaluation boundary: ignored `backend/evaluation/private/`; committed manifests/aggregates metrics-only
+- Phase 0 evidence destination: `backend/evaluation/reports/phase_0_feasibility.md`
+- Single-purpose local diagnostics remain available; no CI workflow was introduced
+
+### Single-purpose Phase 0 commands (reference only)
+
+| Gate | Command |
+|---|---|
+| Astryx | `cd frontend` → `npm ci --ignore-scripts` → `npm run check:astryx` |
+| Backend focused tests | `cd backend` → `python -m pip install -e ".[test]"` → `python -m pytest -q` |
+| ShopAIKey live diagnostic | `python backend/scripts/check_shopaikey_compatibility.py` (root `.env`) |
+| PDF benchmark | `cd backend` → `python -m evaluation.benchmark_pdf_extraction` |
+| Embedding benchmark | `cd backend` → `python -m evaluation.benchmark_embeddings` |
+
+### Adapter-only revision path (if a future re-validation fails)
+
+Revise **only** the failed adapter decision (Astryx pin/matrix, ShopAIKey chat modes, pypdf mode/rule, or embedding contract) in the master plan / Phase 0 protocol after approval; re-run that gate only; re-enter Batch06 revalidation. Do **not** introduce alternate providers, UI systems, OCR/parsers, local/GPU embeddings, Qdrant, CI, or other fallback stacks.
+
+## Final decision table (06C)
+
+Status: **FINAL**. All required gates are **PASS**. Phase 0 exit is complete. Plan 2 is **AUTHORIZED**.
 
 | Gate | Result | Evidence | Selected mode/version | Phase impact |
 |---|---|---|---|---|
-| Prerequisite readiness | PENDING | Sanitized inventory above; user actions remain | PENDING | Blocks affected live gates |
-| Astryx compatibility | PASS | Exact npm resolution, initializer evidence, sixteen pinned CLI lookups, and `npm run check:astryx` | `@astryxdesign/core` and `@astryxdesign/cli` `0.1.4`; public matrix above | Astryx decision is locked for Plan 2; overall Plan 2 remains blocked on other Phase 0 gates |
-| ShopAIKey compatibility | PASS | Live 03F diagnostic exit 0; all six capabilities characterized; secret/leakage scan clean; fake suite 73 passed without network | Model `gpt-4o-mini`; tools `bind_tools` + tool-result round trip; schema `strict_schema` (max 1 repair/attempt); streaming supported | ShopAIKey provider decisions locked for Plan 2; overall Plan 2 remains blocked on PDF, embeddings, and consolidation gates |
-| PDF extraction compatibility | PASS | 04C digital majority met with `layout` locked; 04D image-only normal+layout exact `NO_EXTRACTABLE_TEXT` / 0 chars on repeated runs; OCR/alternate search clean | Digital mode `layout`; image-only exact failure `NO_EXTRACTABLE_TEXT` | PDF adapter locked for Plan 2; overall Plan 2 remains blocked on embeddings and consolidation gates |
-| Embedding compatibility | **PASS** | Live re-run after methodology fix: model/dims/order/finite/latency PASS; nDCG@10=0.833333 ≥ 0.30; Recall@10=1.0 ≥ 0.35; scalar_batch_equivalence=true; PRE_RECORDED baselines unchanged; no model substitution | ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 / `phase0_v1_synthetic` | Unlocks embedding contract for Plan 2; Batch06 still required |
-| Cleanup and evidence consolidation | PENDING | Pending Batch06 evidence | PENDING | Blocks Plan 2 |
+| Scaffold safety | PASS | Three product folders only (`frontend`, `backend`, `infrastructure`); root `.env.example` + ignored private path; no production services/UI/CI; evaluation report destination present; 06B/06C Git/ignore reconfirmed | `frontend` + `backend` + `infrastructure`; root config only | Scaffold boundary locked; Plan 2 may build product services on this boundary |
+| Astryx compatibility | PASS | Exact npm pin `0.1.4`, initializer evidence, sixteen public component rows PASS, `npm run check:astryx` PASS on 06C re-check | `@astryxdesign/core` and `@astryxdesign/cli` `0.1.4`; public matrix above | Astryx adapter locked for Plan 2 consumption without re-benchmark |
+| ShopAIKey compatibility | PASS | Live 03F diagnostic exit 0; six capabilities characterized; secret/leakage scan clean; focused fake suite without network (06C: 121 pytest passed) | Model `gpt-4o-mini`; tools `bind_tools` + tool-result round trip; schema `strict_schema` (max 1 repair/attempt); streaming `streaming_text` | Provider chat adapter locked for Plan 2 consumption without re-benchmark |
+| PDF extraction compatibility | PASS | Aggregate `pdf_extraction_benchmark.json`: digital 5/5 vs frozen 4/5; selected `layout`; image-only normal+layout exact `NO_EXTRACTABLE_TEXT` / 0 chars; `ocr_used=false`; `alternate_parser_used=false` | Digital mode `layout`; image-only exact failure `NO_EXTRACTABLE_TEXT`; library `pypdf==6.12.2` | PDF adapter locked for Plan 2 consumption without re-benchmark |
+| Embedding compatibility | PASS | Aggregate `embedding_benchmark.json`: `gate_result=PASS`; model/dims/order/finite/latency PASS; nDCG@10=0.833333 ≥ 0.30; Recall@10=1.0 ≥ 0.35; `scalar_batch_equivalence=true`; PRE_RECORDED baselines unchanged; no model substitution | ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 / `phase0_v1_synthetic` | Embedding contract locked for Plan 2 consumption without re-benchmark |
+| Cleanup and evidence consolidation | PASS | 06B removed demo `output/`, caches, non-gate temp artifacts; exact Phase 0 + Plan 2 pins including FastAPI `0.139.0` (≥0.135.0); Git ignore/tracked proof clean; no secrets/private fixtures tracked; local-only validation | Pins in `backend/pyproject.toml` and `frontend/package.json`; local-only validation | Cleanup complete; does not block Plan 2 |
+| Global safety | PASS | Root-only env contract; private inputs ignored/untracked; aggregate-only evidence; no OCR/Qdrant/CI/fallback stack introduced; out-of-scope search clean on product sources | Secrets in ignored root `.env` only; validation local-only | Safety boundary locked for Plan 2 |
