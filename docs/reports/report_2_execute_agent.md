@@ -340,3 +340,300 @@ complete
   - `frontend/src/app/env.ts`, `frontend/src/vite-env.d.ts`: comments updated to describe exact-key publication (accessor behavior unchanged).
 - validations rerun: `npm run lint` (pass), `npm run typecheck` (pass), `npm run test -- --run` (2 files, 5 tests pass), `npm run build` (pass), independent createServer transform verification (`INDEPENDENT_TRANSFORM_PASS`: approved present; unapproved-VITE, `VITE_API_BASE_URL_SECRET`, backend markers absent).
 - outcome: exact-key publication enforced; all listed A2 repair items addressed; status complete; ready for A2 re-review.
+
+---
+
+# Task Execution Report - 02A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch02 - SQLite Source of Truth and Migrations
+
+## Task
+02A - Implement the async SQLite lifecycle and complete application model metadata
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - SQLite Source of Truth and Migrations
+- Task ID: 02A
+- Task title: Implement the async SQLite lifecycle and complete application model metadata
+- Files allowed / repair scope: same-task repair of 02A — correct SQLite shared-cache memory URI so it is real on this runtime; retain multi-connection isolation + prior UUID/agent_run repairs; remove only A1-generated `backend/file`; update tests/report evidence. No 02B.
+
+## Completed Work
+- Searched backend for reusable SQLAlchemy/session/enum patterns; reused StrEnum style from evaluation diagnostics; no existing ORM models to extend.
+- Implemented async SQLAlchemy 2 engine/session ownership (`DatabaseSessionManager`) for configured SQLite paths and isolated temp/in-memory DBs with PRAGMA foreign_keys=ON, explicit commit/rollback session_scope, and parent-directory creation.
+- Defined all eleven application tables with UUID PKs for every non-singleton table (including `memory_facts.id`), documented integer singleton rows only for `candidate_profile` / `job_preferences` / `conversation`, UTC timestamp mixin, explicit FKs, independent job status CHECK constraints, JSON columns for structured documents (repository validation deferred; no public repository API), and no content blobs or LangGraph checkpoint models.
+- `memory_facts.key` is required, unique, and indexed as business identity (not the primary key); duplicate keys are rejected.
+- `agent_runs.message_id` is unique (one application run per user-turn message); ORM cardinality is one-to-one (`ChatMessage.agent_run` / `uselist=False`); resume updates the existing run row.
+- In-memory mode uses a manager-unique shared-cache memory URI with `NullPool` (distinct physical connections per session) plus a keepalive connection so schema/data remain shared within one manager while transactions stay isolated; separate managers use distinct names.
+- **URI fix (this repair):** put `uri=true` on the SQLAlchemy URL query (`sqlite+aiosqlite:///file:{name}?mode=memory&cache=shared&uri=true`). SQLAlchemy 2.0.51 `create_connect_args` only builds a native SQLite URI when `uri=true` is on the URL; `connect_args={"uri": True}` alone still path-absolutizes `file:{name}` and created the zero-byte `backend/file` artifact. Removed that artifact. Regression tests run the in-memory manager under a temporary cwd and assert no filesystem DB/`file` artifact while same-manager sharing, peer isolation, separate-manager isolation, and multi-connection `foreign_keys=ON` hold.
+- Added metadata and session tests covering table inventory, singleton/uniqueness (including memory key and one-run-per-message), FK enforcement, UTC timestamps, JSON storage boundaries, independent statuses, relationships, file isolation, simultaneous in-memory session isolation, separate in-memory manager isolation, no-cwd-artifact regression, and rollback non-leakage.
+
+## Files Created or Modified
+- backend/app/db/__init__.py
+- backend/app/db/base.py
+- backend/app/db/enums.py
+- backend/app/db/session.py
+- backend/app/db/models/__init__.py
+- backend/app/db/models/attachments.py
+- backend/app/db/models/profile.py
+- backend/app/db/models/jobs.py
+- backend/app/db/models/conversation.py
+- backend/app/db/models/memory.py
+- backend/app/db/models/outbox.py
+- backend/tests/db/__init__.py
+- backend/tests/db/test_models.py
+- backend/tests/db/test_session.py
+- docs/reports/report_2_execute_agent.md
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/db/test_models.py tests/db/test_session.py`
+- required: yes
+- result: passed
+- evidence or reason: 27 passed in 2.58s against temporary SQLite files / manager-isolated in-memory DBs; includes URI connect_args regression, temp-cwd no-filesystem-artifact proof, simultaneous session isolation, separate-manager isolation + multi-connection foreign_keys=ON; no network
+
+- command/check: `cd backend; python -m ruff check app/db tests/db`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed
+
+- command/check: `cd backend; python -m mypy app/db`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 11 source files
+
+- command/check: `cd backend; python -m pytest -q`
+- required: yes
+- result: passed
+- evidence or reason: 197 passed in 4.69s full backend suite after URI repair
+
+- command/check: `git status --short -uall` and assert `backend/file` absent
+- required: yes
+- result: passed
+- evidence or reason: `backend/file` removed and absent from status; changed/untracked paths listed truthfully in Files Created or Modified / Notes
+
+## Acceptance Check
+- condition: SQLAlchemy metadata contains exactly the eleven application tables required by Plan 2 and contains no LangGraph checkpoint model
+- status: satisfied
+- evidence: Base.metadata tables are exactly attachments, candidate_profile, profile_drafts, job_preferences, job_posts, conversation, chat_messages, agent_runs, tool_executions, memory_facts, graph_sync_outbox; tests assert no checkpoint table names
+
+- condition: Status values cannot be conflated, foreign-key enforcement is enabled, UUID/singleton rules are explicit, and session rollback does not leak partial state
+- status: satisfied
+- evidence: Independent CHECK constraints and StrEnum value sets; PRAGMA foreign_keys=ON verified on multiple simultaneous connections; UUID PK on all non-singleton tables including memory_facts; integer singleton PKs only for documented single-row tables; IntegrityError on orphan FKs, duplicate memory keys, and second agent_run for the same message_id; session_scope/explicit rollback and simultaneous in-memory session tests prove uncommitted work is not visible (empty result or SQLite table lock) and is not leaked after rollback; committed rows are shared within one manager; separate managers remain isolated; in-memory mode creates no cwd filesystem `file`/DB artifact
+
+- condition: Structured JSON columns are not exposed through an unvalidated generic public repository API
+- status: satisfied
+- evidence: JSON columns exist on models only; app/repositories package absent; no GenericRepository/JsonRepository on app.db
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files (this repair): `backend/app/db/session.py`, `backend/tests/db/test_session.py`, this report; deleted A1 artifact `backend/file` (must remain absent)
+- cumulative 02A untracked/modified code paths still present: `backend/app/db/**`, `backend/tests/db/**`, prior model repairs retained
+- validations to rerun: `python -m pytest -q tests/db/test_models.py tests/db/test_session.py`, `python -m ruff check app/db tests/db`, `python -m mypy app/db`, full `python -m pytest -q` from backend/; confirm `backend/file` absent via `git status --short -uall`
+- risk areas: job_posts field set is essential-field complete from master 6.1 not a full Plan 5 repository; singleton PK is integer 1 with CHECK; Alembic migrations intentionally deferred to 02B; in-memory isolation relies on NullPool + SQLAlchemy URL `uri=true` shared-cache named memory + keepalive (not StaticPool; not connect_args-only uri)
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ### 7.2 SQLite ownership and schema
+- docs/plans/Master_plan.md > ### 4.1 Ownership rules
+- docs/plans/Master_plan.md > ### 6.1 Application tables
+- docs/plans/Master_plan.md > ### 6.3 Job status dimensions
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md (directory structure, out of scope)
+- docs/plans/Master_plan.md (job flow / outbox context for field intent)
+- docs/plans/Plan_5.md (job_posts raw_content_hash / normalized_key / status machine context)
+- README.md
+- docs/tasks/task_2.md (02A envelope)
+- docs/review/review_2_review_agent.md (A2 REJECTED repair instructions)
+
+## Dependency and User Action Check
+- dependencies: (01A) satisfied — typed settings, SQLAlchemy 2.0.51, aiosqlite 0.22.1 installed
+- user actions: none
+
+## Files Inspected Before Editing
+- backend/app/config.py
+- backend/app/main.py
+- backend/pyproject.toml
+- backend/app/db/base.py
+- backend/app/db/session.py
+- backend/app/db/models/memory.py
+- backend/app/db/models/conversation.py
+- backend/tests/db/test_models.py
+- backend/tests/db/test_session.py
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_2.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+
+## Key Implementation Decisions
+- Split models by ownership (attachments, profile, jobs, conversation, memory, outbox) plus shared base/enums/session
+- Store structured documents as SQLAlchemy JSON columns; validation remains a repository-boundary concern for later plans
+- Integer singleton PK fixed at 1 with CHECK for candidate_profile, job_preferences, conversation only
+- memory_facts uses UUID `id` PK; `key` is unique/indexed business identity
+- agent_runs enforces one row per message via unique `message_id` and one-to-one ORM relationship; interrupt/resume mutates the same row
+- Independent status columns use String + SQLite CHECK rather than a single overloaded status field
+- In-memory engines use named shared-cache memory DBs + NullPool + retained keepalive connection (never StaticPool single-connection sharing)
+- SQLAlchemy 2.0.51 requires `uri=true` on the SQLAlchemy URL query for native SQLite URI connect args; connect_args-only `uri=True` is insufficient and caused `backend/file`
+- create_all on DatabaseSessionManager is for tests/bootstrap only; Alembic is 02B
+
+## Workflow Integrity Check
+- single task 02A only (same_task_repair)
+- no 02B Alembic work
+- no commit or staging
+- no checkbox or batch status update
+- no repositories, public CRUD, or LangGraph checkpoint models
+
+## Repair Log
+
+### 2026-07-11T16:53:29+07:00
+- reason for repair: A2 REJECTED (1 of 3) — missing UUID PK on memory_facts, StaticPool in-memory broke simultaneous-session isolation, agent_runs.message_id not unique / ORM many-side cardinality.
+- changes made:
+  - memory_facts: UUID `id` primary key; `key` required unique indexed business identity; tests reject duplicate keys.
+  - session: replaced StaticPool `:memory:` with manager-unique shared-cache URI + NullPool + keepalive; adversarial isolation tests for simultaneous sessions and separate managers.
+  - agent_runs: unique `message_id`, `ChatMessage.agent_run` one-to-one; test proves second run rejected and resume reuses existing row.
+  - report claims aligned with repaired code/evidence.
+- validations rerun: `python -m pytest -q tests/db/test_models.py tests/db/test_session.py` (24 passed); `python -m ruff check app/db tests/db` (passed); `python -m mypy app/db` (passed); optional full `python -m pytest -q` (194 passed).
+- outcome: complete — all A2-listed repair items fixed with passing required validation. (Superseded: URI was still incorrect on this runtime; see next repair entry.)
+
+### 2026-07-11T17:10:00+07:00
+- reason for repair: Orchestrator evidence failure after prior 02A repair — in-memory URL `sqlite+aiosqlite:///file:<name>?mode=memory&cache=shared` with only `connect_args uri=True` was not treated as a native SQLite URI by SQLAlchemy 2.0.51 (`create_connect_args` path-absolutized `file:<name>`), producing unreported zero-byte `backend/file` and incomplete handoff evidence.
+- changes made:
+  - `backend/app/db/session.py`: in-memory URL now includes `uri=true` on the SQLAlchemy query string so dialect returns `(['file:name?cache=shared&mode=memory'], {uri: True, ...})`; dropped redundant connect_args-only uri reliance.
+  - `backend/tests/db/test_session.py`: assert URL/query/connect_args; temp-cwd regression that no filesystem `file`/DB artifact is created while same-manager sharing + peer isolation work; separate managers isolated + FK ON on simultaneous connections under temp cwd; isolation helper accepts empty result or SQLite table lock as non-observation of uncommitted work.
+  - Deleted only A1-generated `backend/file`; prior UUID and agent_run cardinality repairs left intact.
+  - No 02B / no checkbox / no commit.
+- validations rerun: `python -m pytest -q tests/db/test_models.py tests/db/test_session.py` (27 passed); `python -m ruff check app/db tests/db` (passed); `python -m mypy app/db` (passed); `python -m pytest -q` (197 passed); `git status --short -uall` shows `backend/file` absent.
+- outcome: complete — named shared-cache memory mode is real on this runtime; artifact removed; evidence complete for A2 re-review.
+
+---
+
+# Task Execution Report - 02B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - SQLite Source of Truth and Migrations
+
+## Task
+02B - Create and prove the repeatable initial Alembic migration
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - SQLite Source of Truth and Migrations
+- Task ID: 02B
+- Task title: Create and prove the repeatable initial Alembic migration
+- Files allowed / repair scope: backend/alembic.ini, backend/migrations/env.py, backend/migrations/script.py.mako, backend/migrations/versions/*.py, backend/tests/integration/test_migrations.py, README.md
+
+## Completed Work
+- Configured Alembic to resolve the SQLite file from process `SQLITE_PATH` first (tests inject temporary paths and never load the user-owned root `.env`); falls back to typed `load_settings().sqlite_path` for local CLI only.
+- Pointed Alembic `target_metadata` at application `Base.metadata` with all eleven models registered; excluded checkpoint table names from autogenerate; enabled SQLite foreign keys on migration connections; used sync `sqlite:///` URLs (not aiosqlite) for Alembic.
+- Generated and hand-reviewed the single initial head revision `c885a5846d85` creating exactly the eleven application tables with required columns, CHECK constraints (status/singleton/source/role enums), foreign keys (including ondelete), uniqueness, and indexes aligned to 02A model metadata. Replaced autogenerated `UTCDateTime` references with portable `sa.DateTime(timezone=True)`. No LangGraph checkpoint tables; upgrade path has no broad drop/reset.
+- Added integration tests proving fresh upgrade, second-run upgrade on the same file, data preservation, metadata parity (columns/FKs/uniques/indexes/checks), one head, SQLITE_PATH-only resolution (load_settings not called when set), and static guards against checkpoint table creation / destructive upgrade ops.
+- Documented the single-purpose local command `python -m alembic -c alembic.ini upgrade head` in root README; no automatic downgrade/reset path documented or wired.
+
+## Files Created or Modified
+- backend/alembic.ini
+- backend/migrations/env.py
+- backend/migrations/script.py.mako
+- backend/migrations/README
+- backend/migrations/versions/c885a5846d85_initial_application_schema.py
+- backend/tests/integration/__init__.py
+- backend/tests/integration/test_migrations.py
+- README.md
+- docs/reports/report_2_execute_agent.md
+
+## Files Inspected Before Editing
+- backend/app/db/base.py, session.py, enums.py, models/*
+- backend/app/config.py
+- backend/tests/db/test_models.py
+- backend/pyproject.toml
+- docs/plans/Plan_2.md section 7.2 / 9
+- docs/plans/Master_plan.md sections 24.2 / 25
+- README.md
+- docs/reports/report_2_execute_agent.md (02A block)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/integration/test_migrations.py`
+- required: yes
+- result: passed
+- evidence or reason: 7 passed in 0.95s � fresh upgrade, second-run idempotent upgrade, data preservation, metadata parity, single head, SQLITE_PATH isolation, static revision guards; temporary SQLite only; no network; no real root `.env`
+
+- command/check: `cd backend; python -m alembic -c alembic.ini heads`
+- required: yes
+- result: passed
+- evidence or reason: exactly one head reported: `c885a5846d85 (head)`
+
+- command/check: `cd backend; python -m ruff check migrations tests/integration`
+- required: no
+- result: passed
+- evidence or reason: All checks passed after ruff --fix
+
+- command/check: `cd backend; python -m pytest -q tests/db tests/integration/test_migrations.py`
+- required: no
+- result: passed
+- evidence or reason: 34 passed in 2.39s (02A db suite + 02B migration suite)
+
+## Acceptance Check
+- condition: Fresh and second-run upgrades both succeed and produce the same eleven-table application schema at one head revision
+- status: satisfied
+- evidence: `test_fresh_upgrade_creates_eleven_application_tables` and `test_second_upgrade_on_initialized_file_is_idempotent`; `alembic heads` = `c885a5846d85`
+
+- condition: Migration operations preserve existing initialized data and contain no broad drop/reset behavior or LangGraph checkpoint tables
+- status: satisfied
+- evidence: data-preservation tests keep conversation/memory/attachment/job rows across re-upgrade; upgrade section has create_table only; no checkpoint table names in create_table ops; no drop_all/metadata.drop in upgrade
+
+- condition: Runtime metadata and migrated schema agree on required columns, foreign keys, uniqueness, indexes, and status constraints
+- status: satisfied
+- evidence: `assert_schema_matches_metadata` and `test_metadata_parity_via_sqlalchemy_inspect` compare PRAGMA/reflection to Base.metadata for all eleven tables
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: listed above; 02A model/session code was not modified
+- validations to rerun: `python -m pytest -q tests/integration/test_migrations.py`; `python -m alembic -c alembic.ini heads` from backend/
+- risk areas: downgrade() exists as Alembic convention but is not documented as a local command and is not used by tests/automation; UUID stored as CHAR(32) hex without hyphens on SQLite; migration uses DateTime rather than ORM UTCDateTime TypeDecorator (ORM still enforces timezone-aware binds at runtime)
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ### 7.2 SQLite ownership and schema
+- docs/plans/Plan_2.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 24.2 Backend integration tests
+- docs/plans/Master_plan.md > ## 25. Implementation Phases
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- README.md
+- accepted 02A application metadata under backend/app/db/
+
+## Dependency and User Action Check
+- dependencies: 02A accepted metadata present and used as runtime source
+- user action: none required

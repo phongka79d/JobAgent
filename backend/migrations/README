@@ -1,0 +1,13 @@
+# JobAgent Alembic migrations
+
+Application-owned SQLite schema only (eleven tables). LangGraph checkpoint
+tables are owned later by the checkpointer and must not appear here.
+
+Local upgrade (from `backend/`, with root env or `SQLITE_PATH` set):
+
+```text
+python -m alembic -c alembic.ini upgrade head
+```
+
+Do not add automatic downgrade/reset scripts. Upgrade is safe to re-run against
+an already-initialized persistent SQLite file.

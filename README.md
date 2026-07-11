@@ -8,8 +8,11 @@ re-benchmarking Phase 0 gates.
 
 **Plan 2 Batch01 is COMPLETE.** The repository now has runnable local FastAPI and
 React/TypeScript/Vite foundations with one typed root configuration contract.
-Persistence, health checks, product services, Agent behavior, and user workflows
-remain for later Plan 2 batches.
+
+**Plan 2 Batch02 is COMPLETE.** SQLite application metadata (02A) and a
+repeatable initial Alembic migration (02B) are available under `backend/`.
+Health checks, product services, Agent behavior, and user workflows remain for
+later Plan 2 batches.
 
 Batch01–Batch05 locked the scaffold and four compatibility gates (Astryx,
 ShopAIKey chat, pypdf extraction, ShopAIKey embeddings). Batch06 pinned exact
@@ -78,6 +81,30 @@ python -m ruff check app tests
 python -m mypy app
 python -m pytest -q
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+### Backend SQLite migration (Batch02)
+
+SQLite is the canonical application source of truth. The reviewed initial head
+creates exactly the eleven Plan 2 application tables; LangGraph checkpoint
+tables remain outside application metadata and are owned by its checkpointer.
+
+Single-purpose command to apply the reviewed application schema to the
+configured SQLite file (`SQLITE_PATH` from the root `.env` contract, or set in
+the process environment). Safe to re-run against an already-initialized
+persistent file; there is no automatic downgrade or destructive reset path.
+
+```powershell
+cd backend
+python -m alembic -c alembic.ini upgrade head
+```
+
+Migration integration checks (temporary SQLite files only; does not read the
+user-owned root `.env`):
+
+```powershell
+cd backend
+python -m pytest -q tests/integration/test_migrations.py
 ```
 
 The Batch01 backend intentionally exposes only FastAPI's generated documentation

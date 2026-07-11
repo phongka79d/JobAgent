@@ -244,7 +244,7 @@ CRUD, attachment file operations, or graph synchronization behavior.
 
 ### Tasks
 
-- [ ] (02A): Implement the async SQLite lifecycle and complete application model metadata
+- [x] (02A): Implement the async SQLite lifecycle and complete application model metadata
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.2 SQLite ownership and schema`; `docs/plans/Master_plan.md` > `### 4.1 Ownership rules`; `docs/plans/Master_plan.md` > `### 6.1 Application tables`; `docs/plans/Master_plan.md` > `### 6.3 Job status dimensions`
   - Source Requirements:
     - Implement async SQLAlchemy 2 engine/session ownership for the configured SQLite path and all eleven master-defined application tables.
@@ -269,7 +269,7 @@ CRUD, attachment file operations, or graph synchronization behavior.
   - Blocked Condition: The plan and master source cannot be reconciled on a required field, identity, foreign key, or status contract without changing canonical ownership.
   - Files: `backend/app/db/base.py`, `backend/app/db/session.py`, `backend/app/db/models/*.py`, `backend/tests/db/test_models.py`, `backend/tests/db/test_session.py`
 
-- [ ] (02B): Create and prove the repeatable initial Alembic migration
+- [x] (02B): Create and prove the repeatable initial Alembic migration
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.2 SQLite ownership and schema`; `docs/plans/Plan_2.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 24.2 Backend integration tests`; `docs/plans/Master_plan.md` > `## 25. Implementation Phases`
   - Source Requirements:
     - Produce one reviewed initial migration for the complete application metadata.
