@@ -1337,3 +1337,445 @@ complete
 - Executed only 04C; did not implement health API, Compose, Batch05, domain loaders, or workers
 - Did not commit or stage; did not update task checkboxes or batch status
 - Did not perform a destructive live Neo4j invocation
+
+---
+
+# Task Execution Report - 05A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - Composed Runtime, Health, and Exit Evidence
+
+## Task
+05A - Create production-shaped Dockerfiles and local Compose services
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05A
+- Task title: Create production-shaped Dockerfiles and local Compose services
+- Files allowed / repair scope: infrastructure/docker/backend.Dockerfile, infrastructure/docker/frontend.Dockerfile, infrastructure/docker-compose.yml, .dockerignore, focused infrastructure config only if required (frontend.nginx.conf)
+
+## Completed Work
+- Searched Batch01 package/server commands, root .env.example contract, empty infrastructure/docker placeholders, Plan 2/Master network and config requirements, and existing ignore rules before editing.
+- Created production-shaped backend Dockerfile (Python 3.13 slim, pip install from pyproject.toml, non-root user `app`, uvicorn on 0.0.0.0:8000 inside the container only).
+- Created production-shaped multi-stage frontend Dockerfile (Node 22 `npm ci --ignore-scripts` + `npm run build` with only `VITE_API_BASE_URL` build arg; nginx:1.27-alpine non-root static runtime on port 8080).
+- Added focused `frontend.nginx.conf` for SPA static serving on unprivileged port 8080.
+- Defined `infrastructure/docker-compose.yml` with exactly three services (frontend, backend, neo4j:5.26-community), internal network, depends_on ordering, healthchecks, restart unless-stopped, named volumes `jobagent_backend_data` (/data for SQLite+FILES_DIR) and `jobagent_neo4j_data`, frontend/backend published only on 127.0.0.1, Neo4j expose-only (no host ports).
+- Wired root env contract via Compose interpolation/`--env-file` into backend runtime environment; frontend receives only approved public build arg; no `.env` file copied into images.
+- Added root `.dockerignore` excluding secrets, private evaluation inputs, node_modules, caches, and docs noise from build contexts.
+- Did not implement 05B health endpoint behavior, 05C exit evidence, worker/Qdrant, or live Compose up (optional; requires user-owned root `.env` with valid NEO4J_PASSWORD).
+
+## Files Created or Modified
+- infrastructure/docker/backend.Dockerfile (created)
+- infrastructure/docker/frontend.Dockerfile (created)
+- infrastructure/docker/frontend.nginx.conf (created)
+- infrastructure/docker-compose.yml (created)
+- .dockerignore (created)
+- docs/reports/report_2_execute_agent.md (this 05A block appended)
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (05A entry)
+- docs/plans/Plan_2.md (§4 Scope, §7.1 Configuration contract, §9 Verification)
+- docs/plans/Master_plan.md (§22.1 Network exposure, §23 Environment Configuration)
+- .env.example
+- .gitignore
+- backend/pyproject.toml
+- backend/app/main.py
+- backend/app/config.py
+- frontend/package.json
+- frontend/vite.config.ts
+- infrastructure/docker/ (placeholder .gitkeep only)
+- infrastructure/neo4j/ (empty placeholder)
+- docs/reports/report_2_execute_agent.md (no prior 05A block)
+
+## Tests or Validations Run
+- command/check: `docker compose --env-file .env.example -f infrastructure/docker-compose.yml config`
+- required: yes
+- result: passed
+- evidence or reason: exit 0; services neo4j/backend/frontend only; env vars from .env.example interpolated; ports host_ip 127.0.0.1 for backend:8000 and frontend:5173->8080; neo4j expose 7474/7687 without host ports; named volumes jobagent_backend_data and jobagent_neo4j_data
+
+- command/check: `docker compose --env-file .env.example -f infrastructure/docker-compose.yml build`
+- required: yes
+- result: passed
+- evidence or reason: exit 0; Image jobagent-backend Built and Image jobagent-frontend Built; clean contexts (backend ~187kB / frontend ~214kB transfer); no secret file copy; Docker Desktop engine was started to complete this required check
+
+- command/check: `rg -n "worker|qdrant|0\.0\.0\.0:" infrastructure/docker-compose.yml`
+- required: yes
+- result: passed
+- evidence or reason: rg exit code 1 (no matches); no worker, qdrant, or 0.0.0.0 host bindings in compose file
+
+- command/check: image content / non-root / no .env (local corroboration)
+- required: no
+- result: passed
+- evidence or reason: backend runs as uid 1000 app, imports JobAgent app, NO_APP_ENV/NO_ROOT_ENV/NO_EVAL; frontend runs as nginx, serves index.html+assets, NO_ROOT_ENV; compose --services lists only neo4j backend frontend; compose --volumes lists jobagent_neo4j_data and jobagent_backend_data
+
+- command/check: `docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d` (optional live startup)
+- required: no
+- result: not_run
+- evidence or reason: optional; blocked for live path when user-owned root `.env` lacks valid NEO4J_PASSWORD; static config/build remain the required gates and passed without reading or modifying real `.env`
+
+## Acceptance Check
+- condition: Compose defines exactly frontend, backend, and Neo4j; frontend/backend publish only on 127.0.0.1; Neo4j has no default host publication
+- status: satisfied
+- evidence: config --services => neo4j, backend, frontend; ports 127.0.0.1:8000:8000 and 127.0.0.1:5173:8080; neo4j has expose only
+
+- condition: Backend receives backend-only variables at runtime; frontend build/runtime only approved public configuration; no `.env` copied into an image
+- status: satisfied
+- evidence: backend environment block lists full master §23 contract via Compose interpolation; frontend build.args only VITE_API_BASE_URL; image inspect/run shows no .env files; .dockerignore excludes .env
+
+- condition: SQLite/files and Neo4j use named persistent storage that survives restart and plain down
+- status: satisfied
+- evidence: volumes jobagent_backend_data:/data and jobagent_neo4j_data:/data; restart: unless-stopped; no anonymous volumes for app/neo4j data
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: infrastructure/docker/backend.Dockerfile; infrastructure/docker/frontend.Dockerfile; infrastructure/docker/frontend.nginx.conf; infrastructure/docker-compose.yml; .dockerignore; docs/reports/report_2_execute_agent.md
+- validations to rerun: `docker compose --env-file .env.example -f infrastructure/docker-compose.yml config`; `docker compose --env-file .env.example -f infrastructure/docker-compose.yml build`; `rg -n "worker|qdrant|0\.0\.0\.0:" infrastructure/docker-compose.yml`
+- risk areas: live `up` requires user-owned root `.env` with non-empty NEO4J_PASSWORD (example file has empty password); container-internal backend bind is 0.0.0.0 while host publication remains 127.0.0.1; frontend production serves static nginx (not vite dev server) on container 8080 mapped to host 5173; did not implement 05B health API
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 4. Scope
+- docs/plans/Plan_2.md > ### 7.1 Configuration contract
+- docs/plans/Plan_2.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 22.1 Network exposure
+- docs/plans/Master_plan.md > ## 23. Environment Configuration
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+- docs/tasks/task_2.md
+- .env.example
+
+## Dependency and User Action Check
+- dependencies: (01A)/(01B) runnable backend/frontend scaffolds present (satisfied)
+- user action: populate root `.env` NEO4J_PASSWORD before optional live up only; not required for static config/build (satisfied for required gates)
+
+## Key Implementation Decisions
+- Repo-root build contexts with root `.dockerignore` so secrets/private evaluation inputs never enter images
+- Compose loads single root contract via `--env-file` interpolation into service environment (no nested app env files, no env baked into layers)
+- Neo4j Community pin `neo4j:5.26-community` for native vector-index support compatible with driver 6.2.0 / Plan 2 schema
+- Frontend multi-stage nginx runtime is production-shaped; host still uses port 5173 to match FRONTEND_ORIGIN
+- Backend CMD uses in-container 0.0.0.0 bind so Docker networking works while host publish stays loopback-only
+
+## Workflow Integrity Check
+- Executed only 05A; did not implement 05B health endpoint, 05C exit evidence, worker, Qdrant, CI, or later-phase APIs
+- Did not commit or stage; did not update task checkboxes or batch status
+- Did not open, print, modify, or copy the real root `.env`; used `.env.example` only for static validations
+
+---
+
+# Task Execution Report - 05B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - Composed Runtime, Health, and Exit Evidence
+
+## Task
+05B - Integrate lifecycle dependencies and expose sanitized component health
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05B
+- Task title: Integrate lifecycle dependencies and expose sanitized component health
+- Files allowed / repair scope: backend/app/api/health.py, backend/app/schemas/health.py, backend/app/main.py, backend/tests/api/test_health.py, backend/tests/test_lifecycle.py (plus package inits and minimal test_config route regression)
+
+## Completed Work
+- Inspected existing lifecycle owners (DatabaseSessionManager, FilesystemAttachmentStorage, Neo4jClient/ensure_graph_schema), settings/CORS contracts, and main app factory before editing.
+- Added typed health schemas (OverallStatus healthy/degraded; ComponentState up/down; ComponentHealth with safe code pattern; HealthResponse with sqlite/filesystem/neo4j).
+- Added probe orchestration in app/api/health.py separate from component clients: bounded SQLite SELECT 1, writable FILES_DIR probe, Neo4j connectivity + idempotent schema check; concurrent collect_health aggregation.
+- Wired FastAPI lifespan in main.py: settings load (or injection), db/storage/neo4j ownership, best-effort schema setup that never mutates SQLite/files on Neo4j failure, shutdown close/dispose; ExactOriginCORSMiddleware using lifespan-set frontend_origin; only public app route GET /api/health plus framework docs.
+- Added API tests for healthy shape, per-component injected failures, Neo4j timeout, responsiveness, CORS exact origin vs evil origin, preflight, path/URI/credential redaction, and OpenAPI health-only surface.
+- Added lifecycle tests for shutdown cleanup, schema IF NOT EXISTS idempotency, Neo4j startup failure preserving SQLite/files, import without root .env, settings_loader injection, positive probe timeout guard.
+- Updated tests/test_config.py route assertion for health-only OpenAPI surface (prior 01A no-/api assertion).
+- Did not open user-owned root .env, run live Compose, implement 05C, add workers/polling, or extra public endpoints.
+
+## Files Created or Modified
+- backend/app/schemas/__init__.py (created)
+- backend/app/schemas/health.py (created)
+- backend/app/api/__init__.py (created)
+- backend/app/api/health.py (created)
+- backend/app/main.py (modified: lifespan, CORS, health router)
+- backend/tests/api/__init__.py (created)
+- backend/tests/api/test_health.py (created)
+- backend/tests/test_lifecycle.py (created)
+- backend/tests/test_config.py (modified: health-only route assertion)
+- docs/reports/report_2_execute_agent.md (this 05B block appended)
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (05B entry)
+- docs/plans/Plan_2.md (7.6 Health boundary, 9 Verification)
+- docs/plans/Master_plan.md (20 Failure/Recovery, 22 Security, 14 Public API)
+- backend/app/main.py
+- backend/app/config.py
+- backend/app/db/session.py
+- backend/app/graph/client.py
+- backend/app/graph/lifecycle.py
+- backend/app/graph/schema.py
+- backend/app/graph/errors.py
+- backend/app/services/attachment_storage.py
+- backend/tests/graph/fakes.py
+- backend/tests/test_config.py
+- docs/reports/report_2_execute_agent.md (05A block present; no prior 05B)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/api/test_health.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 17 passed in 0.87s; synthetic settings and FakeDriver only; no live Compose or root .env
+
+- command/check: `cd backend; python -m ruff check app/api app/schemas/health.py app/main.py tests/api tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed (after ruff --fix import sort)
+
+- command/check: `cd backend; python -m mypy app/api app/schemas/health.py app/main.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 4 source files
+
+- command/check: `cd backend; python -m pytest -q tests/test_config.py`
+- required: no
+- result: passed
+- evidence or reason: 49 passed; health-only OpenAPI regression
+
+- command/check: optional live `Invoke-RestMethod http://127.0.0.1:8000/api/health`
+- required: no
+- result: not_run
+- evidence or reason: optional after Compose startup; fake-based suite covers contract; did not start Compose or read root .env
+
+## Acceptance Check
+- condition: Endpoint reports all three named components and overall state through validated schema; injected failures only as safe state/code
+- status: satisfied
+- evidence: HealthResponse pydantic model; healthy + sqlite/filesystem/neo4j failure tests assert degraded + stable codes; leak assertions exclude secrets/paths/URIs/tracebacks
+
+- condition: Startup/shutdown closes database and graph resources; schema setup idempotent; Neo4j failure does not mutate/delete SQLite/filesystem state
+- status: satisfied
+- evidence: test_shutdown_closes_database_and_graph; test_schema_setup_is_idempotent_on_startup (2x SCHEMA_STATEMENTS with IF NOT EXISTS); test_neo4j_startup_failure_does_not_mutate_sqlite_or_files (seed row 42 and marker file preserved)
+
+- condition: Route inspection finds no public endpoint other than /api/health plus framework documentation routes
+- status: satisfied
+- evidence: OpenAPI paths == {/api/health}; framework /docs /redoc /openapi.json retained; no chat/attachments/profile/jobs routes
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: backend/app/api/health.py; backend/app/api/__init__.py; backend/app/schemas/health.py; backend/app/schemas/__init__.py; backend/app/main.py; backend/tests/api/test_health.py; backend/tests/api/__init__.py; backend/tests/test_lifecycle.py; backend/tests/test_config.py; docs/reports/report_2_execute_agent.md
+- validations to rerun: `python -m pytest -q tests/api/test_health.py tests/test_lifecycle.py`; `python -m ruff check app/api app/schemas/health.py app/main.py tests/api tests/test_lifecycle.py`; `python -m mypy app/api app/schemas/health.py app/main.py` from backend/
+- risk areas: production lifespan still loads root .env only at startup (not import); nested FastAPI 0.139 include_router requires OpenAPI path inspection not flat app.routes.path; optional live health after Compose remains 05C; preserved uncommitted 05A Compose artifacts untouched
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ### 7.6 Health boundary
+- docs/plans/Plan_2.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+- docs/plans/Master_plan.md > ## 22. Security and Privacy
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+- docs/tasks/task_2.md
+
+## Dependency and User Action Check
+- dependencies: (02B)/(03A)/(04A)/(05A) primitives present (satisfied)
+- user action: none for fake-based tests (satisfied); live healthy-state optional requires root .env from 05A (not required for 05B acceptance)
+
+## Key Implementation Decisions
+- Probe orchestration isolated in api/health.py; clients remain unaware of aggregate health
+- Overall healthy iff all three components up; otherwise degraded with HTTP 200 (endpoint stays responsive)
+- Exact-origin CORS middleware reads app.state.frontend_origin set in lifespan so import never loads root .env
+- Neo4j schema ensure is best-effort at startup and re-checked inside bounded neo4j probe when connectivity is up
+- Test injection via create_app(settings=..., session_manager=..., storage=..., neo4j_client=...) and FakeDriver only
+
+## Workflow Integrity Check
+- Executed only 05B; did not implement 05C exit evidence, worker, timer, polling loop, or later-phase APIs
+- Did not commit or stage; did not update task checkboxes or batch status
+- Did not open, print, modify, or copy the real root .env; preserved uncommitted 05A Compose work
+---
+
+# Task Execution Report - 05C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - Composed Runtime, Health, and Exit Evidence
+
+## Task
+05C - Prove the local foundation and publish the Plan 3 handoff commands
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05C
+- Task title: Prove the local foundation and publish the Plan 3 handoff commands
+- Files allowed / repair scope: README.md and existing Plan 2-owned code/config/tests only if validation exposes a same-scope defect
+
+## Completed Work
+- Re-ran full backend quality suite (ruff, mypy, pytest) and full frontend suite (npm ci, check:astryx, lint, typecheck, test, build); both green without ShopAIKey network calls.
+- Nested-env and later-phase surface scans clean (no nested `.env`; no chat/upload/CRUD/match surface under `backend/app/api` or Compose; no worker/qdrant).
+- Live Compose with root `.env` only as `--env-file` (never opened/printed secret values). Aggregate-only preflight: `NEO4J_PASSWORD_nonempty=true`. `up --build -d` exit 0; all three services reached healthy; host binds `127.0.0.1:8000` and `127.0.0.1:5173`.
+- Sanitized health: HTTP 200 `{"status":"healthy","sqlite":{"status":"up","code":null},"filesystem":{"status":"up","code":null},"neo4j":{"status":"up","code":null}}` — keys only `status,sqlite,filesystem,neo4j`.
+- Migrations: `alembic upgrade head` applied once on empty volume then second run no-op at head `c885a5846d85`; both exit 0.
+- Graph schema: `ensure_graph_schema` twice; `SCHEMA_DOUBLE_OK=True`; 4 required uniqueness constraints present once each; vector index `job_embedding_vector` present; no duplicates.
+- Outbox replay: double enqueue same `(operation, entity_id)` returned same row id; `OUTBOX_ROW_COUNT=1`; attempts/status unchanged (`pending`).
+- Persistence markers for SQLite row, FILES_DIR file, and Neo4j probe node; ordinary `compose restart`; after healthy recovery `ALL_THREE_PERSISTED=True` (sqlite/file/neo4j). Frontend HTTP 200.
+- `compose down` without `-v` exit 0; named volumes `jobagent_backend_data` and `jobagent_neo4j_data` retained.
+- Updated root `README.md` Phase 1 status/commands/architecture/persistence boundaries/limitations and Plan 3 handoff of stable primitives (no Plan 3 behavior). Prior same-scope health string scan fix retained from first 05C pass.
+- Did not update task checkboxes or batch status; did not commit or stage; did not open or report any environment secret values. Preserved uncommitted 05A/05B work.
+
+## Files Created or Modified
+- README.md (Phase 1 evidence-backed status, commands, Plan 3 handoff)
+- backend/app/api/health.py (prior same-scope scan false-positive string only; retained)
+- docs/reports/report_2_execute_agent.md (this 05C block updated)
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (05C entry)
+- docs/plans/Plan_2.md (§9 Verification, §10 Handoff Notes for Plan 3)
+- docs/plans/Master_plan.md (§24.5 Local verification commands, §25 Phase 1 exit)
+- docs/reports/report_2_execute_agent.md (existing blocked 05C block + 05A/05B)
+- infrastructure/docker-compose.yml
+- infrastructure/docker/backend.Dockerfile
+- infrastructure/scripts/rebuild_graph.py
+- backend/app/api/health.py
+- backend/app/main.py
+- backend/app/graph/schema.py
+- backend/app/repositories/graph_outbox.py
+- backend/app/db/session.py
+- backend/app/graph/client.py
+- .env.example (names/defaults only; not real secrets)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m ruff check app tests; python -m mypy app; python -m pytest -q`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success 37 source files; pytest 369 passed, 2 skipped in 11.78s; synthetic/fake suite; no ShopAIKey network calls
+
+- command/check: `cd frontend; npm ci --ignore-scripts; npm run check:astryx; npm run lint; npm run typecheck; npm run test -- --run; npm run build`
+- required: yes
+- result: passed
+- evidence or reason: npm ci 0 vulns; Astryx 0.1.4 16 components PASS; eslint/tsc clean; vitest 5 passed; vite production build succeeded
+
+- command/check: `docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d` + health + double schema + migration + outbox replay + pre/post-restart persistence
+- required: yes
+- result: passed
+- evidence or reason: UP_EXIT=0; three services healthy; health sanitized healthy with sqlite/filesystem/neo4j up; alembic upgrade head twice (apply then no-op at c885a5846d85); SCHEMA_DOUBLE_OK=True (4 constraints, vector index, no dups); OUTBOX_REPLAY_SAME_ID=True ROW_COUNT=1; compose restart then ALL_THREE_PERSISTED=True; frontend HTTP 200. No secret values printed. Aggregate preflight NEO4J_PASSWORD_nonempty=true only.
+
+- command/check: `docker compose --env-file .env -f infrastructure/docker-compose.yml down`
+- required: yes
+- result: passed
+- evidence or reason: DOWN_EXIT=0; containers/network removed; volumes jobagent_backend_data and jobagent_neo4j_data retained (no -v)
+
+- command/check: nested env scan under frontend/backend and surface scan `(chat|attachments/cv|profiles|jobs|match)` on backend/app/api + infrastructure/docker-compose.yml
+- required: yes
+- result: passed
+- evidence or reason: NESTED_ENV_COUNT=0; no later-phase surface matches; worker/qdrant absent from compose; no tracked .env files
+
+- command/check: `git status --short; git diff --check`
+- required: yes
+- result: passed
+- evidence or reason: intended Plan 2/report/review/task/README/compose/health changes only (05A/05B preserved uncommitted); git diff --check clean (CRLF conversion warnings only)
+
+## Acceptance Check
+- condition: All required local commands pass; Compose starts three healthy services; health sanitized; migration/schema reruns idempotent; restart preserves SQLite/files/Neo4j
+- status: satisfied
+- evidence: backend/frontend suites green; three services healthy; health keys status/sqlite/filesystem/neo4j only; alembic and ensure_graph_schema double-run safe; outbox identity replay-safe; ALL_THREE_PERSISTED after ordinary restart
+
+- condition: README commands match actual scripts/paths and distinguish required local checks from optional Phase 0 live diagnostics
+- status: satisfied
+- evidence: README documents backend/frontend/migration/Compose/health/rebuild commands and separate optional Phase 0 diagnostics; Plan 3 handoff lists stable primitives only
+
+- condition: Git diff and route/service/dependency scans contain only Plan 2 scope; no secret or private source data tracked/reported
+- status: satisfied
+- evidence: scope scans clean; no nested env; no secret values printed; git shows Plan 2 foundation + reports/reviews only
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files this re-run: README.md (status wording); docs/reports/report_2_execute_agent.md (05C update). Retained prior 05C health.py string fix and Batch05 uncommitted 05A/05B artifacts.
+- validations already green in this run: full backend/frontend suites; compose up/health/schema/migration/outbox/restart/down; scope scans; git diff --check
+- risk areas: do not treat plain `docker compose up` exit 0 as healthy — wait for service health and sanitized /api/health; root `.env` remains user-owned and untracked; temporary in-container probe scripts used /tmp only and were not committed
+- next task readiness: can_review
+- prior blocked reason cleared: live exit completed after user provided non-empty NEO4J_PASSWORD (value never printed)
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_2.md > ## 10. Handoff Notes for Plan 3 (Master Phase 2)
+- docs/plans/Master_plan.md > ### 24.5 Local verification commands
+- docs/plans/Master_plan.md > ## 25. Implementation Phases
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+- docs/reports/report_2_execute_agent.md
+- docs/review/review_2_review_agent.md
+- docs/tasks/task_2.md
+- .env.example (names only)
+
+## Dependency and User Action Check
+- dependencies: 05A/05B and earlier Plan 2 tasks present (satisfied)
+- user action: valid ignored root `.env` for live Compose (satisfied this re-run; aggregate NEO4J_PASSWORD_nonempty=true only)
+
+## Workflow Integrity Check
+- Executed only 05C; did not implement Plan 3 behavior, workers, CRUD, chat, CI, or cloud deploy
+- Did not commit or stage; did not update task checkboxes or batch status
+- Never opened/printed/copied real env secret values; used root `.env` only as Compose `--env-file`
+- Always issued compose down without volume removal before final handoff
+
+## Repair Log
+
+### 2026-07-11 (orchestrated re-execute after BLOCKED_BY_USER_ACTION)
+- reason for repair: Prior 05C blocked because root `.env` had empty NEO4J_PASSWORD. Orchestrator re-checked aggregate NEO4J_PASSWORD_nonempty=true and requested full re-execute of live Compose exit evidence.
+- changes made: Re-ran complete required local and live validations; no Plan 2 code defects found requiring repair beyond README status wording update and this report block update. Preserved prior health.py scan-string fix and uncommitted 05A/05B work.
+- validations rerun: backend ruff/mypy/pytest; frontend npm ci through build; compose up --build -d; health; alembic upgrade head x2; ensure_graph_schema x2; outbox double-enqueue; restart persistence (sqlite/files/neo4j); compose down; nested-env and route/service scans; git status/diff --check
+- outcome: status complete; acceptance satisfied; nextTaskReadiness can_review

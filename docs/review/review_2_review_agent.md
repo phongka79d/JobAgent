@@ -1154,3 +1154,267 @@ ACCEPTED
 
 ## Repair Instructions
 - None.
+
+---
+
+# Task Review Report - 05A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05A
+- Task title: Create production-shaped Dockerfiles and local Compose services
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status/diff/stat/cached-diff reviewed: yes; cached diff is empty.
+- changed files: `.dockerignore`, `infrastructure/docker-compose.yml`, `infrastructure/docker/backend.Dockerfile`, `infrastructure/docker/frontend.Dockerfile`, `infrastructure/docker/frontend.nginx.conf`, and matching A1 evidence. No 05B/05C implementation file is present.
+
+## Files Reviewed
+- Compose defines only `neo4j`, `backend`, and `frontend` on an internal network. Frontend/backend publish only loopback ports; Neo4j exposes internal ports only; `/data` named volumes retain backend SQLite/files and Neo4j data.
+- Backend and frontend Dockerfiles use reproducible install commands, run non-root processes, and copy only explicit application/build inputs. Frontend receives only the approved `VITE_API_BASE_URL` build argument.
+- `.dockerignore` excludes root/nested environment files, private evaluation inputs, data, and build caches from root contexts.
+- The matching 05A execution report and live A1 handoff were reviewed as evidence, not authority.
+
+## Validations Reviewed
+- `docker compose --env-file .env.example -f infrastructure/docker-compose.yml config`: passed independently; three services, root-contract interpolation, loopback-only publications, internal Neo4j, and two named volumes confirmed.
+- `docker compose --env-file .env.example -f infrastructure/docker-compose.yml build`: passed in A1 evidence for both clean application images. Independent rerun was blocked after A1 by the unavailable local Docker Desktop daemon (`dockerDesktopLinuxEngine` pipe missing); static context and Dockerfile checks corroborate the image-boundary requirements.
+- `rg -n "worker|qdrant|0\.0\.0\.0:" infrastructure/docker-compose.yml`: independently returned no matches.
+- Static settings/context probe: passed. Backend receives settings consumed by `app.config`; frontend receives only the approved public build key; no `.env` can enter through a Dockerfile `COPY` path.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Evidence: the required three-service local topology, host exposure boundary, root environment contract, non-root/clean image contexts, and named persistence volumes are present. Optional live `up` was properly not attempted because it requires the user-owned root `.env` with a valid Neo4j password.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- Docker Desktop was unavailable during the independent image-build rerun after A1's successful build; later live-stack validation remains tied to the user-owned `.env` path.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 05B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05B
+- Task title: Integrate lifecycle dependencies and expose sanitized component health
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status/diff/stat/cached-diff reviewed: yes; cached diff is empty.
+- changed files: health API/schemas/main, focused API/lifecycle tests, health-only route assertion, and matching A1 evidence. Existing 05A Compose files were identified as prior accepted work.
+
+## Files Reviewed
+- `app/api/health.py`: bounded SQLite, contained filesystem, and Neo4j/schema probes run concurrently and return only fixed status/code fields.
+- `app/schemas/health.py`: validated response schemas allow only healthy/degraded and up/down states plus bounded safe-code grammar.
+- `app/main.py`: lifespan owns dependencies, treats Neo4j schema setup as best effort, closes graph/database resources, and exposes only the health router with exact-origin CORS.
+- Focused API/lifecycle tests and `tests/test_config.py`: cover failure, timeout, cleanup, CORS, redaction, lifecycle isolation, and health-only OpenAPI paths.
+
+## Validations Reviewed
+- `cd backend; python -m pytest -q tests/api/test_health.py tests/test_lifecycle.py`: passed independently, 17 tests.
+- `cd backend; python -m ruff check app/api app/schemas/health.py app/main.py tests/api tests/test_lifecycle.py`: passed independently.
+- `cd backend; python -m mypy app/api app/schemas/health.py app/main.py`: passed independently.
+- `cd backend; python -m pytest -q tests/test_config.py`: passed independently, 49 tests.
+- Independent route/filesystem/redaction probes: passed. OpenAPI contains only `/api/health`; a temporary health probe is removed after successful contained read/write; source scan finds no exception-string or traceback response path.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Evidence: the validated health endpoint reports all three components and deterministic aggregate state; injected failures remain code-only. Neo4j failures do not prevent serving or mutate SQLite/filesystem state, and shutdown releases graph/database resources. No product endpoint beyond `/api/health` was introduced.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 05C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch05 - Composed Runtime, Health, and Exit Evidence
+- Task ID: 05C
+- Task title: Prove the local foundation and publish the Plan 3 handoff commands
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes (via `.git/logs/HEAD` + working-tree inventory; HEAD remains `f9665cd` / `P2B04: Complete` with Batch05 deliverables uncommitted, matching A1)
+- git diff reviewed: yes (working-tree vs last commit baseline for claimed 05C and preserved Batch05 files; A1 reported `git diff --check` clean with CRLF conversion warnings only)
+- changed files from git / working tree for this review focus:
+  - `README.md` (05C Phase 1 status, commands, Plan 3 handoff)
+  - `docs/reports/report_2_execute_agent.md` (05C block updated from blocked → complete)
+  - retained Batch05 tree already accepted for 05A/05B (`infrastructure/docker-compose.yml`, Dockerfiles, health API/schemas/main/tests) and prior same-scope `backend/app/api/health.py` retention noted by A1
+  - no Batch05 commit yet; no staged index changes claimed; secrets remain untracked root `.env` only
+
+## Files Reviewed
+- `README.md`: in scope — Phase 0 complete + Phase 1 Batches 01–05 evidence-backed status; backend/frontend quality commands; migration/attachment/graph/outbox/health suites; Compose config/build/up/health/alembic/down; optional Phase 0 diagnostics separated; Plan 3 handoff lists stable primitives only (no Plan 3 behavior).
+- `docs/reports/report_2_execute_agent.md` (`# Task Execution Report - 05C`): in scope — status `complete` after re-run; live Compose aggregate evidence; no secret values; reportWriteMode update of prior blocked block.
+- `.agent/handoff/a1_response.json` + bridge meta: in scope as A1 gate evidence — `status=complete`, `VALIDATION_PASSED`, duration ~307s, live mode, taskId 05C.
+- `infrastructure/docker-compose.yml`: in scope (dependency/context) — exactly `neo4j`/`backend`/`frontend`; `127.0.0.1` host publications; named volumes; no worker/qdrant; root env interpolation.
+- `backend/app/api/health.py`, `backend/app/schemas/health.py`, `backend/app/main.py`: in scope (dependency) — health-only public router; sanitized `HealthResponse`; concurrent probes; lifespan best-effort schema.
+- `backend/app/repositories/graph_outbox.py`: source context — `(operation, entity_id)` replay returns same row; no continuous worker.
+- `frontend/package.json` scripts and `infrastructure/scripts/rebuild_graph.py` path: match README commands.
+- `docs/plans/Plan_2.md` §9/§10 and `docs/plans/Master_plan.md` §24.5/§25: source requirements satisfied for Phase 1 exit and Plan 3 handoff.
+- Nested env / later-phase surface: no matches under `backend/app/api` or `infrastructure/docker-compose.yml` for `(chat|attachments/cv|profiles|jobs|match)`; only `health.py` under `backend/app/api/`; root `.env` ignored via `/.env` in `.gitignore`.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m ruff check app tests; python -m mypy app; python -m pytest -q`
+  - Required: yes
+  - Reported result: passed (ruff clean; mypy 37 files; pytest 369 passed, 2 skipped)
+  - Rerun result: not_run (no independent process runner in this A2 runtime); static suite layout and package scripts corroborate
+  - Status: passed (A1 credible; not contradicted)
+  - Notes: synthetic/fake suite; no ShopAIKey network requirement
+
+- Command/check: `cd frontend; npm ci --ignore-scripts; npm run check:astryx; npm run lint; npm run typecheck; npm run test -- --run; npm run build`
+  - Required: yes
+  - Reported result: passed (Astryx 0.1.4 PASS; vitest 5; production build)
+  - Rerun result: not_run (same runtime limit); `package.json` scripts match README
+  - Status: passed (A1 credible)
+
+- Command/check: live Compose up/health/schema/migration/outbox/restart/persistence + down without `-v`
+  - Required: yes
+  - Reported result: passed — UP_EXIT=0; three services healthy; sanitized health keys only; alembic head `c885a5846d85` apply then no-op; SCHEMA_DOUBLE_OK=True; OUTBOX_REPLAY_SAME_ID=True ROW_COUNT=1; ALL_THREE_PERSISTED=True; DOWN_EXIT=0; volumes retained; aggregate `NEO4J_PASSWORD_nonempty=true` only
+  - Rerun result: not_run (requires user-owned root `.env` credentials and Docker; policy forbids credential-bearing re-execution here)
+  - Status: passed (A1 live handoff + ~307s bridge duration + narrative log consistent; prior BLOCKED_BY_USER_ACTION cleared)
+  - Notes: temporary in-container probes claimed not committed
+
+- Command/check: nested env + later-phase surface scans
+  - Required: yes
+  - Reported result: NESTED_ENV_COUNT=0; no surface matches
+  - Rerun result: independently confirmed via repository search (no nested `.env`; no chat/upload/CRUD/match surface on api/compose)
+  - Status: passed
+
+- Command/check: `git status --short; git diff --check`
+  - Required: yes
+  - Reported result: intended Plan 2/report/review/compose/health tree; diff --check clean (CRLF warnings only)
+  - Rerun result: HEAD still P2B04; working tree holds Batch05 uncommitted foundation + reports/reviews/README; no tracked secret env
+  - Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence:
+  - Required local quality and live Phase 1 exit evidence reported complete with aggregate-only secrets handling.
+  - README documents exact lint/typecheck/test/migration/Compose/health/rebuild/shutdown commands and separates optional Phase 0 live diagnostics.
+  - Plan 3 handoff publishes stable configuration/database/attachment/graph/outbox/health primitives without Plan 3 chat/agent behavior.
+  - Scope remains Plan 2: health-only public API surface; three Compose services; no worker/Qdrant/CI/cloud.
+  - Dependencies 05A/05B already A2-accepted with checkboxes retained.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling checkboxes 05A/05B left checked (prior ACCEPTED); batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Full backend/frontend/Compose suites were not independently re-executed in this A2 process runtime; acceptance relies on credible A1 live handoff, bridge meta, and static repository corroboration (same pattern as prior Batch05 reviews when Docker/credentials cannot be re-driven safely).
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

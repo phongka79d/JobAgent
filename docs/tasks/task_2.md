@@ -451,7 +451,7 @@ worker, CI, public product endpoint, provider call, or later-phase business flow
 
 ### Tasks
 
-- [ ] (05A): Create production-shaped Dockerfiles and local Compose services
+- [x] (05A): Create production-shaped Dockerfiles and local Compose services
   - Source of Truth: `docs/plans/Plan_2.md` > `## 4. Scope`; `docs/plans/Plan_2.md` > `### 7.1 Configuration contract`; `docs/plans/Plan_2.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 22.1 Network exposure`
   - Source Requirements:
     - Build frontend and backend images and compose frontend, backend, and Neo4j Community services from `infrastructure/docker-compose.yml`.
@@ -477,7 +477,7 @@ worker, CI, public product endpoint, provider call, or later-phase business flow
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` for live startup when the ignored root `.env` lacks a valid Neo4j password; static config/build validation remains required.
   - Files: `infrastructure/docker/backend.Dockerfile`, `infrastructure/docker/frontend.Dockerfile`, `infrastructure/docker-compose.yml`, `.dockerignore`, focused service config under `infrastructure/` only if required
 
-- [ ] (05B): Integrate lifecycle dependencies and expose sanitized component health
+- [x] (05B): Integrate lifecycle dependencies and expose sanitized component health
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.6 Health boundary`; `docs/plans/Plan_2.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`; `docs/plans/Master_plan.md` > `## 22. Security and Privacy`
   - Source Requirements:
     - Expose `GET /api/health` with overall status and SQLite, filesystem, and Neo4j component states.
@@ -502,7 +502,7 @@ worker, CI, public product endpoint, provider call, or later-phase business flow
   - Blocked Condition: A required live component cannot start because user-owned root credentials are missing; fake-based behavior and sanitization tests must still complete.
   - Files: `backend/app/api/health.py`, `backend/app/schemas/health.py`, `backend/app/main.py`, `backend/tests/api/test_health.py`, `backend/tests/test_lifecycle.py`
 
-- [ ] (05C): Prove the local foundation and publish the Plan 3 handoff commands
+- [x] (05C): Prove the local foundation and publish the Plan 3 handoff commands
   - Source of Truth: `docs/plans/Plan_2.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_2.md` > `## 10. Handoff Notes for Plan 3 (Master Phase 2)`; `docs/plans/Master_plan.md` > `### 24.5 Local verification commands`; `docs/plans/Master_plan.md` > `## 25. Implementation Phases`
   - Source Requirements:
     - Prove backend/frontend quality, fresh and initialized migrations, three-service startup, sanitized health, persistent SQLite/files/Neo4j storage, schema idempotency, and replay-safe outbox behavior.

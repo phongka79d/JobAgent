@@ -291,18 +291,20 @@ def test_load_settings_with_environ_does_not_require_real_root_env() -> None:
     assert isinstance(settings, Settings)
 
 
-def test_fastapi_app_is_importable_without_custom_routes() -> None:
+def test_fastapi_app_is_importable_with_health_only() -> None:
     assert isinstance(app, FastAPI)
     built = create_app()
     assert isinstance(built, FastAPI)
-    # Framework-generated documentation routes only; no application API yet.
-    paths = {route.path for route in app.routes}  # type: ignore[attr-defined]
-    assert "/docs" in paths or "/openapi.json" in paths
-    application_paths = {
-        path
-        for path in paths
-        if path not in {"/docs", "/redoc", "/openapi.json"}
-        and not path.startswith("/docs")
+    # Framework docs exist; OpenAPI application surface is health-only.
+    route_paths = {
+        route.path
+        for route in app.routes  # type: ignore[attr-defined]
+        if hasattr(route, "path")
     }
-    # Starlette may include a default route set; ensure no /api/* product routes.
-    assert not any(path.startswith("/api") for path in application_paths)
+    assert "/docs" in route_paths or "/openapi.json" in route_paths
+    openapi_paths = set(app.openapi()["paths"])
+    assert openapi_paths == {"/api/health"}
+    assert not any(
+        any(marker in path for marker in ("chat", "attachments", "profile", "jobs"))
+        for path in openapi_paths
+    )

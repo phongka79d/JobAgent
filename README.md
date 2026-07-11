@@ -6,42 +6,51 @@
 **PASS**. **Plan 2 is AUTHORIZED** to consume the locked decisions below without
 re-benchmarking Phase 0 gates.
 
-**Plan 2 Batch01 is COMPLETE.** The repository now has runnable local FastAPI and
-React/TypeScript/Vite foundations with one typed root configuration contract.
+**Plan 2 Phase 1 local foundation is evidence-backed** across Batches 01–05:
 
-**Plan 2 Batch02 is COMPLETE.** SQLite application metadata (02A) and a
-repeatable initial Alembic migration (02B) are available under `backend/`.
+| Batch | Outcome |
+|---|---|
+| Batch01 | Runnable FastAPI + React/TypeScript/Vite scaffolds and one typed root configuration contract |
+| Batch02 | SQLite application metadata and repeatable initial Alembic migration |
+| Batch03 | Contained staged/active attachment filesystem persistence |
+| Batch04 | Idempotent Neo4j schema primitives, durable replay-safe graph outbox, rebuild skeleton |
+| Batch05 | Production-shaped Compose (frontend/backend/Neo4j), sanitized `GET /api/health`, green local quality + live exit evidence |
 
-**Plan 2 Batch03 is COMPLETE.** Contained filesystem attachment storage and
-caller-transactional staged/active metadata operations are available under
-`backend/`. MIME/content inspection, parsing, profile replacement, upload
-endpoints, health checks, Agent behavior, and user workflows remain for later
-plans and Plan 2 batches.
+Re-running live three-service Compose exit checks requires a populated ignored
+root `.env` (especially a non-empty `NEO4J_PASSWORD`). Do not paste secret
+values into reports, commits, or chat.
 
-**Plan 2 Batch04 is COMPLETE.** Neo4j remains derived-only behind reusable
-lifecycle/schema primitives, SQLite has a replay-safe graph outbox, and the
-rebuild command defaults to a safe dry run with explicit incomplete later stages.
-
-Batch01–Batch05 locked the scaffold and four compatibility gates (Astryx,
-ShopAIKey chat, pypdf extraction, ShopAIKey embeddings). Batch06 pinned exact
-dependency decisions, removed temporary demo/cache artifacts, completed global
-safety checks, and enforced the Phase 0 exit gate (**06C**).
-
-Evidence destination:
+Phase 0 evidence destination:
 `backend/evaluation/reports/phase_0_feasibility.md` (final decision table at EOF).
 
-## Repository layout
+## Architecture and persistence boundaries
 
 Exactly three product working folders:
 
-- `frontend/`: runnable neutral Astryx React/TypeScript/Vite shell; no product workflows.
-- `backend/`: runnable FastAPI foundation, typed settings, SQLite metadata,
-  contained attachment persistence, and Phase 0 diagnostics.
-- `infrastructure/`: empty Docker, Neo4j, and script placeholders only.
+- `frontend/`: production-shaped Astryx React/TypeScript/Vite shell (static nginx
+  image under Compose). Talks only to FastAPI. Only `VITE_`-prefixed public
+  configuration is published to frontend assets.
+- `backend/`: FastAPI foundation, typed root settings, SQLite metadata, attachment
+  storage, Neo4j client/schema, graph outbox, sanitized health, and Phase 0
+  diagnostics.
+- `infrastructure/`: Dockerfiles, Compose definition, Neo4j placeholders, and
+  the graph rebuild command skeleton.
 
 Root documentation and configuration files are not a fourth working folder.
 
-## Locked dependency decisions (for Plan 2)
+Persistence ownership:
+
+| Store | Role |
+|---|---|
+| SQLite (`SQLITE_PATH`) | Only canonical application source of truth (eleven application tables + Alembic version) |
+| Filesystem (`FILES_DIR`) | Uploaded attachment bytes under service-owned `staged/` and `active/` paths |
+| Neo4j | Derived, fully rebuildable graph data only; never the sole copy of canonical state |
+
+The only public Phase 1 application endpoint is `GET /api/health` (plus framework
+documentation routes). Chat, Agent, upload, public CRUD, matching, continuous
+workers, Qdrant, CI, and cloud deployment remain out of scope for Plan 2.
+
+## Locked dependency decisions
 
 | Area | Decision |
 |---|---|
@@ -53,20 +62,14 @@ Root documentation and configuration files are not a fourth working folder.
 | PDF | `pypdf==6.12.2`; digital mode `layout`; image-only exact `NO_EXTRACTABLE_TEXT` |
 | Embeddings | ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 prefixes |
 | FastAPI | `fastapi==0.139.0` (meets master floor ≥ `0.135.0`) |
-| LangGraph (Plan 2 only) | `langgraph==1.2.9` via optional extra `plan2` |
-| Neo4j driver (Plan 2 only) | `neo4j==6.2.0` via optional extra `plan2` |
+| LangGraph | `langgraph==1.2.9` (optional extra / later execution plans) |
+| Neo4j driver | `neo4j==6.2.0` |
+| Compose Neo4j image | `neo4j:5.26-community` |
 
-The backend default install now includes the Batch01 application foundation.
-Optional `plan2` extras retain later-batch LangGraph and Neo4j pins; normal tests
-remain fake/synthetic and do not call ShopAIKey.
-
-Plan 2 must consume these decisions without repeating benchmarks or adding
-alternate provider/UI/parser/embedding stacks. If a future re-validation fails,
-revise only the affected adapter decision.
+Normal automated tests use fakes or temporary local files and never call
+ShopAIKey. Optional Phase 0 live diagnostics remain separate (see below).
 
 ## Local prerequisites
-
-Single-purpose tool checks:
 
 ```powershell
 python --version
@@ -75,11 +78,15 @@ npm --version
 docker compose version
 ```
 
-## Batch01 application commands
+All application configuration comes from the **single root** `.env` contract.
+Copy names from `.env.example`, populate required non-placeholder values
+(especially `NEO4J_PASSWORD`, `SHOPAIKEY_API_KEY`, and path/URI fields), and do
+**not** create nested `frontend/.env` or `backend/.env` files.
 
-All application configuration comes from the root `.env` contract. Populate the
-required values from `.env.example`; do not create nested application `.env`
-files.
+## Required local quality commands (Phase 1)
+
+These are the primary Plan 2 quality gates. They do not require live Docker or
+provider network calls when using the documented synthetic/fake test suites.
 
 ### Backend
 
@@ -89,52 +96,14 @@ python -m pip install -e ".[test]"
 python -m ruff check app tests
 python -m mypy app
 python -m pytest -q
+```
+
+Local non-Compose server (loads root `.env` at startup only):
+
+```powershell
+cd backend
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-
-### Backend SQLite migration (Batch02)
-
-SQLite is the canonical application source of truth. The reviewed initial head
-creates exactly the eleven Plan 2 application tables; LangGraph checkpoint
-tables remain outside application metadata and are owned by its checkpointer.
-
-Single-purpose command to apply the reviewed application schema to the
-configured SQLite file (`SQLITE_PATH` from the root `.env` contract, or set in
-the process environment). Safe to re-run against an already-initialized
-persistent file; there is no automatic downgrade or destructive reset path.
-
-```powershell
-cd backend
-python -m alembic -c alembic.ini upgrade head
-```
-
-Migration integration checks (temporary SQLite files only; does not read the
-user-owned root `.env`):
-
-```powershell
-cd backend
-python -m pytest -q tests/integration/test_migrations.py
-```
-
-### Backend attachment persistence (Batch03)
-
-Attachment bytes are stored under the configured `FILES_DIR` in service-owned
-`staged/<uuid>` and `active/<uuid>` paths; SQLite stores metadata and the
-service path, not file blobs. `FilesystemAttachmentStorage` owns contained
-stage, promote, open, and delete mechanics, while `AttachmentRepository`
-participates in the caller's transaction for staged/active metadata changes.
-Neither interface accepts user path authority or applies MIME, magic-byte,
-page-count, parsing, approval, or profile-replacement policy.
-
-Focused attachment checks (temporary files and SQLite databases only):
-
-```powershell
-cd backend
-python -m pytest -q tests/services/test_attachment_storage.py tests/repositories/test_attachments.py
-```
-
-The Batch01 backend intentionally exposes only FastAPI's generated documentation
-routes. `GET /api/health` is added in a later Plan 2 batch.
 
 ### Frontend
 
@@ -149,16 +118,112 @@ npm run build
 npm run dev
 ```
 
-The frontend dev server binds to `http://127.0.0.1:5173`. Only
-`VITE_API_BASE_URL` is published to frontend code.
+The Vite dev server binds to `http://127.0.0.1:5173`. Only `VITE_API_BASE_URL`
+is published to frontend code.
 
-## Phase 0 single-purpose commands
+### SQLite migrations
 
-All validation is **local-only**. No CI is configured.
+SQLite is the canonical store. The reviewed initial head creates the eleven Plan
+2 application tables. LangGraph checkpoint tables are **not** application
+metadata.
 
-### Frontend Astryx resolution
+Apply or re-apply head (safe against an already-initialized file; no automatic
+downgrade):
 
-From `frontend/` after installing the exact lockfile:
+```powershell
+cd backend
+python -m alembic -c alembic.ini upgrade head
+```
+
+Migration integration checks use temporary SQLite files only and do not read the
+user-owned root `.env`:
+
+```powershell
+cd backend
+python -m pytest -q tests/integration/test_migrations.py
+```
+
+### Attachment, graph, outbox, and health focused suites
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_attachment_storage.py tests/repositories/test_attachments.py
+python -m pytest -q tests/graph tests/repositories/test_graph_outbox.py tests/infrastructure/test_rebuild_graph.py
+python -m pytest -q tests/api/test_health.py tests/test_lifecycle.py
+```
+
+### Graph rebuild skeleton
+
+Default is dry-run (non-destructive). Destructive clear of JobAgent-derived
+labels only requires `--confirm-destructive`. Later data-load stages remain
+explicitly incomplete (non-zero exit) so a partial skeleton cannot be mistaken
+for a full rebuild.
+
+```powershell
+python infrastructure/scripts/rebuild_graph.py --help
+python infrastructure/scripts/rebuild_graph.py
+```
+
+## Docker Compose (three-service local runtime)
+
+From the repository root. Compose loads the **single root** env file via
+`--env-file` (never bake `.env` into images).
+
+Static validation without real secrets:
+
+```powershell
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml config
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml build
+```
+
+Live startup (requires populated root `.env`, especially non-empty
+`NEO4J_PASSWORD`):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d
+```
+
+Expected services: `frontend`, `backend`, `neo4j` only. Host publications:
+
+- Backend API: `http://127.0.0.1:8000`
+- Frontend static: `http://127.0.0.1:5173` (container port 8080)
+- Neo4j: internal network only (no default host ports)
+
+Named volumes (persist across ordinary restart and plain `down`):
+
+- `jobagent_backend_data` → SQLite + `FILES_DIR` under `/data`
+- `jobagent_neo4j_data` → Neo4j store
+
+Sanitized health (overall + `sqlite` / `filesystem` / `neo4j` component states
+only; no credentials, URIs, paths, or stack traces):
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Depth 4
+```
+
+Apply migrations against the Compose backend volume (paths come from root env;
+default example uses `/data/jobagent.db`):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml exec backend python -m alembic -c alembic.ini upgrade head
+```
+
+Idempotent Neo4j schema setup is performed best-effort at backend startup and
+again inside the Neo4j health probe when connectivity is up. Re-running schema
+must not create duplicate constraints/indexes.
+
+Stop services **without** deleting named volumes:
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml down
+```
+
+(Do not add `-v` for ordinary shutdowns if you need persistence evidence.)
+
+## Optional Phase 0 live diagnostics
+
+These are **not** required Plan 2 quality gates. They need ignored root secrets
+and/or private corpora and must never print credentials or document text.
 
 ```powershell
 cd frontend
@@ -166,40 +231,11 @@ npm ci --ignore-scripts
 npm run check:astryx
 ```
 
-### Backend focused tests (fakes/synthetic only; no network)
-
-From `backend/`:
-
-```powershell
-cd backend
-python -m pip install -e ".[test]"
-python -m pytest -q
-```
-
-### Optional local PDF benchmark (private ignored corpus)
-
-Metrics-only aggregate; never commits PDFs or document text:
-
 ```powershell
 cd backend
 python -m evaluation.benchmark_pdf_extraction
-```
-
-### Optional live ShopAIKey embedding benchmark (validation slice only)
-
-Requires ignored root `.env` and private labeled records; writes aggregate
-metrics only:
-
-```powershell
-cd backend
 python -m evaluation.benchmark_embeddings
 ```
-
-### Optional live ShopAIKey chat diagnostic
-
-Uses ignored root `.env` only (`SHOPAIKEY_BASE_URL`, `SHOPAIKEY_API_KEY`,
-`LLM_MODEL`). Exits non-zero on required capability failure; must not print
-secrets:
 
 ```powershell
 python backend/scripts/check_shopaikey_compatibility.py
@@ -209,9 +245,43 @@ python backend/scripts/check_shopaikey_compatibility.py
 
 `.env.example` documents the root configuration contract, including
 `EMBEDDING_MODEL=text-embedding-3-small` and `EMBEDDING_DIMENSIONS=1536`.
-Real credentials belong only in the ignored root `.env`; nested frontend or
-backend `.env` files are unsupported. Private evaluation inputs (PDF corpora
-and labeled retrieval records) belong in ignored locations such as
-`backend/evaluation/private/`; committed manifests and aggregate reports
-contain only generic identifiers, digests, and non-identifying metrics —
-never raw document text, real PDFs, or private label text.
+Real credentials belong only in the ignored root `.env`. Nested frontend or
+backend `.env` files are unsupported. Private evaluation inputs belong in
+ignored locations such as `backend/evaluation/private/`. Committed manifests and
+aggregate reports contain only generic identifiers, digests, and non-identifying
+metrics — never raw document text, real PDFs, private labels, or secrets.
+
+## Current limitations (Plan 2 / Phase 1)
+
+- No chat transport, SSE, LangGraph execution, or ShopAIKey production calls in
+  the application path.
+- No CV/JD extraction, profile approval, matching, ranking, or evaluation UI.
+- No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
+  CI, or cloud deployment.
+- Graph rebuild data-load stages after clear+schema are intentionally incomplete.
+- Outbox repository is durable and replay-safe; no background poller ships in
+  Phase 1 (claim only at explicit lifecycle points in later plans).
+
+## Plan 3 handoff (Master Phase 2)
+
+Plan 3 receives these **stable primitives** and must reuse them rather than
+recreate them:
+
+- Runnable frontend/backend/Neo4j Compose services and the typed root
+  configuration contract (`backend/app/config.py`, root `.env` / `.env.example`).
+- Async SQLite session lifecycle (`DatabaseSessionManager`) and all eleven
+  application tables via the reviewed Alembic head.
+- Conversation, message, agent-run, tool-execution, memory, attachment,
+  candidate/job, and graph-outbox tables ready for repositories.
+- Contained attachment storage (`FilesystemAttachmentStorage` +
+  `AttachmentRepository`).
+- Neo4j client lifecycle, idempotent `ensure_graph_schema`, and rebuild command
+  skeleton.
+- Transactional, replay-safe graph outbox repository (enqueue/claim/mark
+  synced/failed; no continuous worker).
+- Sanitized `GET /api/health` and the local lint/type-check/test/migration/Compose
+  commands documented above.
+
+Plan 3 owns chat transport and Agent runtime. It must not implement CV/JD domain
+workflows before their dedicated plans, and it must not re-benchmark Phase 0
+adapter decisions.
