@@ -673,3 +673,568 @@ complete
 - validations to rerun: exact staged/unstaged `.gitignore` comparison, 01C ignore/tracked-file assertions, and the 20-path Batch01 allowlist check.
 - risk areas: keep `output/` unstaged through A2/A3 and the Batch01 commit.
 - next task readiness: can_review.
+
+---
+
+# Task Execution Report - 02A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Astryx Compatibility Gate
+
+## Task
+02A - Select, pin, and initialize a stable Astryx release
+
+## Status
+complete
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > `## 4. Scope`
+- docs/plans/Plan_1.md > `## 8. Implementation Steps`
+- docs/plans/Master_plan.md > `## 3. Locked Technology Stack`
+- docs/plans/Master_plan.md > `### Phase 0 - Feasibility and compatibility gates`
+
+## Supplemental Documents Used
+- README.md
+
+## Selected Scope
+- Batch: Batch02 - Astryx Compatibility Gate
+- Task ID: 02A
+- Task title: Select, pin, and initialize a stable Astryx release
+- Files allowed: frontend package manifest and lock, required initializer output, Phase 0 feasibility report, and this execution-report append.
+- Repair scope if any: None.
+
+## Dependency and User Action Check
+- dependencies: 01A, 01B, and 01D are checked and Batch01 is committed.
+- user action: Network and npm registry access were available; official stable metadata was unambiguous, so no release-choice approval was needed.
+- status: satisfied.
+
+## Files Inspected Before Editing
+- README.md: confirmed Phase 0 evidence-only scaffold and absence of product flows.
+- docs/tasks/task_1.md: confirmed 02A boundary, required initializer, acceptance, and files.
+- docs/plans/Plan_1.md and docs/plans/Master_plan.md: confirmed stable exact pin and Phase 0-only boundary.
+- frontend/package.json and repository lockfile search: confirmed no pre-existing Astryx pin or frontend lockfile.
+- backend/evaluation/reports/phase_0_feasibility.md: reused the existing Astryx and locked-version evidence tables.
+- Official npm package metadata and Astryx documentation: confirmed the official packages are `@astryxdesign/core` and `@astryxdesign/cli`, both with stable `latest` release `0.1.4`; the CLI provides the `astryx` binary.
+
+## Completed Work
+- Added exact `@astryxdesign/core` `0.1.4` and `@astryxdesign/cli` `0.1.4` pins to the frontend manifest.
+- Generated a reproducible npm lockfile resolving both official Astryx packages exactly once at `0.1.4`.
+- Ran `npx astryx init --features agents --agent codex` from `frontend/`; it completed and generated only `frontend/AGENTS.md`.
+- Recorded the npm evidence date, resolved package/CLI versions, initializer result, and retained generated path in the Phase 0 feasibility report.
+- Removed the local reproducible `frontend/node_modules` install directory after validation; no demo UI or product-flow artifact was created or retained.
+- Left public component imports, composition paths, and the overall Astryx gate pending for 02B and 02C.
+
+## Files Created or Modified
+- frontend/package.json: added exact official Astryx core and CLI pins.
+- frontend/package-lock.json: added reproducible npm resolution for the exact pins.
+- frontend/AGENTS.md: retained the initializer-generated version-matched compatibility guidance.
+- backend/evaluation/reports/phase_0_feasibility.md: recorded sanitized stable-release and initialization evidence.
+- docs/reports/report_1_execute_agent.md: appended this execution record.
+
+## Tests or Validations Run
+- command/check: Official npm metadata query for `@astryxdesign/core` and `@astryxdesign/cli`
+- required: yes
+- result: passed
+- evidence or reason: On 2026-07-11, both packages reported `latest` and current stable version `0.1.4`; canary releases were separate prerelease tags, and the CLI metadata exposed the `astryx` binary.
+- command/check: `npm install --package-lock-only --ignore-scripts` and `npm ls @astryxdesign/core @astryxdesign/cli --depth=0 --json`
+- required: yes
+- result: passed
+- evidence or reason: npm completed with zero vulnerabilities and resolved both direct packages at exactly `0.1.4`.
+- command/check: Structured package-lock assertion using Node's JSON parser
+- required: yes
+- result: passed
+- evidence or reason: Root declarations and resolved lock entries are exactly `0.1.4`, with exactly one lock entry for core and one for CLI.
+- command/check: `npx astryx --version` and `npx astryx init --features agents --agent codex`
+- required: yes
+- result: passed
+- evidence or reason: CLI reported `0.1.4`; initializer completed successfully and idempotently from the documented frontend context.
+- command/check: Generated-path and Phase 0 scope inventory
+- required: yes
+- result: passed
+- evidence or reason: Retained generated output is only `frontend/AGENTS.md`; package and report artifacts are gate evidence, and no source UI, demo, or product-flow file changed.
+- command/check: `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: No whitespace errors were reported before the execution-report append.
+
+## Acceptance Check
+- condition: npm resolves exact stable Astryx pins, the required initializer completes, package and CLI versions are recorded, and no product flow or floating version is added.
+- status: satisfied
+- evidence: Official npm metadata, exact manifest/lock assertions, `npm ls`, CLI version output, initializer completion, generated-path inventory, and feasibility report record all agree on `0.1.4`.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated A1 execution forbids progress updates.
+
+## Key Implementation Decisions
+- Used the official Meta-owned npm packages identified by the Astryx documentation and npm repository metadata, not the unrelated unscoped `astryx` package.
+- Kept the CLI as an exact dev dependency because reproducible initialization and later compatibility documentation checks require its binary; core remains the exact runtime dependency under inspection.
+- Preserved the initializer-generated `AGENTS.md` because it is the required version-matched compatibility scaffold, while removing the reproducible local install directory.
+
+## Risks or Open Issues
+- 02A does not establish public exports or composition support. Those results remain pending and must be measured by 02B and gated by 02C.
+
+## Minor In-Scope Issues Fixed
+- None.
+
+## Workflow Integrity Check
+- Exactly task 02A was executed. No 02B/02C component matrix, compatibility check, task checkbox, batch status, staging, or commit was performed.
+
+## Notes for Review Agent
+- changed files: frontend/package.json, frontend/package-lock.json, frontend/AGENTS.md, backend/evaluation/reports/phase_0_feasibility.md, and docs/reports/report_1_execute_agent.md.
+- validations to rerun: npm exact resolution, lockfile single-entry assertion, CLI version, initializer command, generated-path inventory, and diff scope.
+- risk areas: distinguish official scoped Astryx packages from the unrelated unscoped package; ensure later tasks do not treat the successful initializer as component-gate evidence.
+- next task readiness: can_review.
+
+---
+
+# Task Execution Report - 02B
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Astryx Compatibility Gate
+
+## Task
+02B - Build the complete Astryx public component matrix
+
+## Status
+complete
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > `### 7.2 Astryx component matrix`
+- docs/plans/Plan_1.md > `## 8. Implementation Steps`
+- docs/plans/Master_plan.md > `### 15.1 Layout`
+- docs/plans/Master_plan.md > `### 15.3 Chat components`
+
+## Supplemental Documents Used
+- README.md
+- frontend/AGENTS.md
+
+## Selected Scope
+- Batch: Batch02 - Astryx Compatibility Gate
+- Task ID: 02B
+- Task title: Build the complete Astryx public component matrix
+- Files allowed: backend/evaluation/reports/phase_0_feasibility.md and this execution-report append; optional evidence was kept inline rather than duplicated in a second artifact.
+- Repair scope if any: None.
+
+## Dependency and User Action Check
+- dependencies: 02A is A2-accepted and checked; exact Astryx core and CLI `0.1.4` pins and lockfile are present.
+- user action: None.
+- status: satisfied.
+
+## Files Inspected Before Editing
+- README.md: confirmed Phase 0 evidence-only scope and absence of product UI.
+- docs/tasks/task_1.md: confirmed the sixteen-name union, required per-component CLI lookup, acceptance, and file boundary.
+- docs/plans/Plan_1.md: confirmed the original ten-name component matrix and pinned-CLI workflow.
+- docs/plans/Master_plan.md: confirmed the controlling layout/chat union and public-API-only rule.
+- frontend/package.json and frontend/package-lock.json: confirmed exact core/CLI `0.1.4` pins used for documentation inspection.
+- frontend/AGENTS.md: identified the initializer-documented `astryx component <Name>` workflow, then verified it against pinned CLI help rather than using its aggregate count as evidence.
+- backend/evaluation/reports/phase_0_feasibility.md: reused the existing Astryx evidence section and preserved the final decision table at physical EOF.
+- docs/reports/report_1_execute_agent.md: inspected physical EOF before appending this report.
+
+## Completed Work
+- Verified from pinned CLI help that `astryx component [name]` is the supported per-component documentation command.
+- Ran the pinned command separately for all sixteen required component names and captured version-specific name, package, public import, role, and composition evidence.
+- Recorded a complete matrix in the Phase 0 report. All sixteen needs are direct public exports; the six chat components share the documented public `@astryxdesign/core/Chat` subpath.
+- Recorded only CLI-documented composition relationships, including `ChatLayout` with `ChatMessageList`/`ChatComposer`, message-list children, AppShell slots, and MetadataList items.
+- Marked the matrix-level public-import and composition evidence `PASS` while leaving the overall Astryx compatibility gate pending for 02C.
+- Removed the reproducible local `frontend/node_modules` inspection directory after validation; no product UI or 02C gate logic was added.
+
+## Files Created or Modified
+- backend/evaluation/reports/phase_0_feasibility.md: added the version-specific sixteen-component public import/composition matrix and evidence command.
+- docs/reports/report_1_execute_agent.md: appended this execution record.
+
+## Tests or Validations Run
+- command/check: `npx --yes --package @astryxdesign/cli@0.1.4 astryx --help` and pinned `component --help`
+- required: yes
+- result: passed
+- evidence or reason: CLI `0.1.4` publicly documents `component [name]` as the command to print component docs and `--json` as typed output.
+- command/check: sixteen separate `npx astryx --json component <Name>` reruns with structured cross-checks
+- required: yes
+- result: passed
+- evidence or reason: Every required lookup returned `component.detail`, the exact requested name, package `@astryxdesign/core`, its recorded public import subpath, and a row-specific documented role/composition token.
+- command/check: installed package public export checks using package exports and Node imports
+- required: yes
+- result: passed
+- evidence or reason: All eleven documented subpaths are package exports, and all six names documented on `@astryxdesign/core/Chat` are available as public named exports.
+- command/check: feasibility matrix completeness and internal-path scan
+- required: yes
+- result: passed
+- evidence or reason: The report contains exactly sixteen required public-import rows and contains no `src` or `dist` package-internal import path.
+- command/check: `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: No whitespace errors were reported; Git emitted only existing line-ending conversion warnings.
+
+## Acceptance Check
+- condition: All sixteen required component needs have a verified public import or documented public composition path, and no undocumented internal is referenced.
+- status: satisfied
+- evidence: All sixteen pinned CLI lookups and their required reruns passed; the public export checks and report completeness/internal-path scan agree with the matrix.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated A1 execution forbids progress updates.
+
+## Key Implementation Decisions
+- Used exact local CLI/core `0.1.4` resolution and per-component output as component evidence; did not rely on the differing initializer aggregate count warned about by A2.
+- Recorded direct public imports for every name instead of inventing replacement components. Composition notes are limited to relationships explicitly present in pinned CLI output.
+- Kept the overall Astryx gate pending because 02C owns the final gate lock.
+
+## Risks or Open Issues
+- None for 02B. The direct export matrix still requires independent 02C gate review/lock before the batch is complete.
+
+## Minor In-Scope Issues Fixed
+- None.
+
+## Workflow Integrity Check
+- Exactly task 02B was executed. No 02C gate lock, product UI, task checkbox, batch status, staging, or commit was performed.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/reports/phase_0_feasibility.md and docs/reports/report_1_execute_agent.md.
+- validations to rerun: pinned CLI help, sixteen separate JSON component lookups, public package export checks, matrix completeness/internal-path scan, and diff scope.
+- risk areas: do not treat AGENTS.md aggregate component counts as evidence; confirm each row from pinned per-component output.
+- next task readiness: can_review.
+
+---
+
+# Task Execution Report - 02C
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Astryx Compatibility Gate
+
+## Task
+02C - Validate and lock the Astryx compatibility decision
+
+## Status
+complete
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > `### 7.2 Astryx component matrix`
+- docs/plans/Plan_1.md > `## 9. Verification & Testing Plan`
+- docs/plans/Plan_1.md > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`
+- docs/plans/Master_plan.md > `### Phase 0 - Feasibility and compatibility gates`
+
+## Supplemental Documents Used
+- README.md
+- frontend/AGENTS.md
+
+## Selected Scope
+- Batch: Batch02 - Astryx Compatibility Gate
+- Task ID: 02C
+- Task title: Validate and lock the Astryx compatibility decision
+- Files allowed: frontend package files, one focused compatibility-check file under frontend, backend/evaluation/reports/phase_0_feasibility.md, and this execution-report append.
+- Repair scope if any: None.
+
+## Dependency and User Action Check
+- dependencies: 02B is A2-accepted and checked; its complete sixteen-component matrix and exact 0.1.4 pins are present.
+- user action: No adapter revision approval is required because all required public coverage passed.
+- status: satisfied.
+
+## Files Inspected Before Editing
+- README.md: confirmed the evidence-only Phase 0 state and absence of product UI behavior.
+- docs/tasks/task_1.md: confirmed exact 02C scope, dependencies, acceptance, validation, and progress restrictions.
+- docs/plans/Plan_1.md: confirmed the Astryx matrix, npm resolution requirement, and Plan 2 handoff contract.
+- docs/plans/Master_plan.md: confirmed the adapter-only revision boundary and required public coverage exit gate.
+- frontend/package.json and frontend/package-lock.json: confirmed exact core/CLI 0.1.4 declarations and resolutions before adding the check command.
+- frontend/AGENTS.md: confirmed the initializer output is version-matched compatibility guidance that remains required evidence.
+- backend/evaluation/reports/phase_0_feasibility.md: reused the accepted 02A/02B evidence and preserved the decision table at physical EOF.
+- docs/reports/report_1_execute_agent.md: inspected physical EOF before appending this report.
+
+## Completed Work
+- Added one focused Node compatibility check that reads the installed core package's public exports, verifies the exact 0.1.4 package version, dynamically imports all eleven matrix subpaths, and asserts all sixteen required named exports.
+- Added the single-purpose `npm run check:astryx` package command without adding a dependency, product screen, app shell, UI behavior, or frontend test framework.
+- Executed fresh package/import resolution and locked the Astryx gate as PASS in the feasibility report, including exact pins, command, public matrix, and Plan 2 impact.
+- Confirmed the documented composition decisions use public APIs only; no internal path or invented replacement API was introduced.
+- Retained only the accepted initializer guidance and removed the temporary `node_modules` inspection directory after validation.
+
+## Files Created or Modified
+- frontend/scripts/check-astryx-compatibility.mjs: added the focused exact-pin public-export check.
+- frontend/package.json: added the single-purpose compatibility command; exact dependency pins remain unchanged.
+- backend/evaluation/reports/phase_0_feasibility.md: recorded fresh check evidence and locked the Astryx gate PASS decision.
+- docs/reports/report_1_execute_agent.md: appended this execution record.
+
+## Tests or Validations Run
+- command/check: `npm run check:astryx`
+- required: yes
+- result: passed
+- evidence or reason: The installed core package reported exact version 0.1.4; all eleven documented public subpaths dynamically imported and exposed all sixteen required names.
+- command/check: `npm ls @astryxdesign/core @astryxdesign/cli --depth=0 --json` plus structured manifest/lock assertions
+- required: yes
+- result: passed
+- evidence or reason: npm resolved both direct packages at exactly 0.1.4, and package.json/package-lock.json agree on the exact pins.
+- command/check: repository source scan for `@astryxdesign/core/(src|dist|lib|internal)` and focused-check matrix coverage assertion
+- required: yes
+- result: passed
+- evidence or reason: No internal Astryx import path was found, and the focused check names all sixteen accepted matrix exports.
+- command/check: temporary artifact cleanup and `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: The temporary install directory was safely removed, the accepted initializer guidance remains, and no whitespace errors were reported.
+
+## Acceptance Check
+- condition: The exact pinned packages and every required public API resolve through a reproducible focused check, with version/matrix locked for Plan 2 and no undocumented workaround.
+- status: satisfied
+- evidence: Fresh `npm run check:astryx`, npm package resolution, structured lock assertions, matrix-coverage assertion, and internal-path scan all passed for exact version 0.1.4.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated A1 execution forbids progress updates.
+
+## Key Implementation Decisions
+- Used Node standard-library assertions and dynamic imports, avoiding a frontend test framework or new dependency for this narrow compatibility gate.
+- Kept the matrix as the composition source of truth and made the focused check validate only resolvable public package/export facts, without constructing product UI or guessing props.
+- Retained frontend/AGENTS.md because 02A established it as required version-matched initializer evidence; removed only the reproducible local install directory.
+
+## Risks or Open Issues
+- None for the Astryx gate. Overall Plan 2 remains blocked by the other pending Phase 0 gates.
+
+## Minor In-Scope Issues Fixed
+- None.
+
+## Workflow Integrity Check
+- Exactly task 02C was executed. No sibling task, product UI, task checkbox, batch status, staging, or commit was performed.
+
+## Notes for Review Agent
+- changed files: frontend/scripts/check-astryx-compatibility.mjs, frontend/package.json, backend/evaluation/reports/phase_0_feasibility.md, and docs/reports/report_1_execute_agent.md.
+- validations to rerun: install exact lockfile packages, `npm run check:astryx`, `npm ls`, structured exact-pin assertions, matrix coverage assertion, internal-path scan, report decision-table EOF, and diff scope.
+- risk areas: install dependencies before rerunning the import check; distinguish the package's documented public export map from its internal target files.
+- next task readiness: can_review.
+
+---
+
+# Task Execution Report - batch_scope
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+batch_scope_repair
+
+## Batch
+Batch02 - Astryx Compatibility Gate
+
+## Task
+batch_scope - Repair prior-batch report separators after A3 audit P1B2-A3-20260711
+
+## Status
+complete
+
+## Source of Truth Used
+- A3 audit P1B2-A3-20260711 repair instructions
+- docs/tasks/task_1.md > Batch02 - Astryx Compatibility Gate
+
+## Supplemental Documents Used
+- README.md
+
+## Selected Scope
+- Batch: Batch02 - Astryx Compatibility Gate
+- Task ID: batch_scope
+- Task title: Repair prior-batch report separators after A3 audit P1B2-A3-20260711
+- Files allowed: docs/reports/report_1_execute_agent.md and docs/review/review_1_review_agent.md.
+- Repair scope if any: Restore the exact HEAD blank-line, `---`, blank-line boundaries between the 01A and 01B entries in both files, preserve all Batch02 evidence, and append this repair record.
+
+## Dependency and User Action Check
+- dependencies: Tasks 02A, 02B, and 02C are A2-accepted and checked.
+- user action: Batch02 was approved by the user; no additional action was required for this explicit A3 repair.
+- status: satisfied.
+
+## Files Inspected Before Editing
+- README.md: confirmed the current Phase 0 evidence-only repository context.
+- docs/tasks/task_1.md: confirmed 02A, 02B, and 02C remain checked and no progress update is authorized.
+- docs/reports/report_1_execute_agent.md: compared the 01A/01B boundary with HEAD and inspected physical EOF before repair/report append.
+- docs/review/review_1_review_agent.md: compared the 01A/01B boundary with HEAD before repair.
+- HEAD versions of both report files: established the exact separator text and blank-line placement to restore.
+- task-execution-agent repair policy, report template, and handoff contract: confirmed the batch-scope repair and reporting constraints.
+
+## Completed Work
+- Restored the exact HEAD blank-line, `---`, blank-line separator between the 01A and 01B execution entries.
+- Restored the exact HEAD `---` separator and blank-line boundary between the 01A and 01B review entries.
+- Preserved the pre-repair Batch02 suffixes for 02A, 02B, and 02C byte-for-byte, then appended only this required repair record to the execution report's prior physical EOF.
+- Left implementation evidence, review evidence, task checkboxes, batch status, staging, and commits unchanged.
+
+## Files Created or Modified
+- docs/reports/report_1_execute_agent.md: restored the historical separator and appended this batch-scope repair record.
+- docs/review/review_1_review_agent.md: restored the historical separator only.
+
+## Tests or Validations Run
+- command/check: SHA-256 comparison of each Batch02 suffix before and after separator restoration
+- required: yes
+- result: passed
+- evidence or reason: The execution suffix remained `45087b71ad93bbcfd776196adca941047189a975d26d7f22da53c06911490e22` and the review suffix remained `42435d8214635af5808666403bc4a14d5b6712fdf1086fcbe363d19a25eafb26` before this required execution-report append.
+- command/check: `git diff --unified=0 -- docs/reports/report_1_execute_agent.md docs/review/review_1_review_agent.md`
+- required: yes
+- result: passed
+- evidence or reason: Both HEAD-relative diffs begin only after each file's prior physical EOF; the historical separator-deletion hunks are absent.
+- command/check: task checkbox scan for 02A, 02B, and 02C
+- required: yes
+- result: passed
+- evidence or reason: All three accepted task checkboxes remain checked.
+- command/check: `git diff --check -- docs/reports/report_1_execute_agent.md docs/review/review_1_review_agent.md`
+- required: yes
+- result: passed
+- evidence or reason: No whitespace errors were reported; Git emitted line-ending conversion warnings only.
+
+## Acceptance Check
+- condition: Repair only the two A3-listed historical separator deletions, preserve accepted Batch02 evidence, append a repair record, and leave progress and repository state otherwise unchanged.
+- status: satisfied
+- evidence: Exact HEAD boundaries are restored, suffix hashes matched before the required append, both diffs are append-only from HEAD, and all three Batch02 checkboxes remain checked.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated batch-scope repair forbids progress updates.
+
+## Key Implementation Decisions
+- Restored only the exact three-line separator boundaries shown by HEAD; no surrounding historical or Batch02 content was normalized.
+
+## Risks or Open Issues
+- None.
+
+## Minor In-Scope Issues Fixed
+- Restored the two A3-listed prior-batch report separators.
+
+## Workflow Integrity Check
+- Only the explicit A3 batch-scope repair was performed. No implementation, review outcome, task checkbox, batch status, staging, commit, or sibling task was changed.
+
+## Notes for Review Agent
+- changed files: docs/reports/report_1_execute_agent.md and docs/review/review_1_review_agent.md.
+- validations to rerun: HEAD boundary comparison, HEAD-relative append-only diff check, Batch02 suffix/content preservation, checkbox scan, git status, diff stat, full diff, and diff check.
+- risk areas: The required repair report extends the execution-report suffix after the preserved 02C EOF; validate the original 02A-02C content separately from this new append.
+- next task readiness: can_review.
+
+---
+
+# Task Execution Report - batch_scope
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+batch_scope_repair
+
+## Batch
+Batch02 - Astryx Compatibility Gate
+
+## Task
+batch_scope - Repair final prior-batch blank line after A3 rerun P1B2-A3-RERUN1-20260711
+
+## Status
+complete
+
+## Source of Truth Used
+- A3 rerun P1B2-A3-RERUN1-20260711 exact repair instructions
+- docs/tasks/task_1.md > Batch02 - Astryx Compatibility Gate
+
+## Supplemental Documents Used
+- README.md
+
+## Selected Scope
+- Batch: Batch02 - Astryx Compatibility Gate
+- Task ID: batch_scope
+- Task title: Repair final prior-batch blank line after A3 rerun P1B2-A3-RERUN1-20260711
+- Files allowed: docs/review/review_1_review_agent.md and this required execution-report append.
+- Repair scope if any: Restore exactly the single HEAD blank line between the 01A `### Major` value and `### Minor` heading, preserving the complete Batch02 and batch_scope suffixes.
+
+## Dependency and User Action Check
+- dependencies: Tasks 02A, 02B, and 02C are A2-accepted and checked; A3 supplied an exact one-line repair.
+- user action: Batch02 remains approved; no additional action was required.
+- status: satisfied.
+
+## Files Inspected Before Editing
+- README.md: confirmed the Phase 0 evidence-only repository context.
+- docs/tasks/task_1.md: confirmed 02A, 02B, and 02C remain checked and no progress change is authorized.
+- docs/review/review_1_review_agent.md: located the exact missing blank line and snapshotted the complete 02A-through-batch_scope suffix.
+- docs/reports/report_1_execute_agent.md: snapshotted the complete 02A-through-batch_scope suffix and inspected physical EOF before this append.
+- HEAD:docs/review/review_1_review_agent.md: established the exact committed prefix and missing blank-line position.
+- task-execution-agent contract: confirmed the batch-scope repair, report append, and JSON handoff requirements.
+
+## Completed Work
+- Restored exactly one blank line between `- None.` under the 01A `### Major` heading and the following `### Minor` heading.
+- Preserved the complete 02A, 02B, 02C, and batch_scope review suffix byte-for-byte.
+- Preserved the complete prior execution suffix through its physical EOF, then appended only this required repair record.
+- Left all implementation evidence, review outcomes, checkboxes, batch status, staging, and commits unchanged.
+
+## Files Created or Modified
+- docs/review/review_1_review_agent.md: restored the single A3-listed historical blank line.
+- docs/reports/report_1_execute_agent.md: appended this batch-scope repair record.
+
+## Tests or Validations Run
+- command/check: normalized-text equality of the entire working review prefix through HEAD EOF against `git show HEAD:docs/review/review_1_review_agent.md`
+- required: yes
+- result: passed
+- evidence or reason: All 749 committed lines match HEAD after normalizing line endings; no Batch01 deletion or modification remains.
+- command/check: `git diff --unified=0 -- docs/review/review_1_review_agent.md`
+- required: yes
+- result: passed
+- evidence or reason: The sole review-file hunk is an append after HEAD line 749; no committed-prefix hunk remains.
+- command/check: SHA-256 comparison of the complete Batch02 and batch_scope suffixes
+- required: yes
+- result: passed
+- evidence or reason: The review suffix remained `2e2e0c9e2ab0b2980f3b61c477e837d92ff441bba78c5da8fa2ff39572233947` and the prior execution suffix remained `8df904a19ffaead71e677593ab4cc5802bfcf6e93439f56566cf22c23be13d86` before this required append.
+- command/check: git status, full diff, diff stat, diff check, staging scan, and 02A-02C checkbox scan
+- required: yes
+- result: passed
+- evidence or reason: The dirty inventory remains the accepted Batch02 surface, full diff completed, no whitespace error or staged path exists, and all three accepted checkboxes remain checked.
+
+## Acceptance Check
+- condition: Restore only the one A3-listed blank line, prove the entire committed review prefix equals HEAD, preserve all accepted suffix evidence, append a repair record, and change no progress or repository state.
+- status: satisfied
+- evidence: Full-prefix equality, append-only diff, complete-suffix hashes, checkbox scan, working-tree inventory, staging scan, and whitespace validation all passed.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated batch-scope repair forbids progress updates.
+
+## Key Implementation Decisions
+- Compared the full 749-line committed prefix after normalizing line endings, rather than relying on another narrow boundary check.
+
+## Risks or Open Issues
+- None.
+
+## Minor In-Scope Issues Fixed
+- Restored the single missing historical blank line identified by A3 rerun P1B2-A3-RERUN1-20260711.
+
+## Workflow Integrity Check
+- Only the explicit one-line A3 repair and mandatory execution-report append were performed. No Batch02 evidence, review outcome, task checkbox, batch status, staging, commit, or sibling task changed.
+
+## Notes for Review Agent
+- changed files: docs/review/review_1_review_agent.md and docs/reports/report_1_execute_agent.md.
+- validations to rerun: full normalized committed-prefix equality, review append-only diff, complete review/execution suffix preservation, git status, full diff, diff stat, diff check, staging scan, and checkbox scan.
+- risk areas: Exclude this newly appended execution record when recomputing the preserved prior execution-suffix hash.
+- next task readiness: can_review.

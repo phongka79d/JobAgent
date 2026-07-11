@@ -2,5 +2,14 @@
   "name": "jobagent-phase-0-frontend",
   "version": "0.0.0",
   "private": true,
-  "description": "Phase 0 compatibility scaffold; no product UI is implemented."
+  "description": "Phase 0 compatibility scaffold; no product UI is implemented.",
+  "scripts": {
+    "check:astryx": "node scripts/check-astryx-compatibility.mjs"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.1.4"
+  },
+  "devDependencies": {
+    "@astryxdesign/cli": "0.1.4"
+  }
 }

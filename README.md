@@ -6,8 +6,9 @@ This repository currently contains only the Phase 0 compatibility scaffold.
 Product services, data stores, Agent behavior, and user interface flows have
 not been implemented.
 
-Batch01 established the readiness baseline. The later Astryx, ShopAIKey,
-PDF extraction, and embedding compatibility gates are still pending.
+Batch01 established the readiness baseline. Batch02 locked Astryx core and CLI
+at `0.1.4` and verified all 16 required public components. The ShopAIKey, PDF
+extraction, and embedding compatibility gates are still pending.
 
 ## Repository layout
 
@@ -26,7 +27,15 @@ npm --version
 docker compose version
 ```
 
-There is no application run, build, or test command yet.
+Run the focused Astryx compatibility gate from `frontend/` after installing the
+exact lockfile:
+
+```powershell
+npm ci --ignore-scripts
+npm run check:astryx
+```
+
+There is no application run or build command yet.
 
 ## Configuration and private inputs
 

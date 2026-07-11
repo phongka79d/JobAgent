@@ -359,7 +359,7 @@ The product UI cannot safely begin until the design-system version and component
 
 ### Tasks
 
-- [ ] (02A): Select, pin, and initialize a stable Astryx release
+- [x] (02A): Select, pin, and initialize a stable Astryx release
   - Source of Truth: `docs/plans/Plan_1.md` > `## 4. Scope`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 3. Locked Technology Stack`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - Pin one stable Astryx version rather than a floating range.
@@ -381,7 +381,7 @@ The product UI cannot safely begin until the design-system version and component
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when required registry/network access or an explicit release choice cannot be obtained.
   - Files: `frontend/package.json`, frontend package lock, Astryx initializer outputs required for documentation inspection, `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (02B): Build the complete Astryx public component matrix
+- [x] (02B): Build the complete Astryx public component matrix
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.2 Astryx component matrix`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `## 15. Frontend UX Plan` > `### 15.1 Layout`; `docs/plans/Master_plan.md` > `## 15. Frontend UX Plan` > `### 15.3 Chat components`
   - Source Requirements:
     - Use the pinned CLI documentation command before implementing any component.
@@ -403,7 +403,7 @@ The product UI cannot safely begin until the design-system version and component
   - Blocked Condition: None for documentation capture; the gate remains failed if a required public import/composition path cannot be proven.
   - Files: `backend/evaluation/reports/phase_0_feasibility.md`; optional sanitized CLI evidence files under `backend/evaluation/reports/` when the report links them.
 
-- [ ] (02C): Validate and lock the Astryx compatibility decision
+- [x] (02C): Validate and lock the Astryx compatibility decision
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.2 Astryx component matrix`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements:
     - npm must resolve the pinned package and required public APIs.
