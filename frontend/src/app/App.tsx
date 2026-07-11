@@ -1,26 +1,16 @@
 import { Theme } from "@astryxdesign/core";
-import { AppShell } from "@astryxdesign/core/AppShell";
-import { Heading } from "@astryxdesign/core/Heading";
-import { Text } from "@astryxdesign/core/Text";
-import { VStack } from "@astryxdesign/core/VStack";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 
+import { ChatShell } from "../features/chat/components/ChatShell";
+
 /**
- * Neutral Phase 1 shell only.
- * No chat, upload, profile, job, matching, CRUD, or health UI.
+ * Plan 3 first screen: base Astryx chat experience (history, stream, tools, approval).
+ * No upload/profile/job/match UI or direct provider/store access.
  */
 export function App() {
   return (
     <Theme theme={neutralTheme} mode="system">
-      <AppShell contentPadding={6} height="fill" variant="surface">
-        <VStack gap={4}>
-          <Heading level={1}>JobAgent</Heading>
-          <Text type="body" as="p">
-            Local frontend scaffold is ready. Product workflows are intentionally
-            disabled in this phase.
-          </Text>
-        </VStack>
-      </AppShell>
+      <ChatShell wrapTheme={false} />
     </Theme>
   );
 }

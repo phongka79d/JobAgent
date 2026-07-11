@@ -285,9 +285,34 @@ python -m ruff check app/agent app/tools app/services/shopaikey_chat.py app/serv
 python -m mypy app/agent app/tools app/services/shopaikey_chat.py app/services/chat_context.py app/services/chat_service.py
 ```
 
-## Current limitations (after Plan 3 Batch02)
+## Plan 3 progress (Batch03)
 
-- No public chat transport; the SSE contract and Agent runtime are not yet exposed by FastAPI.
+Batch03 exposes the durable runtime through the public chat surface and a base
+Astryx chat UI:
+
+- Public FastAPI routes are limited to `GET /api/chat/history`, `POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume`; POST routes stream the validated SSE union.
+- The frontend uses the existing `VITE_API_BASE_URL` boundary, an incremental SSE parser, a pure run/event reducer, history hydration, duplicate filtering, and disconnect/approval states.
+- The first screen is an Astryx chat experience with hydrated messages, partial assistant text, sanitized tool activity, approval/correction resume controls, and no profile/job/upload UI.
+
+Focused Batch03 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/api/test_chat.py tests/integration/test_chat_transport.py tests/test_lifecycle.py
+python -m ruff check app/api/chat.py app/schemas/chat.py app/main.py tests/api/test_chat.py tests/integration/test_chat_transport.py
+python -m mypy app/api/chat.py app/schemas/chat.py app/main.py
+
+cd frontend
+npm run check:astryx
+npm run test -- --run src/features/chat/reducer.test.ts src/lib/sse/parser.test.ts src/features/chat/api.test.ts src/features/chat/components src/test/app.chat.test.tsx
+npm run lint
+npm run typecheck
+npm run build
+```
+
+## Current limitations (after Plan 3 Batch03)
+
+- Phase-wide full transport proof and synthetic-tool removal are deferred to Batch04.
 - No CV/JD extraction, profile approval, matching, ranking, or evaluation UI.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.

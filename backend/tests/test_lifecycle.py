@@ -180,6 +180,8 @@ def test_create_app_import_does_not_require_root_env() -> None:
     # Fresh factory without lifespan entry does not load settings.
     bare = factory()
     assert bare.title == "JobAgent"
+    # Chat service is bound only inside lifespan (import-safe).
+    assert not hasattr(bare.state, "chat_service") or bare.state.chat_service is None
 
 
 def test_probe_timeout_must_be_positive(tmp_path: Path) -> None:
@@ -196,6 +198,46 @@ def test_probe_timeout_must_be_positive(tmp_path: Path) -> None:
             ),
             probe_timeout_seconds=0,
         )
+
+
+def test_chat_service_injected_in_lifespan_without_provider_network(
+    tmp_path: Path,
+) -> None:
+    """Lifespan installs chat_service; tests inject fakes so no ShopAIKey call."""
+    from app.services.chat_service import ChatService
+    from tests.fakes.agent_tools import ScriptedDecision, decision_text
+
+    settings = _settings(tmp_path)
+    db = create_session_manager(settings.sqlite_path)
+    storage = FilesystemAttachmentStorage(settings.files_dir)
+    neo4j = Neo4jClient.from_settings(
+        settings,
+        driver_factory=FakeDriver,
+        health_timeout_seconds=0.2,
+    )
+    chat = ChatService(
+        db,
+        sqlite_path=settings.sqlite_path,
+        decision=ScriptedDecision([decision_text("lifecycle ok")]),
+        tools=[],
+    )
+    application = create_app(
+        settings=settings,
+        session_manager=db,
+        storage=storage,
+        neo4j_client=neo4j,
+        chat_service=chat,
+        run_schema_setup=False,
+    )
+    with TestClient(application) as client:
+        assert client.app.state.chat_service is chat  # type: ignore[attr-defined]
+        # OpenAPI still exposes only health + three chat paths.
+        paths = set(client.app.openapi()["paths"])  # type: ignore[attr-defined]
+        assert "/api/health" in paths
+        assert "/api/chat/history" in paths
+        assert "/api/chat/turns" in paths
+        assert "/api/chat/runs/{run_id}/resume" in paths
+        assert len(paths) == 4
 
 
 def test_lifespan_uses_injected_settings_loader(tmp_path: Path) -> None:

@@ -931,3 +931,478 @@ complete
 - changes made: Added production `await_approval` / `request_human_approval` seam in `graph.py`; staged approval from tool `APPROVAL_REQUIRED:` markers; documented lifecycle/ChatService same-thread resume path; rewrote lifecycle interrupt/idempotency/retain tests to use default `build_agent_graph` without alternate interrupt graph; added test-only approval synthetic tools
 - validations rerun: `pytest -q tests/integration/test_agent_lifecycle.py` (9 passed); `ruff check` lifecycle/graph/chat_service/lifecycle tests (All checks passed); `mypy` lifecycle + chat_service (Success)
 - outcome: complete — production graph path interrupt/resume across request boundary satisfied
+
+---
+
+# Task Execution Report - 03A
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Public SSE API and base Astryx chat experience
+
+## Task
+03A - Expose history, turn, and same-run resume through validated SSE
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03A
+- Task title: Expose history, turn, and same-run resume through validated SSE
+- Files allowed / repair scope: A2 rejection items only — do not serialize DB conversation/message/tool-execution primary keys in history or SSE; preserve public `run_id`; opaque per-stream tool id only; add public-ID leakage assertions; rerun four required 03A validations. In-scope files: `backend/app/api/chat.py`, `backend/app/schemas/chat.py`, `backend/tests/api/test_chat.py`, `backend/tests/integration/test_chat_transport.py` (prior 03A surface also includes main/lifecycle/package exports)
+
+## Completed Work
+- Added public chat request/history schemas (`TurnRequest`, `ResumeRequest`, `HistoryResponse`) with validation-before-write for user text, bounded attachment IDs (max 32), approve/correct resume commands, and idempotency keys.
+- Implemented `GET /api/chat/history`, `POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume` in `app/api/chat.py` against existing repositories and `ChatService`.
+- API layer limited to validation, dependency lookup, and SSE orchestration; durable writes stay in ChatService/repositories.
+- Both POST routes return `text/event-stream` frames of (01C)-validated ordered events; completed/failed streams have one terminal outcome; interrupt streams end at `approval_required`; duplicate keys replay durable outcomes without second writes.
+- Disconnect watcher sets `cancel_event` so ChatService advances only to a safe durable state.
+- Registered chat router in `create_app`; injects/lifespan-builds `ChatService` without provider network at import; CORS methods updated to `GET, POST, OPTIONS` without weakening exact origin matching.
+- Added API and integration tests for hydration, bounds, validation-before-write, ordered SSE, duplicate turn/resume keys, same-run resume, terminal failures, disconnect, CORS, route inventory, and leakage.
+- Same-task repair: history response no longer serializes `conversation_id` or message `id`; SSE tool events use opaque per-stream `tool_call_id` values (`t1`, `t2`, …) instead of `ToolExecution.id`; public `run_id` retained; API and integration tests assert public-ID non-leakage against durable PKs.
+
+## Files Created or Modified
+- backend/app/schemas/chat.py
+- backend/app/api/chat.py
+- backend/app/main.py
+- backend/app/api/__init__.py
+- backend/app/schemas/__init__.py
+- backend/tests/api/test_chat.py
+- backend/tests/integration/test_chat_transport.py
+- backend/tests/test_lifecycle.py
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/api/test_chat.py tests/integration/test_chat_transport.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 22 passed in 4.38s (post-repair)
+
+- command/check: `cd backend; python -m ruff check app/api/chat.py app/schemas/chat.py app/main.py tests/api/test_chat.py tests/integration/test_chat_transport.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed!
+
+- command/check: `cd backend; python -m mypy app/api/chat.py app/schemas/chat.py app/main.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 3 source files
+
+- command/check: `rg -n "@(router|app)\.(get|post|put|patch|delete)" backend/app/api`
+- required: yes
+- result: passed
+- evidence or reason: Only four route declarations — health GET plus three Plan 3 chat paths; no attachment/profile/job/synthetic routes.
+
+## Acceptance Check
+- condition: OpenAPI exposes `/api/health` and exactly the three Plan 3 chat paths, with no public attachment/profile/job CRUD or synthetic-tool route
+- status: satisfied
+- evidence: OpenAPI path set asserted in API/integration/lifecycle tests; route inventory scan confirms only four declarations
+
+- condition: Both POST responses use SSE and every decoded event validates through (01C) in legal order with one terminal outcome (or interrupt ending at approval_required)
+- status: satisfied
+- evidence: Ordered SSE + terminal tests in test_chat.py and test_chat_transport.py
+
+- condition: Invalid input writes nothing; duplicate idempotency keys produce no duplicate message/run/resume/assistant result
+- status: satisfied
+- evidence: validation-before-write and duplicate turn/resume tests
+
+- condition: Responses/logs exclude raw tool arguments, document content, secrets, headers, stack traces, unsafe internal IDs, and provider exception text
+- status: satisfied
+- evidence: leakage scans on SSE/history bodies; sanitized error codes only; post-repair public-ID assertions prove history omits conversation/message PKs and tool events use non-DB opaque `tool_call_id` while retaining public `run_id`
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode — A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files (repair delta): schemas/chat.py, api/chat.py, tests/api/test_chat.py, tests/integration/test_chat_transport.py
+- validations to rerun: the four required commands listed above
+- risk areas: SSE events are synthesized from durable ChatTurnResult after execution (not live mid-token provider stream); interrupt streams intentionally end at approval_required without run_completed; production lifespan builds ShopAIKeyChatAdapter from settings without network until first model use; frontend 03B must not depend on history message/conversation DB IDs
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md sections 7.1, 7.4, 7.5
+- docs/plans/Master_plan.md section 14.1
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/review/review_3_review_agent.md (03A A2 REJECTED repair instructions)
+
+## Dependency and User Action Check
+- dependencies: (01C) and (02D) accepted and available via schemas/sse and ChatService
+- user actions: none required
+
+## Files Inspected Before Editing
+- backend/app/main.py
+- backend/app/api/health.py
+- backend/app/api/chat.py
+- backend/app/schemas/chat.py
+- backend/app/services/chat_service.py
+- backend/app/schemas/sse.py
+- backend/app/repositories/conversations.py
+- backend/app/repositories/agent_runs.py
+- backend/app/db/models/conversation.py
+- backend/tests/api/test_chat.py
+- backend/tests/integration/test_chat_transport.py
+- docs/review/review_3_review_agent.md (03A block)
+
+## Key Implementation Decisions
+- StreamingResponse with explicit SSE wire frames (`event`/`id`/`data`) for TestClient-compatible POST SSE without EventSourceResponse encode pitfalls.
+- Map ChatTurnResult + sanitized tool_executions into (01C) ordered event sequence; validate full sequence before streaming.
+- Inject ChatService via create_app for tests; production lifespan constructs adapter + service after settings load (import remains env-free).
+- CORS allow-methods extended to include POST only; exact origin matching unchanged.
+- Public history is role/content/timestamp/payload only; tool stream correlation uses `t{n}` opaque IDs scoped to the SSE sequence, never SQLite PKs.
+
+## Workflow Integrity Check
+- single task 03A only (same_task_repair)
+- no sibling 03B/03C or Batch04 work
+- no checkbox update, no staging, no commit
+
+## Repair Log
+
+### 2026-07-12 (same_task_repair after A2 REJECTED)
+- reason for repair: A2 rejected 03A because public SSE `tool_call_id` used `ToolExecution.id` and history serialized conversation/message primary keys (unsafe internal IDs).
+- changes made:
+  - `HistoryMessage` / `HistoryResponse` no longer include `id` or `conversation_id`.
+  - `_tool_events` emits opaque per-stream `tool_call_id` values (`t1`, `t2`, …) instead of `str(row.id)`.
+  - Added `_assert_no_public_db_ids` and strengthened API/integration leakage coverage against durable message/tool PKs while preserving public `run_id`.
+- validations rerun: all four required 03A commands (pytest 22 passed; ruff; mypy; route inventory rg) — all passed.
+- outcome: complete; acceptance satisfied for public-ID non-leakage; ready for A2 re-review.
+
+---
+
+# Task Execution Report - 03B
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Public SSE API and base Astryx chat experience
+
+## Task
+03B - Implement the typed frontend SSE client, pure reducer, and history hydration
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03B
+- Task title: Implement the typed frontend SSE client, pure reducer, and history hydration
+- Files allowed / repair scope (A2): `frontend/src/features/chat/api.ts`, `frontend/src/features/chat/api.test.ts` — single owner for stream-consumption `onError`; malformed SSE regression; retain single fetch/HTTP/abort notifications. Cumulative task files also include contracts/reducer/parser from original execution.
+
+## Completed Work
+- Original: typed frontend chat contracts matching backend (01C) eight-event SSE union and history/turn/resume request shapes (`contracts.ts`).
+- Original: incremental SSE frame parser with fragmented-chunk support and multiline `data:` joining (`lib/sse/parser.ts`); no EventSource or other external SSE dependency.
+- Original: pure `chatReducer` keyed by `run_id`/`event_id` with duplicate ignore, foreign-run/out-of-order ignore, partial text accumulation, approval/active/failed/completed/disconnected phases, and `isSendDisabled()`.
+- Original: transport client using only `readPublicConfig().apiBaseUrl` and the three approved paths with stream handlers for events, disconnect, abort, and errors.
+- Original: unit tests for parser, reducer, and API covering fragmented frames, multiline data, every event type, duplicates, foreign-run, out-of-order, partial text, approval, terminal failure, disconnect, reconnect hydration, and abort cleanup.
+- Repair (A2): stream-consumption errors notify `onError` exactly once — `consumeSSEResponse` owns the notification and rethrows; `postSSE` no longer re-notifies for `ChatContractError` after await. Fetch/HTTP failures still notify once in `postSSE`; abort handling unchanged.
+- Repair: regression test asserts malformed SSE frame data calls `onError` once and still rejects with `ChatContractError`/`invalid_json`.
+
+## Files Created or Modified
+- frontend/src/features/chat/api.ts (repair)
+- frontend/src/features/chat/api.test.ts (repair)
+- Cumulative prior task files (unchanged this repair): frontend/src/features/chat/contracts.ts, frontend/src/features/chat/reducer.ts, frontend/src/features/chat/reducer.test.ts, frontend/src/lib/sse/parser.ts, frontend/src/lib/sse/parser.test.ts
+
+## Tests or Validations Run
+- command/check: `cd frontend; npm run test -- --run src/features/chat/reducer.test.ts src/lib/sse/parser.test.ts src/features/chat/api.test.ts`
+- required: yes
+- result: passed
+- evidence or reason: 3 files, 37 tests passed (repair re-run; +1 malformed-SSE single-onError regression)
+
+- command/check: `cd frontend; npm run lint`
+- required: yes
+- result: passed
+- evidence or reason: eslint clean (0 errors, 0 warnings)
+
+- command/check: `cd frontend; npm run typecheck`
+- required: yes
+- result: passed
+- evidence or reason: `tsc -b --noEmit` success
+
+## Acceptance Check
+- condition: The client calls only the three approved FastAPI chat paths through the existing public base URL
+- status: satisfied
+- evidence: `CHAT_API_PATHS` + `fetchChatHistory` / `streamChatTurn` / `streamChatResume` use `readPublicConfig().apiBaseUrl`; api tests assert exact URLs
+
+- condition: Reducer transitions are pure and deterministic; replaying the same event ID has no effect, while ordered deltas produce exactly one assistant text stream
+- status: satisfied
+- evidence: `reducer.test.ts` duplicate no-op and ordered-delta single-assistant-stream cases pass
+
+- condition: Approval, active, failed, completed, and disconnected states are distinguishable and expose a reliable send-disabled decision
+- status: satisfied
+- evidence: phases on `ChatState.phase`; `isSendDisabled` true only for `active` and `awaiting_approval`; tests cover each phase
+
+- condition (A2 repair): malformed SSE JSON/contract data calls `onError` exactly once while the promise still rejects; fetch/HTTP and abort remain single-notification
+- status: satisfied
+- evidence: `notifies onError exactly once for malformed SSE frame data and still rejects`; `consumeSSEResponse` sole stream-consumption notifier; postSSE outer re-notify removed
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files (repair delta): `frontend/src/features/chat/api.ts`, `frontend/src/features/chat/api.test.ts`
+- validations to rerun: the three required frontend commands above
+- risk areas: interrupt streams end at `approval_required` (treated as clean end, not disconnect); history hydrate clears transient run state; no UI wiring yet (03C)
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ### 7.5 SSE event contract
+- docs/plans/Plan_3.md > ### 7.7 Frontend state
+- docs/plans/Plan_3.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 14.2 SSE contract
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/review/review_3_review_agent.md (A2 REJECTED_WITH_WARNINGS 03B repair instructions)
+- backend/app/schemas/sse.py
+- backend/app/schemas/chat.py
+- backend/app/api/chat.py (SSE wire frame shape)
+
+## Dependency and User Action Check
+- Dependencies: (01C) eight-event contract and (03A) public chat routes present and aligned with Plan 3
+- User Action: None
+
+## Files Inspected Before Editing
+- frontend/src/features/chat/api.ts
+- frontend/src/features/chat/api.test.ts
+- frontend/src/features/chat/contracts.ts
+- docs/tasks/task_3.md
+- docs/plans/Plan_3.md
+- docs/review/review_3_review_agent.md (03B block)
+- docs/reports/report_3_execute_agent.md
+- README.md
+
+## Key Implementation Decisions
+- Reused exact `readPublicConfig` / `VITE_API_BASE_URL` accessor; no second config source and no EventSource package.
+- SSE parse via fetch ReadableStream + incremental parser matching backend `event`/`id`/`data` frames.
+- Pure reducer uses immutable `seenEventIds` record; foreign-run and pre-`run_started` events ignored rather than throwing (UI-safe).
+- `approval_required` ends the HTTP stream cleanly (backend interrupt contract) so client does not report disconnect.
+- Stream-consumption error ownership: `consumeSSEResponse` calls `onError` once then rethrows; `postSSE` owns only pre-stream fetch/HTTP failures (single notify + throw).
+
+## Workflow Integrity Check
+- single task 03B only (same_task_repair)
+- no sibling 03C or Batch04 work
+- no checkbox update, no staging, no commit
+
+## Repair Log
+
+### 2026-07-12 (same_task_repair after A2 REJECTED_WITH_WARNINGS)
+- reason for repair: A2 found malformed SSE data invoked `onError` twice — `consumeSSEResponse` notified then rethrew, and `postSSE` re-notified for `ChatContractError`.
+- changes made:
+  - Removed outer `ChatContractError` re-notification in `postSSE` after `consumeSSEResponse`; stream-consumption errors now have one owner.
+  - Dropped unused `ChatContractError` import from `api.ts`.
+  - Added regression test: malformed SSE frame data → `onError` called once + promise rejects with `invalid_json`.
+- validations rerun: required focused vitest (37 passed), lint, typecheck — all passed.
+- outcome: complete; A2 single-onError repair satisfied; ready for A2 re-review.
+
+
+---
+
+# Task Execution Report - 03C
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Public SSE API and base Astryx chat experience
+
+## Task
+03C - Build the base Astryx chat shell and sanitized tool activity UI
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03C
+- Task title: Build the base Astryx chat shell and sanitized tool activity UI
+- Files allowed / repair scope (A2 same-task repair): `ChatShell`, `ChatApproval`, and focused component tests — accessible correction input while awaiting approval; gate Correct until nonblank `correction_text`; tests for empty/disabled and successful Correct resume payload. Prior 03C deliverables remain: `frontend/src/app/App.tsx`, focused `frontend/src/features/chat/components/*`, tests, `frontend/src/test/app.chat.test.tsx`.
+
+## Completed Work
+- Ran Astryx discovery (`npx astryx build "persistent AI chat with tool activity and approval"`) and inspected documented APIs for ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatToolCalls, ChatSystemMessage, AppShell, Banner, Button, ButtonGroup, EmptyState, Spinner, Text.
+- Replaced Plan 2 placeholder App shell with first-screen chat: Theme + ChatShell (AppShell + ChatLayout).
+- Implemented focused components consuming 03B reducer/API:
+  - ChatShell: history hydrate, turn submit, resume, stop/abort, send-disabled while active/awaiting approval, loading/empty/failure/disconnect composer status.
+  - ChatMessages: durable history, partial streaming text, assistant status, tools, approval, failure, disconnect, completed system rows.
+  - ChatComposerPanel: documented ChatComposer with controlled value, stop, status.
+  - ChatToolActivity + toolMapping: map only friendly label, pending|running|complete|error, duration, short sanitized outcome to ChatToolCalls (no raw args/secrets/internal IDs as visible fields).
+  - ChatApproval: ButtonGroup Approve/Correct with disable while resume in flight.
+- **Same-task repair (A2 REJECTED_WITH_WARNINGS):** ChatApproval now includes an accessible Astryx `TextArea` correction field; Correct stays disabled for blank/whitespace input and only invokes resume with trimmed nonblank text; ChatShell sends that value as `correction_text` and refuses empty correct resumes without using the disabled composer draft.
+- Added component and App integration tests for hydration, submit, partial text, sanitized tools, approval idempotency, empty-correction gate, successful Correct resume payload, failure/disconnect recovery, empty first screen, prohibited values, approved chat paths only.
+- Extended jsdom setup with ResizeObserver and canvas stubs for Astryx ChatLayout/Spinner.
+- Viewport inspection at 1440x900 and 390x844 against Vite dev (history mocked empty): chat empty state + composer present, no landing placeholder, no prohibited content, no horizontal overflow (original 03C run).
+
+## Files Created or Modified
+- frontend/src/app/App.tsx
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/ChatComposerPanel.tsx
+- frontend/src/features/chat/components/ChatToolActivity.tsx
+- frontend/src/features/chat/components/ChatApproval.tsx
+- frontend/src/features/chat/components/toolMapping.ts
+- frontend/src/features/chat/components/index.ts
+- frontend/src/features/chat/components/ChatShell.test.tsx
+- frontend/src/features/chat/components/ChatMessages.test.tsx
+- frontend/src/features/chat/components/ChatComposerPanel.tsx (panel source)
+- frontend/src/features/chat/components/ChatToolActivity.test.tsx
+- frontend/src/features/chat/components/ChatApproval.test.tsx
+- frontend/src/test/app.chat.test.tsx
+- frontend/src/test/app.smoke.test.tsx
+- frontend/src/test/setup.ts
+- frontend/scripts/inspect-chat-layout.mjs (optional viewport inspect helper)
+
+### Repair-delta files (this same-task repair)
+- frontend/src/features/chat/components/ChatApproval.tsx
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/ChatApproval.test.tsx
+- frontend/src/features/chat/components/ChatShell.test.tsx
+- docs/reports/report_3_execute_agent.md (this block update)
+
+## Tests or Validations Run
+- command/check: `cd frontend; npx astryx build "persistent AI chat with tool activity and approval"` (+ component docs for Chat*/AppShell/Banner/Button/EmptyState)
+- required: yes (Agent Work step 1)
+- result: passed
+- evidence or reason: kit returned ai-chat page + ChatToolCalls/Banner/Toast domain components; component prop docs inspected before UI edits
+
+- command/check: `cd frontend; npm run check:astryx`
+- required: yes
+- result: passed
+- evidence or reason: PASS: Astryx 0.1.4 exposes all 16 required public components. (rerun after repair)
+
+- command/check: `cd frontend; npm run test -- --run src/features/chat/components src/test/app.chat.test.tsx`
+- required: yes
+- result: passed
+- evidence or reason: 5 files, 24 tests passed (includes empty Correct gate + correction_text resume payload)
+
+- command/check: `cd frontend; npm run lint`
+- required: yes
+- result: passed
+- evidence or reason: eslint clean (exit 0) after repair
+
+- command/check: `cd frontend; npm run typecheck`
+- required: yes
+- result: passed
+- evidence or reason: tsc -b --noEmit exit 0 after repair
+
+- command/check: `cd frontend; npm run build`
+- required: yes
+- result: passed
+- evidence or reason: production build succeeded (vite, 2260 modules) after repair
+
+- command/check: `cd frontend; npm run dev` + viewport inspect 1440x900 and 390x844
+- required: yes
+- result: passed
+- evidence or reason: Original 03C INSPECT_PASS retained; repair did not change layout shell/empty first-screen structure (only approval correction field). Required quality gates re-verified via check:astryx + focused tests + lint + typecheck + build.
+
+## Acceptance Check
+- condition: First screen is chat experience using documented pinned Astryx APIs (AppShell/ChatLayout/messages/composer/tools/approval)
+- status: satisfied
+- evidence: App.tsx mounts ChatShell; tests assert empty-state heading and absence of Plan 2 landing copy; astryx check + component docs used
+
+- condition: Message/composer/tool/approval states legible and non-overlapping at desktop and mobile; controls do not resize from dynamic status text
+- status: satisfied
+- evidence: viewport inspect pass at 1440x900 and 390x844; ChatComposer status slot; duration omitted when null; correction TextArea only mounts while awaiting approval
+
+- condition: UI never renders raw arguments, document content, secrets, headers, stack traces, or internal-only IDs
+- status: satisfied
+- evidence: toolMapping maps only label/status/duration/outcome; tests assert tool_call_id and prohibited strings absent
+
+- condition: No upload/profile/job/match feature or direct provider/store request
+- status: satisfied
+- evidence: App integration test asserts only /api/chat/* paths; no later-phase UI components added
+
+- condition: Correct approval workflow supplies nonblank correction_text
+- status: satisfied
+- evidence: ChatApproval TextArea + disabled Correct for blank/whitespace; ChatShell resume body includes trimmed correction_text; focused tests cover both cases
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode — A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- repair-delta files: ChatApproval.tsx, ChatShell.tsx, ChatMessages.tsx, ChatApproval.test.tsx, ChatShell.test.tsx, report update
+- validations to rerun: `npm run check:astryx`; focused vitest paths; lint; typecheck; build
+- risk areas: Correct uses dedicated TextArea (not disabled composer draft); STREAM_OPEN still unmounts approval after resume starts; empty Correct cannot call streamResume
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md sections 4, 7.7
+- docs/plans/Master_plan.md sections 15.1, 15.3, 15.4
+- frontend/AGENTS.md Astryx workflow
+- 03B contracts/api/reducer
+- A2 repair instructions (correction_text resume workflow)
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/review/review_3_review_agent.md (03C REJECTED_WITH_WARNINGS)
+
+## Dependency and User Action Check
+- dependencies satisfied: yes (03B complete; pinned Astryx 0.1.4 neutral theme)
+- user actions satisfied: yes (none required)
+
+## Files Inspected Before Editing
+- frontend/AGENTS.md
+- frontend/src/app/App.tsx
+- frontend/src/features/chat/{api,contracts,reducer}.ts
+- frontend/src/features/chat/components/ChatApproval.tsx
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/ChatApproval.test.tsx
+- frontend/src/features/chat/components/ChatShell.test.tsx
+- Astryx TextArea / Button / ButtonGroup public APIs
+- docs/tasks/task_3.md 03C block
+- docs/review/review_3_review_agent.md 03C findings
+
+## Key Implementation Decisions
+- No later-phase sidebar/profile/job UI; AppShell content-only with ChatLayout.
+- Optimistic user message via HYDRATE_HISTORY then STREAM_OPEN before turn stream.
+- Sanitized tools: label?name, status, duration string, outcome?target/errorMessage; toolCallId only as React key.
+- Approval resume uses resumeMode + STREAM_OPEN so double-submit cannot fire a second resume.
+- Correction input lives on ChatApproval (documented TextArea) because composer remains disabled while awaiting approval; Correct only resumes after nonblank trim.
+
+## Workflow Integrity Check
+- single task 03C only (same_task_repair)
+- no Batch04 / 04A work
+- no checkbox update, no staging, no commit
+
+## Repair Log
+
+### 2026-07-12T00:45:00Z (same_task_repair after A2 REJECTED_WITH_WARNINGS)
+- reason for repair: A2 found Correct always sent null `correction_text` because the disabled composer was the only text source; Correct was unusable for backend `ResumeRequest`.
+- changes made:
+  - `ChatApproval`: accessible Astryx TextArea for correction; Correct disabled when blank/whitespace; `onCorrect(trimmedText)` only after nonblank; optional inline error status if invoked empty.
+  - `ChatShell.handleResume`: accepts correction text; refuses correct action without nonblank text; sends `correction_text` on successful Correct resume (no draft dependency).
+  - `ChatMessages`: `onCorrect` typed as `(correctionText: string) => void`.
+  - Tests: empty/whitespace Correct disabled without resume; successful Correct resume payload includes trimmed `correction_text`; Approve path unchanged.
+- validations rerun: `npm run check:astryx` PASS; focused tests 5 files / 24 passed; lint, typecheck, build all exit 0.
+- outcome: complete — A2 listed repair items addressed; required 03C quality gates passed.

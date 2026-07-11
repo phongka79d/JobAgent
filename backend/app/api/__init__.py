@@ -1,1 +1,1 @@
-"""Public FastAPI route modules (Phase 1: health only)."""
+"""Public FastAPI route modules (health + Plan 3 chat boundary)."""

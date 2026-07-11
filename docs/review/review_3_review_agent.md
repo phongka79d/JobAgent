@@ -590,3 +590,288 @@ ACCEPTED
 - repairs verified: the default graph interrupts through `await_approval`; resume uses the original run/thread identity and completes without replaying application writes.
 - remaining issues: None.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03C
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03C
+- Task title: Build the base Astryx chat shell and sanitized tool activity UI
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: scoped App, chat components, tests, test setup, and viewport inspection helper, alongside existing uncommitted accepted Batch03 work.
+
+## Files Reviewed
+- `frontend/src/features/chat/components/ChatShell.tsx`: in scope, but the Correct approval action always sends a null correction while the composer remains disabled.
+- `frontend/src/features/chat/components/ChatApproval.tsx`: in scope, passes Correct directly to the broken resume path.
+- `frontend/src/features/chat/components/ChatToolActivity.tsx` and `toolMapping.ts`: in scope, expose the required sanitized tool fields only.
+- `frontend/src/app/App.tsx` and focused component tests: in scope.
+
+## Validations Reviewed
+- Required 03C Astryx compatibility, focused tests (20), lint, typecheck, and build were rerun and passed.
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: the repair adds a dedicated Astryx TextArea while awaiting approval, gates Correct until its text is nonblank, and sends the trimmed text as `correction_text`. Required A1 validation evidence is green; A2 reran the focused component/App selection with 24 passing tests.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: correction input/gating and resume payload path; focused component and App tests.
+- repairs verified: Correct is disabled for blank text and the submitted resume receives nonblank `correction_text`.
+- remaining issues: None.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03A
+- Task title: Expose history, turn, and same-run resume through validated SSE
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `backend/app/api/chat.py`, `backend/app/schemas/chat.py`, `backend/app/main.py`, `backend/app/api/__init__.py`, `backend/app/schemas/__init__.py`, `backend/tests/api/test_chat.py`, `backend/tests/integration/test_chat_transport.py`, `backend/tests/test_lifecycle.py`, `docs/reports/report_3_execute_agent.md`
+
+## Files Reviewed
+- `backend/app/api/chat.py`: in scope - tool events now use opaque per-stream `tN` identifiers instead of database primary keys.
+- `backend/app/schemas/chat.py`: in scope - public history omits conversation and message primary keys.
+- `backend/app/main.py`: in scope - registers the router and extends exact-origin CORS methods to POST.
+- `backend/app/api/__init__.py`: in scope - package documentation only.
+- `backend/app/schemas/__init__.py`: in scope - exports the chat schemas.
+- `backend/tests/api/test_chat.py`: in scope - adds direct durable-PK non-leakage and opaque-tool-ID assertions.
+- `backend/tests/integration/test_chat_transport.py`: in scope - asserts history and SSE omit durable message/tool IDs.
+- `backend/tests/test_lifecycle.py`: in scope - injected chat-service lifecycle coverage.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/api/test_chat.py tests/integration/test_chat_transport.py tests/test_lifecycle.py`
+- Required: yes
+- Reported result: 22 passed
+- Rerun result: 22 passed in 4.02s
+- Status: passed
+
+- Command/check: `cd backend; python -m ruff check app/api/chat.py app/schemas/chat.py app/main.py tests/api/test_chat.py tests/integration/test_chat_transport.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+
+- Command/check: `cd backend; python -m mypy app/api/chat.py app/schemas/chat.py app/main.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success: no issues found in 3 source files
+- Status: passed
+
+- Command/check: `rg -n "@(router|app)\\.(get|post|put|patch|delete)" backend/app/api`
+- Required: yes
+- Reported result: four approved declarations
+- Rerun result: health GET plus history GET, turns POST, and same-run resume POST only
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: public responses exclude unsafe internal IDs while retaining the required public `run_id`.
+- Status: satisfied
+- Evidence: `_tool_events()` now assigns stream-local `t{index}` IDs (`backend/app/api/chat.py:179`), and `HistoryMessage` / `HistoryResponse` contain no durable message or conversation identifiers (`backend/app/schemas/chat.py:144`). API and integration tests query durable message/tool IDs and prove they are absent from public history and SSE payloads.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: public history fields, SSE tool correlation IDs, durable-PK non-leakage tests, and all four required 03A validations.
+- repairs verified: history omits conversation/message IDs; tool events use opaque `tN` IDs; direct API and integration assertions prove durable message/tool IDs do not reach public payloads.
+- remaining issues: None.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Public SSE API and base Astryx chat experience
+- Task ID: 03B
+- Task title: Implement the typed frontend SSE client, pure reducer, and history hydration
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the seven new frontend transport/state files reported by A1; pre-existing uncommitted 03A backend files and earlier batch evidence were kept separate from this review.
+
+## Files Reviewed
+- `frontend/src/features/chat/contracts.ts`: in scope - typed eight-event public contract and history parser.
+- `frontend/src/features/chat/api.ts`: in scope - approved history/turn/resume transport, but has duplicate error notification for invalid SSE frames.
+- `frontend/src/features/chat/reducer.ts`: in scope - pure run/event keyed reducer and send-disable state.
+- `frontend/src/lib/sse/parser.ts`: in scope - incremental framed SSE parser.
+- `frontend/src/features/chat/api.test.ts`: in scope - missing invalid-SSE single-error regression.
+- `frontend/src/features/chat/reducer.test.ts`: in scope - covers duplicate, foreign-run, pre-start, approval, terminal, disconnect, and hydration transitions.
+- `frontend/src/lib/sse/parser.test.ts`: in scope - parser fragmentation and multiline coverage.
+
+## Validations Reviewed
+- Command/check: `cd frontend; npm run test -- --run src/features/chat/reducer.test.ts src/lib/sse/parser.test.ts src/features/chat/api.test.ts`
+- Required: yes
+- Reported result: 36 tests passed
+- Rerun result: 3 files, 36 tests passed
+- Status: passed
+
+- Command/check: `cd frontend; npm run lint`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+
+- Command/check: `cd frontend; npm run typecheck`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: the client is limited to the three approved routes through `readPublicConfig`, the parser and reducer are typed and presentation-free, and focused validation passed. The same-task repair makes `consumeSSEResponse()` the sole notifier for malformed SSE/contract failures and adds a regression proving one `onError` call with a rejected promise.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: the A1 repair delta, malformed-SSE one-notification regression, required 03B Vitest selection, lint, and strict TypeScript checks.
+- repairs verified: `postSSE()` no longer re-notifies errors from `consumeSSEResponse()`; malformed SSE JSON calls `onError` once and still rejects as `ChatContractError`.
+- remaining issues: None.
+- updated outcome: ACCEPTED.

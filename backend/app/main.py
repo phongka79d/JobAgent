@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
+from app.api.chat import router as chat_router
 from app.api.health import DEFAULT_PROBE_TIMEOUT_SECONDS
 from app.api.health import router as health_router
 from app.config import Settings, load_settings
@@ -22,6 +23,8 @@ from app.graph.client import Neo4jClient
 from app.graph.errors import GraphError
 from app.graph.schema import ensure_graph_schema
 from app.services.attachment_storage import FilesystemAttachmentStorage
+from app.services.chat_service import ChatService
+from app.services.shopaikey_chat import ShopAIKeyChatAdapter
 
 SettingsLoader = Callable[[], Settings]
 
@@ -52,7 +55,7 @@ class ExactOriginCORSMiddleware(BaseHTTPMiddleware):
             and origin == allowed
         ):
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             acrh = request.headers.get("access-control-request-headers")
             if acrh:
                 response.headers["Access-Control-Allow-Headers"] = acrh
@@ -69,6 +72,7 @@ def create_app(
     session_manager: DatabaseSessionManager | None = None,
     storage: FilesystemAttachmentStorage | None = None,
     neo4j_client: Neo4jClient | None = None,
+    chat_service: ChatService | None = None,
     run_schema_setup: bool = True,
     probe_timeout_seconds: float = DEFAULT_PROBE_TIMEOUT_SECONDS,
 ) -> FastAPI:
@@ -76,7 +80,8 @@ def create_app(
 
     Parameters support test injection of synthetic settings and fake clients.
     Production uses ``create_app()`` with no arguments; settings load only inside
-    the lifespan from the process/root environment contract.
+    the lifespan from the process/root environment contract. Chat service is
+    constructed in lifespan (or injected) so import never opens a provider.
     """
     if probe_timeout_seconds <= 0:
         raise ValueError("probe_timeout_seconds must be positive")
@@ -100,11 +105,22 @@ def create_app(
         if graph is None:
             graph = Neo4jClient.from_settings(cfg)
 
+        chat = chat_service
+        if chat is None:
+            # Adapter stores settings only; ChatOpenAI is built on first use.
+            decision = ShopAIKeyChatAdapter.from_settings(cfg)
+            chat = ChatService(
+                db,
+                sqlite_path=cfg.sqlite_path,
+                decision=decision,
+            )
+
         app.state.settings = cfg
         app.state.db = db
         app.state.storage = store
         app.state.files_dir = Path(store.files_dir)
         app.state.neo4j = graph
+        app.state.chat_service = chat
         app.state.frontend_origin = cfg.frontend_origin
         app.state.embedding_dimensions = cfg.embedding_dimensions
         app.state.probe_timeout_seconds = probe_timeout_seconds
@@ -148,6 +164,7 @@ def create_app(
     )
     application.add_middleware(ExactOriginCORSMiddleware)
     application.include_router(health_router)
+    application.include_router(chat_router)
     return application
 
 

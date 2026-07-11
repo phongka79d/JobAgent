@@ -343,7 +343,7 @@ direct frontend access to backend stores/providers.
 
 ### Tasks
 
-- [ ] (03A): Expose history, turn, and same-run resume through validated SSE
+- [x] (03A): Expose history, turn, and same-run resume through validated SSE
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.4 Public chat contracts`; `docs/plans/Plan_3.md` > `### 7.5 SSE event contract`; `docs/plans/Plan_3.md` > `### 7.1 Persistent conversation and run lifecycle`; `docs/plans/Master_plan.md` > `## 14. Public FastAPI Boundary` > `### 14.1 API rules`
   - Source Requirements:
     - Implement only `GET /api/chat/history`, `POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume`; both POST routes return SSE.
@@ -369,7 +369,7 @@ direct frontend access to backend stores/providers.
   - Blocked Condition: A required chat service dependency from Batch02 is not accepted or cannot be injected through the current FastAPI lifecycle without loading real settings/provider calls during import.
   - Files: `backend/app/api/chat.py`, `backend/app/schemas/chat.py`, `backend/app/main.py`, `backend/tests/api/test_chat.py`, `backend/tests/integration/test_chat_transport.py`, `backend/tests/test_lifecycle.py`
 
-- [ ] (03B): Implement the typed frontend SSE client, pure reducer, and history hydration
+- [x] (03B): Implement the typed frontend SSE client, pure reducer, and history hydration
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.5 SSE event contract`; `docs/plans/Plan_3.md` > `### 7.7 Frontend state`; `docs/plans/Plan_3.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 14.2 SSE contract`
   - Source Requirements:
     - Parse the exact backend event union and reduce state purely by `run_id` and `event_id`.
@@ -392,7 +392,7 @@ direct frontend access to backend stores/providers.
   - Blocked Condition: The accepted backend SSE schema differs from the exact Plan 3 eight-event contract; reconcile (01C)/(03A) before implementing a divergent frontend parser.
   - Files: `frontend/src/features/chat/contracts.ts`, `frontend/src/features/chat/api.ts`, `frontend/src/features/chat/reducer.ts`, `frontend/src/features/chat/api.test.ts`, `frontend/src/features/chat/reducer.test.ts`, `frontend/src/lib/sse/parser.ts`, `frontend/src/lib/sse/parser.test.ts`
 
-- [ ] (03C): Build the base Astryx chat shell and sanitized tool activity UI
+- [x] (03C): Build the base Astryx chat shell and sanitized tool activity UI
   - Source of Truth: `docs/plans/Plan_3.md` > `## 4. Scope`; `docs/plans/Plan_3.md` > `### 7.7 Frontend state`; `docs/plans/Master_plan.md` > `### 15.1 Layout`; `docs/plans/Master_plan.md` > `### 15.3 Chat components`; `docs/plans/Master_plan.md` > `### 15.4 Tool activity display`
   - Source Requirements:
     - Replace the placeholder with the base responsive Astryx `AppShell`/`ChatLayout`, message list, composer, system/failure states, and `ChatToolCalls` rendering.
