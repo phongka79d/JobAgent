@@ -268,10 +268,26 @@ python -m ruff check app/db app/repositories app/schemas tests/repositories test
 python -m mypy app/db app/repositories app/schemas
 ```
 
-## Current limitations (after Plan 3 Batch01)
+## Plan 3 progress (Batch02)
 
-- No public chat transport, LangGraph execution, or ShopAIKey production calls in
-  the application path; the SSE contract is not yet exposed by FastAPI.
+Batch02 adds the controlled runtime behind the existing contract:
+
+- The typed ShopAIKey adapter uses the locked model/modes, fake-backed tests, and bounded repair/retry failures.
+- One LangGraph `StateGraph` and one `ToolNode` use an empty-by-default production tool registry, a six-iteration guard, and a production approval interrupt/resume seam.
+- Per-run `AsyncSqliteSaver` checkpoints retain interrupted work, resume on the same durable thread, and are deleted only after final assistant persistence.
+
+Focused Batch02 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_shopaikey_chat.py tests/agent/test_state.py tests/agent/test_prompt.py tests/services/test_context_assembly.py tests/agent/test_graph.py tests/tools/test_registry.py tests/integration/test_agent_lifecycle.py
+python -m ruff check app/agent app/tools app/services/shopaikey_chat.py app/services/chat_context.py app/services/chat_service.py tests/agent tests/tools tests/services/test_shopaikey_chat.py tests/services/test_context_assembly.py tests/integration/test_agent_lifecycle.py
+python -m mypy app/agent app/tools app/services/shopaikey_chat.py app/services/chat_context.py app/services/chat_service.py
+```
+
+## Current limitations (after Plan 3 Batch02)
+
+- No public chat transport; the SSE contract and Agent runtime are not yet exposed by FastAPI.
 - No CV/JD extraction, profile approval, matching, ranking, or evaluation UI.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.

@@ -397,3 +397,537 @@ complete
 - changes made: required `payload` on all events; conservative multi-line document-body detector for text deltas; preserve streaming whitespace on delta; tests for missing payload, explicit `{}`, CV/JD rejection, and normal partial acceptance.
 - validations rerun: required pytest (50 passed), ruff, mypy — all passed.
 - outcome: complete; A2 repair items satisfied; ready for A2 re-review.
+
+---
+
+# Task Execution Report - 02A
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Controlled Agent Runtime and Lifecycle
+
+## Task
+02A - Implement the production ShopAIKey chat adapter with bounded failures
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Controlled Agent Runtime and Lifecycle
+- Task ID: 02A
+- Task title: Implement the production ShopAIKey chat adapter with bounded failures
+- Files allowed / repair scope: backend/app/services/shopaikey_chat.py, backend/tests/services/test_shopaikey_chat.py, existing Phase 0 diagnostic helpers only when refactoring is required to eliminate duplicated adapter logic
+
+## Completed Work
+- Implemented production ShopAIKeyChatAdapter constructed from typed root Settings (base URL, API key, model) at locked temperature zero.
+- Tool binding uses public bind_tools() (locked tool mode); structured output uses locked strict_schema (function_calling + strict=True); final text uses locked streaming_text.
+- Application-owned ceilings: at most one timeout/rate-limit retry per operation; at most one structured-output repair; non-transient failures fail closed and are never converted to success.
+- Silent model substitution is rejected when the provider reports a different model id.
+- Injectable model factory and optional cancellation callback; sanitized ShopAIKeyChatError exposes stable codes only (no key, Authorization, raw body, or credential-bearing URL).
+- Added socket-blocked/fake tests covering configuration, binding, ordered streaming text, repair/retry ceilings, no model switching, cancellation, and secret-safe failures.
+- Did not refactor Phase 0 diagnostic helpers; production adapter reuses their patterns without duplicating live network paths into app code.
+
+## Files Created or Modified
+- backend/app/services/shopaikey_chat.py
+- backend/tests/services/test_shopaikey_chat.py
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pytest -q tests/services/test_shopaikey_chat.py
+- required: yes
+- result: passed
+- evidence or reason: 28 passed in 0.15s
+
+- command/check: cd backend; python -m ruff check app/services/shopaikey_chat.py tests/services/test_shopaikey_chat.py
+- required: yes
+- result: passed
+- evidence or reason: All checks passed!
+
+- command/check: cd backend; python -m mypy app/services/shopaikey_chat.py
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 1 source file
+
+## Acceptance Check
+- condition: Production construction uses only typed backend settings, the locked model/base URL, temperature zero, and bind_tools()
+- status: satisfied
+- evidence: from_settings reads Settings fields only; model_construction_kwargs forces temperature 0.0; tests assert factory kwargs and bind_tools path
+
+- condition: Schema repair and transient retry each stop at one; other failures are not retried or converted to success
+- status: satisfied
+- evidence: repair ceiling tests (initial + one repair only); timeout/rate-limit one-retry tests; non-transient provider errors single attempt; shared transient budget across structured primary+repair
+
+- condition: Required tests perform no provider network request and expose no key, Authorization header, raw provider body, or credential-bearing URL
+- status: satisfied
+- evidence: block_sockets fixture forbids socket construction; injectable fakes only; secret-surface tests scan stdout/stderr/logs/traceback for sentinel key, Authorization, and credential URLs
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: backend/app/services/shopaikey_chat.py, backend/tests/services/test_shopaikey_chat.py
+- validations to rerun: focused pytest, ruff, and mypy commands above
+- risk areas: live ChatOpenAI path is factory-default only (unexercised in normal suite); later graph/chat_service must inject cancel callbacks and consume DecisionResult/StreamChunk without logging secrets
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ### 7.6 ShopAIKey adapter and prompt boundary
+- docs/plans/Master_plan.md > ## 16. ShopAIKey Integration
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- backend/scripts/check_shopaikey_compatibility.py (Phase 0 patterns inspected; not modified)
+- backend/app/config.py (Settings contract)
+
+## Dependency and User Action Check
+- Dependencies: (01C) SSE contract present; Plan 1 locked langchain-openai==1.0.3 available; Plan 2 Settings available
+- User Action: None; tests do not read root .env
+
+## Files Inspected Before Editing
+- backend/app/config.py
+- backend/scripts/check_shopaikey_compatibility.py
+- backend/tests/test_shopaikey_diagnostic_foundation.py
+- backend/tests/test_shopaikey_structured_schema.py
+- backend/app/graph/errors.py
+- backend/app/services/__init__.py
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- README.md
+
+## Key Implementation Decisions
+- Force temperature 0.0 at adapter construction regardless of settings.llm_temperature range allowance.
+- Shared transient-retry budget for structured primary + repair (one total), matching master " retry once\ wording.
+- Do not import Phase 0 scripts into production app path; mirror verified constructor/bind/schema/stream/sanitize patterns instead.
+- ShopAIKeyChatError.__cause__/__context__ forced None to prevent secret leakage through exception chaining.
+
+## Workflow Integrity Check
+- single task 02A only
+- no sibling Batch02 (02B/02C/02D) work
+- no checkbox update, no staging, no commit
+
+---
+
+# Task Execution Report - 02B
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Controlled Agent Runtime and Lifecycle
+
+## Task
+02B - Implement bounded Agent state, context assembly, and domain prompt policy
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Controlled Agent Runtime and Lifecycle
+- Task ID: 02B
+- Task title: Implement bounded Agent state, context assembly, and domain prompt policy
+- Files allowed / repair scope: backend/app/agent/state.py, backend/app/agent/prompt.py, backend/app/services/chat_context.py, backend/tests/agent/test_state.py, backend/tests/agent/test_prompt.py, backend/tests/services/test_context_assembly.py
+
+## Completed Work
+- Defined exact Plan 3 AgentState TypedDict keys and validation that rejects unexpected keys, raw PDF/JD/CV body fields, unbounded history fields, nested bytes, and oversized nested strings.
+- Implemented initial_agent_state / validate_agent_state with attachment ID-only large-content references (no document bodies in state).
+- Implemented domain system policy, untrusted CV/JD document delimiters, and deterministic domain redirect policy without a classifier model.
+- Unrelated messages return the master-exact brief redirect with zero tool calls and no provider/tool retry loop.
+- Implemented ChatContextAssembler that reuses ConversationRepository.list_recent_for_context and optional Plan 2 CandidateProfile / JobPreferences / MemoryFact rows (absent when missing; no alternate memory storage).
+- Strips forbidden body keys from structured profile/preferences/memory slices before they enter candidate_context.
+- Added unit tests for exact state keys, bounds, missing optional context, current-turn inclusion, ID-only refs, malicious embedded instructions, and unrelated zero-tool redirect.
+
+## Files Created or Modified
+- backend/app/agent/__init__.py
+- backend/app/agent/state.py
+- backend/app/agent/prompt.py
+- backend/app/services/chat_context.py
+- backend/tests/agent/__init__.py
+- backend/tests/agent/test_state.py
+- backend/tests/agent/test_prompt.py
+- backend/tests/services/test_context_assembly.py
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pytest -q tests/agent/test_state.py tests/agent/test_prompt.py tests/services/test_context_assembly.py
+- required: yes
+- result: passed
+- evidence or reason: 31 passed in 1.83s
+
+- command/check: cd backend; python -m ruff check app/agent app/services/chat_context.py tests/agent tests/services/test_context_assembly.py
+- required: yes
+- result: passed
+- evidence or reason: All checks passed!
+
+- command/check: cd backend; python -m mypy app/agent app/services/chat_context.py
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 4 source files
+
+## Acceptance Check
+- condition: State contains the source-defined fields and no raw PDF/JD body field or unbounded history
+- status: satisfied
+- evidence: AGENT_STATE_KEYS match Plan 3 nine fields; validate_agent_state rejects extra keys and FORBIDDEN_STATE_BODY_KEYS nested bodies; tests cover exact keys and body rejection
+
+- condition: Prompt construction marks embedded document instructions untrusted and cannot grant tool authorization from document text
+- status: satisfied
+- evidence: wrap_untrusted_document delimiters + explicit boundary text; tool_authorization_from_document always False; malicious injection tests pass
+
+- condition: Unrelated input returns exactly the approved brief redirect through policy behavior and invokes no tool/provider retry loop
+- status: satisfied
+- evidence: evaluate_domain_policy returns DOMAIN_REDIRECT_MESSAGE exactly, allow_tools=False, tool_calls=(), invoke_provider_retry_loop=False
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: backend/app/agent/__init__.py, backend/app/agent/state.py, backend/app/agent/prompt.py, backend/app/services/chat_context.py, backend/tests/agent/__init__.py, backend/tests/agent/test_state.py, backend/tests/agent/test_prompt.py, backend/tests/services/test_context_assembly.py
+- validations to rerun: focused pytest, ruff, and mypy commands above
+- risk areas: domain relatedness is keyword/heuristic (not ML); graph (02C) must call evaluate_domain_policy before tool loops; document extracts for later phases must use wrap_untrusted_document and never put bodies into AgentState
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ### 7.2 Agent state
+- docs/plans/Plan_3.md > ### 7.6 ShopAIKey adapter and prompt boundary
+- docs/plans/Master_plan.md > ### 12.3 Agent state
+- docs/plans/Master_plan.md > ### 12.4 Memory policy
+- docs/plans/Master_plan.md > ### 12.5 Domain policy
+- docs/plans/Master_plan.md > ### 22.3 Untrusted content
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- README.md
+
+## Dependency and User Action Check
+- Dependencies: (01A) ConversationRepository bounded recent window available; (01B) run identity available as run_id string; (02A) ShopAIKey adapter present (not modified)
+- User Action: None
+- Optional profile/preferences/memory treated as absent when rows missing (no block)
+
+## Files Inspected Before Editing
+- backend/app/repositories/conversations.py
+- backend/app/db/models/conversation.py
+- backend/app/db/models/profile.py
+- backend/app/db/models/memory.py
+- backend/app/db/models/__init__.py
+- backend/app/services/shopaikey_chat.py
+- backend/app/services/__init__.py
+- backend/app/repositories/__init__.py
+- backend/tests/repositories/test_conversations.py
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- README.md
+
+## Key Implementation Decisions
+- Exact nine AgentState keys only; full_history / raw body fields fail closed.
+- Optional candidate context loaded via session.get on Plan 2 models without new repositories.
+- Domain redirect uses master-exact string; no classifier model.
+- Untrusted document wrapper is for prompt assembly only — bodies never enter AgentState.
+
+## Workflow Integrity Check
+- single task 02B only
+- no sibling Batch02 (02C/02D) work
+- no checkbox update, no staging, no commit
+
+---
+
+# Task Execution Report - 02C
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch02 - Controlled Agent Runtime and Lifecycle
+
+## Task
+02C - Build the single ToolNode graph, registry seam, loop guard, and error boundary
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Controlled Agent Runtime and Lifecycle
+- Task ID: 02C
+- Task title: Build the single ToolNode graph, registry seam, loop guard, and error boundary
+- Files allowed / repair scope: backend/pyproject.toml, backend/app/agent/graph.py, backend/app/tools/registry.py, backend/tests/agent/test_graph.py, backend/tests/tools/test_registry.py, backend/tests/fakes/agent_tools.py (plus package __init__ modules required for imports)
+
+## Completed Work
+- Promoted locked langgraph==1.2.9 into production dependencies and added compatible langgraph-checkpoint-sqlite==3.1.0 (requires langgraph-checkpoint>=4.1.0; resolves cleanly with Python 3.13). Removed obsolete plan2 optional extra that only held langgraph.
+- Implemented empty-by-default ToolRegistry registration/runtime seam (register/get/list/clear/replace_all) with documented later-phase domain tool names reserved but not implemented.
+- Implemented one StateGraph in app/agent/graph.py with topology: START -> load_context -> agent_decision <-> tools(ToolNode) via increment_iteration, else persist_response -> cleanup_checkpoint -> END.
+- Loop guard stops before a seventh ToolNode visit with exact code TOOL_LOOP_LIMIT_EXCEEDED; decision routing owns retries (LLM does not).
+- Structured tool failures (ToolMessage status=error or ERROR/ok:false payloads) set TOOL_EXECUTION_FAILED and cannot become run_outcome=completed.
+- Domain redirect in load_context uses evaluate_domain_policy with zero tool/provider calls.
+- persist_response and cleanup_checkpoint are seams for 02D durable lifecycle (flags only).
+- Synthetic tools and ScriptedDecision live only under tests/fakes/agent_tools.py and are injected at graph build time.
+- Tests cover topology, no-tool, one/multiple tools, exactly six iterations, pre-seventh failure, structured failure, registry isolation, and production domain-tool absence scan.
+
+## Files Created or Modified
+- backend/pyproject.toml
+- backend/app/agent/graph.py
+- backend/app/agent/__init__.py
+- backend/app/tools/__init__.py
+- backend/app/tools/registry.py
+- backend/tests/agent/test_graph.py
+- backend/tests/tools/__init__.py
+- backend/tests/tools/test_registry.py
+- backend/tests/fakes/__init__.py
+- backend/tests/fakes/agent_tools.py
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pip install -e ".[test]"; python -m pip check
+- required: yes
+- result: passed
+- evidence or reason: Host install succeeded (langgraph 1.2.9, langgraph-checkpoint-sqlite 3.1.0). Host pip check reports unrelated site-package ragdocument-backend langgraph pin conflict only. Isolated temp venv install of ".[test]" then pip check: "No broken requirements found." (exit 0); versions 1.2.9 / 3.1.0.
+
+- command/check: cd backend; python -m pytest -q tests/agent/test_graph.py tests/tools/test_registry.py
+- required: yes
+- result: passed
+- evidence or reason: 20 passed in 0.71s
+
+- command/check: cd backend; python -m ruff check app/agent app/tools tests/agent tests/tools; python -m mypy app/agent app/tools
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed!; mypy Success: no issues found in 6 source files
+
+- command/check: rg -n "def (get_candidate_context|propose_profile_from_cv|propose_profile_update|commit_profile_draft|save_job|query_jobs|match_jobs)" backend/app
+- required: yes
+- result: passed
+- evidence or reason: no matches (rg exit 1 / empty) — no production domain tool implementations
+
+## Acceptance Check
+- condition: Repository inspection finds one StateGraph, one decision node, and one ToolNode path with no multi-agent/handoff implementation
+- status: satisfied
+- evidence: AST scan in test_source_has_one_stategraph_and_one_toolnode; topology test asserts six named nodes without handoff/supervisor/worker
+
+- condition: Six tool executions are allowed and the seventh is prevented with the exact controlled code; failed tools cannot produce a successful run outcome
+- status: satisfied
+- evidence: test_exactly_six_tool_iterations_allowed; test_seventh_tool_blocked_with_loop_limit_code (code TOOL_LOOP_LIMIT_EXCEEDED, six ticks only); structured failure tests assert run_outcome=failed and has_successful_run_outcome False
+
+- condition: Synthetic tools exist only in test fixtures/injection, and production contains no implementation of the seven later-phase tools
+- status: satisfied
+- evidence: tests/fakes/agent_tools.py; test_synthetic_tool_not_imported_by_production_app_modules; domain-tool rg scan and registry tests
+
+- condition: Production image/package installation includes the runtime graph and SQLite checkpoint dependencies
+- status: satisfied
+- evidence: pyproject.toml main dependencies pin langgraph==1.2.9 and langgraph-checkpoint-sqlite==3.1.0; isolated install resolves
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: backend/pyproject.toml, backend/app/agent/graph.py, backend/app/agent/__init__.py, backend/app/tools/__init__.py, backend/app/tools/registry.py, backend/tests/agent/test_graph.py, backend/tests/tools/__init__.py, backend/tests/tools/test_registry.py, backend/tests/fakes/__init__.py, backend/tests/fakes/agent_tools.py
+- validations to rerun: pip install -e ".[test]"; pip check (prefer clean venv if host has other packages); pytest tests/agent/test_graph.py tests/tools/test_registry.py; ruff/mypy focused; domain-tool rg scan
+- risk areas: persist_response/cleanup_checkpoint are seams only (02D owns durable writes and AsyncSqliteSaver); tool_iteration_count increments per ToolNode visit (batch), not per parallel tool call; host global pip check may fail if other projects pin older langgraph
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ### 7.3 Graph topology and limits
+- docs/plans/Plan_3.md > ## 4. Scope
+- docs/plans/Plan_3.md > ## 5. Out of Scope
+- docs/plans/Master_plan.md > ### 12.1 One Agent, one controlled loop
+- docs/plans/Master_plan.md > ### 12.6 Tool loop limits
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- README.md
+
+## Dependency and User Action Check
+- Dependencies: (01B), (02A), (02B) present and accepted in task file
+- User Action: None
+
+## Files Inspected Before Editing
+- backend/pyproject.toml
+- backend/app/agent/state.py
+- backend/app/agent/prompt.py
+- backend/app/agent/__init__.py
+- backend/app/services/shopaikey_chat.py
+- backend/app/config.py
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- README.md
+
+## Key Implementation Decisions
+- Compatible checkpointer pin is langgraph-checkpoint-sqlite==3.1.0 (matches langgraph 1.2.9 requirement langgraph-checkpoint>=4.1.0); 2.x checkpointer-sqlite is incompatible.
+- messages_for_this_turn uses append reducer so ToolNode can emit only new ToolMessages under messages_key.
+- DecisionPort is injectable (ShopAIKeyChatAdapter or ScriptedDecision); production tools never auto-registered.
+- Error boundary refuses to convert structured tool failure into completed success even if a later fake decision claims success.
+
+## Workflow Integrity Check
+- single task 02C only
+- no sibling Batch02 (02D) work
+- no checkbox update, no staging, no commit
+
+---
+
+# Task Execution Report - 02D
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch02 - Controlled Agent Runtime and Lifecycle
+
+## Task
+02D - Implement per-run checkpoint, interrupt/resume, persistence, and cleanup lifecycle
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Controlled Agent Runtime and Lifecycle
+- Task ID: 02D
+- Task title: Implement per-run checkpoint, interrupt/resume, persistence, and cleanup lifecycle
+- Files allowed / repair scope: backend/app/agent/graph.py, backend/app/agent/lifecycle.py, backend/app/services/chat_service.py, backend/tests/integration/test_agent_lifecycle.py (plus test fakes / graph unit topology for await_approval)
+
+## Completed Work
+- Implemented `app/agent/lifecycle.py` owning short-lived `AsyncSqliteSaver` open/setup, thread config, per-thread checkpoint count, and completed-thread `adelete_thread` cleanup. Library checkpoint tables remain separate from application ORM/migrations; cleanup deletes one thread only.
+- Implemented `app/services/chat_service.py` as the durable turn/resume owner: user message then run create, mark running, graph execute with per-request saver + same `thread_id` (= run id), interrupt → interrupted + retain checkpoints, completed → validated assistant message then completed state then checkpoint delete, failed/disconnect → durable failed/inspectable state without assistant success write.
+- Turn and resume idempotency keys return existing run outcomes without replaying message/run/graph writes.
+- On disconnect (cancel event), advance non-terminal runs to safe durable `failed` with `client_disconnected`; reconnect via same turn key is replay-only.
+- Sanitized tool execution rows recorded from graph tool messages when tools ran; retained after completed checkpoint cleanup.
+- **Repair (A2):** Added production approval interrupt seam on the controlled graph: `request_human_approval` / `sanitize_approval_payload`, `await_approval` node, tool-marker staging (`APPROVAL_REQUIRED:`), and routing `agent_decision ↔ tools → increment → await_approval → decision|persist`. Lifecycle/ChatService persist and resume that interrupt on the same durable run/thread identity without an alternate test-only StateGraph.
+- Integration tests prove the **default production graph path** (`build_agent_graph` via ChatService, no interrupt `graph_factory`): request-boundary interrupt/resume, same thread ID, one resumed outcome, retained interrupted checkpoints, completed cleanup only after final assistant persistence, plus prior lifecycle cases.
+
+## Files Created or Modified
+- backend/app/agent/graph.py (production await_approval / request_human_approval seam + checkpointer compile)
+- backend/app/agent/lifecycle.py (interrupt/resume checkpoint lifecycle docs + helpers)
+- backend/app/services/chat_service.py (resume docs; durable interrupt/resume wiring)
+- backend/tests/integration/test_agent_lifecycle.py (production-graph interrupt proof; no alternate interrupt graph)
+- backend/tests/fakes/agent_tools.py (synthetic approval-request / gated-commit tools for tests only)
+- backend/tests/agent/test_graph.py (topology includes await_approval)
+- backend/app/agent/__init__.py (lifecycle exports; prior)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/integration/test_agent_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 9 passed in 2.69s (repair re-run)
+
+- command/check: `cd backend; python -m ruff check app/agent/lifecycle.py app/agent/graph.py app/services/chat_service.py tests/integration/test_agent_lifecycle.py; python -m mypy app/agent/lifecycle.py app/services/chat_service.py`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed!; mypy Success: no issues found in 2 source files
+
+- command/check: `cd backend; python -m pytest -q tests/agent/test_graph.py` (regression)
+- required: no
+- result: passed
+- evidence or reason: graph + lifecycle combined run: 21 passed in 3.12s earlier; graph topology includes await_approval
+
+## Acceptance Check
+- condition: A resumed interrupt uses the original application run and LangGraph thread identity after the first request has ended
+- status: satisfied
+- evidence: `test_interrupt_resume_same_thread_across_requests` uses production `build_agent_graph` (decision+tools only); new ChatService/saver on second request; same `run_id`/`thread_id`; one completed assistant message
+
+- condition: A completed run has one validated assistant message and no remaining checkpoint rows; application messages, outcome, and sanitized tool records remain
+- status: satisfied
+- evidence: `test_completed_run_persists_assistant_before_checkpoint_cleanup`; `test_tool_records_retained_after_completed_cleanup` (checkpoint count 0; messages/run/tools retained)
+
+- condition: Interrupted/failed/disconnected runs retain enough safe durable state to inspect or resume without duplicate application writes
+- status: satisfied
+- evidence: production-graph interrupt retains checkpoints + user message + interrupted run; failed retains error + user message; disconnect → failed then duplicate turn key is replay with one user message
+
+- condition: No application migration or ORM model owns LangGraph checkpoint tables
+- status: satisfied
+- evidence: `test_no_application_orm_owns_checkpoint_tables`; CHECKPOINT_TABLE_NAMES absent from Base.metadata and pre-setup migrated tables
+
+- condition (A2 repair): Default production graph path interrupts in one request and resumes in a second with same thread ID, retained interrupted checkpoints, cleanup only after final assistant persistence
+- status: satisfied
+- evidence: lifecycle interrupt tests no longer inject an alternate interrupt StateGraph; synthetic tool only stages `APPROVAL_REQUIRED:` for production `await_approval`
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files: backend/app/agent/graph.py, backend/app/agent/lifecycle.py, backend/app/services/chat_service.py, backend/tests/integration/test_agent_lifecycle.py, backend/tests/fakes/agent_tools.py, backend/tests/agent/test_graph.py
+- validations to rerun: pytest tests/integration/test_agent_lifecycle.py; ruff/mypy focused commands above
+- risk areas: checkpointer shares application SQLite file; application session not held open during graph execution; approval staging uses `APPROVAL_REQUIRED:` tool marker or `request_human_approval()` for guarded commits
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ### 7.1 Persistent conversation and run lifecycle
+- docs/plans/Plan_3.md > ### 7.3 Graph topology and limits
+- docs/plans/Plan_3.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 12.1 One Agent, one controlled loop
+- docs/plans/Master_plan.md > ### 12.2 Per-turn runs
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md
+- docs/review/review_3_review_agent.md (A2 REJECTED 02D repair instructions)
+- README.md
+
+## Dependency and User Action Check
+- Dependencies: (01A), (01B), (01C), (02C) present and accepted in task file
+- User Action: None
+
+## Files Inspected Before Editing
+- backend/app/agent/graph.py
+- backend/app/agent/lifecycle.py
+- backend/app/services/chat_service.py
+- backend/tests/integration/test_agent_lifecycle.py
+- backend/tests/fakes/agent_tools.py
+- backend/tests/agent/test_graph.py
+- docs/review/review_3_review_agent.md
+- docs/tasks/task_3.md
+- docs/plans/Plan_3.md
+
+## Key Implementation Decisions
+- Same configured SQLite path for application rows and library checkpoint tables; cleanup uses `adelete_thread` only (never global delete).
+- Durable writes use short `session_scope` transactions before and after graph execution so SQLAlchemy and aiosqlite are not co-writing one long-held session.
+- Final assistant message is appended and run marked completed before `delete_completed_thread_checkpoints`.
+- Production interrupt: `await_approval` node calls `request_human_approval` → LangGraph `interrupt()` when `pending_approval` is staged; ChatService maps `__interrupt__` to durable interrupted + retain checkpoints; resume uses `Command(resume=...)` on the same thread id.
+- Tests inject only synthetic tools/decision fakes into the production graph — not a second interrupt StateGraph.
+
+## Workflow Integrity Check
+- single task 02D same_task_repair only
+- no sibling Batch03 work
+- no checkbox update, no staging, no commit
+
+## Repair Log
+
+### 2026-07-11T23:46:18+07:00
+- reason for repair: A2 REJECTED 02D — production graph lacked approval interrupt; interrupt proven only via injected test-only graph factory
+- changes made: Added production `await_approval` / `request_human_approval` seam in `graph.py`; staged approval from tool `APPROVAL_REQUIRED:` markers; documented lifecycle/ChatService same-thread resume path; rewrote lifecycle interrupt/idempotency/retain tests to use default `build_agent_graph` without alternate interrupt graph; added test-only approval synthetic tools
+- validations rerun: `pytest -q tests/integration/test_agent_lifecycle.py` (9 passed); `ruff check` lifecycle/graph/chat_service/lifecycle tests (All checks passed); `mypy` lifecycle + chat_service (Success)
+- outcome: complete — production graph path interrupt/resume across request boundary satisfied

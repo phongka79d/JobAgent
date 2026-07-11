@@ -226,7 +226,7 @@ the production registry or application startup path.
 
 ### Tasks
 
-- [ ] (02A): Implement the production ShopAIKey chat adapter with bounded failures
+- [x] (02A): Implement the production ShopAIKey chat adapter with bounded failures
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.6 ShopAIKey adapter and prompt boundary`; `docs/plans/Master_plan.md` > `## 16. ShopAIKey Integration`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Construct `ChatOpenAI` from the typed root base URL/key/model with temperature zero and `bind_tools()`.
@@ -249,7 +249,7 @@ the production registry or application startup path.
   - Blocked Condition: The installed locked provider package no longer exposes the already-verified constructor, binding, strict-schema, or streaming behavior; report the concrete compatibility conflict without changing versions or modes.
   - Files: `backend/app/services/shopaikey_chat.py`, `backend/tests/services/test_shopaikey_chat.py`, existing Phase 0 diagnostic helpers only when refactoring is required to eliminate duplicated adapter logic
 
-- [ ] (02B): Implement bounded Agent state, context assembly, and domain prompt policy
+- [x] (02B): Implement bounded Agent state, context assembly, and domain prompt policy
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.2 Agent state`; `docs/plans/Plan_3.md` > `### 7.6 ShopAIKey adapter and prompt boundary`; `docs/plans/Master_plan.md` > `### 12.3 Agent state`; `docs/plans/Master_plan.md` > `### 12.4 Memory policy`; `docs/plans/Master_plan.md` > `### 12.5 Domain policy`; `docs/plans/Master_plan.md` > `### 22.3 Untrusted content`
   - Source Requirements:
     - Define the exact Plan 3 state fields and keep large document bodies out of state.
@@ -272,7 +272,7 @@ the production registry or application startup path.
   - Blocked Condition: Approved profile/preferences or memory repositories are not yet implemented; treat them as absent optional context through existing Plan 2 models, and block only if doing so prevents the current-turn/bounded-history contract.
   - Files: `backend/app/agent/state.py`, `backend/app/agent/prompt.py`, `backend/app/services/chat_context.py`, `backend/tests/agent/test_state.py`, `backend/tests/agent/test_prompt.py`, `backend/tests/services/test_context_assembly.py`
 
-- [ ] (02C): Build the single ToolNode graph, registry seam, loop guard, and error boundary
+- [x] (02C): Build the single ToolNode graph, registry seam, loop guard, and error boundary
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.3 Graph topology and limits`; `docs/plans/Plan_3.md` > `## 4. Scope`; `docs/plans/Plan_3.md` > `## 5. Out of Scope`; `docs/plans/Master_plan.md` > `### 12.1 One Agent, one controlled loop`; `docs/plans/Master_plan.md` > `### 12.6 Tool loop limits`
   - Source Requirements:
     - Build one `StateGraph` with the specified context, decision, `ToolNode`, iteration, persistence, cleanup, and end topology.
@@ -298,7 +298,7 @@ the production registry or application startup path.
   - Blocked Condition: No SQLite checkpointer release is compatible with locked `langgraph==1.2.9` and Python 3.13; report the dependency resolution evidence rather than changing the locked LangGraph version.
   - Files: `backend/pyproject.toml`, `backend/app/agent/graph.py`, `backend/app/tools/registry.py`, `backend/tests/agent/test_graph.py`, `backend/tests/tools/test_registry.py`, `backend/tests/fakes/agent_tools.py`
 
-- [ ] (02D): Implement per-run checkpoint, interrupt/resume, persistence, and cleanup lifecycle
+- [x] (02D): Implement per-run checkpoint, interrupt/resume, persistence, and cleanup lifecycle
   - Source of Truth: `docs/plans/Plan_3.md` > `### 7.1 Persistent conversation and run lifecycle`; `docs/plans/Plan_3.md` > `### 7.3 Graph topology and limits`; `docs/plans/Plan_3.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 12.2 Per-turn runs`
   - Source Requirements:
     - Create one `AsyncSqliteSaver` lifecycle per run/thread, resume an interrupt through the same identity across requests, and remove completed checkpoint rows.

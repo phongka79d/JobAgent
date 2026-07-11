@@ -18,6 +18,9 @@ dependencies = [
     "uvicorn==0.51.0",
     # Plan 2 graph client (04A); locked Phase 0 / Plan 1 driver pin.
     "neo4j==6.2.0",
+    # Plan 3 Agent runtime (02C): locked LangGraph + compatible SQLite checkpointer.
+    "langgraph==1.2.9",
+    "langgraph-checkpoint-sqlite==3.1.0",
 ]
 
 [project.optional-dependencies]
@@ -26,10 +29,6 @@ test = [
     "pytest==8.4.2",
     "ruff==0.15.21",
     "mypy==1.18.2",
-]
-# Later Plan 2 production adapters (not required for foundation import/startup).
-plan2 = [
-    "langgraph==1.2.9",
 ]
 
 [project.scripts]
