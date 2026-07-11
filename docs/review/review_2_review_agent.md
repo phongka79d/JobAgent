@@ -599,3 +599,179 @@ ACCEPTED
 
 ## Repair Instructions
 - None.
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Staged and Active Attachment Persistence
+- Task ID: 03A
+- Task title: Implement contained attachment storage and staged/active metadata operations
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: modified `backend/tests/db/test_models.py`, `docs/reports/report_2_execute_agent.md`, and this A2 review report; untracked focused attachment modules under `backend/app/services/`, the attachment repository, and split service/repository tests
+
+## Files Reviewed
+- `backend/app/services/attachment_storage.py`: repaired in scope - 294-line public protocol/facade; async orchestration delegates synchronous critical operations without duplicating platform logic.
+- `backend/app/services/attachment_storage_errors.py`: in scope - one sanitized domain-error mapping boundary.
+- `backend/app/services/attachment_storage_paths.py`: in scope - the sole canonical UUID service-path grammar shared by storage and repository.
+- `backend/app/services/attachment_storage_containment.py`: in scope - root/area identity and verified Windows directory-handle ownership.
+- `backend/app/services/attachment_storage_windows.py`: in scope - private fail-closed Windows path/open/final-handle adapter.
+- `backend/app/services/attachment_storage_windows_mutate.py`: in scope - private handle-relative rename and disposition-delete operations.
+- `backend/app/services/attachment_storage_fd.py`: in scope - exclusive partial/read descriptor operations and sanitized write/fsync/close helpers.
+- `backend/app/services/attachment_storage_publish.py`: in scope - non-overwriting finalization/promotion plus POSIX rollback.
+- `backend/app/services/attachment_storage_unlink.py`: in scope - handle-bound public delete and best-effort abort cleanup.
+- `backend/app/services/attachment_storage_ops.py`: in scope - 29-line composition surface with no duplicated security logic.
+- `backend/app/services/__init__.py`: in scope - focused package marker only.
+- `backend/app/repositories/attachments.py`: repaired in scope - wraps the shared validator only to map storage errors into repository errors; duplicate and caller-owned transaction behavior remain correct.
+- `backend/app/repositories/__init__.py`: in scope - focused package marker only.
+- `backend/tests/services/test_attachment_storage.py`, `attachment_helpers.py`, and four `cases_attachment_storage_*.py` files: repaired in scope - split by path, lifecycle, I/O, and containment; real Windows junction hooks and deterministic POSIX rollback are exercised.
+- `backend/tests/repositories/test_attachments.py`: repaired in scope - path identity, duplicate ID/hash, failed-session rollback, mark-active rollback, and non-commit behavior remain covered.
+- `backend/tests/db/test_models.py`: in scope - legitimate narrow adaptation; it retains the generic-repository guard while allowing only `attachments.py`.
+- `backend/app/db/models/attachments.py`, `backend/app/db/enums.py`, and `backend/app/db/session.py`: accepted dependency contracts - model state and caller-owned session boundaries remain compatible.
+- `docs/reports/report_2_execute_agent.md`: in-scope evidence - one updated 03A block preserves both repair stages, accurately describes final code/tests, contains no U+FFFD/mojibake in 03A, and restores the decoded 02B evidence text; Git shows only equivalent em-dash byte-encoding normalization on that prior line.
+- `.agent/handoff/a1_response.json`: live repair handoff evidence - selects exactly 03A, reports `complete`, and matches the updated report identity.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/services/test_attachment_storage.py tests/repositories/test_attachments.py`
+- Required: yes
+- Reported result: 74 passed, 1 POSIX-only skip
+- Rerun result: 74 passed, 1 skipped in 2.49s
+- Status: passed
+- Notes: all Windows junction and final-path cases ran; only the native POSIX branch is skipped on this host and was independently invoked below.
+
+- Command/check: `cd backend; python -m ruff check app/services app/repositories/attachments.py tests/services tests/repositories; python -m mypy app/services app/repositories/attachments.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Ruff passed; mypy passed for all 12 storage/repository source modules.
+- Status: passed
+- Notes: verifies the complete extracted production surface, not only the facade.
+
+- Command/check: `cd backend; python -m pytest -q`
+- Required: yes
+- Reported result: 278 passed, 1 skipped
+- Rerun result: 278 passed, 1 skipped in 5.40s
+- Status: passed
+- Notes: complete backend regression remains green.
+
+- Command/check: independent Windows junction swaps at stage publish, promote publish, and public unlink boundaries
+- Required: yes
+- Reported result: all mutation operations use verified handles and preserve outside/source bytes
+- Rerun result: passed; a bound partial prevents the stage-area rename and publishes only inside; promote/delete hooks that installed actual junctions raised `InvalidStoragePathError`, preserved `PROMOTE`/`REAL`, left both outside markers unchanged, and created no outside attachment leaf.
+- Status: passed
+- Notes: Windows mutation targets derive from verified parent-handle final paths, not the swapped service pathname.
+
+- Command/check: independent open final-handle failure/path-swap probe
+- Required: yes
+- Reported result: Windows final-path verification closes open races and fails closed
+- Rerun result: passed; swapping the area inside the actual leaf `CreateFileW` hook raised `InvalidStoragePathError` and returned no outside bytes; forcing `GetFinalPathNameByHandleW` to return zero raised context-free `InvalidStoragePathError`.
+- Status: passed
+- Notes: no fallback to stale pre-open checks remains.
+
+- Command/check: independent collision, short/zero-write, invalid-chunk, and common OS-error probe
+- Required: yes
+- Reported result: repaired behaviors passed
+- Rerun result: repeated stage and promotion collisions raised `AttachmentStorageCollisionError` while preserving both sides; six one-byte writes stored/reported six bytes; zero writes and invalid chunks raised sanitized domain errors with no partial; open permission and delete permission errors were sanitized and delete preserved the file.
+- Status: passed
+- Notes: the principal original collision, short-write, invalid-content, and delete-suppression defects are repaired.
+
+- Command/check: independent write/fsync/close and POSIX publication rollback probe
+- Required: yes
+- Reported result: all filesystem failures are sanitized and POSIX source-removal failure rolls back
+- Rerun result: passed; injected write/fsync/close failures produced context-free `AttachmentStorageIOError` without path disclosure; direct deterministic `_publish_posix` invocation preserved `SRC`, removed the destination, raised sanitized failure, and did not falsely succeed.
+- Status: passed
+- Notes: safely exercises the skipped branch on Windows without claiming native POSIX execution.
+
+- Command/check: independent SQLite transaction/path-identity/duplicate probe
+- Required: yes
+- Reported result: canonical path identity, duplicate mapping, and caller-owned rollback reported satisfied
+- Rerun result: passed; mismatched/non-UUID/encoded/reserved paths were rejected; duplicate hash and ID raised context-free `AttachmentDuplicateError` with correct kinds, left the session failed until explicit caller rollback, and preserved the one committed row.
+- Status: passed
+- Notes: repository transaction and duplicate repairs are real and contain no Plan 4 policy.
+
+- Command/check: caller/security-rule and module-boundary inspection
+- Required: yes
+- Reported result: focused storage/repository modules with one canonical validator
+- Rerun result: passed; one `parse_service_storage_path` implementation rejects noncanonical UUID, encoded, reserved, drive, UNC, mixed-separator, and traversal forms; the repository imports it through a narrow domain-error wrapper; all ten production storage modules are at or below 294 physical lines with genuine contract/path/containment/platform/FD/publish/unlink boundaries.
+- Status: passed
+- Notes: caller search found no duplicated or bypassable compatibility path shim and no Plan 4 policy.
+
+- Command/check: `git diff --check`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed with informational LF-to-CRLF warnings only.
+- Status: passed
+- Notes: no whitespace error found.
+
+- Command/check: production module line counts and report encoding/history scan
+- Required: yes
+- Reported result: all storage modules <=300; 03A encoding clean; 02B text restored
+- Rerun result: passed; counts were 294/280/229/196/196/144/126/105/53/29; 03A contained zero U+FFFD and zero known mojibake sequences; decoded 02B evidence contains the original U+2014 and `.env` text.
+- Status: passed
+- Notes: the only Git-level 02B delta is equivalent conversion of the em dash from legacy CP1252 bytes to valid UTF-8, with no evidence wording/history change.
+
+## Acceptance Review
+- Task acceptance: contained async stage/promote/delete/open mechanics, non-overwriting collisions, exact streaming writes, partial cleanup, sanitized failures, canonical service paths, caller-owned repository transactions, focused modules, and Plan 4 exclusion are satisfied.
+- Status: satisfied
+- Evidence: required and full suites pass; independent exact operation-hook junction probes preserve every outside/source marker; final-path API failure rejects; low-level error and POSIX rollback probes pass; shared-validator, caller, module-boundary, line-count, git, and report scans pass.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-11T17:51:31+07:00
+- what was re-checked: all five original major findings, every A1 repair claim, actual Windows junction swaps before and inside operations, final-handle failure, repeated/concurrent collisions, short/zero writes, invalid chunks, OS error chains, SQLite path/duplicate/rollback behavior, all callers, full git scope, required/full validations, and the explicit SRP/file-size concern.
+- repairs verified: single-FD iteration; normal non-overwriting collisions; complete short-write loops; zero-write/invalid-chunk cleanup; common open/delete error sanitization; canonical repository identity; duplicate domain mapping; caller-owned rollback and non-commit behavior.
+- remaining issues: mutating containment races, final-path fail-open, raw fsync/write failures, unreliable POSIX source cleanup, inconsistent duplicated path security, 671-line god module, missing in-operation regressions, and execution-report corruption/overclaim.
+- updated outcome: REJECTED.
+
+### 2026-07-11T18:19:00+07:00
+- what was re-checked: final split implementation and all callers/imports; exact stage/promote/delete/open operation hooks with real Windows junctions; real GetFinalPathNameByHandleW zero return; collisions, short/zero writes, invalid chunks, cleanup, write/fsync/close errors, deterministic POSIX rollback, canonical paths, duplicate/rollback/non-commit SQL behavior, Plan 4 exclusion, line counts, report history/encoding, required checks, and full backend tests.
+- repairs verified: handle-bound fail-closed Windows operations; no outside read/create/move/delete; complete sanitized OS-error boundary; POSIX failure rollback; one shared canonical validator; focused <=300-line production modules; concern-split tests; accurate preserved execution evidence.
+- remaining issues: none.
+- updated outcome: ACCEPTED.

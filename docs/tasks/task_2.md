@@ -312,7 +312,7 @@ CV parsing, upload endpoints, approval, and active-profile replacement are exclu
 
 ### Tasks
 
-- [ ] (03A): Implement contained attachment storage and staged/active metadata operations
+- [x] (03A): Implement contained attachment storage and staged/active metadata operations
   - Source of Truth: `docs/plans/Plan_2.md` > `### 7.3 Attachment storage interface`; `docs/plans/Plan_2.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 4.1 Ownership rules`; `docs/plans/Master_plan.md` > `### 6.1 Application tables`
   - Source Requirements:
     - Implement async `stage`, `promote`, `delete`, and `open` behavior compatible with the declared `AttachmentStorage` protocol.

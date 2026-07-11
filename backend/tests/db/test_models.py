@@ -148,7 +148,7 @@ def test_no_blob_columns_for_uploaded_bytes() -> None:
             assert "blob" not in type_name
 
 
-def test_structured_json_columns_exist_without_public_repository_api() -> None:
+def test_structured_json_columns_exist_without_generic_repository_api() -> None:
     json_columns = {
         ("candidate_profile", "profile_json"),
         ("profile_drafts", "draft_json"),
@@ -164,10 +164,14 @@ def test_structured_json_columns_exist_without_public_repository_api() -> None:
 
     import app.db as db_pkg
 
+    # JSON remains model-owned; no generic repository facade on app.db.
+    # Plan 2 Batch03 introduces a narrow AttachmentRepository only.
     assert not hasattr(db_pkg, "GenericRepository")
     assert not hasattr(db_pkg, "JsonRepository")
     repos_root = Path(__file__).resolve().parents[2] / "app" / "repositories"
-    assert not repos_root.exists()
+    assert repos_root.is_dir()
+    assert (repos_root / "attachments.py").is_file()
+    assert not (repos_root / "generic.py").exists()
 
 
 @pytest.mark.asyncio

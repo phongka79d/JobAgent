@@ -11,8 +11,12 @@ React/TypeScript/Vite foundations with one typed root configuration contract.
 
 **Plan 2 Batch02 is COMPLETE.** SQLite application metadata (02A) and a
 repeatable initial Alembic migration (02B) are available under `backend/`.
-Health checks, product services, Agent behavior, and user workflows remain for
-later Plan 2 batches.
+
+**Plan 2 Batch03 is COMPLETE.** Contained filesystem attachment storage and
+caller-transactional staged/active metadata operations are available under
+`backend/`. MIME/content inspection, parsing, profile replacement, upload
+endpoints, health checks, Agent behavior, and user workflows remain for later
+plans and Plan 2 batches.
 
 Batch01–Batch05 locked the scaffold and four compatibility gates (Astryx,
 ShopAIKey chat, pypdf extraction, ShopAIKey embeddings). Batch06 pinned exact
@@ -27,7 +31,8 @@ Evidence destination:
 Exactly three product working folders:
 
 - `frontend/`: runnable neutral Astryx React/TypeScript/Vite shell; no product workflows.
-- `backend/`: runnable FastAPI foundation, typed settings, and Phase 0 diagnostics.
+- `backend/`: runnable FastAPI foundation, typed settings, SQLite metadata,
+  contained attachment persistence, and Phase 0 diagnostics.
 - `infrastructure/`: empty Docker, Neo4j, and script placeholders only.
 
 Root documentation and configuration files are not a fourth working folder.
@@ -105,6 +110,23 @@ user-owned root `.env`):
 ```powershell
 cd backend
 python -m pytest -q tests/integration/test_migrations.py
+```
+
+### Backend attachment persistence (Batch03)
+
+Attachment bytes are stored under the configured `FILES_DIR` in service-owned
+`staged/<uuid>` and `active/<uuid>` paths; SQLite stores metadata and the
+service path, not file blobs. `FilesystemAttachmentStorage` owns contained
+stage, promote, open, and delete mechanics, while `AttachmentRepository`
+participates in the caller's transaction for staged/active metadata changes.
+Neither interface accepts user path authority or applies MIME, magic-byte,
+page-count, parsing, approval, or profile-replacement policy.
+
+Focused attachment checks (temporary files and SQLite databases only):
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_attachment_storage.py tests/repositories/test_attachments.py
 ```
 
 The Batch01 backend intentionally exposes only FastAPI's generated documentation
