@@ -1,0 +1,134 @@
+{
+  "protocol_id": "phase0_shopaikey_embedding_validation_v1",
+  "protocol_version": 1,
+  "data_class": "safe_aggregate",
+  "recorded_at_utc": "2026-07-11T05:39:44+00:00",
+  "recorded_before_live_results": true,
+  "held_out_access_for_threshold_setting": "forbidden",
+  "status": "FROZEN",
+  "freeze_accepted_task": "05A",
+  "user_option": "B_synthetic_phase0_materialization",
+  "provider_contract": {
+    "provider": "ShopAIKey",
+    "endpoint": "POST /v1/embeddings",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "encoding": "float",
+    "alternate_models_allowed": false,
+    "local_embedding_runtime_allowed": false,
+    "silent_model_substitution_allowed": false
+  },
+  "preprocessing": {
+    "e5_query_prefix": false,
+    "e5_passage_prefix": false,
+    "whitespace_normalization": "strip_and_collapse_internal_whitespace",
+    "candidate_representation": "target roles + profile summary + verified skills + experience titles + preferences",
+    "job_representation": "title + summary + responsibilities + required skills + preferred skills",
+    "candidate_pii_redaction_required_before_request": true,
+    "representation_builders_version": "phase0_v1_synthetic"
+  },
+  "request_boundaries": {
+    "config_source": "root_.env_only",
+    "required_env_names": [
+      "SHOPAIKEY_BASE_URL",
+      "SHOPAIKEY_API_KEY",
+      "EMBEDDING_MODEL",
+      "EMBEDDING_DIMENSIONS"
+    ],
+    "scalar_inputs_required": true,
+    "batch_inputs_required": true,
+    "max_batch_size": 16,
+    "request_timeout_seconds": 30,
+    "timeout_policy": "fail_closed_with_sanitized_error",
+    "rate_limit_policy": "retry_once_then_persist_sanitized_failure",
+    "invalid_response_policy": "sanitize_and_fail_without_raw_payload_logging",
+    "log_prohibitions": [
+      "api_keys",
+      "authorization_headers",
+      "raw_provider_headers",
+      "raw_cv_jd_text",
+      "contact_pii",
+      "private_label_text"
+    ]
+  },
+  "response_validation": {
+    "preserve_input_order": true,
+    "required_vector_length": 1536,
+    "value_type": "finite_float",
+    "reject_non_finite": true,
+    "scalar_batch_equivalence_for_identical_inputs": true
+  },
+  "evaluation_inputs": {
+    "relevance_label_scale": {
+      "0": "irrelevant",
+      "1": "related but missing many requirements",
+      "2": "reasonably suitable",
+      "3": "highly suitable / should apply"
+    },
+    "split": {
+      "scheme": "fixed_seeded_60_20_20",
+      "seed": 20260711,
+      "development_fraction": 0.6,
+      "validation_fraction": 0.2,
+      "held_out_test_fraction": 0.2,
+      "phase0_active_slice": "validation",
+      "held_out_use_in_phase0": "forbidden_for_threshold_setting_and_tuning"
+    },
+    "subset_manifest_safe_inventory": "backend/evaluation/labels/retrieval_subset_manifest.json",
+    "ignored_records_path": "backend/evaluation/private/retrieval_subset.local.json",
+    "subset_status": "FROZEN_SYNTHETIC",
+    "validation_record_count": 32,
+    "label_provenance": "SYNTHETIC_PHASE0_USER_OPTION_B"
+  },
+  "metrics": {
+    "quality": [
+      "nDCG@10",
+      "Recall@10"
+    ],
+    "latency": [
+      "median_provider_request_latency_ms",
+      "p95_provider_request_latency_ms"
+    ],
+    "slice": "validation_only",
+    "ranking": {
+      "similarity": "cosine",
+      "k": 10,
+      "relevant_label_threshold_min": 2
+    }
+  },
+  "pass_criteria": {
+    "status": "PRE_RECORDED",
+    "recorded_before_execution_required": true,
+    "recorded_at_utc": "2026-07-11T05:39:44+00:00",
+    "post_hoc_threshold_changes_allowed": false,
+    "numeric_baselines": {
+      "nDCG@10_min": 0.3,
+      "Recall@10_min": 0.35,
+      "median_provider_request_latency_ms_max": 3000,
+      "p95_provider_request_latency_ms_max": 8000
+    },
+    "compatibility_must_pass": [
+      "model_is_text-embedding-3-small",
+      "dimensions_exactly_1536",
+      "encoding_float",
+      "no_e5_prefixes",
+      "ordered_outputs",
+      "finite_floats_only",
+      "sanitized_provider_failures"
+    ]
+  },
+  "live_embedding_authorization": {
+    "user_option_b": true,
+    "status": "AUTHORIZED_WHEN_CREDENTIALS_EXIST"
+  },
+  "failure_criteria": [
+    "post_hoc_threshold_changes",
+    "held_out_results_inspected_for_threshold_setting",
+    "alternate_model_or_dimension_used",
+    "e5_prefix_applied",
+    "unordered_or_mismatched_batch_outputs",
+    "non_finite_or_wrong_dimension_vectors",
+    "raw_private_text_or_secrets_in_logs_or_reports",
+    "quality_or_latency_below_pre_recorded_baseline"
+  ]
+}

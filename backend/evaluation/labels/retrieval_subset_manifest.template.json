@@ -2,13 +2,17 @@
   "manifest_version": 1,
   "data_class": "local_private",
   "ignored_records_path": "backend/evaluation/private/retrieval_subset.local.json",
-  "seed": null,
+  "seed": 20260711,
   "split_name": "validation",
-  "record_count": null,
-  "label_provenance": "PENDING_USER_CONFIRMATION",
+  "record_count": 32,
+  "label_provenance": "SYNTHETIC_PHASE0_USER_OPTION_B",
   "record_fields": [
     "record_id",
-    "relevance_label"
+    "relevance_label",
+    "split",
+    "query_entity_id",
+    "document_entity_id"
   ],
-  "benchmark_status": "PENDING"
+  "benchmark_status": "FROZEN",
+  "safe_manifest_path": "backend/evaluation/labels/retrieval_subset_manifest.json"
 }

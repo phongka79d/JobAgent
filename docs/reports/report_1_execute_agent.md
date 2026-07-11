@@ -1,4 +1,4 @@
----
+﻿---
 
 # Task Execution Report - 01A
 
@@ -2749,3 +2749,551 @@ complete
 - No OCR, no alternate parser, no raw document text recorded.
 - Frozen digital 4/5 criterion left unchanged.
 - PDF gate closed honestly as PASS with dual-mode exact-code evidence.
+
+---
+
+# Task Execution Report - 05A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - ShopAIKey Embedding Compatibility Gate
+
+## Task
+05A - Freeze the seeded retrieval subset and embedding validation protocol
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - ShopAIKey Embedding Compatibility Gate
+- Task ID: 05A
+- Task title: Freeze the seeded retrieval subset and embedding validation protocol
+- Files allowed / repair scope: Retrieval manifest under backend/evaluation/labels/; ignored local data paths under backend/evaluation/private/; backend/evaluation/reports/phase_0_feasibility.md; execution report only. No 05B runner implementation, no 05C live embeddings, no threshold invention, no held-out tuning.
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ## 3. Prerequisites from Prior Phases
+- docs/plans/Plan_1.md > ### 7.4 Embedding benchmark record
+- docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.1 Locked embedding contract
+- docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.2 Provider compatibility gate
+- docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.3 Text representations
+- docs/plans/Master_plan.md > ## 19. Evaluation Plan > ### 19.2 Relevance labels
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_1.md (selected 05A entry)
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.template.json
+- backend/evaluation/reports/phase_0_feasibility.md
+- .env.example
+- .gitignore
+
+## Dependency and User Action Check
+- dependencies: (01D) ACCEPTED — satisfied
+- user action required: Confirm label provenance and split; approve numeric quality/latency baselines and live embedding-call authorization
+- user action status: SATISFIED (Option B materials present and sealed)
+  1. Live embedding authorization: AUTHORIZED_WHEN_CREDENTIALS_EXIST (protocol); credentials inventory not re-logged here; no live call in 05A
+  2. Labeled retrieval subset + seed/split/provenance: PRESENT — ignored `backend/evaluation/private/retrieval_subset.local.json`; seed `20260711`; 160 pairs; splits 96/32/32; Phase 0 validation slice 32; provenance `SYNTHETIC_PHASE0_USER_OPTION_B`; labels 0–3
+  3. Pre-recorded numeric baselines: PRESENT and unchanged — nDCG@10_min=0.30, Recall@10_min=0.35, median_ms_max=3000, p95_ms_max=8000; `pass_criteria.status=PRE_RECORDED` at `2026-07-11T05:39:44+00:00`
+- blocked condition: not applicable after Option B materialization
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (05A block)
+- README.md
+- docs/plans/Plan_1.md / Master_plan.md (embedding and relevance sections)
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.template.json
+- backend/evaluation/private/retrieval_subset.local.json (integrity/counts/split/label-scale only; held-out not used for thresholds)
+- backend/evaluation/private/README.md
+- backend/evaluation/reports/phase_0_feasibility.md
+- docs/reports/report_1_execute_agent.md (existing 05A blocked block)
+- .env.example
+- .gitignore
+
+## Completed Work
+- Validated Option B freeze materials without inventing thresholds or inspecting held-out for tuning.
+- Confirmed private corpus integrity: seed 20260711, 160 pairs, splits 96/32/32, labels 0–3, validation metadata matches safe inventory; binary SHA-256 of private file matches `private_records_sha256`.
+- Finalized freeze acceptance markers: protocol `status=FROZEN`, `freeze_accepted_task=05A`; manifest `benchmark_status=FROZEN`, `freeze_accepted_task=05A`.
+- Preserved PRE_RECORDED baselines exactly as user-supplied Option B values (no post-hoc change).
+- Updated feasibility Embeddings / Locked Versions / Final Decisions rows to 05A freeze accepted; live measurement remains pending 05B–05D.
+- Updated private README to document Option B local file fields without committing private text.
+- Did not implement 05B runner, did not run live embeddings (05C), did not stage/commit, did not update task checkboxes.
+
+## Files Created or Modified
+- backend/evaluation/labels/embedding_validation_protocol.json (freeze status finalized)
+- backend/evaluation/labels/retrieval_subset_manifest.json (freeze acceptance note/marker)
+- backend/evaluation/private/README.md (Option B local guidance; gitignored path)
+- backend/evaluation/reports/phase_0_feasibility.md (05A freeze evidence)
+- docs/reports/report_1_execute_agent.md (this block updated)
+
+## Tests or Validations Run
+- command/check: Manifest/protocol schema + freeze status (FROZEN, required fields, model/dims/encoding/no-E5, PRE_RECORDED baselines, no private text fields in committed JSON)
+- required: yes
+- result: passed
+- evidence or reason: Required schema fields present; model `text-embedding-3-small`, dimensions 1536, float, e5 prefixes false; baselines exact 0.3/0.35/3000/8000; committed freeze files contain no `query_text`/`document_text`
+
+- command/check: Seed/split integrity vs private corpus (counts, validation ID/label metadata match; binary SHA-256)
+- required: yes
+- result: passed
+- evidence or reason: seed 20260711; total 160; development 96 / validation 32 / held_out_test 32; validation safe metadata matches private validation records; private SHA-256 `3594fe5b2a935c4007d419a02f2b4e48797accfc663a59401b2b2e86a22b556b` matches manifest; private path gitignored and untracked
+
+- command/check: Threshold timestamp/order (pre-execution PRE_RECORDED, no post-hoc change, no live embedding results yet)
+- required: yes
+- result: passed
+- evidence or reason: `pass_criteria.recorded_at_utc` = protocol `recorded_at_utc` = manifest `frozen_at_utc` = `2026-07-11T05:39:44+00:00`; `recorded_before_live_results=true`; no embedding result/benchmark artifacts under `backend/evaluation/reports/`
+
+- command/check: Held-out-access checks (forbidden for threshold setting/tuning; no held-out metric artifacts; Phase 0 validation-only slice)
+- required: yes
+- result: passed
+- evidence or reason: protocol `held_out_access_for_threshold_setting=forbidden`; private held-out policy forbids Phase 0 threshold use; 32 held-out pairs exist only in ignored private file; no held-out metric files in repo; 05A used validation-slice metadata integrity only, not held-out labels for thresholds
+
+## Acceptance Check
+- condition: Protocol fixes model, dimensions, encoding, preprocessing, inputs, metrics, thresholds, and failure criteria without loading held-out outcomes
+- status: satisfied
+- evidence: Frozen protocol + safe inventory seal Option B inputs (validation 32 IDs), locked adapter contract, PRE_RECORDED quality/latency baselines, failure criteria, and held-out ban; no held-out outcomes used for threshold setting; no live embedding run in 05A
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated mode forbids checkbox and batch status updates (A2 is acceptance gate).
+
+## Key Implementation Decisions
+- Used user Option B materials and envelope baselines only; did not invent new thresholds.
+- Binary file hash used for private corpus digest (Windows text-mode CRLF would otherwise false-mismatch).
+- Held-out pairs counted for integrity only; never used for threshold tuning or metric computation.
+- Live embedding authorization remains conditional on credentials for 05C; 05A performs freeze only.
+
+## Risks or Open Issues
+- 05B must implement the runner against this frozen protocol without changing baselines.
+- 05C live measurement must use validation slice only and must not reopen thresholds.
+
+## Workflow Integrity Check
+- Implemented only 05A freeze finalization. No 05B runner. No 05C live embeddings. No checkbox/batch status/stage/commit. No secrets or private query/document text in reports.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/labels/embedding_validation_protocol.json; backend/evaluation/labels/retrieval_subset_manifest.json; backend/evaluation/private/README.md; backend/evaluation/reports/phase_0_feasibility.md; docs/reports/report_1_execute_agent.md
+- validations to rerun: re-parse freeze JSON; recompute private binary SHA-256 vs inventory; confirm validation ID set length 32 and split counts 96/32/32; confirm baselines unchanged; confirm no held-out metric artifacts; confirm no live embedding results
+- risk areas: thresholds must remain PRE_RECORDED; held-out sealed; private text must stay gitignored
+- next task readiness: can_review
+
+## Repair Log
+
+### 2026-07-11 (Option B materials present; re-run after prior blocked 05A)
+- reason for repair: Prior 05A was blocked on missing labels/baselines. User Option B synthetic Phase 0 set and PRE_RECORDED baselines are now present; re-execute 05A freeze acceptance only.
+- changes made: Validated private corpus + safe inventory + protocol; set protocol/manifest freeze acceptance markers; updated feasibility embeddings freeze evidence; updated private README; did not invent thresholds or run live embeddings.
+- validations rerun: schema, seed/split integrity + SHA-256, threshold timestamp/order, held-out-access — all passed
+- outcome: status complete; acceptance satisfied
+
+
+---
+
+# Task Execution Report - 05B
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - ShopAIKey Embedding Compatibility Gate
+
+## Task
+05B - Implement the focused ShopAIKey embedding diagnostic and benchmark
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - ShopAIKey Embedding Compatibility Gate
+- Task ID: 05B
+- Task title: Implement the focused ShopAIKey embedding diagnostic and benchmark
+- Files allowed / repair scope: Focused runner under backend/evaluation/, typed aggregate schema, synthetic tests, pyproject.toml if needed, aggregate report path. No live ShopAIKey embedding calls. No held-out inspection. No checkbox/commit/stage. No 05C/05D work.
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ### 7.4 Embedding benchmark record
+- docs/plans/Plan_1.md > ## 8. Implementation Steps
+- docs/plans/Master_plan.md > ### 17.1 Locked embedding contract
+- docs/plans/Master_plan.md > ### 17.2 Provider compatibility gate
+- docs/plans/Master_plan.md > ### 17.3 Text representations
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_1.md (selected 05B entry)
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/scripts/check_shopaikey_compatibility.py (config/HTTP/sanitize patterns)
+- backend/evaluation/benchmark_pdf_extraction.py / pdf_benchmark_schema.py (aggregate runner pattern)
+
+## Dependency and User Action Check
+- dependencies: (03A) ACCEPTED — ShopAIKey diagnostic foundation available; (05A) ACCEPTED — frozen protocol and subset inventory present
+- user action required: None beyond authorized local ShopAIKey credentials (live deferred to 05C)
+- user action status: N/A for 05B implementation
+- blocked condition: None; live execution deferred to 05C
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (05B block)
+- README.md
+- docs/plans/Plan_1.md / Master_plan.md (embedding sections)
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/scripts/check_shopaikey_compatibility.py
+- backend/evaluation/benchmark_pdf_extraction.py
+- backend/evaluation/pdf_benchmark_schema.py
+- backend/tests/test_pdf_extraction_benchmark.py
+- backend/tests/test_shopaikey_diagnostic_foundation.py
+- backend/pyproject.toml
+- .env.example
+- docs/reports/report_1_execute_agent.md (prior 05A block)
+
+## Completed Work
+- Implemented typed aggregate embedding schema (`embedding_benchmark_schema.py`) with compatibility, quality (nDCG@10, Recall@10), latency (median/P95), and pass-criteria snapshot fields; no raw text/secret fields.
+- Implemented focused runner (`benchmark_embeddings.py`): root-env config (SHOPAIKEY_BASE_URL/API_KEY, EMBEDDING_MODEL/DIMENSIONS), locked allowlist for text-embedding-3-small @ 1536, whitespace normalization without E5 prefixes, scalar and bounded batch embed, response validation (order, exactly 1536 finite floats), sanitized provider failures, cosine ranking metrics, latency percentiles, aggregate write path `backend/evaluation/reports/embedding_benchmark.json`.
+- Injected EmbeddingClient protocol so automated tests use fakes only; live OpenAI-compatible client is opt-in via main()/default factory for 05C.
+- Added synthetic test suite covering metrics, percentiles, scalar/batch ordering and equivalence, dimension/finite checks, allowlist rejection, seed/validation-slice handling, provider failures, and private-text/secret suppression in aggregates.
+- Did not run live ShopAIKey embeddings, did not inspect held-out for tuning, did not stage/commit, did not update task checkboxes, did not modify pyproject.toml (no new direct deps required).
+
+## Files Created or Modified
+- backend/evaluation/embedding_benchmark_schema.py (created)
+- backend/evaluation/benchmark_embeddings.py (created)
+- backend/tests/test_embedding_benchmark.py (created)
+- docs/reports/report_1_execute_agent.md (this block appended)
+
+## Tests or Validations Run
+- command/check: `python -m pytest tests/test_embedding_benchmark.py -q` (from backend/)
+- required: yes
+- result: passed
+- evidence or reason: 31 passed in 0.19s — metrics, percentiles, ordering, dimension/finite, allowlist, seed, provider failures, private-text suppression
+
+- command/check: `python -m pytest -q` (from backend/, full suite)
+- required: no (touched-module + regression)
+- result: passed
+- evidence or reason: 120 passed in 0.44s
+
+- command/check: Live ShopAIKey embedding call
+- required: no (explicitly deferred to 05C; fake-provider only for 05B)
+- result: not_run
+- evidence or reason: Task and envelope forbid live provider in normal automated suite; main entrypoint exists for 05C
+
+## Acceptance Check
+- condition: Runner rejects alternate models/dimensions, never logs secrets/raw text, produces required compatibility/quality/latency fields
+- status: satisfied
+- evidence: `reject_if_disallowed_contract` / `load_embedding_config` reject alternate model/dimensions without echoing secrets; `write_aggregate` forbids query_text/document_text/api_key/authorization fields; AggregateEmbeddingResult includes compatibility (scalar/batch/order/finite/dims/no-E5), quality (nDCG@10, Recall@10), and latency (median/P95); synthetic tests prove behavior with FakeEmbeddingClient only
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated mode forbids checkbox and batch status updates (A2 is acceptance gate).
+
+## Key Implementation Decisions
+- Mirrored Batch03 root `.env` config + secret-hiding `__repr__` and sanitized exception patterns; embedding-specific env names from frozen protocol (EMBEDDING_MODEL, EMBEDDING_DIMENSIONS).
+- Fake client injectable at every network boundary; default OpenAI embeddings client only used when main() runs (05C).
+- Validation-slice pairs only via frozen manifest IDs + private records split filter; held-out never loaded into metrics.
+- Aggregate default path reserved at backend/evaluation/reports/embedding_benchmark.json; no live aggregate artifact written in 05B.
+
+## Risks or Open Issues
+- 05C must execute live run with credentials and write the real aggregate; thresholds remain PRE_RECORDED from 05A.
+- Fake provider vectors are content-hash unit vectors; live ranking quality will differ and is not claimed here.
+
+## Workflow Integrity Check
+- Implemented only 05B runner + schema + synthetic tests. No live embeddings. No held-out tuning. No checkbox/batch status/stage/commit. No secrets or private query/document text in reports.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/embedding_benchmark_schema.py; backend/evaluation/benchmark_embeddings.py; backend/tests/test_embedding_benchmark.py; docs/reports/report_1_execute_agent.md
+- validations to rerun: `cd backend; python -m pytest tests/test_embedding_benchmark.py -q` and optionally full `python -m pytest -q`
+- risk areas: ensure no live network in tests; confirm allowlist still locked to text-embedding-3-small/1536; confirm aggregates never contain private text keys
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 05C
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - ShopAIKey Embedding Compatibility Gate
+
+## Task
+05C - Execute the live ShopAIKey embedding compatibility and baseline run
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - ShopAIKey Embedding Compatibility Gate
+- Task ID: 05C
+- Task title: Execute the live ShopAIKey embedding compatibility and baseline run
+- Files allowed / repair scope: Aggregate embedding result, feasibility report, and runner/tests only when corrections required. Live authorized run via focused runner. No baseline edits. No held-out inspection. No checkbox/commit/stage. No 05D handoff lock.
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ### 7.4 Embedding benchmark record
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 17.2 Provider compatibility gate
+- docs/plans/Master_plan.md > ## 19. Evaluation Plan > ### 19.2 Relevance labels
+
+## Supplemental Documents Used
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_1.md (selected 05C entry)
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/evaluation/benchmark_embeddings.py (05B runner)
+- backend/evaluation/embedding_benchmark_schema.py
+
+## Dependency and User Action Check
+- dependencies: (05B) ACCEPTED — focused runner, schema, and synthetic suite present
+- user action required: ignored credentials and approved labeled subset available; live authorized for Batch05 Option B
+- user action status: satisfied — root `.env` has SHOPAIKEY_BASE_URL, SHOPAIKEY_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS set (values not recorded); private synthetic subset present at ignored path
+- blocked condition: not triggered
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (05C block)
+- README.md
+- backend/evaluation/benchmark_embeddings.py
+- backend/evaluation/embedding_benchmark_schema.py
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/labels/retrieval_subset_manifest.json
+- backend/evaluation/private/retrieval_subset.local.json (existence/structure only; no held-out tuning)
+- backend/evaluation/reports/phase_0_feasibility.md
+- docs/reports/report_1_execute_agent.md (prior 05B block)
+- root `.env` (key presence only; secrets redacted)
+
+## Completed Work
+- Ran required fake-provider suite first: `python -m pytest tests/test_embedding_benchmark.py -q` → 31 passed.
+- Executed authorized live run via single-purpose command `python -m evaluation.benchmark_embeddings` (from `backend/`); retried after initial scalar APITimeoutError; final successful live path wrote aggregate metrics only.
+- Confirmed live allowlist model `text-embedding-3-small`, dimensions 1536, encoding float, no E5 prefixes.
+- Recorded scalar_ok=true, batch_ok=true, ordering_preserved=true, vector_length_ok=true, finite_floats_only=true, sanitized_failure_ok=true.
+- Recorded strict element-wise scalar_batch_equivalence=false (abs_tol 1e-5); separate synthetic-probe diagnostic showed cosine similarity ≈ 0.9999–1.0 for identical inputs (not stored as private text).
+- Stored sanitized aggregate metrics: nDCG@10=0.833333, Recall@10=0.277778, median_ms=1162.763, p95_ms=2551.111; validation slice only (32 pairs, 18 queries, seed 20260711); held_out_used=false.
+- Compared to PRE_RECORDED baselines without changing them: nDCG PASS (≥0.30), Recall FAIL (0.277778 < 0.35), median PASS (≤3000), P95 PASS (≤8000).
+- Updated feasibility Embeddings section and Final Decisions row with measured evidence; did not mark overall embedding gate PASS; did not change protocol baselines.
+- Did not inspect held-out for tuning, did not stage/commit, did not update task checkboxes, did not print secrets or raw private texts.
+
+## Files Created or Modified
+- backend/evaluation/reports/embedding_benchmark.json (created/overwritten by live runner; final successful run)
+- backend/evaluation/reports/phase_0_feasibility.md (Embeddings live evidence + decision table measurement status)
+- docs/reports/report_1_execute_agent.md (this block appended)
+
+## Tests or Validations Run
+- command/check: `python -m pytest tests/test_embedding_benchmark.py -q` (from backend/; before and after live)
+- required: yes
+- result: passed
+- evidence or reason: 31 passed in 0.09s — metrics, percentiles, ordering, dimension/finite, allowlist, seed, failure, private-text suppression
+
+- command/check: live single-purpose `python -m evaluation.benchmark_embeddings` (from backend/)
+- required: yes
+- result: passed
+- evidence or reason: exit 0; final aggregate summary model=text-embedding-3-small dimensions=1536 nDCG@10=0.833333 Recall@10=0.277778 median_ms=1162.763 p95_ms=2551.111; output backend/evaluation/reports/embedding_benchmark.json. Initial run hit scalar APITimeoutError (scalar_ok=false); retry succeeded with empty failure_codes.
+
+- command/check: Aggregate schema validate (AggregateEmbeddingResult.model_validate)
+- required: yes
+- result: passed
+- evidence or reason: schema_version=1; all required compatibility/quality/latency/pass_criteria fields present; held_out_used=false; active_slice=validation
+
+- command/check: Dimension/order/finite + model allowlist from aggregate
+- required: yes
+- result: passed
+- evidence or reason: dimensions=1536; ordering_preserved=true; finite_floats_only=true; vector_length_ok=true; model exact text-embedding-3-small
+
+- command/check: Metric recompute / formula + stability
+- required: yes
+- result: passed
+- evidence or reason: offline nDCG/Recall formula smoke OK; live metrics stable across successful re-runs (nDCG@10=0.833333, Recall@10=0.277778)
+
+- command/check: Baseline comparison (no baseline mutation; evidence for 05D)
+- required: no
+- result: passed
+- evidence or reason: Comparison executed without mutating protocol. PRE_RECORDED baselines still nDCG@10_min=0.3, Recall@10_min=0.35, median_max=3000, p95_max=8000. Measured outcomes: nDCG@10 0.833333 PASS; Recall@10 0.277778 FAIL vs 0.35; median 1162.763 PASS; P95 2551.111 PASS; all_baselines_pass=false. Strict scalar_batch_equivalence false under abs_tol 1e-5 (cosine near 1.0 on synthetic probes). Quality/latency gate verdict deferred to 05D.
+
+- command/check: Failure-path (sanitized oversized batch)
+- required: yes
+- result: passed
+- evidence or reason: compatibility.sanitized_failure_ok=true; no secret leak fields in aggregate
+
+- command/check: Held-out / private-data / secret scan of aggregate
+- required: yes
+- result: passed
+- evidence or reason: no query_text/document_text/api_key/authorization/bearer/sk- hits in embedding_benchmark.json; held_out_used=false; only validation slice metrics
+
+## Acceptance Check
+- condition: Every required field complete; all vectors 1536 finite floats in order; no held-out metric or raw private text
+- status: satisfied
+- evidence: AggregateEmbeddingResult validates with complete compatibility (scalar/batch/order/finite/dims/failure), quality (nDCG@10, Recall@10, seed, counts), latency (median/P95), and PRE_RECORDED pass_criteria snapshot; live vectors validated as 1536 finite ordered floats; held_out_used=false; private/secret scan clean. Baseline Recall FAIL and strict element-wise scalar/batch equivalence FAIL are recorded honestly for 05D and do not remove completeness of the compatibility record.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: Orchestrated mode forbids checkbox and batch status updates (A2 is acceptance gate).
+
+## Key Implementation Decisions
+- Used existing focused runner main entrypoint only; no runner code changes required for the live path.
+- Retried live once after transient scalar APITimeoutError (aligned with protocol retry_once intent); final artifact is the successful run.
+- Did not change PRE_RECORDED baselines or protocol after observing Recall shortfall.
+- Recorded strict equivalence failure honestly rather than loosening abs_tol post-hoc.
+
+## Risks or Open Issues
+- Recall@10 below pre-recorded baseline will force 05D quality/gate FAIL unless an approved adapter-only revision path is taken (not authorized in 05C).
+- Strict element-wise scalar/batch equivalence failed while cosine near 1.0; 05D should treat this as measured provider behavior under the frozen 1e-5 check.
+- First live attempt had scalar timeout; latency samples depend on network/provider conditions.
+
+## Workflow Integrity Check
+- Executed only 05C live run + evidence recording. No held-out tuning. No baseline edits. No checkbox/batch status/stage/commit. No secrets or private query/document text in reports. 05D handoff lock not performed.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/reports/embedding_benchmark.json; backend/evaluation/reports/phase_0_feasibility.md; docs/reports/report_1_execute_agent.md
+- validations to rerun: `cd backend; python -m pytest tests/test_embedding_benchmark.py -q`; inspect aggregate schema/fields; confirm protocol baselines still PRE_RECORDED and unchanged; private/secret scan of embedding_benchmark.json
+- risk areas: Recall baseline FAIL; scalar_batch_equivalence false; ensure no private text in aggregate; ensure 05D does not rewrite baselines
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 05D
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - ShopAIKey Embedding Compatibility Gate
+
+## Task
+05D - Lock the verified ShopAIKey embedding handoff
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - ShopAIKey Embedding Compatibility Gate
+- Task ID: 05D
+- Task title: Lock the verified ShopAIKey embedding handoff
+- Files allowed / repair scope: Aggregate embedding results, feasibility report, and .env.example if needed. No model substitution. No post-hoc baseline changes. No checkbox/commit/stage. No Batch06 work.
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ### 7.4 Embedding benchmark record
+- docs/plans/Plan_1.md > ## 10. Handoff Notes for Plan 2 (Master Phase 1)
+- docs/plans/Master_plan.md > ### 17.2 Provider compatibility gate
+- docs/plans/Master_plan.md > ### Phase 0 — Feasibility and compatibility gates
+
+## Supplemental Documents Used
+- docs/tasks/task_1.md (selected 05D entry)
+- README.md
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/reports/phase_0_feasibility.md
+- .env.example
+
+## Dependency and User Action Check
+- dependencies: (05C) ACCEPTED — live aggregate present and measured
+- user action: Approve embedding-adapter revision only if locked provider contract fails — **required for recovery**, not for recording honest FAIL
+- blocked condition: not applied; honest FAIL with adapter-revision-only path satisfies acceptance without inventing PASS
+
+## Files Inspected Before Editing
+- docs/tasks/task_1.md (05D block)
+- backend/evaluation/reports/embedding_benchmark.json
+- backend/evaluation/labels/embedding_validation_protocol.json
+- backend/evaluation/reports/phase_0_feasibility.md
+- backend/evaluation/embedding_benchmark_schema.py
+- backend/evaluation/benchmark_embeddings.py (metrics helpers referenced for independent gate logic)
+- .env.example
+- README.md (context only; not modified — outside 05D file list)
+
+## Completed Work
+- Independently recalculated embedding gate results from aggregate + PRE_RECORDED protocol without mutating baselines or re-running live provider calls.
+- Confirmed model/dims/encoding/no-E5/order/finite/sanitized-failure/latency/nDCG PASS; Recall@10 FAIL (0.277778 < 0.35); scalar_batch_equivalence FAIL; all_baselines_pass=false; overall gate FAIL.
+- Recorded exact fixed downstream handoff contract (request/preprocessing/batching/error/response/evaluation) in phase_0_feasibility.md Embeddings section.
+- Marked embedding gate **FAIL**, blocked Plan 2 embedding consumption, and identified **embedding-adapter revision only** recovery path (no model substitution, no broad fallback, no post-hoc baseline rewrite).
+- Annotated aggregate `notes` with 05D FAIL summary; left numeric metrics and protocol baselines unchanged.
+- Confirmed root `.env.example` already documents EMBEDDING_MODEL=text-embedding-3-small and EMBEDDING_DIMENSIONS=1536 (no edit required).
+- Did not update task checkboxes, stage, or commit.
+
+## Files Created or Modified
+- backend/evaluation/reports/phase_0_feasibility.md (05D contract + recalculation + FAIL decision + locked versions + handoff + final decisions row)
+- backend/evaluation/reports/embedding_benchmark.json (notes annotation only; metrics/baselines unchanged)
+- docs/reports/report_1_execute_agent.md (this block)
+
+## Tests or Validations Run
+- command/check: `python -m pytest tests/test_embedding_benchmark.py -q` (from backend/)
+- required: yes (local consistency)
+- result: passed
+- evidence or reason: 31 passed in 0.10s
+
+- command/check: Independent quality/latency recalculation from aggregate vs PRE_RECORDED protocol
+- required: yes
+- result: passed (recalculation executed; gate outcome FAIL)
+- evidence or reason: nDCG@10 0.833333 >= 0.30 PASS; Recall@10 0.277778 >= 0.35 FAIL; median 1162.763 <= 3000 PASS; P95 2551.111 <= 8000 PASS; all_baselines_pass=false. Protocol numeric baselines unchanged (0.3/0.35/3000/8000; status PRE_RECORDED).
+
+- command/check: Model/dimension/order/finite/compatibility checks
+- required: yes
+- result: passed for required allowlist checks; failed for scalar_batch_equivalence
+- evidence or reason: model text-embedding-3-small; dimensions 1536; encoding float; e5_prefixes_applied=false; ordering_preserved=true; finite_floats_only=true; vector_length_ok=true; scalar_ok=true; batch_ok=true; sanitized_failure_ok=true; scalar_batch_equivalence=false (protocol requires true).
+
+- command/check: Aggregate schema + private/secret scan
+- required: yes
+- result: passed
+- evidence or reason: AggregateEmbeddingResult.model_validate ok after notes update; no query_text/document_text/Bearer/sk- in aggregate JSON.
+
+- command/check: Source/report cross-check (feasibility FAIL + adapter-only path + env placeholders)
+- required: yes
+- result: passed
+- evidence or reason: feasibility contains 05D recalculation table, overall FAIL, adapter-revision-only path, Final Decisions embedding row FAIL; .env.example still documents locked model/dims.
+
+## Acceptance Check
+- condition: Exact fixed contract recorded and passes every gate, OR Phase 0 honestly blocks with only the adapter revision path identified
+- status: satisfied
+- evidence: Fixed ShopAIKey contract fully recorded; overall embedding gate honestly FAIL with evidence (Recall@10 and scalar_batch_equivalence); Plan 2 embedding handoff blocked; recovery limited to embedding-adapter revision only. No invented PASS. No model substitution. No baseline mutation.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Honest FAIL is valid 05D completion under acceptance (evidence-backed block with adapter-only path).
+- Did not re-run live ShopAIKey embeddings; 05C aggregate is the measured source of truth for gate close.
+- Did not loosen abs_tol or quality floors after measurement.
+- Did not modify README (not in 05D allowed files).
+
+## Risks or Open Issues
+- Plan 2 remains blocked on embedding FAIL until an approved adapter-only revision and successful re-run.
+- Scalar/batch strict equivalence failure is separate from quality Recall shortfall; both must be addressed or formally revised in adapter/protocol before PASS.
+- Batch06 must not treat embedding as PASS while this FAIL stands.
+
+## Workflow Integrity Check
+- Executed only 05D handoff lock. No checkbox/batch status/stage/commit. No model switch. No baseline edits. No Batch06 consolidation. No secrets or private text in reports.
+
+## Notes for Review Agent
+- changed files: backend/evaluation/reports/phase_0_feasibility.md; backend/evaluation/reports/embedding_benchmark.json (notes only); docs/reports/report_1_execute_agent.md
+- validations to rerun: independent gate recalc (Recall FAIL, scalar_batch_equivalence FAIL); protocol PRE_RECORDED baselines still 0.3/0.35/3000/8000; AggregateEmbeddingResult validate; feasibility FAIL + adapter-only path language; .env.example contract placeholders present
+- risk areas: do not reclassify FAIL as PASS; do not post-hoc edit baselines; ensure no private text in notes
+- next task readiness: can_review

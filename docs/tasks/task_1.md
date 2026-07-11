@@ -809,7 +809,7 @@ The relational/graph foundation and later ranking work require a verified provid
 
 ### Tasks
 
-- [ ] (05A): Freeze the seeded retrieval subset and embedding validation protocol
+- [x] (05A): Freeze the seeded retrieval subset and embedding validation protocol
   - Source of Truth: `docs/plans/Plan_1.md` > `## 3. Prerequisites from Prior Phases`; `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md` > `## 17. Embedding and Retrieval` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
   - Source Requirements:
     - Lock ShopAIKey `text-embedding-3-small`, `dimensions=1536`, float encoding, and no E5 prefixes before execution.
@@ -824,7 +824,7 @@ The relational/graph foundation and later ranking work require a verified provid
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when labels/split, numeric baselines, or live-use authorization are missing.
   - Files: Retrieval manifest, ignored local data paths, and `backend/evaluation/reports/phase_0_feasibility.md`.
 
-- [ ] (05B): Implement the focused ShopAIKey embedding diagnostic and benchmark
+- [x] (05B): Implement the focused ShopAIKey embedding diagnostic and benchmark
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 8. Implementation Steps`; `docs/plans/Master_plan.md` > `### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md` > `### 17.3 Text representations`
   - Source Requirements: Call only `text-embedding-3-small` with `dimensions=1536`; support scalar and bounded batch inputs; validate ordering, exactly 1536 finite floats, and sanitized provider failures; apply no E5 prefixes.
   - Dependencies: (03A), (05A)
@@ -836,7 +836,7 @@ The relational/graph foundation and later ranking work require a verified provid
   - Blocked Condition: None; live execution is deferred to (05C).
   - Files: Focused runner/tests, `backend/pyproject.toml`, and aggregate report path.
 
-- [ ] (05C): Execute the live ShopAIKey embedding compatibility and baseline run
+- [x] (05C): Execute the live ShopAIKey embedding compatibility and baseline run
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `## 19. Evaluation Plan` > `### 19.2 Relevance labels`
   - Source Requirements: Use only redacted or synthetic text from the frozen validation slice and pre-registered protocol; run scalar, batch, invalid-response/failure handling, retrieval metrics, and latency measurements without exposing raw text.
   - Dependencies: (05B)
@@ -848,7 +848,7 @@ The relational/graph foundation and later ranking work require a verified provid
   - Blocked Condition: `BLOCKED_BY_USER_ACTION` when live authorization, credentials, or the frozen labeled subset is unavailable.
   - Files: Aggregate embedding result, feasibility report, and runner/tests only when corrections are required.
 
-- [ ] (05D): Lock the verified ShopAIKey embedding handoff
+- [x] (05D): Lock the verified ShopAIKey embedding handoff
   - Source of Truth: `docs/plans/Plan_1.md` > `### 7.4 Embedding benchmark record`; `docs/plans/Plan_1.md` > `## 10. Handoff Notes for Plan 2 (Master Phase 1)`; `docs/plans/Master_plan.md` > `### 17.2 Provider compatibility gate`; `docs/plans/Master_plan.md` > `### Phase 0 — Feasibility and compatibility gates`
   - Source Requirements: The downstream contract is fixed as ShopAIKey `text-embedding-3-small`, 1536 dimensions, float encoding, no E5 prefixes, and the versioned text representations; it passes only when compatibility and pre-recorded quality/latency gates pass.
   - Dependencies: (05C)

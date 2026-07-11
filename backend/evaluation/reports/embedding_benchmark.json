@@ -1,0 +1,55 @@
+{
+  "active_slice": "validation",
+  "compatibility": {
+    "batch_ok": true,
+    "dimensions": 1536,
+    "e5_prefixes_applied": false,
+    "encoding": "float",
+    "finite_floats_only": true,
+    "max_batch_size": 16,
+    "model": "text-embedding-3-small",
+    "ordering_preserved": true,
+    "sanitized_failure_ok": true,
+    "scalar_batch_equivalence": false,
+    "scalar_ok": true,
+    "vector_length_ok": true
+  },
+  "data_class": "safe_aggregate",
+  "dimensions": 1536,
+  "encoding": "float",
+  "endpoint": "POST /v1/embeddings",
+  "failure_codes": [],
+  "held_out_used": false,
+  "latency": {
+    "median_provider_request_latency_ms": 1162.763,
+    "p95_provider_request_latency_ms": 2551.111,
+    "sample_count": 6
+  },
+  "model": "text-embedding-3-small",
+  "notes": "Phase 0 embedding compatibility and validation-slice baseline. 05D gate_result=FAIL; all_baselines_pass=false; fail_reasons=recall_at_10_below_0.35,scalar_batch_equivalence_false; recovery=embedding_adapter_revision_only; baselines_not_mutated; model_not_substituted.",
+  "pass_criteria": {
+    "median_provider_request_latency_ms_max": 3000.0,
+    "ndcg_at_10_min": 0.3,
+    "p95_provider_request_latency_ms_max": 8000.0,
+    "recall_at_10_min": 0.35,
+    "status": "PRE_RECORDED"
+  },
+  "protocol_id": "phase0_shopaikey_embedding_validation_v1",
+  "protocol_path": "backend/evaluation/labels/embedding_validation_protocol.json",
+  "protocol_version": 1,
+  "provider": "ShopAIKey",
+  "quality": {
+    "k": 10,
+    "labeled_pair_count": 32,
+    "ndcg_at_10": 0.833333,
+    "query_count": 18,
+    "recall_at_10": 0.277778,
+    "relevant_label_threshold_min": 2,
+    "seed": 20260711,
+    "similarity": "cosine",
+    "slice": "validation"
+  },
+  "schema_version": 1,
+  "seed": 20260711,
+  "subset_manifest_path": "backend/evaluation/labels/retrieval_subset_manifest.json"
+}

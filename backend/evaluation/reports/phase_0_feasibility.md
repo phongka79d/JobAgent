@@ -15,9 +15,9 @@ Sanitized readiness transferred from task 01A:
 | Local ShopAIKey setting | READY | Ignored root environment exists with a non-empty setting; value was not recorded | Authorize live use and approve structured-schema criterion before the live gate |
 | Digital PDF corpus | READY | Five digital fixtures frozen under ignored private path with generic IDs; 04C digital comparison complete; 04D reconfirmed selected `layout` still meets 4/5 | Digital mode `layout` locked; PDF gate closed in 04D |
 | Image-only PDF fixture | READY | One image-only fixture frozen as `pdf_image_only_001`; dual-mode exact `NO_EXTRACTABLE_TEXT` verified in 04D (normal + layout, repeated runs) | Exact dual-mode rule closed PASS in 04D |
-| Labeled retrieval subset | MISSING_OR_UNDECLARED | No declared manifest or location was available | Confirm provenance, fixed split, seed, record count, and decision criteria |
+| Labeled retrieval subset | READY | User Option B synthetic Phase 0 set: seed `20260711`, 160 pairs (96/32/32), validation-only active; private records ignored; safe IDs/labels committed | Keep held-out sealed; no post-hoc label edits |
 | PDF decision criterion | READY | Pre-benchmark rule recorded: at least 4 of 5 digital fixtures must yield extractable text; image-only must be `NO_EXTRACTABLE_TEXT` | Criterion unchanged after 04C measurement; do not revise post-hoc |
-| Embedding decision criteria | BLOCKED_BY_USER_ACTION | No approved numeric embedding criteria were available | Record embedding criteria before measuring Batch05 |
+| Embedding decision criteria | READY | Pre-recorded before live results (unchanged): nDCG@10 ≥ 0.30, Recall@10 ≥ 0.35, median latency ≤ 3000 ms, P95 ≤ 8000 ms. Live 05C measured against these without post-hoc edits | Baselines remain PRE_RECORDED; 05D decides gate PASS/FAIL |
 | Committed manifest metadata | CONFIRMED | Generic non-identifying identifiers and metadata were approved | Keep real names, paths, text, and personal data in ignored local files |
 
 ## Astryx
@@ -165,16 +165,114 @@ Frozen fixture: `pdf_image_only_001` (manifest `phase0_pdf_fixture_freeze_v1`). 
 
 ## Embeddings
 
-Manifest source: `backend/evaluation/labels/retrieval_subset_manifest.template.json`. The populated records and any private text remain in the ignored path declared by the template.
+Safe inventory and protocol (Option B synthetic materialization, **05A freeze accepted**, recorded before live results):
+
+- Template: `backend/evaluation/labels/retrieval_subset_manifest.template.json`
+- Safe subset inventory: `backend/evaluation/labels/retrieval_subset_manifest.json` (`benchmark_status=FROZEN`, `freeze_accepted_task=05A`)
+- Pre-registered protocol: `backend/evaluation/labels/embedding_validation_protocol.json` (`status=FROZEN`, `pass_criteria.status=PRE_RECORDED`)
+- Ignored private records: `backend/evaluation/private/retrieval_subset.local.json` (synthetic texts; gitignored; digest recorded in safe inventory only)
+
+User selected **Option B**: materialize a synthetic Phase 0 labeled validation set and pre-record baselines before any live embedding run. Task **05A** validated and sealed this freeze. Task **05B** delivered the focused runner. Task **05C** executed the authorized live ShopAIKey embedding run against the validation slice only. Task **05D** independently recalculated gate results from the aggregate, recorded the fixed handoff contract, and closed the embedding gate as **FAIL** (no model substitution, no post-hoc baseline change). No held-out labels were used for thresholds or tuning. Pre-recorded baselines were not modified after measurement.
+
+Live aggregate artifact (metrics only): `backend/evaluation/reports/embedding_benchmark.json`.
 
 | Evidence item | Result | Evidence | Locked decision |
 |---|---|---|---|
-| Seeded split and label provenance | PENDING | Pending Batch05 evidence | PENDING |
-| Scalar and batch compatibility | PENDING | Pending Batch05 evidence | PENDING |
-| Ordering, dimensions, and finite values | PENDING | Pending Batch05 evidence | PENDING |
-| Quality baseline | PENDING | Pending Batch05 evidence | PENDING |
-| Request-latency baseline | PENDING | Pending Batch05 evidence | PENDING |
-| Failure behavior | PENDING | Pending Batch05 evidence | PENDING |
+| Provider contract (model/dims/encoding) | PASS (live) | Live model `text-embedding-3-small`, `dimensions=1536`, float encoding, `POST /v1/embeddings`; allowlist enforced; no alternate model | Fixed adapter identity for handoff; overall gate still FAIL |
+| Preprocessing | PASS (live) | No E5 query/passage prefixes applied (`e5_prefixes_applied=false`); representation builders `phase0_v1_synthetic` | No-prefix normalization policy recorded |
+| Request boundaries | PASS (live) | Root `.env` only; scalar + batch; max_batch_size=16; timeout 30s fail-closed | Diagnostic request boundary confirmed live |
+| Seeded split and label provenance | FROZEN | Seed `20260711`; 160 pairs; splits 96/32/32; Phase 0 uses validation only (32 record IDs / 18 queries); provenance `SYNTHETIC_PHASE0_USER_OPTION_B`; labels 0–3 | Validation-slice freeze unchanged |
+| Numeric quality baselines | FROZEN_PRE_RECORDED | Unchanged: `nDCG@10_min=0.30`, `Recall@10_min=0.35`; relevant label ≥ 2; k=10 cosine; timestamp `2026-07-11T05:39:44+00:00` | Do not change after live results |
+| Numeric latency baselines | FROZEN_PRE_RECORDED | Unchanged: median ≤ 3000 ms; P95 ≤ 8000 ms; same freeze timestamp | Do not change after live results |
+| Held-out access control | PASS | `held_out_used=false`; active_slice=`validation`; no held-out metrics in aggregate; 05C/05D did not inspect held-out for tuning | Keep held-out sealed |
+| Scalar and batch compatibility | FAIL (strict equivalence) | Live: `scalar_ok=true`, `batch_ok=true`; strict element-wise `scalar_batch_equivalence=false` (abs_tol 1e-5); protocol requires equivalence for identical inputs | Contributes to embedding gate FAIL; do not loosen check post-hoc |
+| Ordering, dimensions, and finite values | PASS | Live: `ordering_preserved=true`, `vector_length_ok=true` (1536), `finite_floats_only=true` | Ordered 1536 finite floats required |
+| Quality measurement | FAIL vs baseline (Recall) | Live validation-slice: `nDCG@10=0.833333` (PASS ≥ 0.30); `Recall@10=0.277778` (FAIL < 0.35); seed 20260711; 32 pairs / 18 queries | Primary quality fail; baselines unchanged |
+| Request-latency measurement | PASS vs baseline | Live: median `1162.763` ms ≤ 3000; P95 `2551.111` ms ≤ 8000; sample_count=6 (compat + quality requests) | Latency baselines met without post-hoc change |
+| Failure behavior | PASS | Oversized-batch failure path: `sanitized_failure_ok=true`; aggregate `failure_codes=[]` on final successful live run; no secrets/raw text in aggregate | Sanitized fail-closed behavior confirmed |
+
+### 05D independent gate recalculation (from aggregate only)
+
+Source aggregate: `backend/evaluation/reports/embedding_benchmark.json`. Source baselines: `backend/evaluation/labels/embedding_validation_protocol.json` (`pass_criteria.status=PRE_RECORDED`, `recorded_at_utc=2026-07-11T05:39:44+00:00`). Aggregate `pass_criteria` snapshot matches protocol numeric floors; no post-hoc edit.
+
+| Check | Measured | Baseline / required | Pass? |
+|---|---|---|---|
+| Model | `text-embedding-3-small` | exact `text-embedding-3-small` | yes |
+| Dimensions / vector length | 1536 / `vector_length_ok=true` | exactly 1536 | yes |
+| Encoding | float | float | yes |
+| No E5 prefixes | `e5_prefixes_applied=false` | no query/passage prefixes | yes |
+| Ordering preserved | true | required | yes |
+| Finite floats only | true | required | yes |
+| Sanitized provider failures | `sanitized_failure_ok=true` | required | yes |
+| Scalar request | `scalar_ok=true` | required | yes |
+| Batch request | `batch_ok=true` | required | yes |
+| Scalar/batch equivalence (identical inputs) | `false` | protocol `scalar_batch_equivalence_for_identical_inputs=true` | **no** |
+| nDCG@10 | 0.833333 | ≥ 0.30 | yes |
+| Recall@10 | 0.277778 | ≥ 0.35 | **no** |
+| Median provider latency ms | 1162.763 | ≤ 3000 | yes |
+| P95 provider latency ms | 2551.111 | ≤ 8000 | yes |
+| Held-out unused | `held_out_used=false`, slice=`validation` | required | yes |
+| `all_baselines_pass` (quality+latency) | false | true required for gate PASS | **no** |
+| Overall embedding gate | **FAIL** | compatibility AND quality AND latency AND response-validation | **FAIL** |
+
+Failing evidence (honest; not invented PASS):
+
+1. **Recall@10** = 0.277778 < pre-recorded 0.35 on validation slice (seed 20260711, 18 queries, 32 labeled pairs, relevant ≥ 2, k=10, cosine).
+2. **scalar_batch_equivalence** = false under the frozen strict element-wise check (abs_tol 1e-5) even though scalar and batch paths both succeed and ordering/dimensions/finite checks pass.
+
+### Fixed downstream embedding handoff contract (recorded; not authorized as PASS)
+
+Exact contract fixed for Plan 2 consumption **only after** this gate is re-run and passes following an approved adapter-only revision. Until then Plan 2 must not treat embeddings as unlocked.
+
+| Contract field | Locked value |
+|---|---|
+| Provider | ShopAIKey |
+| Endpoint | `POST /v1/embeddings` |
+| Model | `text-embedding-3-small` only (`alternate_models_allowed=false`; no silent substitution) |
+| Dimensions | 1536 |
+| Encoding | float |
+| E5 prefixes | none (no `query:` / `passage:` prefixes) |
+| Text normalization | strip and collapse internal whitespace |
+| Candidate representation | target roles + profile summary + verified skills + experience titles + preferences |
+| Job representation | title + summary + responsibilities + required skills + preferred skills |
+| Representation builders version | `phase0_v1_synthetic` |
+| Config source | root `.env` only (`SHOPAIKEY_BASE_URL`, `SHOPAIKEY_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`) |
+| Placeholder documentation | root `.env.example` already documents `EMBEDDING_MODEL=text-embedding-3-small` and `EMBEDDING_DIMENSIONS=1536` |
+| Scalar inputs | required |
+| Batch inputs | required; `max_batch_size=16` |
+| Timeout | 30s; fail-closed with sanitized error |
+| Rate-limit policy | retry once then persist sanitized failure |
+| Invalid-response policy | sanitize and fail without raw payload logging |
+| Response order | preserve input order |
+| Response values | exactly 1536 finite floats per input |
+| Scalar/batch equivalence | required for identical inputs (currently FAIL on measured run) |
+| Quality baselines (PRE_RECORDED) | nDCG@10 ≥ 0.30; Recall@10 ≥ 0.35; validation slice only |
+| Latency baselines (PRE_RECORDED) | median ≤ 3000 ms; P95 ≤ 8000 ms |
+| Evaluation seed / slice | seed `20260711`; active slice `validation`; held-out forbidden for tuning |
+| Single-purpose command | from `backend/`: `python -m evaluation.benchmark_embeddings` |
+| Aggregate artifact | `backend/evaluation/reports/embedding_benchmark.json` |
+
+Log prohibitions remain: API keys, Authorization headers, raw provider headers, raw CV/JD text, contact PII, private label text.
+
+### 05D embedding gate decision
+
+| Field | Value |
+|---|---|
+| Gate result | **FAIL** |
+| Gate closed by | 05D |
+| Model substitution | **not performed** |
+| Baseline mutation | **not performed** |
+| Plan 2 embedding handoff | **blocked** |
+| Allowed recovery path | **embedding-adapter revision only** |
+
+**Adapter-revision-only path** (no broad fallback stack):
+
+1. Revise **only** the affected embedding adapter decision in the master plan / Phase 0 protocol after user approval — for example: locked model/dimension contract, versioned text-representation builders, request/response equivalence policy, or pre-recorded quality baselines that predate a re-run. Do **not** introduce a local/GPU embedding runtime, alternate provider, silent model switch, held-out tuning, OCR/parser/UI/provider stack changes, or post-hoc baseline edits against the already-measured aggregate.
+2. Re-freeze protocol if baselines or representation contracts change (new freeze timestamp before the next live run).
+3. Re-run the single-purpose live command `python -m evaluation.benchmark_embeddings` on the frozen validation slice only.
+4. Re-evaluate 05D: gate passes only when compatibility, quality, and latency all pass against the then-current pre-recorded criteria without inventing PASS.
+
+Until that re-run passes, Phase 0 must not authorize Plan 2 embedding consumption.
 
 ## Locked Versions
 
@@ -186,7 +284,7 @@ Manifest source: `backend/evaluation/labels/retrieval_subset_manifest.template.j
 | ShopAIKey completion schema mode | `strict_schema` | Live 03F three consecutive validated attempts; repairs_used_total=0; max 1 repair/attempt policy |
 | ShopAIKey streaming | supported (`streaming_text`) | Live 03F ordered non-empty text chunks; knowledge-only |
 | PDF extraction mode | `layout` (digital; Batch04 closed) | 04C: both digital modes 5/5 vs frozen 4/5 with equal yield; layout locked; 04D: image-only dual-mode exact `NO_EXTRACTABLE_TEXT` PASS |
-| Embedding adapter contract | PENDING | Pending gate measurement |
+| Embedding adapter contract | **FAIL** (05D locked; Plan 2 blocked) | Fixed ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 / `phase0_v1_synthetic` representations / max_batch=16 / fail-closed errors; 05D independent recalc: nDCG@10=0.833333 PASS, Recall@10=0.277778 FAIL vs 0.35, latency PASS, scalar_batch_equivalence FAIL; adapter-revision-only recovery |
 
 ## Cleanup
 
@@ -199,7 +297,7 @@ Manifest source: `backend/evaluation/labels/retrieval_subset_manifest.template.j
 
 ## Handoff
 
-Plan 2 remains blocked until every required gate is measured, supported by evidence, and marked `PASS`. A failed gate permits revision only of the affected adapter decision.
+Plan 2 remains blocked until every required gate is measured, supported by evidence, and marked `PASS`. The embedding compatibility gate is closed as **FAIL** (05D): fixed ShopAIKey contract is recorded, but Recall@10 and strict scalar/batch equivalence miss pre-recorded/protocol requirements. Recovery is **embedding-adapter revision only** (no model substitution without an approved adapter revision, no post-hoc baseline rewrite, no broad fallback stack). Other gates still must pass in Batch06 consolidation.
 
 ## Final Decisions
 
@@ -209,5 +307,5 @@ Plan 2 remains blocked until every required gate is measured, supported by evide
 | Astryx compatibility | PASS | Exact npm resolution, initializer evidence, sixteen pinned CLI lookups, and `npm run check:astryx` | `@astryxdesign/core` and `@astryxdesign/cli` `0.1.4`; public matrix above | Astryx decision is locked for Plan 2; overall Plan 2 remains blocked on other Phase 0 gates |
 | ShopAIKey compatibility | PASS | Live 03F diagnostic exit 0; all six capabilities characterized; secret/leakage scan clean; fake suite 73 passed without network | Model `gpt-4o-mini`; tools `bind_tools` + tool-result round trip; schema `strict_schema` (max 1 repair/attempt); streaming supported | ShopAIKey provider decisions locked for Plan 2; overall Plan 2 remains blocked on PDF, embeddings, and consolidation gates |
 | PDF extraction compatibility | PASS | 04C digital majority met with `layout` locked; 04D image-only normal+layout exact `NO_EXTRACTABLE_TEXT` / 0 chars on repeated runs; OCR/alternate search clean | Digital mode `layout`; image-only exact failure `NO_EXTRACTABLE_TEXT` | PDF adapter locked for Plan 2; overall Plan 2 remains blocked on embeddings and consolidation gates |
-| Embedding compatibility | PENDING | Pending Batch05 evidence | PENDING | Blocks Plan 2 |
+| Embedding compatibility | **FAIL** | 05D independent recalc from `embedding_benchmark.json` + PRE_RECORDED protocol: model/dims/order/finite/latency/nDCG PASS; Recall@10 FAIL (0.277778 < 0.35); scalar_batch_equivalence FAIL; baselines unchanged; no model substitution | ShopAIKey `text-embedding-3-small` / 1536 / float / no E5 / `phase0_v1_synthetic`; contract recorded but not authorized as PASS | Blocks Plan 2; recovery = embedding-adapter revision only, then re-run live benchmark and re-close 05D |
 | Cleanup and evidence consolidation | PENDING | Pending Batch06 evidence | PENDING | Blocks Plan 2 |

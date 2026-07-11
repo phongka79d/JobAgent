@@ -1,0 +1,316 @@
+{
+  "manifest_version": 1,
+  "manifest_id": "phase0_retrieval_subset_freeze_v1",
+  "data_class": "safe_aggregate",
+  "frozen_at_utc": "2026-07-11T05:39:44+00:00",
+  "recorded_before_live_embedding_run": true,
+  "benchmark_status": "FROZEN",
+  "freeze_accepted_task": "05A",
+  "user_option": "B_synthetic_phase0_materialization",
+  "label_provenance": "SYNTHETIC_PHASE0_USER_OPTION_B",
+  "seed": 20260711,
+  "split_name": "validation",
+  "split_scheme": "fixed_seeded_60_20_20",
+  "phase0_active_slice": "validation",
+  "held_out_access": "forbidden_for_phase0_threshold_setting",
+  "record_count_total": 160,
+  "record_count_by_split": {
+    "development": 96,
+    "validation": 32,
+    "held_out_test": 32
+  },
+  "record_count": 32,
+  "label_scale": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "validation_label_histogram": {
+    "0": 6,
+    "1": 20,
+    "2": 2,
+    "3": 4
+  },
+  "record_fields_safe": [
+    "record_id",
+    "query_entity_id",
+    "document_entity_id",
+    "relevance_label",
+    "split"
+  ],
+  "ignored_records_path": "backend/evaluation/private/retrieval_subset.local.json",
+  "template_path": "backend/evaluation/labels/retrieval_subset_manifest.template.json",
+  "protocol_path": "backend/evaluation/labels/embedding_validation_protocol.json",
+  "validation_record_ids": [
+    "syn_pair_0011",
+    "syn_pair_0021",
+    "syn_pair_0022",
+    "syn_pair_0023",
+    "syn_pair_0030",
+    "syn_pair_0042",
+    "syn_pair_0053",
+    "syn_pair_0056",
+    "syn_pair_0057",
+    "syn_pair_0061",
+    "syn_pair_0068",
+    "syn_pair_0069",
+    "syn_pair_0075",
+    "syn_pair_0076",
+    "syn_pair_0079",
+    "syn_pair_0080",
+    "syn_pair_0084",
+    "syn_pair_0093",
+    "syn_pair_0098",
+    "syn_pair_0100",
+    "syn_pair_0107",
+    "syn_pair_0108",
+    "syn_pair_0112",
+    "syn_pair_0113",
+    "syn_pair_0115",
+    "syn_pair_0123",
+    "syn_pair_0124",
+    "syn_pair_0130",
+    "syn_pair_0137",
+    "syn_pair_0143",
+    "syn_pair_0144",
+    "syn_pair_0153"
+  ],
+  "validation_records_safe": [
+    {
+      "record_id": "syn_pair_0011",
+      "query_entity_id": "syn_cand_001",
+      "document_entity_id": "syn_job_007",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0021",
+      "query_entity_id": "syn_cand_002",
+      "document_entity_id": "syn_job_013",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0022",
+      "query_entity_id": "syn_cand_002",
+      "document_entity_id": "syn_job_018",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0023",
+      "query_entity_id": "syn_cand_002",
+      "document_entity_id": "syn_job_012",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0030",
+      "query_entity_id": "syn_cand_003",
+      "document_entity_id": "syn_job_010",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0042",
+      "query_entity_id": "syn_cand_005",
+      "document_entity_id": "syn_job_007",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0053",
+      "query_entity_id": "syn_cand_006",
+      "document_entity_id": "syn_job_009",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0056",
+      "query_entity_id": "syn_cand_007",
+      "document_entity_id": "syn_job_003",
+      "relevance_label": 3,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0057",
+      "query_entity_id": "syn_cand_007",
+      "document_entity_id": "syn_job_013",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0061",
+      "query_entity_id": "syn_cand_007",
+      "document_entity_id": "syn_job_004",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0068",
+      "query_entity_id": "syn_cand_008",
+      "document_entity_id": "syn_job_008",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0069",
+      "query_entity_id": "syn_cand_008",
+      "document_entity_id": "syn_job_005",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0075",
+      "query_entity_id": "syn_cand_009",
+      "document_entity_id": "syn_job_013",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0076",
+      "query_entity_id": "syn_cand_009",
+      "document_entity_id": "syn_job_003",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0079",
+      "query_entity_id": "syn_cand_009",
+      "document_entity_id": "syn_job_009",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0080",
+      "query_entity_id": "syn_cand_010",
+      "document_entity_id": "syn_job_005",
+      "relevance_label": 3,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0084",
+      "query_entity_id": "syn_cand_010",
+      "document_entity_id": "syn_job_007",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0093",
+      "query_entity_id": "syn_cand_011",
+      "document_entity_id": "syn_job_004",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0098",
+      "query_entity_id": "syn_cand_012",
+      "document_entity_id": "syn_job_004",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0100",
+      "query_entity_id": "syn_cand_012",
+      "document_entity_id": "syn_job_009",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0107",
+      "query_entity_id": "syn_cand_013",
+      "document_entity_id": "syn_job_010",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0108",
+      "query_entity_id": "syn_cand_013",
+      "document_entity_id": "syn_job_001",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0112",
+      "query_entity_id": "syn_cand_014",
+      "document_entity_id": "syn_job_007",
+      "relevance_label": 3,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0113",
+      "query_entity_id": "syn_cand_014",
+      "document_entity_id": "syn_job_017",
+      "relevance_label": 2,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0115",
+      "query_entity_id": "syn_cand_014",
+      "document_entity_id": "syn_job_005",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0123",
+      "query_entity_id": "syn_cand_015",
+      "document_entity_id": "syn_job_000",
+      "relevance_label": 0,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0124",
+      "query_entity_id": "syn_cand_015",
+      "document_entity_id": "syn_job_012",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0130",
+      "query_entity_id": "syn_cand_016",
+      "document_entity_id": "syn_job_012",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0137",
+      "query_entity_id": "syn_cand_017",
+      "document_entity_id": "syn_job_018",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0143",
+      "query_entity_id": "syn_cand_017",
+      "document_entity_id": "syn_job_009",
+      "relevance_label": 1,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0144",
+      "query_entity_id": "syn_cand_018",
+      "document_entity_id": "syn_job_009",
+      "relevance_label": 3,
+      "split": "validation"
+    },
+    {
+      "record_id": "syn_pair_0153",
+      "query_entity_id": "syn_cand_019",
+      "document_entity_id": "syn_job_019",
+      "relevance_label": 2,
+      "split": "validation"
+    }
+  ],
+  "private_records_sha256": "3594fe5b2a935c4007d419a02f2b4e48797accfc663a59401b2b2e86a22b556b",
+  "inventory": {
+    "private_records_file_exists": true,
+    "seed_declared": true,
+    "record_count_declared": true,
+    "label_provenance_confirmed": true,
+    "held_out_results_present_in_repo": false,
+    "held_out_results_inspected": false,
+    "private_text_in_committed_manifest": false
+  },
+  "notes": "Safe freeze for Option B synthetic Phase 0 subset. Accepted in task 05A; thresholds and held-out policy sealed before live embedding runs (05C)."
+}
