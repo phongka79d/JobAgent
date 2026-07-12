@@ -122,126 +122,6 @@ ACCEPTED
 
 ---
 
-# Task Review Report - 06A
-
-## Source Task File
-docs/tasks/task_4.md
-
-## Execution Report Reviewed
-docs/reports/report_4_execute_agent.md
-
-## Review Report File
-docs/review/review_4_review_agent.md
-
-## Mode
-orchestrated
-
-## Final Outcome
-ACCEPTED
-
-## Reviewed Scope
-- Batch: Mandatory Batch06 - Phase 3 Exit Proof and Plan 5 Handoff
-- Task ID: 06A
-- Task title: Prove the full profile workflow and publish the Plan 5 handoff
-- Executor status reported: complete
-
-## Git Diff Evidence
-- git status reviewed: yes
-- git diff stat reviewed: yes
-- git diff reviewed: yes
-- changed files from git: `README.md`, `backend/app/schemas/attachments.py`, the Plan-3 route/registry assertions in five backend test modules, the execution report, the selected checkbox, and this review report. Untracked `backend/tests/integration/test_full_profile_workflow.py`, `backend/tests/integration/profile_workflow/**`, and `frontend/src/test/profile-workflow.integration.test.tsx` were read and classified as in scope.
-
-## Files Reviewed
-- `backend/tests/integration/test_full_profile_workflow.py` and `backend/tests/integration/profile_workflow/**`: in scope - a thin historical entrypoint re-exports cohesive support, workflow, failure, and exposure case modules. The 1,055-line monolith is removed; the largest focused support/case modules are 358/354/316 lines where the shared E2E setup and flows remain cohesive.
-- `frontend/src/test/profile-workflow.integration.test.tsx`: in scope - 508-line integration flow uses the real parser/reducer/shell and covers the requested sidebar/composer/approval/error/disconnect seams.
-- `backend/tests/integration/test_full_chat_transport.py`, `backend/tests/api/test_chat.py`, `backend/tests/api/test_health.py`, `backend/tests/integration/test_chat_transport.py`, `backend/tests/test_config.py`: in scope - accurately update the public seven-route and four-tool Plan 4 assertions.
-- `backend/app/schemas/attachments.py`: in scope but incidental Ruff-compatible import whitespace only.
-- `README.md`: in scope - accurately distinguishes fake-backed proof from optional live observation and states the Plan 5 boundary.
-- `docs/reports/report_4_execute_agent.md`: in scope - updated same-task repair block accurately records the oversized-PDF proof and modularization validations.
-
-## Validations Reviewed
-- Command/check: `cd backend; python -m pytest -q tests/integration/test_full_profile_workflow.py`
-  - Required: yes
-  - Reported result: 6 passed
-  - Rerun result: 6 passed in 3.97s
-  - Status: passed
-  - Notes: proves the current test code, but not the missing required oversized-input assertion.
-- Command/check: `cd frontend; npm run test -- --run src/test/profile-workflow.integration.test.tsx`
-  - Required: yes
-  - Reported result: 5 passed
-  - Rerun result: 5 passed
-  - Status: passed
-  - Notes: real parser/reducer/shell integration exercised.
-- Command/check: backend Ruff and mypy
-  - Required: yes
-  - Reported result: passed / 75 source files
-  - Rerun result: passed / 75 source files
-  - Status: passed
-  - Notes: no source-quality failure.
-- Command/check: frontend Astryx, lint, typecheck, and production build
-  - Required: yes
-  - Reported result: passed
-  - Rerun result: all passed; Astryx 0.1.4 exposes 27 components and Vite build completed
-  - Status: passed
-  - Notes: None.
-- Command/check: full backend and frontend test suites
-  - Required: yes
-  - Reported result: 807 passed / 110 tests
-  - Rerun result: 807 passed, 2 skipped / 18 files, 110 tests passed
-  - Status: passed
-  - Notes: No network call evidence contradicted.
-- Command/check: Docker Compose config and build
-  - Required: yes
-  - Reported result: passed
-  - Rerun result: static three-service configuration resolved and both images built successfully
-  - Status: passed
-  - Notes: no secrets or live service observation required.
-
-## Acceptance Review
-- Task acceptance: satisfied
-- Status: satisfied
-- Evidence: the repair adds `test_oversized_pdf_rejected_with_zero_side_effects`, with an isolated 1 MiB setting, valid PDF magic, a stream-exceeding payload, exact HTTP 413 / `PDF_TOO_LARGE`, and zero profile, draft, attachment, outbox, staged, or active-file effects.
-- Evidence: the former 1,055-line test is split into responsibility-based support, workflow, failure, and exposure modules, preserving the focused entrypoint and all full-flow proof. The re-review reran the focused suite (7 passed), full backend suite (808 passed, 2 skipped), Ruff, and mypy.
-
-## Progress Tracking
-- Selected task checkbox before review: unchecked
-- Checkbox updated by reviewer: yes
-- Checkbox final state: checked
-- Batch status updated by reviewer: no
-
-## Issues
-
-### Blocking
-- None.
-
-### Major
-- None.
-
-### Minor
-- None.
-
-## Decision
-- Accept selected task: yes
-- Repair required: no
-- Can next task proceed: yes
-- Batch can be marked complete by A2: no
-- A3 can rerun: no
-- Next action: close_task
-
-## Repair Instructions
-- None.
-
-## Re-Review / Repair Verification Log
-
-### 2026-07-12
-- what was re-checked: A2's missing-size-limit and module-focus findings, all repair files, the updated execution report, focused/full backend suites, Ruff, and mypy.
-- repairs verified: the explicit oversized upload now returns only sanitized HTTP 413 `PDF_TOO_LARGE` with zero durable side effects; the 1,055-line monolith is replaced by a thin entrypoint plus responsibility-based support/workflow/failure/exposure modules.
-- remaining issues: None blocking, major, or minor.
-- updated outcome: ACCEPTED (prior outcome: REJECTED).
-
-
----
-
 # Task Review Report - 02A
 
 ## Source Task File
@@ -1545,3 +1425,122 @@ ACCEPTED
 - repairs verified: evidence recovery only; no implementation repair occurred. Transcript lines 113-114 precede first source Edit line 146. Trace sequences 35-36 precede first source edit sequence 62.
 - remaining issues: none.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 06A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch06 - Phase 3 Exit Proof and Plan 5 Handoff
+- Task ID: 06A
+- Task title: Prove the full profile workflow and publish the Plan 5 handoff
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `README.md`, `backend/app/schemas/attachments.py`, the Plan-3 route/registry assertions in five backend test modules, the execution report, the selected checkbox, and this review report. Untracked `backend/tests/integration/test_full_profile_workflow.py`, `backend/tests/integration/profile_workflow/**`, and `frontend/src/test/profile-workflow.integration.test.tsx` were read and classified as in scope.
+
+## Files Reviewed
+- `backend/tests/integration/test_full_profile_workflow.py` and `backend/tests/integration/profile_workflow/**`: in scope - a thin historical entrypoint re-exports cohesive support, workflow, failure, and exposure case modules. The 1,055-line monolith is removed; the largest focused support/case modules are 358/354/316 lines where the shared E2E setup and flows remain cohesive.
+- `frontend/src/test/profile-workflow.integration.test.tsx`: in scope - 508-line integration flow uses the real parser/reducer/shell and covers the requested sidebar/composer/approval/error/disconnect seams.
+- `backend/tests/integration/test_full_chat_transport.py`, `backend/tests/api/test_chat.py`, `backend/tests/api/test_health.py`, `backend/tests/integration/test_chat_transport.py`, `backend/tests/test_config.py`: in scope - accurately update the public seven-route and four-tool Plan 4 assertions.
+- `backend/app/schemas/attachments.py`: in scope but incidental Ruff-compatible import whitespace only.
+- `README.md`: in scope - accurately distinguishes fake-backed proof from optional live observation and states the Plan 5 boundary.
+- `docs/reports/report_4_execute_agent.md`: in scope - updated same-task repair block accurately records the oversized-PDF proof and modularization validations.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/integration/test_full_profile_workflow.py`
+  - Required: yes
+  - Reported result: 6 passed
+  - Rerun result: 6 passed in 3.97s
+  - Status: passed
+  - Notes: proves the current test code, but not the missing required oversized-input assertion.
+- Command/check: `cd frontend; npm run test -- --run src/test/profile-workflow.integration.test.tsx`
+  - Required: yes
+  - Reported result: 5 passed
+  - Rerun result: 5 passed
+  - Status: passed
+  - Notes: real parser/reducer/shell integration exercised.
+- Command/check: backend Ruff and mypy
+  - Required: yes
+  - Reported result: passed / 75 source files
+  - Rerun result: passed / 75 source files
+  - Status: passed
+  - Notes: no source-quality failure.
+- Command/check: frontend Astryx, lint, typecheck, and production build
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: all passed; Astryx 0.1.4 exposes 27 components and Vite build completed
+  - Status: passed
+  - Notes: None.
+- Command/check: full backend and frontend test suites
+  - Required: yes
+  - Reported result: 807 passed / 110 tests
+  - Rerun result: 807 passed, 2 skipped / 18 files, 110 tests passed
+  - Status: passed
+  - Notes: No network call evidence contradicted.
+- Command/check: Docker Compose config and build
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: static three-service configuration resolved and both images built successfully
+  - Status: passed
+  - Notes: no secrets or live service observation required.
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: the repair adds `test_oversized_pdf_rejected_with_zero_side_effects`, with an isolated 1 MiB setting, valid PDF magic, a stream-exceeding payload, exact HTTP 413 / `PDF_TOO_LARGE`, and zero profile, draft, attachment, outbox, staged, or active-file effects.
+- Evidence: the former 1,055-line test is split into responsibility-based support, workflow, failure, and exposure modules, preserving the focused entrypoint and all full-flow proof. The re-review reran the focused suite (7 passed), full backend suite (808 passed, 2 skipped), Ruff, and mypy.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: A2's missing-size-limit and module-focus findings, all repair files, the updated execution report, focused/full backend suites, Ruff, and mypy.
+- repairs verified: the explicit oversized upload now returns only sanitized HTTP 413 `PDF_TOO_LARGE` with zero durable side effects; the 1,055-line monolith is replaced by a thin entrypoint plus responsibility-based support/workflow/failure/exposure modules.
+- remaining issues: None blocking, major, or minor.
+- updated outcome: ACCEPTED (prior outcome: REJECTED).
