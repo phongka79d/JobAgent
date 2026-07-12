@@ -104,6 +104,47 @@ describe("mapToolsToChatCalls", () => {
     expect(calls[0]).not.toHaveProperty("arguments");
     expect(calls[0]).not.toHaveProperty("raw");
   });
+
+  it("sanitizes match_jobs label and allowlisted outcomes", () => {
+    const tools: ToolActivity[] = [
+      {
+        toolCallId: "secret-match-call",
+        label: "match_jobs",
+        status: "complete",
+        durationMs: 50,
+        outcome: "matches_found",
+      },
+      {
+        toolCallId: "secret-match-err",
+        label: "Match jobs",
+        status: "error",
+        durationMs: 12,
+        outcome: "match_failed",
+      },
+      {
+        toolCallId: "secret-json",
+        label: "match_jobs",
+        status: "complete",
+        durationMs: 1,
+        outcome: '{"ok":true,"results":[],"raw_content":"RAW"}',
+      },
+    ];
+    const calls = mapToolsToChatCalls(tools);
+    expect(calls[0]).toMatchObject({
+      name: "Match jobs",
+      target: "Matches found",
+    });
+    expect(calls[1]).toMatchObject({
+      name: "Match jobs",
+      errorMessage: "Match failed",
+    });
+    expect(calls[2].name).toBe("Match jobs");
+    expect(calls[2].target).toBeUndefined();
+    const visible = collectMappedToolVisibleStrings(tools).join("\n");
+    expect(visible).not.toContain("secret-match-call");
+    expect(visible).not.toContain("raw_content");
+    expect(visible).not.toContain("match_jobs");
+  });
 });
 
 describe("ChatToolActivity", () => {

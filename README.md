@@ -840,9 +840,9 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one user-observed public-URL or raw-text save/query chat flow.
 ```
 
-## Plan 6 progress (Batches 01–03) — matching tool and bounded transport
+## Plan 6 progress (Batches 01–04) — matching tool, transport, and cards
 
-**Plan 6 Batches 01–03 are evidence-backed.** Normal validation uses injected
+**Plan 6 Batches 01–04 are evidence-backed.** Normal validation uses injected
 graph/database fakes and pure inputs only — no live Neo4j, ShopAIKey, or LLM
 call is required or claimed.
 
@@ -865,8 +865,10 @@ call is required or claimed.
   reads.
 - Validated match-results cards reuse the existing eight-event SSE, final
   assistant payload, and history seam; no route, event name, raw tool result,
-  or separate transport was added. Frontend presentation, evaluation datasets,
-  and tuning remain later Plan 6 batches.
+  or separate transport was added. The existing Astryx chat surface renders
+  bounded live/history match cards, safe source links, matched/related/missing
+  skills, and collapsible effective-weight breakdowns. Evaluation datasets and
+  tuning remain later Plan 6 batches.
 
 Focused Batch02 verification:
 

@@ -602,6 +602,204 @@ describe("chatReducer", () => {
     });
   });
 
+  it("attaches validated match_results card on run_completed and ignores malformed", () => {
+    const jobId = "33333333-3333-4333-8333-333333333333";
+    const wire = {
+      kind: "match_results",
+      contract_version: "match_result_v1",
+      seed_config_version: "hybrid_seed_v1",
+      count: 1,
+      results: [
+        {
+          job_id: jobId,
+          title: "Backend Engineer",
+          company: "Acme Corp",
+          location: "Remote",
+          work_mode: "remote",
+          final_score: 0.85,
+          quality: "full",
+          components: [
+            { name: "semantic_similarity", available: true, value: 0.9, effective_weight: 0.3 },
+            { name: "skill_score", available: true, value: 0.8, effective_weight: 0.4 },
+            { name: "seniority_score", available: true, value: 1.0, effective_weight: 0.1 },
+            { name: "experience_score", available: true, value: 1.0, effective_weight: 0.1 },
+            { name: "location_score", available: true, value: 1.0, effective_weight: 0.05 },
+            { name: "work_mode_score", available: true, value: 1.0, effective_weight: 0.05 },
+          ],
+          matched_required_skills: [
+            {
+              canonical_key: "python",
+              display_name: "Python",
+              match_kind: "direct",
+              strength: 1.0,
+              related_path: [],
+            },
+          ],
+          related_skills: [],
+          missing_required_skills: [],
+          explanation_lines: ["Strong semantic match"],
+          source_url: "https://example.com/jobs/backend",
+          seed_config_version: "hybrid_seed_v1",
+          contract_version: "match_result_v1",
+        },
+      ],
+    };
+
+    let state = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    state = reduceAll(state, [
+      evt({
+        event: "run_started",
+        event_id: "ms",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {},
+      }),
+      evt({
+        event: "tool_started",
+        event_id: "mt0",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          tool_call_id: "match-1",
+          label: "Match jobs",
+          status: "running",
+        },
+      }),
+      evt({
+        event: "tool_completed",
+        event_id: "mt1",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          tool_call_id: "match-1",
+          label: "Match jobs",
+          status: "complete",
+          duration_ms: 80,
+          outcome: "Matches found",
+        },
+      }),
+      evt({
+        event: "text_delta",
+        event_id: "md1",
+        run_id: RUN,
+        timestamp: TS,
+        payload: { delta: "Here are matches." },
+      }),
+      evt({
+        event: "run_completed",
+        event_id: "mc",
+        run_id: RUN,
+        timestamp: TS,
+        payload: { match_results: wire },
+      }),
+    ]);
+    expect(state.phase).toBe("completed");
+    expect(state.tools[0]?.label).toBe("Match jobs");
+    expect(state.tools[0]?.outcome).toBe("Matches found");
+    const last = state.messages.at(-1);
+    expect(last?.content).toBe("Here are matches.");
+    expect(last?.structured_payload).toMatchObject({
+      kind: "match_results",
+      count: 1,
+      results: [{ job_id: jobId, title: "Backend Engineer", final_score: 0.85 }],
+    });
+    expect(JSON.stringify(last?.structured_payload)).not.toMatch(
+      /raw_content|api_key|traceback|vector/i,
+    );
+
+    // Malformed match payload fails closed to ordinary text message.
+    let bad = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    bad = reduceAll(bad, [
+      evt({
+        event: "run_started",
+        event_id: "ms2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {},
+      }),
+      evt({
+        event: "text_delta",
+        event_id: "md2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: { delta: "No card" },
+      }),
+      evt({
+        event: "run_completed",
+        event_id: "mc2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          match_results: {
+            kind: "match_results",
+            count: 1,
+            results: [{ job_id: "not-uuid", final_score: 0.5 }],
+          },
+        },
+      }),
+    ]);
+    expect(bad.messages.at(-1)?.content).toBe("No card");
+    expect(bad.messages.at(-1)?.structured_payload).toBeNull();
+  });
+
+  it("hydrates match_results card from durable history", () => {
+    const jobId = "44444444-4444-4444-8444-444444444444";
+    const wire = {
+      kind: "match_results",
+      contract_version: "match_result_v1",
+      seed_config_version: "hybrid_seed_v1",
+      count: 1,
+      results: [
+        {
+          job_id: jobId,
+          title: "Hydrated Match",
+          company: "Hydra Inc",
+          location: "Berlin",
+          work_mode: "hybrid",
+          final_score: 0.72,
+          quality: "partial",
+          components: [
+            { name: "semantic_similarity", available: true, value: 0.9, effective_weight: 0.3 },
+            { name: "skill_score", available: true, value: 0.8, effective_weight: 0.4 },
+            { name: "seniority_score", available: true, value: 1.0, effective_weight: 0.1 },
+            { name: "experience_score", available: true, value: 1.0, effective_weight: 0.1 },
+            { name: "location_score", available: true, value: 1.0, effective_weight: 0.05 },
+            { name: "work_mode_score", available: true, value: 1.0, effective_weight: 0.05 },
+          ],
+          matched_required_skills: [],
+          related_skills: [],
+          missing_required_skills: [],
+          explanation_lines: [],
+          source_url: "https://example.com/hydrated-match",
+          seed_config_version: "hybrid_seed_v1",
+          contract_version: "match_result_v1",
+        },
+      ],
+    };
+    const state = chatReducer(createInitialChatState(), {
+      type: "HYDRATE_HISTORY",
+      messages: [
+        {
+          role: "user",
+          content: "match me",
+          created_at: TS,
+          structured_payload: null,
+        },
+        {
+          role: "assistant",
+          content: "Matches ready.",
+          created_at: TS,
+          structured_payload: wire,
+        },
+      ],
+    });
+    expect(state.phase).toBe("idle");
+    expect(state.messages[1]?.structured_payload).toMatchObject({
+      kind: "match_results",
+      results: [{ job_id: jobId, title: "Hydrated Match" }],
+    });
+  });
+
   it("active phase disables send", () => {
     let state = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
     expect(state.phase).toBe("active");

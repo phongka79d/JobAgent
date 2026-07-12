@@ -3,7 +3,11 @@
  * Presentation-free; UI maps this state into Astryx components (task 03C).
  */
 
-import { parseSavedJobCardPayload } from "../jobs/contracts";
+import {
+  matchResultsToStructuredPayload,
+  parseMatchResultsCardPayload,
+  parseSavedJobCardPayload,
+} from "../jobs/contracts";
 
 import {
   APPROVAL_KIND_PROFILE_DRAFT,
@@ -331,26 +335,33 @@ function applySSEEvent(state: ChatState, event: ChatSSEEvent): ChatState {
       if (state.phase !== "active" && state.phase !== "awaiting_approval") {
         return state;
       }
-      // Fail closed: only attach a validated saved-job card; ignore malformed.
-      const rawSaved = event.payload.saved_job ?? null;
-      const parsedCard = parseSavedJobCardPayload(rawSaved);
-      const structured: Record<string, unknown> | null = parsedCard
-        ? {
-            kind: parsedCard.kind,
-            job_id: parsedCard.jobId,
-            title: parsedCard.title,
-            company: parsedCard.company,
-            location: parsedCard.location,
-            work_mode: parsedCard.workMode,
-            employment_type: parsedCard.employmentType,
-            jd_quality: parsedCard.jdQuality,
-            quality_reasons_preview: [...parsedCard.qualityReasonsPreview],
-            processing_result: parsedCard.processingResult,
-            duplicate_outcome: parsedCard.duplicateOutcome,
-            graph_sync_status: parsedCard.graphSyncStatus,
-            source_url: parsedCard.sourceUrl,
-          }
-        : null;
+      // Fail closed: attach at most one validated card (match_results | saved_job).
+      const rawMatch = event.payload.match_results ?? null;
+      const parsedMatch = parseMatchResultsCardPayload(rawMatch);
+      let structured: Record<string, unknown> | null = null;
+      if (parsedMatch) {
+        structured = matchResultsToStructuredPayload(parsedMatch);
+      } else {
+        const rawSaved = event.payload.saved_job ?? null;
+        const parsedCard = parseSavedJobCardPayload(rawSaved);
+        structured = parsedCard
+          ? {
+              kind: parsedCard.kind,
+              job_id: parsedCard.jobId,
+              title: parsedCard.title,
+              company: parsedCard.company,
+              location: parsedCard.location,
+              work_mode: parsedCard.workMode,
+              employment_type: parsedCard.employmentType,
+              jd_quality: parsedCard.jdQuality,
+              quality_reasons_preview: [...parsedCard.qualityReasonsPreview],
+              processing_result: parsedCard.processingResult,
+              duplicate_outcome: parsedCard.duplicateOutcome,
+              graph_sync_status: parsedCard.graphSyncStatus,
+              source_url: parsedCard.sourceUrl,
+            }
+          : null;
+      }
       const withText = appendAssistantMessage(
         withSeen(state, event.event_id),
         state.streamingText,

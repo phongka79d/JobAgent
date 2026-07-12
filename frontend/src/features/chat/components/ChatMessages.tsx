@@ -11,8 +11,12 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
 
+import { MatchCard } from "../../jobs/components/MatchCard";
 import { SavedJobCard } from "../../jobs/components/SavedJobCard";
-import { parseSavedJobCardPayload } from "../../jobs/contracts";
+import {
+  parseMatchResultsCardPayload,
+  parseSavedJobCardPayload,
+} from "../../jobs/contracts";
 import type { HistoryMessage } from "../contracts";
 import type { ApprovalState, ChatPhase, ChatState, FailureState } from "../reducer";
 import { ChatApproval } from "./ChatApproval";
@@ -139,9 +143,12 @@ export function ChatMessages({
             </ChatSystemMessage>
           );
         }
+        const payload = message.structured_payload ?? null;
         const savedJob =
-          sender === "assistant"
-            ? parseSavedJobCardPayload(message.structured_payload ?? null)
+          sender === "assistant" ? parseSavedJobCardPayload(payload) : null;
+        const matchResults =
+          sender === "assistant" && savedJob === null
+            ? parseMatchResultsCardPayload(payload)
             : null;
         return (
           <ChatMessage key={messageKey(message, index)} sender={sender}>
@@ -161,6 +168,15 @@ export function ChatMessages({
                   data-testid={`saved-job-card-${String(index)}`}
                 />
               ) : null}
+              {matchResults
+                ? matchResults.results.map((match, matchIndex) => (
+                    <MatchCard
+                      key={`${match.jobId}-${String(matchIndex)}`}
+                      match={match}
+                      data-testid={`match-card-${String(index)}-${String(matchIndex)}`}
+                    />
+                  ))
+                : null}
             </VStack>
           </ChatMessage>
         );

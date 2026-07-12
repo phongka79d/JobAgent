@@ -450,7 +450,7 @@ formula, alternate state store, custom design system, or evaluation behavior.
 
 ### Tasks
 
-- [ ] (04A): Render bounded Astryx match cards and collapsible breakdowns
+- [x] (04A): Render bounded Astryx match cards and collapsible breakdowns
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.5 Match result contract`; `docs/plans/Plan_6.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 15.3 Chat components`; `docs/plans/Master_plan.md` > `### 15.5 Match result card`; `docs/plans/Master_plan.md` > `### 24.3 Frontend tests`
   - Source Requirements:
     - Show title, company, location, work mode, final score, matched required, verified related, missing required, safe source URL, and expandable component/effective-weight breakdown.

@@ -1029,3 +1029,156 @@ complete
 - validations to rerun: required 03B pytest/ruff/mypy commands above
 - risk areas: conversations payload key/node policy change is shared; confirm saved_job and other cards still accept/reject as before (job_chat + conversations tests green in required set / related suites)
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch04 - Astryx Match Presentation
+
+## Task
+04A - Render bounded Astryx match cards and collapsible breakdowns
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Astryx Match Presentation
+- Task ID: 04A
+- Task title: Render bounded Astryx match cards and collapsible breakdowns
+- Files allowed / repair scope: frontend match contract, parser/reducer hydration, sanitized tool label, MatchCard, ScoreBreakdown; existing AppShell/chat layout only
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ### 7.5 Match result contract
+- docs/plans/Plan_6.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 15.3 Chat components
+- docs/plans/Master_plan.md > ### 15.5 Match result card
+- docs/plans/Master_plan.md > ### 24.3 Frontend tests
+- frontend/AGENTS.md (Astryx 0.1.4 CLI discover-before-write)
+
+## Dependency and User Action Check
+- Dependencies: (03B) backend match_results payload and accepted frontend chat contracts/reducer/messages — satisfied
+- User Action: None — satisfied
+
+## Files Inspected Before Editing
+- frontend/AGENTS.md
+- frontend/src/features/jobs/contracts.ts
+- frontend/src/features/jobs/components/SavedJobCard.tsx
+- frontend/src/features/chat/contracts.ts
+- frontend/src/features/chat/reducer.ts
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/toolMapping.ts
+- backend/app/schemas/matching_card.py
+- backend/app/schemas/matching_result.py
+- backend/app/api/chat.py (friendly match_jobs labels/outcomes)
+- @astryxdesign/core 0.1.4 Card/MetadataList/Collapsible/ProgressBar/Link d.ts
+
+## Astryx CLI Evidence (pinned 0.1.4, recorded before UI edits)
+- `npx astryx build "chat job match result score breakdown"` → closest page `ai-chat`; foundation includes Card; frame AppShell/chat already in product
+- `node ./node_modules/@astryxdesign/cli/bin/astryx.mjs component Card` → import `@astryxdesign/core/Card`; props: children, padding scale (0–10), variant
+- `… component MetadataList` → import `@astryxdesign/core/MetadataList` + MetadataListItem; columns single/multi; label position start/top
+- `… component Collapsible` → import `@astryxdesign/core/Collapsible`; required trigger; defaultIsOpen (default true); isOpen/onOpenChange; aria-expanded on trigger button
+- `… component ProgressBar` → import `@astryxdesign/core/ProgressBar`; required label; value/max; hasValueLabel; formatValueLabel; variant accent|success|warning|error|neutral
+- Public APIs used: Card, MetadataList/MetadataListItem, Collapsible, ProgressBar, Badge, Link (isExternalLink), Text, VStack, HStack — no guessed props, no raw layout div, no second UI library
+
+## Completed Work
+- Extended `frontend/src/features/jobs/contracts.ts` with fail-closed `match_results` parser/serializer mirroring backend MatchResultsCardPayload (top-10, full six-component inventory, skill path kind rules, shared safePublicSourceUrl helper, weight-sum tolerance).
+- Added ScoreBreakdown (Collapsible default closed + ProgressBar + MetadataList for effective weights) and MatchCard (title/company/location/work mode/final score/matched/related/missing/source + breakdown).
+- Wired chat contracts `run_completed.match_results`, reducer live hydration via parse + snake_case structured_payload, ChatMessages identical live/history MatchCard rendering, toolMapping sanitizeToolLabel/Outcome for match_jobs.
+- Tests: contracts, MatchCard, ScoreBreakdown, reducer match paths, ChatMessages match cards, matching-workflow.integration (live/history/malformed/duplicate/failure/disconnect/unsafe URL).
+
+## Files Created or Modified
+- frontend/src/features/jobs/contracts.ts
+- frontend/src/features/jobs/contracts.test.ts
+- frontend/src/features/jobs/components/MatchCard.tsx
+- frontend/src/features/jobs/components/MatchCard.test.tsx
+- frontend/src/features/jobs/components/ScoreBreakdown.tsx
+- frontend/src/features/jobs/components/ScoreBreakdown.test.tsx
+- frontend/src/features/jobs/components/matchFixtures.ts
+- frontend/src/features/chat/contracts.ts
+- frontend/src/features/chat/reducer.ts
+- frontend/src/features/chat/reducer.test.ts
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/ChatMessages.test.tsx
+- frontend/src/features/chat/components/toolMapping.ts
+- frontend/src/features/chat/components/ChatToolActivity.test.tsx
+- frontend/src/test/matching-workflow.integration.test.tsx
+- docs/reports/report_6_execute_agent.md
+
+## Key Implementation Decisions
+- One fail-closed parser shared by live SSE and durable history; reducer stores snake_case structured_payload via matchResultsToStructuredPayload for re-parse parity with backend wire.
+- Related skills rendered only when verified_related paths parse; provisional kinds fail the whole card closed.
+- Collapsible content remains mounted when collapsed (Astryx CSS hide); a11y uses aria-expanded=false defaultIsOpen={false}.
+- toolMapping sanitizes raw match_jobs / matches_found tokens without changing saved-job or generic tool paths.
+
+## Tests or Validations Run
+- command/check: cd frontend; npx astryx build "chat job match result score breakdown"; astryx component Card/MetadataList/Collapsible/ProgressBar (via local CLI bin)
+- required: yes (task Agent Work step 1)
+- result: passed
+- evidence or reason: build returned ai-chat frame + Card foundation; component docs recorded for pinned 0.1.4 public props
+
+- command/check: cd frontend; npm run check:astryx
+- required: yes
+- result: passed
+- evidence or reason: PASS: Astryx 0.1.4 exposes all 27 required public components
+
+- command/check: cd frontend; npm run test -- --run src/features/jobs src/features/chat/reducer.test.ts src/features/chat/components/ChatMessages.test.tsx src/test/matching-workflow.integration.test.tsx
+- required: yes
+- result: passed
+- evidence or reason: 7 files, 52 tests passed
+
+- command/check: cd frontend; npm run lint
+- required: yes
+- result: passed
+- evidence or reason: eslint exit 0
+
+- command/check: cd frontend; npm run typecheck
+- required: yes
+- result: passed
+- evidence or reason: tsc -b --noEmit exit 0
+
+- command/check: cd frontend; npm run build
+- required: yes
+- result: passed
+- evidence or reason: tsc -b && vite build success; dist assets emitted
+
+## Acceptance Check
+- condition: Live and hydrated results render identically; malformed/oversized/unsafe payloads ignored without crash/unsafe URLs
+- status: satisfied
+- evidence: matching-workflow.integration live+history same title/score; malformed null payload; localhost source_url nulled; oversized collection rejected in contracts.test
+
+- condition: Cards show every source-required field; related skills only with verified evidence; breakdown shows component values and effective weights
+- status: satisfied
+- evidence: MatchCard/ChatMessages tests for title/company/location/mode/score/matched/related/missing/source; ScoreBreakdown ProgressBar + Effective weight rows; empty relatedSkills omits Related verified
+
+- condition: match_jobs activity uses sanitized tool-status UI; failure/disconnect never show false success
+- status: satisfied
+- evidence: toolMapping/ChatMessages sanitize match_jobs→Match jobs, matches_found→Matches found; integration failure/disconnect have no match-card
+
+- condition: Astryx CLI evidence names used public APIs; no raw layout div, hard-coded visual value, dashboard, second shell, or guessed prop
+- status: satisfied
+- evidence: CLI section above; MatchCard/ScoreBreakdown use Card/MetadataList/Collapsible/ProgressBar with documented props only; still on existing ChatMessages path
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Risks or Open Issues
+- None material for 04A. Broader full-suite frontend test run is out of required validation scope (focused paths green).
+
+## Notes for Review Agent
+- changed files: jobs contracts/components + chat contracts/reducer/ChatMessages/toolMapping + matching-workflow.integration + this report
+- validations to rerun: required 04A frontend commands above
+- risk areas: Collapsible always mounts children (CSS hide) — tests assert aria-expanded; weight-sum tolerance 1e-6 on frontend vs 1e-9 backend
+- next task readiness: can_review

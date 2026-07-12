@@ -89,11 +89,13 @@ export interface TextDeltaPayload {
 
 /**
  * Terminal success payload. Empty object remains valid.
- * Optional saved_job is the Plan 5 bounded Job card (same shape as history
- * structured_payload kind saved_job). Malformed cards are ignored at parse.
+ * Optional saved_job (Plan 5) or match_results (Plan 6) cards share the same
+ * structured_payload tagged union as durable history. Malformed cards are
+ * ignored at parse. At most one card kind is carried.
  */
 export interface RunCompletedPayload {
   readonly saved_job?: Record<string, unknown> | null;
+  readonly match_results?: Record<string, unknown> | null;
 }
 
 export interface RunFailedPayload {
@@ -304,11 +306,28 @@ export function parseChatSSEEvent(raw: unknown): ChatSSEEvent {
     case "run_started":
       return { ...base, event: "run_started", payload: {} };
     case "run_completed": {
-      // Fail closed: only accept a plain saved_job object; ignore garbage.
+      // Fail closed: accept plain saved_job or match_results objects; ignore garbage.
+      // Prefer match_results when both are present (backend emits at most one).
       let saved_job: Record<string, unknown> | null = null;
+      let match_results: Record<string, unknown> | null = null;
+      const rawMatch = payload.match_results;
+      if (isPlainObject(rawMatch) && rawMatch.kind === "match_results") {
+        match_results = rawMatch;
+      }
       const rawSaved = payload.saved_job;
-      if (isPlainObject(rawSaved) && rawSaved.kind === "saved_job") {
+      if (
+        match_results === null &&
+        isPlainObject(rawSaved) &&
+        rawSaved.kind === "saved_job"
+      ) {
         saved_job = rawSaved;
+      }
+      if (match_results) {
+        return {
+          ...base,
+          event: "run_completed",
+          payload: { match_results },
+        };
       }
       return {
         ...base,
