@@ -3,11 +3,12 @@
  * Presentation-free; UI maps this state into Astryx components (task 03C).
  */
 
-import type {
-  AssistantDisplayStatus,
-  ChatSSEEvent,
-  HistoryMessage,
-  ToolDisplayStatus,
+import {
+  APPROVAL_KIND_PROFILE_DRAFT,
+  type AssistantDisplayStatus,
+  type ChatSSEEvent,
+  type HistoryMessage,
+  type ToolDisplayStatus,
 } from "./contracts";
 
 /** Distinguishable run/connection phases for send-disable and UI. */
@@ -27,9 +28,43 @@ export interface ToolActivity {
   readonly outcome: string | null;
 }
 
+/**
+ * Display-only approval interrupt state (generic or profile draft).
+ * `instanceKey` is the SSE event_id so a fresh reapproval is independently actionable.
+ */
 export interface ApprovalState {
   readonly summary: string;
   readonly approvalKind: string | null;
+  readonly currentTitle: string | null;
+  readonly skillNames: readonly string[];
+  readonly experienceCount: number | null;
+  readonly educationCount: number | null;
+  readonly hasPreferenceChanges: boolean | null;
+  readonly targetRolesPreview: readonly string[];
+  /** SSE event_id for this interrupt instance (idempotency / reapproval identity). */
+  readonly instanceKey: string;
+}
+
+/** True when the interrupt is a Plan 4 profile-draft approval card. */
+export function isProfileDraftApproval(approval: ApprovalState): boolean {
+  return approval.approvalKind === APPROVAL_KIND_PROFILE_DRAFT;
+}
+
+/** Build a full ApprovalState (tests and controlled UI seeds). */
+export function createApprovalState(
+  partial: Partial<ApprovalState> & Pick<ApprovalState, "summary">,
+): ApprovalState {
+  return {
+    summary: partial.summary,
+    approvalKind: partial.approvalKind ?? null,
+    currentTitle: partial.currentTitle ?? null,
+    skillNames: partial.skillNames ?? [],
+    experienceCount: partial.experienceCount ?? null,
+    educationCount: partial.educationCount ?? null,
+    hasPreferenceChanges: partial.hasPreferenceChanges ?? null,
+    targetRolesPreview: partial.targetRolesPreview ?? [],
+    instanceKey: partial.instanceKey ?? "approval-instance",
+  };
 }
 
 export interface FailureState {
@@ -249,6 +284,8 @@ function applySSEEvent(state: ChatState, event: ChatSSEEvent): ChatState {
       if (state.phase !== "active") {
         return state;
       }
+      const skills = event.payload.skill_names ?? null;
+      const roles = event.payload.target_roles_preview ?? null;
       return withSeen(
         {
           ...state,
@@ -256,6 +293,13 @@ function applySSEEvent(state: ChatState, event: ChatSSEEvent): ChatState {
           approval: {
             summary: event.payload.summary,
             approvalKind: event.payload.approval_kind ?? null,
+            currentTitle: event.payload.current_title ?? null,
+            skillNames: skills ? [...skills] : [],
+            experienceCount: event.payload.experience_count ?? null,
+            educationCount: event.payload.education_count ?? null,
+            hasPreferenceChanges: event.payload.has_preference_changes ?? null,
+            targetRolesPreview: roles ? [...roles] : [],
+            instanceKey: event.event_id,
           },
           assistantStatus: "waiting",
         },

@@ -10,12 +10,28 @@ const BASE = process.env.CHAT_INSPECT_URL ?? "http://127.0.0.1:5173/";
 async function inspectViewport(browser, { width, height, label }) {
   const page = await browser.newPage({ viewport: { width, height } });
 
-  // History hydrate fails without backend; shell must still show chat composer/empty.
+  // History/profile hydrate fail without backend; shell must still show chat + sidebar.
   await page.route("**/api/chat/history**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ messages: [] }),
+    });
+  });
+  await page.route("**/api/profile**", async (route) => {
+    if (route.request().url().includes("/api/profile/cv")) {
+      await route.fulfill({ status: 404, body: "NO_ACTIVE_CV" });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "none",
+        profile: null,
+        preferences: null,
+        active_attachment: null,
+      }),
     });
   });
 
@@ -32,6 +48,7 @@ async function inspectViewport(browser, { width, height, label }) {
   const textbox = page.getByRole("textbox");
   const textboxCount = await textbox.count();
   const emptyVisible = await page.getByText(/Start a conversation/i).count();
+  const sidebarVisible = await page.locator('[data-testid="profile-sidebar"]').count();
   const landingPlaceholder = /product workflows are intentionally disabled/i.test(
     bodyText,
   );
@@ -52,6 +69,7 @@ async function inspectViewport(browser, { width, height, label }) {
     height,
     textboxCount,
     emptyVisible: emptyVisible > 0,
+    sidebarVisible: sidebarVisible > 0,
     landingPlaceholder,
     prohibited,
     overflow,

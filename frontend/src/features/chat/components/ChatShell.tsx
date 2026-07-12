@@ -1,9 +1,10 @@
 /**
- * Base Astryx chat shell: hydrates history, streams turns/resumes, maps pure state to UI.
- * Consumes 03B transport/reducer only — no direct provider/store access.
+ * Base Astryx chat shell: AppShell + profile sideNav + ChatLayout.
+ * Consumes shared profile upload client/state and chat controller only —
+ * no direct store/provider access.
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback } from "react";
 
 import { Theme } from "@astryxdesign/core";
 import { AppShell } from "@astryxdesign/core/AppShell";
@@ -14,26 +15,26 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { VStack } from "@astryxdesign/core/VStack";
 import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 
+import { SIDEBAR_PROFILE_TURN_TEXT } from "../../profile/contracts";
+import { ProfileSidebar } from "../../profile/components/ProfileSidebar";
 import {
-  fetchChatHistory,
-  streamChatResume,
-  streamChatTurn,
-} from "../api";
-import type { ChatSSEEvent, HistoryMessage } from "../contracts";
+  useProfileShellState,
+  type ProfileShellApi,
+} from "../../profile/components/useProfileShellState";
+import type { HistoryMessage } from "../contracts";
+import type { ChatState } from "../reducer";
 import {
-  chatReducer,
-  createInitialChatState,
-  isSendDisabled,
-  type ChatState,
-} from "../reducer";
+  runComposerCvUpload,
+  runSidebarCvUpload,
+} from "./chatUploadHandlers";
 import { ChatComposerPanel } from "./ChatComposerPanel";
 import { ChatMessages } from "./ChatMessages";
+import {
+  useChatController,
+  type ChatShellApi,
+} from "./useChatController";
 
-export interface ChatShellApi {
-  readonly fetchHistory: typeof fetchChatHistory;
-  readonly streamTurn: typeof streamChatTurn;
-  readonly streamResume: typeof streamChatResume;
-}
+export type { ChatShellApi };
 
 export interface ChatShellProps {
   /** Skip automatic history hydration (tests with deterministic state). */
@@ -46,21 +47,14 @@ export interface ChatShellProps {
   readonly initialState?: ChatState;
   /** When false, Theme wrapper is omitted (App already provides Theme). */
   readonly wrapTheme?: boolean;
-}
-
-function createIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
+  /** When false, profile sidebar and its fetches are skipped (unit tests). */
+  readonly enableProfileSidebar?: boolean;
+  /** Injectable profile clients for tests. */
+  readonly profileApi?: ProfileShellApi;
 }
 
 /**
- * Full-page chat experience: AppShell + ChatLayout + message/composer panels.
+ * Full-page chat experience: AppShell (sideNav profile) + ChatLayout.
  */
 export function ChatShell({
   skipHydrate = false,
@@ -68,228 +62,98 @@ export function ChatShell({
   api: apiOverrides,
   initialState,
   wrapTheme = true,
+  enableProfileSidebar = true,
+  profileApi,
 }: ChatShellProps) {
-  const fetchHistory = apiOverrides?.fetchHistory ?? fetchChatHistory;
-  const streamTurn = apiOverrides?.streamTurn ?? streamChatTurn;
-  const streamResume = apiOverrides?.streamResume ?? streamChatResume;
+  const {
+    profile,
+    profileLoading,
+    profileError,
+    uploadState,
+    dispatchUpload,
+    refreshProfile,
+    beginUpload,
+    endUpload,
+    runUpload,
+    activeCvHref,
+  } = useProfileShellState(enableProfileSidebar, profileApi);
 
-  const [state, dispatch] = useReducer(
-    chatReducer,
-    undefined,
-    () =>
-      initialState ??
-      createInitialChatState({
-        messages: initialMessages ? [...initialMessages] : [],
+  const {
+    state,
+    draft,
+    setDraft,
+    hydrating,
+    hydrateError,
+    correctionMode,
+    sendDisabled,
+    isStopShown,
+    composerStatus,
+    composerPlaceholder,
+    approvalDisabled,
+    focusRequestKey,
+    handleSubmit,
+    handleStop,
+    handleResume,
+    enterCorrectionMode,
+    submitSidebarCvTurn,
+  } = useChatController({
+    skipHydrate,
+    initialMessages,
+    api: apiOverrides,
+    initialState,
+    onRunCompleted: enableProfileSidebar ? refreshProfile : undefined,
+  });
+
+  const handleSidebarUploadFile = useCallback(
+    (file: File) =>
+      runSidebarCvUpload({
+        file,
+        beginUpload,
+        endUpload,
+        runUpload,
+        dispatchUpload,
+        submitSidebarCvTurn,
+        sidebarTurnText: SIDEBAR_PROFILE_TURN_TEXT,
       }),
+    [beginUpload, dispatchUpload, endUpload, runUpload, submitSidebarCvTurn],
   );
 
-  const [draft, setDraft] = useState("");
-  const [hydrating, setHydrating] = useState(!skipHydrate && !initialState);
-  const [hydrateError, setHydrateError] = useState<string | null>(null);
-  const [resumeMode, setResumeMode] = useState<"approve" | "correct" | null>(
-    null,
+  const handleComposerUploadFile = useCallback(
+    (file: File) =>
+      runComposerCvUpload({
+        file,
+        beginUpload,
+        endUpload,
+        runUpload,
+        dispatchUpload,
+      }),
+    [beginUpload, dispatchUpload, endUpload, runUpload],
   );
 
-  const abortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
-  // Latest messages for optimistic append without stale closures.
-  const messagesRef = useRef(state.messages);
-  messagesRef.current = state.messages;
+  const handleRemoveUpload = useCallback(() => {
+    dispatchUpload({ type: "REMOVE" });
+  }, [dispatchUpload]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      abortRef.current?.abort();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (skipHydrate || initialState) {
-      setHydrating(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setHydrating(true);
-    setHydrateError(null);
-
-    void fetchHistory({ signal: controller.signal })
-      .then((history) => {
-        if (!mountedRef.current || controller.signal.aborted) {
-          return;
-        }
-        dispatch({ type: "HYDRATE_HISTORY", messages: history.messages });
-        setHydrating(false);
-      })
-      .catch((error: unknown) => {
-        if (!mountedRef.current || controller.signal.aborted) {
-          return;
-        }
-        const message =
-          error instanceof Error ? error.message : "Failed to load history";
-        setHydrateError(message);
-        setHydrating(false);
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [fetchHistory, skipHydrate, initialState]);
-
-  const abortActiveStream = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-  }, []);
-
-  const streamHandlers = useCallback(
-    () => ({
-      onEvent: (event: ChatSSEEvent) => {
-        dispatch({ type: "SSE_EVENT", event });
-      },
-      onDisconnect: () => {
-        dispatch({ type: "STREAM_DISCONNECTED" });
-      },
-      onAbort: () => {
-        dispatch({ type: "STREAM_ABORTED" });
-      },
-      onError: (error: unknown) => {
-        const message =
-          error instanceof Error ? error.message : "Stream failed";
-        dispatch({ type: "STREAM_ERROR", message });
-      },
-    }),
-    [],
-  );
-
-  const runStream = useCallback(
-    async (start: (signal: AbortSignal) => Promise<void>) => {
-      abortActiveStream();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      dispatch({ type: "STREAM_OPEN" });
-
-      try {
-        await start(controller.signal);
-      } catch {
-        // onError already dispatched when the transport notifies.
-      } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-        }
-        if (mountedRef.current) {
-          setResumeMode(null);
-        }
-      }
-    },
-    [abortActiveStream],
-  );
-
-  const handleSubmit = useCallback(
+  const handleComposerSubmit = useCallback(
     (value: string) => {
-      const text = value.trim();
-      if (!text || isSendDisabled(state) || hydrating) {
-        return;
+      const attachmentId =
+        !correctionMode && uploadState.phase === "uploaded"
+          ? uploadState.attachmentId
+          : null;
+      const ids = attachmentId ? [attachmentId] : undefined;
+      const accepted = handleSubmit(value, ids);
+      if (accepted && ids && ids.length > 0) {
+        dispatchUpload({ type: "REMOVE" });
       }
-
-      const userMessage: HistoryMessage = {
-        role: "user",
-        content: text,
-        created_at: nowIso(),
-        structured_payload: null,
-      };
-
-      dispatch({
-        type: "HYDRATE_HISTORY",
-        messages: [...messagesRef.current, userMessage],
-      });
-      setDraft("");
-
-      const idempotencyKey = createIdempotencyKey();
-      void runStream(async (signal) => {
-        await streamTurn(
-          { text, idempotency_key: idempotencyKey },
-          streamHandlers(),
-          { signal },
-        );
-      });
-    },
-    [hydrating, runStream, state, streamHandlers, streamTurn],
-  );
-
-  const handleStop = useCallback(() => {
-    abortActiveStream();
-    dispatch({ type: "STREAM_ABORTED" });
-  }, [abortActiveStream]);
-
-  const handleResume = useCallback(
-    (action: "approve" | "correct", correctionText?: string) => {
-      if (!state.activeRunId || state.phase !== "awaiting_approval") {
-        return;
-      }
-      if (resumeMode !== null) {
-        return;
-      }
-
-      const trimmedCorrection =
-        action === "correct" ? (correctionText ?? "").trim() : "";
-      if (action === "correct" && trimmedCorrection.length === 0) {
-        // Correct requires nonblank correction_text; ChatApproval gates the UI.
-        return;
-      }
-
-      setResumeMode(action);
-      const runId = state.activeRunId;
-      const idempotencyKey = createIdempotencyKey();
-
-      void runStream(async (signal) => {
-        await streamResume(
-          runId,
-          {
-            action,
-            idempotency_key: idempotencyKey,
-            correction_text: action === "correct" ? trimmedCorrection : null,
-          },
-          streamHandlers(),
-          { signal },
-        );
-      });
     },
     [
-      resumeMode,
-      runStream,
-      state.activeRunId,
-      state.phase,
-      streamHandlers,
-      streamResume,
+      correctionMode,
+      dispatchUpload,
+      handleSubmit,
+      uploadState.attachmentId,
+      uploadState.phase,
     ],
   );
-
-  const sendDisabled =
-    isSendDisabled(state) || hydrating || resumeMode !== null;
-  const isStopShown = state.phase === "active";
-
-  let composerStatus:
-    | { type: "error" | "warning"; message?: string }
-    | undefined;
-  if (state.phase === "failed" && state.failure) {
-    composerStatus = {
-      type: "error",
-      message:
-        state.failure.message?.trim() ||
-        `Run failed (${state.failure.errorCode})`,
-    };
-  } else if (state.phase === "disconnected") {
-    composerStatus = {
-      type: "warning",
-      message: "Connection interrupted. Send again when ready.",
-    };
-  } else if (hydrateError) {
-    composerStatus = {
-      type: "error",
-      message: "Could not load conversation history.",
-    };
-  }
 
   const emptyState = (
     <EmptyState
@@ -322,11 +186,16 @@ export function ChatShell({
         <ChatComposerPanel
           value={draft}
           onChange={setDraft}
-          onSubmit={handleSubmit}
+          onSubmit={handleComposerSubmit}
           onStop={handleStop}
           isDisabled={sendDisabled}
           isStopShown={isStopShown}
           status={composerStatus}
+          placeholder={composerPlaceholder}
+          uploadState={uploadState}
+          onUploadFile={handleComposerUploadFile}
+          onRemoveUpload={handleRemoveUpload}
+          focusRequestKey={focusRequestKey}
         />
       }
       data-testid="chat-layout"
@@ -342,25 +211,38 @@ export function ChatShell({
           approval={state.approval}
           failure={state.failure}
           streamError={state.streamError}
-          approvalDisabled={
-            resumeMode !== null || state.phase !== "awaiting_approval"
-          }
+          approvalDisabled={approvalDisabled}
           onApprove={() => {
             handleResume("approve");
           }}
           onCorrect={(correctionText) => {
             handleResume("correct", correctionText);
           }}
+          onRequestChanges={enterCorrectionMode}
         />
       ) : null}
     </ChatLayout>
   );
+
+  const sideNav = enableProfileSidebar ? (
+    <ProfileSidebar
+      profile={profile}
+      profileLoading={profileLoading}
+      profileError={profileError}
+      uploadState={uploadState}
+      onUploadFile={handleSidebarUploadFile}
+      onRemoveUpload={handleRemoveUpload}
+      activeCvHref={activeCvHref}
+      uploadDisabled={false}
+    />
+  ) : undefined;
 
   const shell = (
     <AppShell
       contentPadding={0}
       height="fill"
       variant="surface"
+      sideNav={sideNav}
       banner={
         hydrateError ? (
           <Banner

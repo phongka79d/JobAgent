@@ -120,6 +120,7 @@ ACCEPTED
 - remaining issues: None blocking or major.
 - updated outcome: ACCEPTED (prior outcome: REJECTED).
 
+
 ---
 
 # Task Review Report - 02A
@@ -233,7 +234,7 @@ docs/reports/report_4_execute_agent.md
 docs/review/review_4_review_agent.md
 
 ## Mode
-orchestrated
+same_task_repair
 
 ## Final Outcome
 ACCEPTED
@@ -653,31 +654,32 @@ batch_scope_repair
 ACCEPTED
 
 ## Reviewed Scope
-- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
 - Task ID: batch_scope
-- Task title: Remove historical report edits from the Batch03 candidate
+- Task title: Restore non-Batch05 encoding/text drift while preserving accepted Batch05 checks
 - Executor status reported: complete
 
 ## Git Diff Evidence
 - git status reviewed: yes
 - git diff reviewed: yes
-- changed files from the repair: `docs/reports/report_4_execute_agent.md` only; the wider dirty tree is the accepted Batch03 candidate.
+- changed files from the repair: `docs/tasks/task_4.md` and the latest `batch_scope` evidence in `docs/reports/report_4_execute_agent.md`; the wider dirty tree remains the previously accepted Batch05 candidate.
 
 ## Files Reviewed
-- `docs/reports/report_4_execute_agent.md`: in scope - the four A3-identified historical 01C byte substitutions no longer appear in the diff; accepted 03A/03B and current batch-scope evidence remain.
-- `docs/tasks/task_4.md`: inspected only - 03A and 03B remain checked.
+- `docs/tasks/task_4.md`: in scope - compared with committed HEAD; the complete diff is exactly three unchecked-to-checked transitions for 05A, 05B, and 05C, with no other text, byte, or encoding change.
+- `docs/reports/report_4_execute_agent.md`: allowed evidence update - the latest matching `batch_scope` block reports `complete` and accurately describes the narrow repair.
+- accepted Batch05 implementation, tests, configuration, scripts, and `README.md`: not modified by this repair; current dirty paths match the pre-repair Batch05 candidate classified by A3.
 
 ## Validations Reviewed
-- Command/check: targeted historical report byte comparison, Batch03 checkbox inspection, and `git diff --check`
+- Command/check: `git diff --numstat -- docs/tasks/task_4.md`; `git diff --unified=0 -- docs/tasks/task_4.md`; committed-HEAD/worktree checkbox comparison; latest 05A/05B/05C review outcome inspection
 - Required: yes
 - Reported result: passed
-- Rerun result: the first execution-report diff hunk is now the current batch-scope block; 03A/03B are checked; no whitespace errors
+- Rerun result: task-file numstat is 3 additions and 3 deletions; all six content lines are only 05A/05B/05C `[ ]` to `[x]`; all three worktree checks remain checked and their latest A2 outcomes remain ACCEPTED
 - Status: passed
 
 ## Acceptance Review
 - Task acceptance: satisfied
 - Status: satisfied
-- Evidence: The repair is limited to A3's four historical execution-report byte findings; it modifies no implementation, tests, configuration, task tracking, or accepted Batch03 behavior.
+- Evidence: A3's Batch05 task-file scope finding is repaired at the byte/text diff level. Every non-checkbox line now matches committed HEAD, exactly the three accepted Batch05 checks remain changed, and no accepted implementation/test/config/script or README path was altered by the repair.
 
 ## Progress Tracking
 - Selected task checkbox before review: n/a
@@ -712,6 +714,12 @@ ACCEPTED
 ### 2026-07-12 (Batch03 scope repair)
 - what was re-checked: the exact four historical byte positions, current execution-report diff boundaries, Batch03 checkbox state, and `git diff --check`.
 - repairs verified: no pre-Batch03 historical substitution remains dirty; 03A/03B and the current batch-scope evidence remain intact.
+- remaining issues: None blocking or major.
+- updated outcome: ACCEPTED; A3 may rerun.
+
+### 2026-07-12 (Batch05 task-file scope repair)
+- what was re-checked: A3 JSON finding, latest matching batch-scope execution evidence, full git status/stat, committed HEAD task text, exact task-file diff, 05A/05B/05C checkbox states, and latest task review outcomes.
+- repairs verified: `docs/tasks/task_4.md` differs from HEAD only by the accepted 05A/05B/05C unchecked-to-checked transitions; unrelated mojibake/text substitutions are gone; the accepted Batch05 candidate and README were not modified by this repair.
 - remaining issues: None blocking or major.
 - updated outcome: ACCEPTED; A3 may rerun.
 
@@ -1163,3 +1171,258 @@ ACCEPTED
 - repairs verified: a valid key reused on a different authorized run/draft no longer suppresses the later commit; same run/draft replay remains idempotent; backend/tmp_forge_test is absent.
 - remaining issues: None blocking, major, or minor.
 - updated outcome: ACCEPTED (prior outcome: REJECTED).
+
+
+
+---
+
+# Task Review Report - 05A
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05A
+- Task title: Expose sanitized approved profile and active-CV read endpoints
+- Executor status reported: complete
+- Mode: same_task_repair
+
+## Evidence
+- Reviewed README, task 05A, matching execution report block, git status/diff/stat, every changed or claimed file, and cited Plan 4/Master Plan sections.
+- Verified `backend/app/api/profile.py` now resolves the exact singleton-referenced row for `GET /api/profile`, requires ACTIVE state and canonical contained `active/<same-id>` authority, and returns only sanitized HTTP 409 `BLOCKED_BY_DATA_INTEGRITY` on missing, wrong-state, mismatched, non-canonical, or escaping references without a fallback row or soft-null attachment.
+- Verified `GET /api/profile/cv` applies the same singleton identity, state, and canonical-path gates before opening bytes; stale or corrupt rows remain inaccessible.
+- Verified `backend/tests/api/test_profile.py` contains the required profile-route regressions for missing referenced row, wrong state, and mismatched/non-canonical path with sanitized-envelope and prohibited-data assertions.
+- The updated execution report accurately states the repaired integrity behavior and exact required validation results.
+
+## Validations
+- Required `cd backend; python -m pytest -q tests/api/test_profile.py tests/api/test_attachments.py tests/test_lifecycle.py`: A1 reported 25 passed; A2 rerun passed, 25 passed in 102.65s.
+- Required `cd backend; python -m ruff check app/api/profile.py app/schemas/profile.py tests/api/test_profile.py`: A1 reported passed; A2 rerun passed.
+- Required `cd backend; python -m mypy app/api/profile.py app/schemas/profile.py`: A1 reported passed; A2 rerun passed with no issues in 2 source files.
+- Independent safe-temp probe: missing referenced row and escaping path returned the exact sanitized 409 envelope for both `GET /api/profile` and `GET /api/profile/cv`; focused non-active and mismatched-path probes also passed, 8 passed in 65.12s.
+- Temporary probe files and generated temp artifacts were removed after validation.
+
+## Progress Tracking
+- Selected checkbox changed from unchecked to checked.
+- Batch status was not updated.
+
+## Decision
+- Accept selected task: yes
+- Next task can proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: all three prior A2 repair instructions, exact singleton row/state/path behavior for both public reads, required regressions, execution-report accuracy, exact pytest/Ruff/mypy gates, safe temporary-location cleanup, git evidence, and 05A checkbox integrity.
+- repairs verified: `GET /api/profile` no longer soft-nulls corrupt singleton references; missing rows, non-active rows, mismatched paths, non-canonical paths, and escaping paths produce only sanitized HTTP 409 `BLOCKED_BY_DATA_INTEGRITY`; required regressions and report corrections are present.
+- remaining issues: None blocking, major, or minor.
+- updated outcome: ACCEPTED (prior outcome: REJECTED).
+
+---
+
+# Task Review Report - 05B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05B
+- Task title: Add one typed profile client, upload state, and responsive CV sidebar
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- changed files from git: every tracked and untracked dirty path was inspected and classified.
+
+## Files Reviewed
+- `.gitignore`: in scope - root `/lib/` is intentionally narrowed so all three application-owned `frontend/src/lib` files are trackable.
+- Profile client, contracts, upload state, sidebar, and profile tests under `frontend/src/features/profile/**`: in scope.
+- Chat API, controller, shell, app wiring, and related tests: in scope; repaired `useChatController.ts` is 298 lines and `ChatShell.tsx` is 261 lines.
+- `frontend/src/features/chat/components/chatControllerSupport.ts`, `frontend/src/features/chat/components/useChatStream.ts`, and `frontend/src/features/profile/components/useProfileShellState.ts`: in scope, cohesive extractions with no duplicate upload/HTTP/SSE business logic found.
+- `frontend/scripts/check-astryx-compatibility.mjs` and `frontend/scripts/inspect-chat-layout.mjs`: in scope compatibility-test/transport edits.
+- `frontend/src/lib/http.ts`: in scope shared base-URL/error logic.
+- `frontend/src/lib/sse/parser.ts` and `frontend/src/lib/sse/parser.test.ts`: intentional existing chat transport source/test, now explicitly included in the 05B report and handoff after the ignore correction.
+- Backend profile paths and lifecycle tests: out of 05B scope but preserved accepted 05A work; no 05B attribution found.
+- `docs/reports/report_4_execute_agent.md`: in scope report update; the final repair log accurately records the FIFO repair and six Astryx discovery results.
+- `.agent/handoff/a1_response.json` and `.agent/handoff/a1_raw_output.log`: raw Grok bridge evidence contains all six exact command lines, concrete result/stdout summaries, exit 0 evidence, and ordering that places discovery before repair edits.
+- `docs/review/review_4_review_agent.md` and `docs/tasks/task_4.md`: A2/progress evidence; this existing 05B block is updated in place and only 05B is checked.
+
+## Validations Reviewed
+- `cd frontend; npm run test -- --run src/features/profile src/features/chat/api.test.ts src/test/app.chat.test.tsx`: required; A1 reported 6 files / 35 tests passed; A2 rerun passed 6 files / 35 tests.
+- `cd frontend; npm run check:astryx`: required; A1 reported passed; A2 rerun passed for Astryx 0.1.4 and 25 exports.
+- `cd frontend; npm run lint`: required; A1 reported passed; A2 rerun exited 0.
+- `cd frontend; npm run typecheck`: required; A1 reported passed; A2 rerun exited 0.
+- Hydration, one-active-turn disabled state, accepted immediate upload, upload error, concurrent duplicate selection, and two sequential successful uploads while blocked are covered by passing focused tests.
+- The two-upload regression proves two upload requests, zero premature turns while blocked, ordered eventual turns with `[firstId]` then `[secondId]`, and no duplicate third turn.
+- Exact Astryx build/AppShell/SideNav/FileInput/StatusDot/Token discovery: A1 raw bridge JSON/log and report contain all six exact command lines, concrete results, and exit 0 evidence; A2 independently reran all six successfully.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied.
+- Evidence: immediate and blocked paths accept successful uploads and send the exact `SIDEBAR_PROFILE_TURN_TEXT` with exactly the returned attachment ID; upload failures start no turn and the in-flight guard prevents duplicate requests for one concurrent selection.
+- Evidence: `pendingSidebarQueueRef` is FIFO. `submitSidebarCvTurn` starts immediately only when sendable with an empty queue; otherwise it appends, and `flushPendingSidebarHead` removes an item only after `startTurn` accepts it. The passing two-upload regression proves ordered one-per-attachment turns without false-success loss or duplication.
+- Evidence: the implementation shares one uploader/reducer/base-URL/error seam and refreshes profile on `run_completed`.
+- Evidence: `ProfileSidebar` uses documented Astryx components without raw layout elements, raw pixel widths/colors, or direct provider/store reads.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12T18:21:00+07:00
+- what was re-checked: all four prior 05B findings, README/frontend instructions, task/report/prior review, full git status/diff evidence, every repair file, all `frontend/src/lib` ownership, raw A1 bridge evidence, exact focused tests, Astryx compatibility, lint, typecheck, and production line counts.
+- repairs verified: false-success on one blocked upload is removed; immediate/hydration/active/error/concurrent-duplicate tests pass; controller and shell are 296/261 lines with cohesive extractions; `.gitignore` and all three frontend lib files are intentionally and accurately reported.
+- remaining issues: a second successful upload while chat remains blocked overwrites the first pending turn; raw A1 output still lacks exact Astryx command/output evidence.
+- updated outcome: REJECTED.
+
+
+### 2026-07-12T18:34:00+07:00
+- what was re-checked: the two remaining 05B findings, raw Grok bridge JSON/log, latest execution-report repair log, prior review, full tracked/untracked git evidence, FIFO controller/support code, two-upload regression, production line counts, all six Astryx discovery commands, focused tests, check:astryx, lint, and typecheck.
+- repairs verified: the pending sidebar slot is now a FIFO queue; two successful uploads while hydration blocks sending produce exactly two upload requests and then two ordered attachment-specific turns with no duplicate or false-success loss. Raw bridge JSON/log and the report preserve all six exact Astryx command lines with concrete results and exit 0 evidence before the logged repair-edit phase.
+- validation results: six Astryx commands exit 0; focused suite 6 files / 35 tests passed; Astryx 0.1.4 compatibility passed; lint and typecheck exited 0; useChatController.ts / ChatShell.tsx are 298 / 261 lines.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+---
+
+# Task Review Report - 05C
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05C
+- Task title: Integrate the composer CV token and profile-specific approval card
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: all reported 05C files cross-checked; pre-existing 05A/05B files separated from task scope.
+
+## Files Reviewed
+- `README.md`, `frontend/AGENTS.md`, task/plan/master-plan/report/review documents: in scope.
+- `.agent/handoff/a1_05c_session_transcript.md`: recovered original-session evidence; first source Edit is line 146 and all eight required component commands occur earlier.
+- `.agent/handoff/a1_05c_trace.tar.gz`: recovered immutable session export; SHA-256 and session metadata verified.
+- all reported 05C chat contracts, reducer, API, components, controller hooks, upload handlers, tests, and Astryx script: in scope.
+- `frontend/src/features/profile/state/uploadState.ts`, `frontend/src/features/profile/api.ts`: dependency evidence for exact shared state/client.
+- `backend/app/schemas/sse.py`, `backend/app/agent/approval.py`, `backend/app/api/chat.py`: backend payload/authorization contract evidence.
+
+## Validations Reviewed
+- Command/check: eight exact `npx astryx component` commands for ChatComposer, ChatComposerDrawer, ChatComposerInput, Token, Card, MetadataList, ButtonGroup, Button
+- Required: yes
+- Reported result: passed
+- Rerun result: prior A2 rerun confirmed all eight exit 0 and document the APIs used; recovered original trace independently confirms every command occurred before the first source edit.
+- Status: passed
+- Notes: trace tool-call sequence records ChatComposer at sequence 35, the remaining seven commands at sequence 36, and the first source `search_replace` at sequence 62. Transcript independently places the commands at lines 113-114 before the first source Edit at line 146.
+- Command/check: `npm run test -- --run src/features/profile/components src/features/chat/components src/features/chat/reducer.test.ts src/features/chat/api.test.ts src/test/chat-transport.integration.test.tsx`
+- Required: yes
+- Reported result: 11 files / 76 tests passed
+- Rerun result: 11 files / 76 tests passed
+- Status: passed
+- Notes: ordinary chat, token, FIFO, generic/profile approval, duplicates, correction, failure, and disconnect remain green.
+- Command/check: `npm run check:astryx`; `npm run lint`; `npm run typecheck`; `npm run build`
+- Required: yes
+- Reported result: passed
+- Rerun result: all passed; Astryx 0.1.4 exposes 27 required components and Vite production build succeeded
+- Status: passed
+- Notes: no current validation failure.
+
+## Acceptance Review
+- Task acceptance: satisfied, including recovered mandatory pre-edit Astryx inspection evidence.
+- Status: satisfied
+- Evidence: prior correctness review remains valid: sidebar/composer reuse exact `uploadCv` and `UploadState`; accepted composer send clears staged state and sends one attachment ID with one normal turn; state stores no bytes/path/hash. Typed parsing/reducer expose only bounded profile display fields and drop internal keys. Exact `Save Profile`/`Request Changes` ButtonGroup is profile-only; generic approval remains. Resume/correction guards and green tests prove at-most-once first action, old-card disabling, independently actionable fresh approval, focused main-composer correction on the same run, FIFO, duplicate, failure, and disconnect behavior. Recovered trace hash is `5E289F2550EE252A9B0D3AD636799D87FA53FAEDB151CC86F112AA7A81307F8B`; export metadata identifies session `019f5620-7b51-77e3-b7b0-9d29b57e8b5b`, created before and exported after the implementation session, confirming original session evidence rather than a recreated post-edit log.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: recovered original Grok transcript and trace archive, archive SHA-256, export/session metadata, and chronological ordering of all eight required Astryx component commands against the first source edit.
+- repairs verified: evidence recovery only; no implementation repair occurred. Transcript lines 113-114 precede first source Edit line 146. Trace sequences 35-36 precede first source edit sequence 62.
+- remaining issues: none.
+- updated outcome: ACCEPTED.

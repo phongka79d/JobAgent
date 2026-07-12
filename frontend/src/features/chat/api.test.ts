@@ -12,7 +12,11 @@ import {
   streamChatTurn,
   ChatApiError,
 } from "./api";
-import { CHAT_API_PATHS, type ChatSSEEvent } from "./contracts";
+import {
+  CHAT_API_PATHS,
+  parseChatSSEEvent,
+  type ChatSSEEvent,
+} from "./contracts";
 
 const BASE = "http://127.0.0.1:8000";
 const RUN = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -115,6 +119,23 @@ describe("fetchChatHistory", () => {
     await expect(fetchChatHistory({ baseUrl: BASE })).rejects.toMatchObject({
       name: "ChatApiError",
       status: 500,
+      code: "history_failed",
+    } satisfies Partial<ChatApiError>);
+  });
+
+  it("maps object detail.code envelopes through shared readErrorCode", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ detail: { code: "history_failed" } }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(fetchChatHistory({ baseUrl: BASE })).rejects.toMatchObject({
+      name: "ChatApiError",
+      status: 503,
       code: "history_failed",
     } satisfies Partial<ChatApiError>);
   });
@@ -410,6 +431,46 @@ describe("streamChatTurn", () => {
       name: "ChatContractError",
       code: "invalid_json",
     });
+  });
+});
+
+describe("parseChatSSEEvent profile approval payload", () => {
+  it("parses bounded profile fields and ignores internal keys", () => {
+    const event = parseChatSSEEvent({
+      event: "approval_required",
+      event_id: "e-appr",
+      run_id: RUN,
+      timestamp: "2026-01-01T00:00:00+00:00",
+      payload: {
+        summary: "Review candidate profile draft",
+        approval_kind: "profile_draft",
+        current_title: "Engineer",
+        skill_names: ["Go", "Rust"],
+        experience_count: 1,
+        education_count: 0,
+        has_preference_changes: false,
+        target_roles_preview: ["Backend"],
+        draft_id: "should-not-appear",
+        storage_path: "/tmp/secret",
+      },
+    });
+    expect(event.event).toBe("approval_required");
+    if (event.event !== "approval_required") {
+      return;
+    }
+    expect(event.payload).toEqual({
+      summary: "Review candidate profile draft",
+      approval_kind: "profile_draft",
+      current_title: "Engineer",
+      skill_names: ["Go", "Rust"],
+      experience_count: 1,
+      education_count: 0,
+      has_preference_changes: false,
+      target_roles_preview: ["Backend"],
+    });
+    expect(JSON.stringify(event.payload)).not.toMatch(
+      /draft_id|storage_path|should-not-appear/i,
+    );
   });
 });
 

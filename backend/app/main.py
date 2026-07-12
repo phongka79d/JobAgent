@@ -18,6 +18,7 @@ from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.health import DEFAULT_PROBE_TIMEOUT_SECONDS
 from app.api.health import router as health_router
+from app.api.profile import router as profile_router
 from app.config import Settings, load_settings
 from app.db.session import DatabaseSessionManager, create_session_manager
 from app.graph.candidate_sync import process_candidate_sync_outbox
@@ -205,6 +206,7 @@ def create_app(
     application.add_middleware(ExactOriginCORSMiddleware)
     application.include_router(health_router)
     application.include_router(attachments_router)
+    application.include_router(profile_router)
     application.include_router(chat_router)
     return application
 

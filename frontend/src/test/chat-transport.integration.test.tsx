@@ -280,7 +280,7 @@ describe("chat transport integration (client + reducer + shell)", () => {
     );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
         api={realClientApi(fetchForShell as typeof fetch)}
@@ -395,7 +395,7 @@ describe("chat transport integration (client + reducer + shell)", () => {
     });
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
         api={realClientApi(shellFetch as typeof fetch)}
@@ -422,6 +422,162 @@ describe("chat transport integration (client + reducer + shell)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("chat-completed")).toBeInTheDocument();
     });
+  });
+
+  it("parses profile_draft approval payload, Save Profile, and composer correction", async () => {
+    const interruptSequence: ChatSSEEvent[] = [
+      evt({ event: "run_started", event_id: "p1", payload: {} }),
+      evt({
+        event: "approval_required",
+        event_id: "p2",
+        payload: {
+          summary: "Review candidate profile draft",
+          approval_kind: "profile_draft",
+          current_title: "Senior Engineer",
+          skill_names: ["TypeScript", "Python"],
+          experience_count: 2,
+          education_count: 1,
+          has_preference_changes: true,
+          target_roles_preview: ["Backend"],
+        },
+      }),
+    ];
+    const resumeSequence: ChatSSEEvent[] = [
+      evt({ event: "run_started", event_id: "pr1", payload: {} }),
+      evt({
+        event: "text_delta",
+        event_id: "pr2",
+        payload: { delta: "profile saved" },
+      }),
+      evt({ event: "run_completed", event_id: "pr3", payload: {} }),
+    ];
+
+    // Raw SSE → real parser → reducer keeps only display fields + instance key.
+    const fetchForReducer = vi.fn(async () =>
+      streamResponse(interruptSequence.map(sseFrame).join("")),
+    );
+    let reduced = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    await streamChatTurn(
+      {
+        text: "Create a candidate profile draft from the attached CV.",
+        idempotency_key: "fe-profile-1",
+        attachment_ids: ["att-staged-1"],
+      },
+      {
+        onEvent: (event) => {
+          reduced = chatReducer(reduced, { type: "SSE_EVENT", event });
+        },
+      },
+      { baseUrl: BASE_URL, fetchImpl: fetchForReducer as typeof fetch },
+    );
+    expect(reduced.phase).toBe("awaiting_approval");
+    expect(reduced.approval).toMatchObject({
+      approvalKind: "profile_draft",
+      currentTitle: "Senior Engineer",
+      skillNames: ["TypeScript", "Python"],
+      instanceKey: "p2",
+    });
+    const turnCall = fetchForReducer.mock.calls[0] as unknown as
+      | [RequestInfo | URL, RequestInit?]
+      | undefined;
+    const turnInit = (turnCall?.[1] ?? {}) as RequestInit;
+    expect(String(turnInit.body)).toContain("att-staged-1");
+
+    // Shell: Save Profile → one approve resume.
+    const saveFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/resume")) {
+        return streamResponse(resumeSequence.map(sseFrame).join(""));
+      }
+      return streamResponse(interruptSequence.map(sseFrame).join(""));
+    });
+    const { unmount: unmountSave } = render(
+      <ChatShell
+        enableProfileSidebar={false}
+        skipHydrate
+        initialMessages={[]}
+        api={realClientApi(saveFetch as typeof fetch)}
+      />,
+    );
+    submitComposer("Create a candidate profile draft from the attached CV.");
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-approval-card")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Senior Engineer")).toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(
+      /draft_id|storage_path|att-staged|RAW_CV|email@/i,
+    );
+    fireEvent.click(screen.getByTestId("profile-approval-save"));
+    await waitFor(() => {
+      expect(
+        saveFetch.mock.calls.some(([u]) => String(u).includes("/resume")),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("profile saved")).toBeInTheDocument();
+    });
+    unmountSave();
+
+    // Shell: Request Changes → composer correct resume (same run).
+    const correctResume: ChatSSEEvent[] = [
+      evt({ event: "run_started", event_id: "cr1", payload: {} }),
+      evt({
+        event: "approval_required",
+        event_id: "cr2",
+        payload: {
+          summary: "Review updated profile draft",
+          approval_kind: "profile_draft",
+          current_title: "Staff Engineer",
+        },
+      }),
+    ];
+    const correctFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/resume")) {
+        return streamResponse(correctResume.map(sseFrame).join(""));
+      }
+      return streamResponse(interruptSequence.map(sseFrame).join(""));
+    });
+    render(
+      <ChatShell
+        enableProfileSidebar={false}
+        skipHydrate
+        initialMessages={[]}
+        api={realClientApi(correctFetch as typeof fetch)}
+      />,
+    );
+    submitComposer("Create a candidate profile draft from the attached CV.");
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-approval-request-changes")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("profile-approval-request-changes"));
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-approval-save")).toBeDisabled();
+    });
+    submitComposer("Use Staff Engineer title");
+    await waitFor(() => {
+      expect(
+        correctFetch.mock.calls.some((rawCall) => {
+          const call = rawCall as unknown as [
+            RequestInfo | URL,
+            RequestInit | undefined,
+          ];
+          const u = call[0];
+          const init = call[1];
+          if (!String(u).includes("/resume")) {
+            return false;
+          }
+          const body = String(init?.body ?? "");
+          return body.includes("correct") && body.includes("Staff Engineer");
+        }),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-approval-card")).toBeInTheDocument();
+      expect(screen.getByText("Staff Engineer")).toBeInTheDocument();
+    });
+    // Fresh reapproval is independently actionable (not disabled).
+    expect(screen.getByTestId("profile-approval-save")).not.toBeDisabled();
   });
 
   it("ignores duplicate event_id and keeps ordered tool/text state", () => {
@@ -483,7 +639,7 @@ describe("chat transport integration (client + reducer + shell)", () => {
     );
 
     const { unmount } = render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
         api={realClientApi(failFetch as typeof fetch)}
@@ -517,7 +673,7 @@ describe("chat transport integration (client + reducer + shell)", () => {
     );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
         api={realClientApi(disconnectFetch as typeof fetch)}

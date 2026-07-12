@@ -1,7 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { createInitialChatState, type ChatState } from "../reducer";
+import {
+  createApprovalState,
+  createInitialChatState,
+  type ChatState,
+} from "../reducer";
 import { ChatMessages } from "./ChatMessages";
 
 function renderMessages(partial: Partial<ChatState>) {
@@ -20,6 +24,7 @@ function renderMessages(partial: Partial<ChatState>) {
       approvalDisabled={state.phase !== "awaiting_approval"}
       onApprove={vi.fn()}
       onCorrect={vi.fn()}
+      onRequestChanges={vi.fn()}
     />,
   );
 }
@@ -81,13 +86,37 @@ describe("ChatMessages", () => {
   it("renders approval summary when awaiting approval", () => {
     renderMessages({
       phase: "awaiting_approval",
-      approval: { summary: "Approve this step?", approvalKind: null },
+      approval: createApprovalState({
+        summary: "Approve this step?",
+        approvalKind: null,
+      }),
       assistantStatus: "waiting",
     });
 
     expect(screen.getByTestId("chat-approval-summary")).toHaveTextContent(
       "Approve this step?",
     );
+  });
+
+  it("renders profile approval card for profile_draft interrupts", () => {
+    renderMessages({
+      phase: "awaiting_approval",
+      approval: createApprovalState({
+        summary: "Review profile draft",
+        approvalKind: "profile_draft",
+        currentTitle: "Engineer",
+        skillNames: ["Go"],
+        instanceKey: "appr-1",
+      }),
+      assistantStatus: "waiting",
+    });
+
+    expect(screen.getByTestId("profile-approval-card")).toBeInTheDocument();
+    expect(screen.getByTestId("profile-approval-save")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("profile-approval-request-changes"),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/draft_id|\/var\/|raw_cv/i);
   });
 
   it("renders failure and disconnect system states", () => {

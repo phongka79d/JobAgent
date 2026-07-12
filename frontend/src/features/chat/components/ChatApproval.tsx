@@ -1,6 +1,6 @@
 /**
  * Approval / resume controls for interrupted agent runs.
- * Uses documented Astryx ButtonGroup, Button, and TextArea only.
+ * Profile drafts use ProfileApprovalCard; other interrupts keep generic Approve/Correct.
  */
 
 import { useState } from "react";
@@ -11,31 +11,51 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { VStack } from "@astryxdesign/core/VStack";
 
-import type { ApprovalState } from "../reducer";
+import { isProfileDraftApproval, type ApprovalState } from "../reducer";
+import { ProfileApprovalCard } from "./ProfileApprovalCard";
 
 export interface ChatApprovalProps {
   readonly approval: ApprovalState;
   /** True while a resume stream is already in flight or send is otherwise blocked. */
   readonly isDisabled: boolean;
   readonly onApprove: () => void;
-  /** Invoked only with nonblank correction text. */
+  /** Invoked only with nonblank correction text (generic path). */
   readonly onCorrect: (correctionText: string) => void;
+  /**
+   * Profile path: enter correction mode and focus main composer.
+   * When omitted, falls back to generic inline correction.
+   */
+  readonly onRequestChanges?: () => void;
   readonly "data-testid"?: string;
 }
 
 /**
- * Surfaces a friendly approval summary, correction field, and approve/correct actions.
- * Never renders internal-only IDs or raw payloads.
+ * Surfaces a friendly approval summary and actions.
+ * Never renders internal-only IDs, raw payloads, paths, or tool arguments.
  */
 export function ChatApproval({
   approval,
   isDisabled,
   onApprove,
   onCorrect,
+  onRequestChanges,
   "data-testid": testId = "chat-approval",
 }: ChatApprovalProps) {
   const [correctionText, setCorrectionText] = useState("");
   const [showEmptyError, setShowEmptyError] = useState(false);
+
+  if (isProfileDraftApproval(approval) && onRequestChanges) {
+    return (
+      <VStack gap={2} data-testid={testId}>
+        <ProfileApprovalCard
+          approval={approval}
+          isDisabled={isDisabled}
+          onSaveProfile={onApprove}
+          onRequestChanges={onRequestChanges}
+        />
+      </VStack>
+    );
+  }
 
   const trimmedCorrection = correctionText.trim();
   const hasCorrection = trimmedCorrection.length > 0;

@@ -287,8 +287,55 @@ describe("chatReducer", () => {
     expect(state.approval).toEqual({
       summary: "Apply profile changes?",
       approvalKind: "profile",
+      currentTitle: null,
+      skillNames: [],
+      experienceCount: null,
+      educationCount: null,
+      hasPreferenceChanges: null,
+      targetRolesPreview: [],
+      instanceKey: "a",
     });
     expect(isSendDisabled(state)).toBe(true);
+  });
+
+  it("stores bounded profile approval payload fields and instance key", () => {
+    let state = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    state = reduceAll(state, [
+      evt({
+        event: "run_started",
+        event_id: "s",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {},
+      }),
+      evt({
+        event: "approval_required",
+        event_id: "profile-evt",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          summary: "Review candidate profile",
+          approval_kind: "profile_draft",
+          current_title: "Senior Engineer",
+          skill_names: ["TypeScript", "Python"],
+          experience_count: 2,
+          education_count: 1,
+          has_preference_changes: true,
+          target_roles_preview: ["Backend"],
+        },
+      }),
+    ]);
+    expect(state.approval).toMatchObject({
+      summary: "Review candidate profile",
+      approvalKind: "profile_draft",
+      currentTitle: "Senior Engineer",
+      skillNames: ["TypeScript", "Python"],
+      experienceCount: 2,
+      educationCount: 1,
+      hasPreferenceChanges: true,
+      targetRolesPreview: ["Backend"],
+      instanceKey: "profile-evt",
+    });
   });
 
   it("surfaces terminal failure distinctly", () => {

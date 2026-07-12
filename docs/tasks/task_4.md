@@ -549,7 +549,7 @@ UI, matching cards, or another application shell.
 
 ### Tasks
 
-- [ ] (05A): Expose sanitized approved profile and active-CV read endpoints
+- [x] (05A): Expose sanitized approved profile and active-CV read endpoints
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.1 Upload and file lifecycle`; `docs/plans/Master_plan.md` > `## 14. Public FastAPI Boundary`; `docs/plans/Master_plan.md` > `### 14.1 API rules`
   - Source Requirements:
     - `GET /api/profile` returns only approved profile/preferences and safe active attachment metadata.
@@ -573,7 +573,7 @@ UI, matching cards, or another application shell.
   - Blocked Condition: The committed singleton references a non-contained or irrecoverably missing active file; return the sanitized failure and report `BLOCKED_BY_DATA_INTEGRITY` rather than serving another attachment row.
   - Files: `backend/app/api/profile.py`, `backend/app/api/__init__.py`, `backend/app/schemas/profile.py`, `backend/app/main.py`, `backend/tests/api/test_profile.py`, `backend/tests/test_lifecycle.py`
 
-- [ ] (05B): Add one typed profile client, upload state, and responsive CV sidebar
+- [x] (05B): Add one typed profile client, upload state, and responsive CV sidebar
   - Source of Truth: `docs/plans/Plan_4.md` > `## 4. Scope`; `docs/plans/Plan_4.md` > `### 7.1 Upload and file lifecycle`; `docs/plans/Master_plan.md` > `### 14.1 API rules`; `docs/plans/Master_plan.md` > `### 15.1 Layout`; `docs/plans/Master_plan.md` > `### 15.2 Sidebar`
   - Source Requirements:
     - Sidebar and chat upload use the same endpoint/client and shared attachment state.
@@ -600,7 +600,7 @@ UI, matching cards, or another application shell.
   - Blocked Condition: The pinned Astryx package lacks a documented shell/sidebar/file-input API required by the accepted design; report `BLOCKED_BY_ASTRYX_CONTRACT` with CLI evidence before introducing a raw custom layout.
   - Files: `frontend/src/lib/http.ts`, `frontend/src/features/profile/contracts.ts`, `frontend/src/features/profile/api.ts`, `frontend/src/features/profile/api.test.ts`, `frontend/src/features/profile/state/uploadState.ts`, `frontend/src/features/profile/state/uploadState.test.ts`, `frontend/src/features/profile/components/ProfileSidebar.tsx`, `frontend/src/features/profile/components/ProfileSidebar.test.tsx`, `frontend/src/features/chat/api.ts`, `frontend/src/features/chat/components/useChatController.ts`, `frontend/src/features/chat/components/ChatShell.tsx`, `frontend/src/app/App.tsx`, `frontend/scripts/check-astryx-compatibility.mjs`, `frontend/scripts/inspect-chat-layout.mjs`
 
-- [ ] (05C): Integrate the composer CV token and profile-specific approval card
+- [x] (05C): Integrate the composer CV token and profile-specific approval card
   - Source of Truth: `docs/plans/Plan_4.md` > `## 4. Scope`; `docs/plans/Plan_4.md` > `### 7.4 Tool behavior and authorization`; `docs/plans/Plan_4.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 10.3 Chat approval`; `docs/plans/Master_plan.md` > `### 15.3 Chat components`
   - Source Requirements:
     - Chat upload renders a PDF attachment token and submits its attachment ID through the existing turn request.

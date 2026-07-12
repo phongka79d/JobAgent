@@ -50,16 +50,19 @@ Persistence ownership:
 | Filesystem (`FILES_DIR`) | Uploaded attachment bytes under service-owned `staged/` and `active/` paths |
 | Neo4j | Derived, fully rebuildable graph data only; never the sole copy of canonical state |
 
-Public application endpoints after Plan 4 Batch02:
+Public application endpoints after Plan 4 Batch05:
 
 - `GET /api/health`
 - `POST /api/attachments/cv`
+- `GET /api/profile`
+- `GET /api/profile/cv`
 - `GET /api/chat/history`
 - `POST /api/chat/turns`
 - `POST /api/chat/runs/{run_id}/resume`
 
-(plus framework documentation routes). Upload, public profile/job CRUD, matching
-UI, continuous workers, Qdrant, CI, and cloud deployment remain out of scope.
+(plus framework documentation routes). Public profile mutations, public job
+CRUD, matching UI, continuous workers, Qdrant, CI, and cloud deployment remain
+out of scope.
 
 ## Locked dependency decisions
 
@@ -262,7 +265,7 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Plan 4 progress (Batches01-04)
+## Plan 4 progress (Batches01-05)
 
 Batch01 establishes the validated Candidate persistence and context foundation;
 it does not yet ingest or upload CV files:
@@ -337,6 +340,17 @@ python -m pytest -q tests/tools/test_profile_commit.py tests/agent/test_profile_
 python -m ruff check app/agent app/tools app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py tests/agent/test_profile_approval.py tests/tools tests/integration/test_profile_approval.py
 python -m mypy app/agent app/tools app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py
 ```
+
+Batch05 adds the public read surface and shared Astryx CV experience:
+
+- `GET /api/profile` returns the approved profile/preferences with safe active
+  attachment metadata, while `GET /api/profile/cv` streams only the active PDF.
+- Sidebar and composer uploads reuse one typed client and shared upload state;
+  the sidebar starts a turn immediately, while the composer holds a removable
+  CV token until the next message is submitted.
+- Profile proposals use a bounded approval card. **Save Profile** resumes the
+  guarded approval, while **Request Changes** sends the next composer message
+  through the same-run correction workflow before presenting a fresh card.
 
 ## Plan 3 progress (Batch01)
 

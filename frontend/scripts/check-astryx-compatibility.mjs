@@ -4,9 +4,18 @@ import { readFile } from "node:fs/promises";
 const expectedVersion = "0.1.4";
 const publicExports = {
   AppShell: ["AppShell"],
+  SideNav: ["SideNav", "SideNavHeading"],
+  FileInput: ["FileInput"],
+  StatusDot: ["StatusDot"],
+  Token: ["Token"],
+  Link: ["Link"],
+  VStack: ["VStack"],
+  HStack: ["HStack"],
+  Text: ["Text"],
   Chat: [
     "ChatLayout",
     "ChatComposer",
+    "ChatComposerDrawer",
     "ChatToolCalls",
     "ChatMessage",
     "ChatMessageList",
@@ -17,7 +26,7 @@ const publicExports = {
   Card: ["Card"],
   Collapsible: ["Collapsible"],
   ProgressBar: ["ProgressBar"],
-  MetadataList: ["MetadataList"],
+  MetadataList: ["MetadataList", "MetadataListItem"],
   Badge: ["Badge"],
   Banner: ["Banner"],
   Toast: ["Toast"],
@@ -38,4 +47,10 @@ for (const [subpath, names] of Object.entries(publicExports)) {
   }
 }
 
-console.log(`PASS: Astryx ${expectedVersion} exposes all 16 required public components.`);
+const componentCount = Object.values(publicExports).reduce(
+  (sum, names) => sum + names.length,
+  0,
+);
+console.log(
+  `PASS: Astryx ${expectedVersion} exposes all ${componentCount} required public components.`,
+);

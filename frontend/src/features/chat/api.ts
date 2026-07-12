@@ -1,9 +1,14 @@
 /**
  * Typed chat transport: history hydration + turn/resume SSE streams.
- * Uses only the three approved FastAPI paths via `readPublicConfig().apiBaseUrl`.
+ * Uses only the three approved FastAPI paths via shared HTTP helpers.
  */
 
-import { readPublicConfig } from "../../app/env";
+import {
+  HttpApiError,
+  joinUrl,
+  readErrorCode,
+  resolveBaseUrl,
+} from "../../lib/http";
 import { createSSEParser } from "../../lib/sse/parser";
 import {
   CHAT_API_PATHS,
@@ -16,15 +21,10 @@ import {
   type TurnRequest,
 } from "./contracts";
 
-export class ChatApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-
+export class ChatApiError extends HttpApiError {
   constructor(status: number, code: string, message?: string) {
-    super(message ?? code);
+    super(status, code, message);
     this.name = "ChatApiError";
-    this.status = status;
-    this.code = code;
   }
 }
 
@@ -49,35 +49,6 @@ export interface StreamOptions {
   readonly baseUrl?: string;
   /** Injected fetch for tests. */
   readonly fetchImpl?: typeof fetch;
-}
-
-function resolveBaseUrl(override?: string): string {
-  const raw = override ?? readPublicConfig().apiBaseUrl;
-  return raw.replace(/\/+$/, "");
-}
-
-function joinUrl(baseUrl: string, path: string): string {
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-async function readErrorCode(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json();
-    if (
-      typeof body === "object" &&
-      body !== null &&
-      "detail" in body &&
-      typeof (body as { detail: unknown }).detail === "string"
-    ) {
-      return (body as { detail: string }).detail;
-    }
-  } catch {
-    // ignore non-JSON error bodies
-  }
-  return `http_${response.status}`;
 }
 
 /**

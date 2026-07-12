@@ -231,14 +231,20 @@ def test_chat_service_injected_in_lifespan_without_provider_network(
     )
     with TestClient(application) as client:
         assert client.app.state.chat_service is chat  # type: ignore[attr-defined]
-        # OpenAPI still exposes only health + three chat paths.
+        # Seven-route public boundary after Phase 3 profile reads.
         paths = set(client.app.openapi()["paths"])  # type: ignore[attr-defined]
         assert "/api/health" in paths
         assert "/api/chat/history" in paths
         assert "/api/chat/turns" in paths
         assert "/api/chat/runs/{run_id}/resume" in paths
         assert "/api/attachments/cv" in paths
-        assert len(paths) == 5
+        assert "/api/profile" in paths
+        assert "/api/profile/cv" in paths
+        assert len(paths) == 7
+        profile_item = client.app.openapi()["paths"]["/api/profile"]  # type: ignore[attr-defined]
+        cv_item = client.app.openapi()["paths"]["/api/profile/cv"]  # type: ignore[attr-defined]
+        assert set(profile_item.keys()) == {"get"}
+        assert set(cv_item.keys()) == {"get"}
 
 
 def test_lifespan_uses_injected_settings_loader(tmp_path: Path) -> None:

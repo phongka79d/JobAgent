@@ -62,10 +62,26 @@ export interface ToolCompletedPayload {
   readonly outcome?: string | null;
 }
 
+/**
+ * Bounded display fields for approval_required (Plan 4 profile draft).
+ * Never carries draft_id, run auth tokens, raw CV text, paths, or PII.
+ */
 export interface ApprovalRequiredPayload {
   readonly summary: string;
   readonly approval_kind?: string | null;
+  readonly current_title?: string | null;
+  readonly skill_names?: readonly string[] | null;
+  readonly experience_count?: number | null;
+  readonly education_count?: number | null;
+  readonly has_preference_changes?: boolean | null;
+  readonly target_roles_preview?: readonly string[] | null;
 }
+
+/** Public SSE approval kind for candidate profile draft interrupts. */
+export const APPROVAL_KIND_PROFILE_DRAFT = "profile_draft" as const;
+
+const MAX_APPROVAL_LIST = 20;
+const MAX_APPROVAL_ITEM_LEN = 128;
 
 export interface TextDeltaPayload {
   readonly delta: string;
@@ -216,9 +232,43 @@ function optionalNonNegativeInt(value: unknown): number | null {
     return null;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new ChatContractError("invalid_event", "invalid duration_ms");
+    throw new ChatContractError("invalid_event", "invalid non-negative int");
   }
   return Math.trunc(value);
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "boolean") {
+    throw new ChatContractError("invalid_event", "invalid boolean");
+  }
+  return value;
+}
+
+function optionalStringList(value: unknown): readonly string[] | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new ChatContractError("invalid_event", "invalid string list");
+  }
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const cleaned = item.trim().replace(/\s+/g, " ");
+    if (!cleaned) {
+      continue;
+    }
+    out.push(cleaned.slice(0, MAX_APPROVAL_ITEM_LEN));
+    if (out.length >= MAX_APPROVAL_LIST) {
+      break;
+    }
+  }
+  return out;
 }
 
 /**
@@ -296,15 +346,27 @@ export function parseChatSSEEvent(raw: unknown): ChatSSEEvent {
         },
       };
     }
-    case "approval_required":
+    case "approval_required": {
+      // Accept only typed display fields; ignore internal keys (draft_id, paths).
       return {
         ...base,
         event: "approval_required",
         payload: {
           summary: requireString(payload.summary, "summary"),
           approval_kind: optionalString(payload.approval_kind),
+          current_title: optionalString(payload.current_title),
+          skill_names: optionalStringList(payload.skill_names),
+          experience_count: optionalNonNegativeInt(payload.experience_count),
+          education_count: optionalNonNegativeInt(payload.education_count),
+          has_preference_changes: optionalBoolean(
+            payload.has_preference_changes,
+          ),
+          target_roles_preview: optionalStringList(
+            payload.target_roles_preview,
+          ),
         },
       };
+    }
     case "text_delta": {
       const delta = payload.delta;
       if (typeof delta !== "string" || delta.length === 0) {

@@ -24,6 +24,15 @@ function streamResponse(body: string): Response {
   );
 }
 
+function noneProfileBody(): string {
+  return JSON.stringify({
+    state: "none",
+    profile: null,
+    preferences: null,
+    active_attachment: null,
+  });
+}
+
 function submitComposer(text: string): void {
   const textbox = screen.getByRole("textbox");
   textbox.textContent = text;
@@ -37,21 +46,34 @@ afterEach(() => {
 });
 
 describe("App chat first screen", () => {
-  it("renders the chat experience as the first screen, not a landing placeholder", async () => {
+  it("renders the chat experience with profile sidebar, not a landing placeholder", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ messages: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/chat/history")) {
+          return new Response(JSON.stringify({ messages: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url.includes("/api/profile") && !url.includes("/cv")) {
+          return new Response(noneProfileBody(), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }),
     );
 
     render(<App />);
 
     await waitFor(() => {
       expect(screen.getByTestId("chat-empty-state")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-sidebar")).toBeInTheDocument();
     });
 
     expect(
@@ -83,6 +105,12 @@ describe("App chat first screen", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
+      }
+      if (url.includes("/api/profile") && !url.includes("/cv")) {
+        return new Response(noneProfileBody(), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }
       if (url.includes("/api/chat/turns") && init?.method === "POST") {
         const events: ChatSSEEvent[] = [
@@ -143,8 +171,10 @@ describe("App chat first screen", () => {
 
     for (const [u] of fetchMock.mock.calls) {
       const url = String(u);
-      expect(url).toMatch(/\/api\/chat\/(history|turns|runs\/)/);
-      expect(url).not.toMatch(/upload|profile|job|match|openai|shopaikey/i);
+      expect(url).toMatch(
+        /\/api\/(chat\/(history|turns|runs\/)|profile(?:\/cv)?)/,
+      );
+      expect(url).not.toMatch(/job|match|openai|shopaikey|attachments/i);
     }
 
     expect(document.body.textContent).not.toMatch(

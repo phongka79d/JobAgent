@@ -4,13 +4,14 @@ import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { ChatShell } from "../features/chat/components/ChatShell";
 
 /**
- * Plan 3 first screen: base Astryx chat experience (history, stream, tools, approval).
- * No upload/profile/job/match UI or direct provider/store access.
+ * Plan 4 Batch05 shell: single AppShell with responsive profile sideNav + chat.
+ * Frontend talks only to FastAPI (profile reads, CV upload, chat turns).
+ * No direct store/provider access.
  */
 export function App() {
   return (
     <Theme theme={neutralTheme} mode="system">
-      <ChatShell wrapTheme={false} />
+      <ChatShell wrapTheme={false} enableProfileSidebar />
     </Theme>
   );
 }

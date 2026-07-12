@@ -925,12 +925,12 @@ batch_scope_repair
 
 
 ## Batch
-Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
 
 
 
 ## Task
-batch_scope - Remove historical report edits from the Batch03 candidate
+batch_scope - Restore non-Batch05 encoding/text drift in task_4.md while preserving 05A/05B/05C checks
 
 
 
@@ -940,64 +940,74 @@ complete
 
 
 ## Selected Scope
-- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
 - Task ID: batch_scope
-- Task title: Remove historical report edits from the Batch03 candidate
-- Files allowed / repair scope: Restore the four historical 01C character positions to the committed baseline while preserving the accepted 03A/03B execution evidence and all task checkboxes.
+- Task title: Restore non-Batch05 encoding/text drift in task_4.md while preserving 05A/05B/05C checks
+- Files allowed / repair scope: Modify only `docs/tasks/task_4.md` plus this batch-scope report block. Restore every non-Batch05 encoding/text change to committed HEAD text; keep exactly 05A, 05B, and 05C checked. Do not alter task requirements, plans, reviews, implementation, Batch06, or README.
 
 
 
 ## Completed Work
-- Restored the four pre-Batch03 01C character positions to their exact committed baseline values.
-- Preserved the accepted 03A/03B execution evidence and Batch03 task checkbox state.
+- Rebuilt `docs/tasks/task_4.md` from `git show HEAD:docs/tasks/task_4.md` (read-only committed evidence; no checkout/reset).
+- Re-applied only the three accepted Batch05 checkbox transitions: 05A, 05B, and 05C unchecked → checked.
+- Restored all other lines (project context, source index, architecture, Batch01/04/06, and in-task smart-quote text) to committed HEAD UTF-8 text, removing mojibake/encoding-only substitutions.
+- Left accepted Batch05 implementation, tests, reviews, and other task checkboxes untouched.
 
 
 
 ## Files Created or Modified
-- docs/reports/report_4_execute_agent.md (restored historical baseline content; updated this batch-scope repair block)
+- docs/tasks/task_4.md (restored non-Batch05 text to HEAD; preserved only 05A/05B/05C checkbox checks)
+- docs/reports/report_4_execute_agent.md (updated this batch-scope repair block + Repair Log; historical task blocks preserved)
 
 
 
 ## Tests or Validations Run
-- command/check: Targeted `git diff -- docs/reports/report_4_execute_agent.md docs/review/review_4_review_agent.md` inspection
+- command/check: `git diff -- docs/tasks/task_4.md` content-line inspection
 - required: yes
 - result: passed
-- evidence or reason: no historical 01C substitution remains in the diff; Batch03 execution blocks remain present.
+- evidence or reason: exactly three minus/plus pairs — only 05A, 05B, and 05C `[ ]` → `[x]` checkbox lines; no mojibake substitutions in the diff.
 
 
 
-- command/check: `rg -n "^- \\[x\\] \\(03[AB]\\)" docs/tasks/task_4.md`
+- command/check: mojibake scan of working `docs/tasks/task_4.md` after repair
 - required: yes
 - result: passed
-- evidence or reason: 03A and 03B remain checked; no task file was modified.
+- evidence or reason: no `â€` / corrupted smart-quote sequences; Unicode curly quotes and em dashes match HEAD.
 
 
 
-- command/check: `git diff --check`
+- command/check: `git status --short` and presence of Batch05 implementation candidates
+- required: yes
+- result: passed
+- evidence or reason: Batch05 implementation/test paths remain present and were not modified by this repair; only task_4.md (+ this report update) changed for the scope fix.
+
+
+
+- command/check: `git diff --check -- docs/tasks/task_4.md`
 - required: no
 - result: passed
-- evidence or reason: no whitespace errors reported.
+- evidence or reason: no whitespace errors reported for the task file.
 
 
 
 ## Acceptance Check
-- condition: Remove only unrelated historical documentation edits while preserving Batch03 evidence and task tracking.
+- condition: Restore every non-Batch05 encoding/text change to committed HEAD text while preserving exactly the checked states for 05A, 05B, and 05C; resulting task_4.md diff must contain only three unchecked-to-checked checkbox changes.
 - status: satisfied
-- evidence: restored the exact committed 01C values; no implementation files, review files, or task checkboxes changed.
+- evidence: `git diff -- docs/tasks/task_4.md` shows only three checkbox hunks; accepted implementation/test candidates remain otherwise untouched.
 
 
 
 ## Progress Update
 - task checkbox updated: no
 - batch status updated: no
-- reason: batch_scope_repair mode forbids progress tracking changes.
+- reason: batch_scope_repair mode forbids progress tracking changes; 05A/05B/05C already-checked states were preserved only as part of restoring HEAD + reapplying accepted checks.
 
 
 
 ## Notes for Review Agent
-- changed files: docs/reports/report_4_execute_agent.md only.
-- validations to rerun: targeted report diff and Batch03 checkbox inspection only.
-- risk areas: none; this repair intentionally does not modify implementation or accepted Batch02 evidence.
+- changed files for this repair: docs/tasks/task_4.md; docs/reports/report_4_execute_agent.md (batch_scope block only).
+- validations to rerun: `git diff -- docs/tasks/task_4.md` (expect three checkbox lines only) and confirm Batch05 code/review files were not altered by this repair.
+- risk areas: none intentional; did not touch implementation, Batch06 text beyond restoring HEAD encoding, or README.
 - next task readiness: ready for A3 scope re-audit.
 
 
@@ -1007,7 +1017,8 @@ complete
 - mode: batch_scope_repair
 - no task implementation or sibling work performed
 - no commit or staging performed
-- task checkboxes and batch status not updated
+- task checkboxes and batch status not updated beyond preserving already-accepted 05A/05B/05C checks
+- no README update; no Batch06 work started
 
 
 
@@ -1026,6 +1037,12 @@ complete
 - changes made: restored those four character positions to the exact committed baseline and preserved all 03A/03B evidence.
 - validations rerun: targeted historical diff inspection, accepted Batch03 checkbox inspection, and `git diff --check`.
 - outcome: complete - the execution-report diff now contains Batch03/batch-scope evidence only.
+
+### 2026-07-12 (Batch05 scope repair)
+- reason for repair: A3 SCOPE_ISSUE (1_OF_3) — valid Batch05 checkbox updates in `docs/tasks/task_4.md` were mixed with unrelated mojibake/encoding-only substitutions outside Batch05 (project context, source index, architecture, Batch01, Batch04, Batch06, and in-task quote text).
+- changes made: rebuilt task file from `git show HEAD:docs/tasks/task_4.md` and re-applied only 05A/05B/05C checked states; updated this batch_scope report block without erasing historical Repair Log entries.
+- validations rerun: `git diff -- docs/tasks/task_4.md` (exactly three checkbox changes), mojibake scan, `git status` implementation-presence check, optional `git diff --check`.
+- outcome: complete - task_4.md diff is limited to the three accepted Batch05 checkbox lines; implementation and Batch06 requirements text restored to HEAD encoding.
 
 ---
 
@@ -1588,3 +1605,576 @@ complete
   - required ruff + mypy: passed
   - git status: no `backend/tmp_forge_test/` paths
 - outcome: repair complete; acceptance satisfied for listed A2 issues.
+
+---
+
+# Task Execution Report - 05A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+
+## Task
+05A - Expose sanitized approved profile and active-CV read endpoints
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05A
+- Task title: Expose sanitized approved profile and active-CV read endpoints
+- Files allowed / repair scope: A2 same-task repair for 05A — `backend/app/api/profile.py`, `backend/tests/api/test_profile.py`, `docs/reports/report_4_execute_agent.md` (preserve prior 05A deliverables)
+
+## Source of Truth Used
+- docs/plans/Plan_4.md > ### 7.1 Upload and file lifecycle
+- docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary
+- docs/plans/Master_plan.md > ### 14.1 API rules
+- docs/tasks/task_4.md > (05A) Blocked Condition: missing/non-contained active file → sanitized `BLOCKED_BY_DATA_INTEGRITY`
+
+## Supplemental Documents Used
+- docs/plans/Plan_4.md
+- docs/plans/Master_plan.md
+- README.md
+- A2_REPAIR_INSTRUCTIONS (envelope)
+
+## Dependency and User Action Check
+- dependencies: (01C), (03B), existing contained storage open method, FastAPI lifecycle/router patterns — satisfied
+- user action: None — satisfied
+
+## Files Inspected Before Editing
+- backend/app/api/profile.py (integrity soft-null path in `_safe_attachment_meta` / `get_profile`)
+- backend/tests/api/test_profile.py (existing CV integrity coverage; no GET /api/profile integrity regressions)
+- backend/app/db/models/profile.py (`active_attachment_id` ON DELETE SET NULL)
+- backend/app/services/attachment_storage_paths.py (`require_canonical_service_path`)
+- docs/reports/report_4_execute_agent.md (05A block)
+- docs/tasks/task_4.md (05A entry)
+
+## Completed Work
+- Prior 05A work preserved: strict `ProfileResponse`, thin `GET /api/profile` and `GET /api/profile/cv`, Content-Disposition sanitization, router registration, lifecycle seven-route GET-only surface.
+- **Repair:** `GET /api/profile` now validates the exact singleton-referenced attachment when `active_attachment_id` is set: row must exist, be ACTIVE, match the referenced id, and use canonical contained `active/<same-id>` path authority. Any mismatch returns HTTP 409 with only sanitized `{detail:{code:BLOCKED_BY_DATA_INTEGRITY}}` and never soft-nulls `active_attachment` or falls back to another row.
+- **Repair:** Added GET `/api/profile` integrity regressions for missing referenced row (dangling FK under FK-off delete), wrong attachment state, and mismatched/non-canonical storage path; asserts 409 + no prohibited data.
+- Legitimate cases unchanged: `state=none` when no approved singleton; `active` with `active_attachment=null` only when the singleton has no `active_attachment_id`; CV stream integrity remains 409 as before.
+
+## Files Created or Modified
+- backend/app/schemas/profile.py (created — prior 05A)
+- backend/app/api/profile.py (created prior 05A; repaired `_safe_attachment_meta` integrity fail-closed)
+- backend/app/api/__init__.py (modified — prior 05A)
+- backend/app/main.py (modified — prior 05A)
+- backend/tests/api/test_profile.py (created prior 05A; repaired with three GET /api/profile integrity regressions)
+- backend/tests/test_lifecycle.py (modified — prior 05A)
+- docs/reports/report_4_execute_agent.md (this block updated in place)
+
+## Key Implementation Decisions
+- Active CV resolution is exclusively through the approved singleton `active_attachment_id`; no public attachment-id download parameter.
+- Integrity failures apply to **both** public profile reads and CV download: missing referenced row, non-active state, id mismatch, non-canonical/mismatched path, and missing bytes all return HTTP 409 `BLOCKED_BY_DATA_INTEGRITY` without substituting another attachment. Soft-null of `active_attachment` is only for an approved profile whose singleton has no attachment id.
+- Full validated `CandidateProfile` document is returned on successful active reads; agent compact projection remains separate.
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/api/test_profile.py tests/api/test_attachments.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 25 passed in 101.99s (includes three new GET /api/profile integrity regressions)
+
+- command/check: `cd backend; python -m ruff check app/api/profile.py app/schemas/profile.py tests/api/test_profile.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed!
+
+- command/check: `cd backend; python -m mypy app/api/profile.py app/schemas/profile.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 2 source files
+
+## Acceptance Check
+- condition: `GET /api/profile` has one typed deterministic no-profile/active contract and never exposes a draft, raw text, path, hash, or provider payload.
+- status: satisfied
+- evidence: ProfileResponse schema + tests for none/active/safe metadata and prohibited-field/sentinel absence.
+
+- condition: When the singleton references a missing, non-active, mismatched, or non-canonical attachment, `GET /api/profile` returns sanitized HTTP 409 `BLOCKED_BY_DATA_INTEGRITY` and does not soft-null or fall back.
+- status: satisfied
+- evidence: `_safe_attachment_meta` raises 409; tests `test_get_profile_missing_referenced_row_is_integrity_failure`, `test_get_profile_wrong_attachment_state_is_integrity_failure`, `test_get_profile_mismatched_noncanonical_path_is_integrity_failure`.
+
+- condition: `GET /api/profile/cv` streams only the current singleton-referenced active bytes with `application/pdf` and safe filename headers; stale/unreferenced rows are inaccessible.
+- status: satisfied
+- evidence: streaming tests for headers/chunk reassembly; stale unreferenced and integrity tests refuse non-referenced/corrupt rows.
+
+- condition: No public profile PUT/PATCH/DELETE/commit route exists.
+- status: satisfied
+- evidence: OpenAPI GET-only for both paths; mutation method assertions return 405/404; lifecycle asserts exactly seven public paths.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode reserves checkbox and batch status for A2/orchestrator; no staging or commit.
+
+## Notes for Review Agent
+- changed files this repair: backend/app/api/profile.py, backend/tests/api/test_profile.py, docs/reports/report_4_execute_agent.md
+- validations to rerun: exact required pytest + ruff + mypy commands above
+- risk areas: Content-Disposition encoding; 409 vs 404 for corrupt singleton references; dangling-row regression uses FK-off raw delete because schema ON DELETE SET NULL would otherwise null the pointer
+- next task readiness: can_review
+
+## Workflow Integrity Check
+- exactly one task repaired: 05A
+- mode: same_task_repair
+- no checkbox, batch status, staging, or commit performed
+- no sibling 05B/05C frontend work implemented
+
+## Repair Log
+
+### 2026-07-12 (same_task_repair after A2 REJECTED)
+- reason for repair: A2 found `GET /api/profile` silently returned HTTP 200 with `active_attachment=null` when the approved singleton referenced a missing, non-active, mismatched, or non-canonical attachment; integrity regressions and report accuracy were missing.
+- changes made:
+  1. `backend/app/api/profile.py` — `_safe_attachment_meta` now requires exist/active/id-match/canonical `active/<same-id>` and raises sanitized HTTP 409 `BLOCKED_BY_DATA_INTEGRITY` on any mismatch; no soft-null fallback.
+  2. `backend/tests/api/test_profile.py` — added GET `/api/profile` regressions for missing referenced row, wrong state, mismatched/non-canonical path with prohibited-data assertions.
+  3. `docs/reports/report_4_execute_agent.md` — updated 05A block in place with accurate integrity behavior and re-validation evidence.
+- validations rerun:
+  - `cd backend; python -m pytest -q tests/api/test_profile.py tests/api/test_attachments.py tests/test_lifecycle.py` → 25 passed in 101.99s
+  - `cd backend; python -m ruff check app/api/profile.py app/schemas/profile.py tests/api/test_profile.py` → All checks passed!
+  - `cd backend; python -m mypy app/api/profile.py app/schemas/profile.py` → Success: no issues found in 2 source files
+- outcome: repair complete; acceptance satisfied for listed A2 issues; ready for A2 re-review.
+
+---
+
+# Task Execution Report - 05B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+
+## Task
+05B - Add one typed profile client, upload state, and responsive CV sidebar
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05B
+- Task title: Add one typed profile client, upload state, and responsive CV sidebar
+- Files allowed / repair scope: A2 same-task repair only — (1) replace overwriteable pending sidebar-turn slot with deterministic FIFO so every accepted upload gets one ordered attachment-specific turn; (2) pre-repair six exact Astryx discovery commands with real outputs in validations/report; preserve uncommitted 05A and correct 05B work; no 05C
+
+## Source of Truth Used
+- docs/plans/Plan_4.md > ## 4. Scope
+- docs/plans/Plan_4.md > ### 7.1 Upload and file lifecycle
+- docs/plans/Master_plan.md > ### 14.1 API rules
+- docs/plans/Master_plan.md > ### 15.1 Layout
+- docs/plans/Master_plan.md > ### 15.2 Sidebar
+
+## Supplemental Documents Used
+- docs/plans/Plan_4.md
+- docs/plans/Master_plan.md
+- README.md
+- frontend/AGENTS.md
+
+## Dependency and User Action Check
+- Dependencies satisfied: (02B) upload endpoint, (04B) approval/turn transport, (05A) profile GETs, VITE_API_BASE_URL reader, chat API injection, single AppShell present
+- User actions: none required
+
+## Files Inspected Before Editing
+- frontend/src/features/chat/components/useChatController.ts (pending slot overwrite)
+- frontend/src/features/chat/components/chatControllerSupport.ts
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/profile/components/ChatShell.profile.test.tsx
+- frontend/src/features/profile/components/useProfileShellState.ts (in-flight guard)
+- frontend/AGENTS.md; Astryx CLI docs for AppShell, SideNav, FileInput, StatusDot, Token
+
+## Completed Work
+1. Original 05B: typed profile client/upload state/ProfileSidebar, shared http helpers, chat controller extract, AppShell sideNav wiring, tests, gitignore `/lib/` correction.
+2. Prior same-task repair: turn acceptance/enqueue, <=300-line extract, SSE path accounting, hydrate/active defer regressions.
+3. Same-task repair (A2 REJECTED, 2_OF_3 — final allowed attempt):
+   - Pre-repair: ran six exact Astryx discovery commands separately before any repair source edit (real exit 0 outputs under Validations + Repair Log).
+   - Replaced overwriteable single pending sidebar-turn slot with a deterministic FIFO queue (`enqueuePendingSidebarTurn` / `flushPendingSidebarHead` in `chatControllerSupport.ts`; controller holds `pendingSidebarQueueRef`).
+   - Free + empty queue starts immediately; blocked or non-empty queue appends; flush dequeues one head when send is free and restores head if start fails — no duplicate business logic, no overwrite of prior accepted uploads.
+   - Regression: two successful sidebar uploads while hydrate-blocked prove two `uploadCv` calls and two ordered attachment-specific turns (no third/duplicate), flushed one-by-one as send becomes free.
+   - Line budget preserved: `useChatController.ts` 298, `ChatShell.tsx` 261.
+
+## Files Created or Modified
+### 05B cumulative (frontend + ignore + report; 05A backend preserved/unrelated)
+- .gitignore (narrow to `/lib/` so frontend/src/lib is not ignored)
+- frontend/src/lib/http.ts (created by 05B)
+- frontend/src/lib/sse/parser.ts (required existing SSE parser; trackable after ignore correction; intentionally listed)
+- frontend/src/lib/sse/parser.test.ts (required existing SSE tests; trackable after ignore correction; intentionally listed)
+- frontend/src/features/profile/contracts.ts
+- frontend/src/features/profile/api.ts
+- frontend/src/features/profile/api.test.ts
+- frontend/src/features/profile/state/uploadState.ts
+- frontend/src/features/profile/state/uploadState.test.ts
+- frontend/src/features/profile/components/ProfileSidebar.tsx
+- frontend/src/features/profile/components/ProfileSidebar.test.tsx
+- frontend/src/features/profile/components/ChatShell.profile.test.tsx
+- frontend/src/features/profile/components/useProfileShellState.ts
+- frontend/src/features/chat/api.ts
+- frontend/src/features/chat/api.test.ts
+- frontend/src/features/chat/components/useChatController.ts
+- frontend/src/features/chat/components/useChatStream.ts
+- frontend/src/features/chat/components/chatControllerSupport.ts
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/chat/components/ChatShell.test.tsx
+- frontend/src/app/App.tsx
+- frontend/src/test/app.chat.test.tsx
+- frontend/src/test/chat-transport.integration.test.tsx
+- frontend/scripts/check-astryx-compatibility.mjs
+- frontend/scripts/inspect-chat-layout.mjs
+- docs/reports/report_4_execute_agent.md (this block)
+- Preserved uncommitted 05A backend paths (not modified by 05B repair): backend/app/api/profile.py, backend/app/schemas/profile.py, backend/tests/api/test_profile.py, backend/app/api/__init__.py, backend/app/main.py, backend/tests/test_lifecycle.py
+
+## Key Implementation Decisions
+- Single `uploadCv` + `uploadReducer` shared for sidebar now and chat composer later (05C); no duplicate multipart/base-URL logic.
+- Deterministic sidebar turn text is a named constant matching Plan 4 source wording.
+- Deferred sidebar CV turns use a FIFO queue (not a latest-wins slot): every accepted successful upload gets exactly one eventual attachment-specific turn in enqueue order.
+- Upload UI remains available while turn is temporarily blocked so deferred enqueue path is reachable; in-flight guard still serializes concurrent upload HTTP requests.
+- AppShell remains single owner of shell frame; profile lives in `sideNav` with collapsible SideNav defaults (no forced width).
+
+## Tests or Validations Run
+- command/check: `cd frontend; npx astryx build "CV profile sidebar and approval workflow"`
+- required: yes (task Agent Work step 1; A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; START → no exact page template, use shell-nav; closest Shell Nav / Side Nav / AI Chat Conversation; frame AppShell+SideNav; blocks ChatMessageList/Avatar*; domain Avatar/MobileNav/useResizable/Breadcrumbs/ClickableCard; foundation VStack/HStack/Grid/Card/Section/Text/Heading/Button/Icon/Badge/Divider
+
+- command/check: `cd frontend; npx astryx component AppShell`
+- required: yes (A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; import AppShell from '@astryxdesign/core/AppShell'; props children/contentPadding/topNav/sideNav/mobileNav/banner/height/variant/xstyle; no nested shells
+
+- command/check: `cd frontend; npx astryx component SideNav`
+- required: yes (A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; import SideNav from '@astryxdesign/core/SideNav'; props header/topContent/children/footer/footerIcons/collapsible/handleRef/xstyle; subcomponents SideNavHeading/Item/Section/CollapseButton
+
+- command/check: `cd frontend; npx astryx component FileInput`
+- required: yes (A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; import FileInput from '@astryxdesign/core/FileInput'; required label/value/onChange; accept/maxSize/isDisabled/disabledMessage/changeAction/status; modes input|dropzone
+
+- command/check: `cd frontend; npx astryx component StatusDot`
+- required: yes (A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; import StatusDot from '@astryxdesign/core/StatusDot'; required variant+label; optional isPulsing/tooltip/xstyle
+
+- command/check: `cd frontend; npx astryx component Token`
+- required: yes (A2 repair evidence item 2)
+- result: passed
+- evidence or reason: exit 0; import Token from '@astryxdesign/core/Token'; required label; optional onRemove/icon/color/size/href/endContent
+
+- command/check: `cd frontend; npm run test -- --run src/features/profile src/features/chat/api.test.ts src/test/app.chat.test.tsx`
+- required: yes
+- result: passed
+- evidence or reason: 6 files / 35 tests passed (includes FIFO two-upload-while-blocked regression + prior hydrate/active defer cases)
+
+- command/check: `cd frontend; npm run check:astryx`
+- required: yes
+- result: passed
+- evidence or reason: PASS: Astryx 0.1.4 exposes all 25 required public components.
+
+- command/check: `cd frontend; npm run lint`
+- required: yes
+- result: passed
+- evidence or reason: eslint . exit 0
+
+- command/check: `cd frontend; npm run typecheck`
+- required: yes
+- result: passed
+- evidence or reason: tsc -b --noEmit exit 0 (after readonly attachment_ids mock typing fix)
+
+- command/check: line counts useChatController.ts / ChatShell.tsx
+- required: yes
+- result: passed
+- evidence or reason: 298 and 261 lines respectively (both <=300); chatControllerSupport.ts 79
+
+- command/check: optional layout inspect at 1440x900 / 390x844
+- required: no
+- result: not_run
+- evidence or reason: browser optional; inspect script updated for profile mock when used later
+
+## Acceptance Check
+- condition: Sidebar and composer import the same upload client/state contract; neither duplicates multipart, base-URL, error, or attachment business logic.
+- status: satisfied
+- evidence: `uploadCv`/`uploadReducer` in profile feature; ChatShell uses useProfileShellState + shared clients; chat api uses shared `lib/http` helpers; SSE parser reused via chat transport.
+
+- condition: Successful sidebar upload sends exactly one turn with deterministic non-PII text and returned attachment ID (including hydrate/active deferred paths; no false-success; multi-upload FIFO preserves each attachment).
+- status: satisfied
+- evidence: ChatShell.profile.test: immediate single turn; defer through hydration then one turn; queue while active then flush once; two uploads while blocked → two ordered attachment turns; upload error never starts turn; uploadCv once per selection.
+
+- condition: Sidebar renders only authorized fields/actions in existing shell using documented Astryx APIs/tokens with no raw layout element or direct store/provider call.
+- status: satisfied
+- evidence: ProfileSidebar uses SideNav/FileInput/StatusDot/Token/Link/VStack/HStack; ProfileSidebar tests; AppShell.sideNav wiring; check:astryx green; six pre-repair Astryx CLI discoveries exit 0.
+
+- condition: Focused production modules stay within ~300-line budget without logic duplication.
+- status: satisfied
+- evidence: useChatController 298, ChatShell 261; FIFO helpers in chatControllerSupport; no second upload/turn business path.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode reserves checkbox and batch status for A2/orchestrator; no staging or commit.
+
+## Notes for Review Agent
+- changed files this repair: useChatController.ts, chatControllerSupport.ts, ChatShell.tsx (comment), ChatShell.profile.test.tsx, report_4_execute_agent.md; 05A backend preserved
+- validations to rerun: six exact Astryx commands + focused frontend test + check:astryx + lint + typecheck; confirm line counts
+- risk areas: FIFO flush after each completed turn (covered by two-upload hydrate regression); FileInput jsdom change events; profile refresh still only on run_completed (approval card is 05C)
+- next task readiness: can_review
+
+## Workflow Integrity Check
+- exactly one task repaired: 05B
+- mode: same_task_repair
+- no checkbox, batch status, staging, or commit performed
+- no 05C composer token / profile approval card implementation
+
+## Repair Log
+
+### 2026-07-12T18:16:49+07:00
+- reason for repair: A2 REJECTED on 05B — (1) successful sidebar upload could drop its deterministic chat turn when `submitSidebarCvTurn` returned false during hydrate/disabled states and ChatShell ignored the result; (2) useChatController/ChatShell exceeded ~300-line focus; (3) `/lib/` ignore correction exposed required SSE sources omitted from report/handoff; (4) original live logs did not prove exact Astryx discovery commands before edits.
+- pre-repair Astryx discovery (ran before any repair edit; exit 0 each):
+  - `npx astryx build "CV profile sidebar and approval workflow"` → closest templates shell-nav / shell-side-nav / ai-chat; frame AppShell+SideNav; FileInput/StatusDot/Token in domain set
+  - `npx astryx component AppShell` → sideNav slot, height fill, contentPadding, no nested shells
+  - `npx astryx component SideNav` → collapsible, header/topContent/children/footer; no forced width prop
+  - `npx astryx component FileInput` → required label/value/onChange; accept/maxSize; isDisabled/disabledMessage; changeAction optional
+  - `npx astryx component StatusDot` → required variant+label
+  - `npx astryx component Token` → required label; optional onRemove
+- changes made:
+  1. `submitSidebarCvTurn` starts or enqueues one pending turn; ChatShell only UPLOAD_SUCCESS after acceptance; empty inputs → UPLOAD_ERROR `turn_not_accepted`
+  2. Extracted `chatControllerSupport.ts`, `useChatStream.ts`, `useProfileShellState.ts`; production files 296/261 lines
+  3. Report lists `frontend/src/lib/sse/parser.ts` + `parser.test.ts` as intentionally trackable required SSE sources (untracked, not ignored); no content change required
+  4. Added hydrate-defer and active-queue flush regressions; kept single-upload and error-without-turn cases
+- validations rerun:
+  - focused test command → 6 files / 34 tests passed
+  - check:astryx → PASS 25 components
+  - lint → exit 0
+  - typecheck → exit 0
+  - line counts → useChatController 296, ChatShell 261
+  - git status -u: dirty includes `?? frontend/src/lib/http.ts`, `?? frontend/src/lib/sse/parser.ts`, `?? frontend/src/lib/sse/parser.test.ts` among 05B paths; 05A backend still present untouched by this repair
+- outcome: prior repair complete for those four issues; later re-rejected on FIFO overwrite + raw Astryx evidence granularity
+
+### 2026-07-12T18:29:18+07:00
+- reason for repair: A2 REJECTED (2_OF_3) on 05B — (1) second successful sidebar upload while chat blocked overwrote the single pending turn so not every accepted upload got one attachment-specific turn; (2) raw bridge/report needed six separate exact Astryx command lines with real outputs before any repair source edit.
+- pre-repair Astryx discovery (six separate commands, each before any repair source edit; exit 0 each):
+  - `cd frontend; npx astryx build "CV profile sidebar and approval workflow"` → exit 0; closest shell-nav / shell-side-nav / ai-chat; frame AppShell+SideNav; domain components listed
+  - `cd frontend; npx astryx component AppShell` → exit 0; sideNav/topNav/banner/height/contentPadding/variant docs
+  - `cd frontend; npx astryx component SideNav` → exit 0; collapsible + section/item anatomy
+  - `cd frontend; npx astryx component FileInput` → exit 0; label/value/onChange required; accept/maxSize/changeAction
+  - `cd frontend; npx astryx component StatusDot` → exit 0; variant+label required
+  - `cd frontend; npx astryx component Token` → exit 0; label required; onRemove optional
+- changes made:
+  1. Replaced `pendingSidebarTurnRef: PendingSidebarTurn | null` with FIFO `pendingSidebarQueueRef: PendingSidebarTurn[]`; `enqueuePendingSidebarTurn` + `flushPendingSidebarHead` in chatControllerSupport; free+empty starts immediately else append; flush one head when send free
+  2. ChatShell comment updated to describe FIFO (behavior already accepted turns before UPLOAD_SUCCESS)
+  3. Regression test: two successful uploads during hydrate block → uploadCv×2, streamTurn×2 with attachment IDs in order, no duplicate third turn
+  4. Typecheck fix: mock `attachment_ids?: readonly string[]`
+- validations rerun:
+  - six exact Astryx commands → exit 0 each (listed above + Validations section)
+  - `cd frontend; npm run test -- --run src/features/profile src/features/chat/api.test.ts src/test/app.chat.test.tsx` → 6 files / 35 tests passed
+  - `cd frontend; npm run check:astryx` → PASS 25 components
+  - `cd frontend; npm run lint` → exit 0
+  - `cd frontend; npm run typecheck` → exit 0
+  - line counts → useChatController 298, ChatShell 261
+- outcome: both remaining A2 findings fixed; final allowed repair attempt complete; ready for A2 re-review.
+
+
+---
+
+# Task Execution Report - 05C
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+
+## Task
+05C - Integrate the composer CV token and profile-specific approval card
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch05 - Public Reads and Shared Astryx CV Experience
+- Task ID: 05C
+- Task title: Integrate the composer CV token and profile-specific approval card
+- Files allowed / repair scope: task_4.md 05C file list only; preserve uncommitted 05A/05B; no Batch06; no checkbox/batch status/commit
+
+## Source of Truth Used
+- docs/plans/Plan_4.md > ## 4. Scope
+- docs/plans/Plan_4.md > ### 7.4 Tool behavior and authorization
+- docs/plans/Plan_4.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 10.3 Chat approval
+- docs/plans/Master_plan.md > ### 15.3 Chat components
+- backend app/agent/approval.py profile_display_summary + app/schemas/sse.py ApprovalRequiredPayload (bounded payload contract from 04B)
+
+## Supplemental Documents Used
+- docs/plans/Plan_4.md
+- docs/plans/Master_plan.md
+- README.md
+- frontend/AGENTS.md
+
+## Dependency and User Action Check
+- Dependencies (04B), (05B), accepted chat contracts/reducer/API, bounded backend profile approval payload: satisfied
+- User Action: None
+
+## Files Inspected Before Editing
+- frontend/src/features/chat/contracts.ts, reducer.ts, api.ts, components/* (ChatApproval, ChatComposerPanel, ChatMessages, ChatShell, useChatController)
+- frontend/src/features/profile/state/uploadState.ts, api.ts, components/useProfileShellState.ts, ProfileSidebar.tsx
+- backend/app/agent/approval.py, backend/app/api/chat.py, backend/app/schemas/sse.py
+- frontend/src/test/chat-transport.integration.test.tsx
+- frontend/scripts/check-astryx-compatibility.mjs
+- frontend/AGENTS.md, docs/tasks/task_4.md 05C block
+
+## Completed Work
+1. Pre-edit Astryx discovery (eight separate commands, each exit 0) for ChatComposer, ChatComposerDrawer, ChatComposerInput, Token, Card, MetadataList, ButtonGroup, Button.
+2. Extended typed SSE `approval_required` payload + parser with bounded profile display fields only (summary, approval_kind, current_title, skill_names, experience_count, education_count, has_preference_changes, target_roles_preview). Internal keys (draft_id, storage_path, etc.) ignored.
+3. Extended pure reducer ApprovalState with profile fields + instanceKey (SSE event_id) for independent reapproval; isProfileDraftApproval + createApprovalState helpers.
+4. Composer CV token: ChatComposerPanel uses shared 05B uploadState + FileInput (input mode) + ChatComposerDrawer Token (removable). Composer upload stages only (no immediate turn); next normal submit includes one attachment_id and clears token on accepted turn.
+5. ProfileApprovalCard: Card + MetadataList + ButtonGroup with exact labels Save Profile / Request Changes; no raw CV/PII/path/internal IDs.
+6. ChatApproval routes profile_draft (+ onRequestChanges) to ProfileApprovalCard; generic path retains Approve/Correct + inline TextArea.
+7. Request Changes enters correctionMode, focuses main composer (focusRequestKey), disables card actions; next nonblank composer submit uses same-run correct resume once; Save Profile is single approve resume; resumeMode + STREAM_OPEN prevent duplicate actions; fresh reapproval card independently actionable.
+8. Extracted chatUploadHandlers + useChatTurnActions + interaction flags to keep ChatShell/controller focused under 300 lines.
+9. Tests: raw SSE parse, reducer profile payload, component token/approval/correction/idempotency, full transport Save/Request Changes/reapproval, existing ordinary/generic/disconnect green.
+10. Compatibility script includes ChatComposerDrawer + MetadataListItem.
+
+## Files Created or Modified
+- frontend/src/features/chat/contracts.ts
+- frontend/src/features/chat/reducer.ts
+- frontend/src/features/chat/reducer.test.ts
+- frontend/src/features/chat/api.test.ts
+- frontend/src/features/chat/components/ChatComposerPanel.tsx
+- frontend/src/features/chat/components/ChatComposerPanel.test.tsx (created)
+- frontend/src/features/chat/components/ChatApproval.tsx
+- frontend/src/features/chat/components/ChatApproval.test.tsx
+- frontend/src/features/chat/components/ProfileApprovalCard.tsx (created)
+- frontend/src/features/chat/components/ProfileApprovalCard.test.tsx (created)
+- frontend/src/features/chat/components/ChatMessages.tsx
+- frontend/src/features/chat/components/ChatMessages.test.tsx
+- frontend/src/features/chat/components/ChatShell.tsx
+- frontend/src/features/chat/components/ChatShell.test.tsx
+- frontend/src/features/chat/components/useChatController.ts
+- frontend/src/features/chat/components/useChatTurnActions.ts (created)
+- frontend/src/features/chat/components/chatUploadHandlers.ts (created)
+- frontend/src/features/chat/components/chatControllerSupport.ts
+- frontend/src/features/chat/components/index.ts
+- frontend/src/features/profile/components/ChatShell.profile.test.tsx (shared-state multi error assertion)
+- frontend/src/test/chat-transport.integration.test.tsx
+- frontend/scripts/check-astryx-compatibility.mjs
+- docs/reports/report_4_execute_agent.md (this block)
+
+## Tests or Validations Run
+- command/check: `cd frontend; npx astryx component ChatComposer`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; docs for drawer/header/input slots, onSubmit required, isDisabled/status
+- command/check: `cd frontend; npx astryx component ChatComposerDrawer`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; children required; count/label collapse API
+- command/check: `cd frontend; npx astryx component ChatComposerInput`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; handleRef focus/insertToken; onFiles for attachments
+- command/check: `cd frontend; npx astryx component Token`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; label required; onRemove optional remove control
+- command/check: `cd frontend; npx astryx component Card`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; padding/variant container for approval card
+- command/check: `cd frontend; npx astryx component MetadataList`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; MetadataListItem key-value rows; columns/label API
+- command/check: `cd frontend; npx astryx component ButtonGroup`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; label required; isDisabled cascades to buttons
+- command/check: `cd frontend; npx astryx component Button`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; label/variant/isDisabled/onClick
+- command/check: `cd frontend; npm run test -- --run src/features/profile/components src/features/chat/components src/features/chat/reducer.test.ts src/features/chat/api.test.ts src/test/chat-transport.integration.test.tsx`
+  - required: yes
+  - result: passed
+  - evidence or reason: 11 files / 76 tests passed
+- command/check: `cd frontend; npm run check:astryx`
+  - required: yes
+  - result: passed
+  - evidence or reason: PASS Astryx 0.1.4 exposes all 27 required public components
+- command/check: `cd frontend; npm run lint`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0
+- command/check: `cd frontend; npm run typecheck`
+  - required: yes
+  - result: passed
+  - evidence or reason: tsc -b --noEmit exit 0
+- command/check: `cd frontend; npm run build`
+  - required: yes
+  - result: passed
+  - evidence or reason: vite production build succeeded (dist assets written)
+- command/check: optional layout inspection 1440x900 / 390x844
+  - required: no
+  - result: not_run
+  - evidence or reason: browser layout inspection optional; automated tests cover token/card/focus/disable behavior
+
+## Acceptance Check
+- condition: Chat and sidebar upload use the exact same client/state; chat token submits one attachment ID with one user turn and is removable before send
+  - status: satisfied
+  - evidence: shared uploadState/uploadCv via useProfileShellState; ChatComposerPanel Token onRemove; handleComposerSubmit passes attachment_ids once and REMOVE on accepted turn; transport test body contains attachment id
+- condition: Profile approval renders only typed sanitized summary fields and exact Save Profile / Request Changes; no raw CV/contact PII/internal ID/path/tool arguments
+  - status: satisfied
+  - evidence: ProfileApprovalCard MetadataList + Button labels; parseChatSSEEvent strips internal keys; shell/integration tests assert no draft_id/storage_path/email/tool_args
+- condition: Save and Request Changes each send at most one resume; correction uses focused main composer, same draft/run, new approval independently actionable
+  - status: satisfied
+  - evidence: ChatShell tests for Save once + Request Changes → composer correct once; integration reapproval card not disabled after correct stream
+- condition: Existing ordinary chat, generic approval, duplicate filtering, failure, disconnect remain green
+  - status: satisfied
+  - evidence: integration + shell + reducer tests all passed (76 total)
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Reused 05B uploadReducer/uploadCv for composer staging without duplicate multipart logic; sidebar still immediate turn, composer token-only until submit.
+- Profile path detected by approval_kind === profile_draft with onRequestChanges; generic approvals keep inline Correct textarea.
+- Application-state idempotency via resumeMode + correctionMode + approvalDisabled + STREAM_OPEN unmount; not model-content gating.
+- Preserved exact eight SSE event names; only extended approval_required payload fields.
+
+## Risks or Open Issues
+- None blocking. Optional visual layout inspection not run (no browser requirement for acceptance).
+- ChatShell/composer always expose attach control when upload handlers are wired (shared state means error status may appear on both FileInputs — covered by profile test getAllByText).
+
+## Notes for Review Agent
+- changed files: listed above under Files Created or Modified
+- validations to rerun: exact required test command + check:astryx + lint + typecheck + build
+- risk areas: correctionMode focus timing in real browsers; shared upload dual FileInput status UX; resumeMode finally re-enable only after stream ends (in-flight still single-fire)
+- next task readiness: can_review
+- preserved uncommitted 05A backend profile routes and 05B profile client/sidebar work; did not implement Batch06
+- no stage/commit
+
+## Workflow Integrity Check
+- exactly one task executed: 05C
+- no sibling 05A/05B re-implementation beyond necessary integration wiring
+- no Batch06 / Phase exit work
+- no checkbox/batch status update
+- no git stage or commit

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChatSSEEvent, HistoryMessage } from "../contracts";
-import { createInitialChatState } from "../reducer";
+import { createApprovalState, createInitialChatState } from "../reducer";
 import { ChatShell } from "./ChatShell";
 
 function sseEvent(
@@ -46,7 +46,7 @@ describe("ChatShell", () => {
     const fetchHistory = vi.fn().mockResolvedValue({ messages: historyMessages });
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         api={{ fetchHistory }}
         wrapTheme
       />,
@@ -97,7 +97,7 @@ describe("ChatShell", () => {
     );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
         api={{
@@ -169,7 +169,7 @@ describe("ChatShell", () => {
     );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         api={{ streamTurn: streamTurn as never }}
       />,
@@ -197,7 +197,10 @@ describe("ChatShell", () => {
       ...initial,
       activeRunId: runId,
       phase: "awaiting_approval" as const,
-      approval: { summary: "Apply change?", approvalKind: null },
+      approval: createApprovalState({
+        summary: "Apply change?",
+        approvalKind: null,
+      }),
       assistantStatus: "waiting" as const,
       seenEventIds: { e1: true as const },
     };
@@ -209,7 +212,7 @@ describe("ChatShell", () => {
     });
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialState={withApproval}
         api={{ streamResume: streamResume as never }}
@@ -241,7 +244,10 @@ describe("ChatShell", () => {
       ...createInitialChatState(),
       activeRunId: runId,
       phase: "awaiting_approval" as const,
-      approval: { summary: "Revise this?", approvalKind: null },
+      approval: createApprovalState({
+        summary: "Revise this?",
+        approvalKind: null,
+      }),
       assistantStatus: "waiting" as const,
       seenEventIds: { e1: true as const },
     };
@@ -249,7 +255,7 @@ describe("ChatShell", () => {
     const streamResume = vi.fn(async () => undefined);
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialState={withApproval}
         api={{ streamResume: streamResume as never }}
@@ -268,7 +274,10 @@ describe("ChatShell", () => {
       ...createInitialChatState(),
       activeRunId: runId,
       phase: "awaiting_approval" as const,
-      approval: { summary: "Revise this?", approvalKind: null },
+      approval: createApprovalState({
+        summary: "Revise this?",
+        approvalKind: null,
+      }),
       assistantStatus: "waiting" as const,
       seenEventIds: { e1: true as const },
     };
@@ -291,7 +300,7 @@ describe("ChatShell", () => {
     );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialState={withApproval}
         api={{ streamResume: streamResume as never }}
@@ -389,7 +398,7 @@ describe("ChatShell", () => {
       );
 
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         api={{ streamTurn: streamTurn as never }}
       />,
@@ -423,7 +432,7 @@ describe("ChatShell", () => {
 
   it("shows empty state when history is empty", () => {
     render(
-      <ChatShell
+      <ChatShell enableProfileSidebar={false}
         skipHydrate
         initialMessages={[]}
       />,
@@ -435,5 +444,132 @@ describe("ChatShell", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getByText(/Message JobAgent/i)).toBeInTheDocument();
+  });
+
+  it("Save Profile sends one approve resume and disables the card", async () => {
+    const runId = "run-profile-save";
+    const withApproval = {
+      ...createInitialChatState(),
+      activeRunId: runId,
+      phase: "awaiting_approval" as const,
+      approval: createApprovalState({
+        summary: "Review candidate profile draft",
+        approvalKind: "profile_draft",
+        currentTitle: "Engineer",
+        skillNames: ["TypeScript"],
+        instanceKey: "prof-1",
+      }),
+      assistantStatus: "waiting" as const,
+      seenEventIds: { e1: true as const },
+    };
+
+    let resumeCalls = 0;
+    const streamResume = vi.fn(async () => {
+      resumeCalls += 1;
+      await new Promise<void>(() => undefined);
+    });
+
+    render(
+      <ChatShell
+        enableProfileSidebar={false}
+        skipHydrate
+        initialState={withApproval}
+        api={{ streamResume: streamResume as never }}
+      />,
+    );
+
+    expect(screen.getByTestId("profile-approval-card")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(
+      /draft_id|storage_path|email@|tool_args/i,
+    );
+
+    fireEvent.click(screen.getByTestId("profile-approval-save"));
+    await waitFor(() => {
+      expect(streamResume).toHaveBeenCalledTimes(1);
+    });
+    expect(streamResume).toHaveBeenCalledWith(
+      runId,
+      expect.objectContaining({ action: "approve" }),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    expect(
+      screen.queryByTestId("profile-approval-save"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("chat-composer"));
+    expect(resumeCalls).toBe(1);
+  });
+
+  it("Request Changes focuses composer and next submit is correct resume once", async () => {
+    const runId = "run-profile-correct";
+    const withApproval = {
+      ...createInitialChatState(),
+      activeRunId: runId,
+      phase: "awaiting_approval" as const,
+      approval: createApprovalState({
+        summary: "Review candidate profile draft",
+        approvalKind: "profile_draft",
+        currentTitle: "Engineer",
+        instanceKey: "prof-2",
+      }),
+      assistantStatus: "waiting" as const,
+      seenEventIds: { e1: true as const },
+    };
+
+    type ResumeBody = {
+      action: string;
+      idempotency_key: string;
+      correction_text?: string | null;
+    };
+    const streamResume = vi.fn(
+      async (
+        resumeRunId: string,
+        body: ResumeBody,
+      ): Promise<void> => {
+        void resumeRunId;
+        void body;
+        await new Promise<void>(() => undefined);
+      },
+    );
+
+    render(
+      <ChatShell
+        enableProfileSidebar={false}
+        skipHydrate
+        initialState={withApproval}
+        api={{ streamResume: streamResume as never }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("profile-approval-request-changes"));
+
+    // Card actions disabled while correction mode is open.
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-approval-save")).toBeDisabled();
+    });
+    expect(
+      screen.getByTestId("profile-approval-request-changes"),
+    ).toBeDisabled();
+
+    // Main composer accepts the correction (not a new turn).
+    submitComposer("  Prefer remote roles  ");
+
+    await waitFor(() => {
+      expect(streamResume).toHaveBeenCalledTimes(1);
+    });
+    expect(streamResume).toHaveBeenCalledWith(
+      runId,
+      expect.objectContaining({
+        action: "correct",
+        correction_text: "Prefer remote roles",
+      }),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    // Duplicate submit cannot send twice while resume is in flight.
+    submitComposer("another correction attempt");
+    expect(streamResume).toHaveBeenCalledTimes(1);
   });
 });

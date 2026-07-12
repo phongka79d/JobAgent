@@ -44,8 +44,10 @@ export interface ChatMessagesProps {
   readonly streamError: string | null;
   readonly approvalDisabled: boolean;
   readonly onApprove: () => void;
-  /** Invoked only with nonblank correction text from the approval field. */
+  /** Generic path: nonblank correction text from the approval field. */
   readonly onCorrect: (correctionText: string) => void;
+  /** Profile path: Request Changes focuses main composer. */
+  readonly onRequestChanges?: () => void;
   readonly "data-testid"?: string;
 }
 
@@ -99,6 +101,7 @@ export function ChatMessages({
   approvalDisabled,
   onApprove,
   onCorrect,
+  onRequestChanges,
   "data-testid": testId = "chat-messages",
 }: ChatMessagesProps) {
   const live = shouldShowLiveAssistant(phase);
@@ -172,6 +175,7 @@ export function ChatMessages({
                 isDisabled={approvalDisabled}
                 onApprove={onApprove}
                 onCorrect={onCorrect}
+                onRequestChanges={onRequestChanges}
               />
             ) : null}
 

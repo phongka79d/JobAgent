@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { createApprovalState } from "../reducer";
 import { ChatApproval } from "./ChatApproval";
 
 /** Fill the Astryx TextArea (native textarea) with correction text. */
@@ -21,7 +22,10 @@ describe("ChatApproval", () => {
 
     render(
       <ChatApproval
-        approval={{ summary: "Apply profile draft?", approvalKind: "profile" }}
+        approval={createApprovalState({
+          summary: "Apply profile draft?",
+          approvalKind: "profile",
+        })}
         isDisabled={false}
         onApprove={onApprove}
         onCorrect={onCorrect}
@@ -49,7 +53,10 @@ describe("ChatApproval", () => {
 
     render(
       <ChatApproval
-        approval={{ summary: "Continue?", approvalKind: null }}
+        approval={createApprovalState({
+          summary: "Continue?",
+          approvalKind: null,
+        })}
         isDisabled={false}
         onApprove={vi.fn()}
         onCorrect={onCorrect}
@@ -70,7 +77,10 @@ describe("ChatApproval", () => {
 
     render(
       <ChatApproval
-        approval={{ summary: "Continue?", approvalKind: null }}
+        approval={createApprovalState({
+          summary: "Continue?",
+          approvalKind: null,
+        })}
         isDisabled={false}
         onApprove={vi.fn()}
         onCorrect={onCorrect}
@@ -92,7 +102,10 @@ describe("ChatApproval", () => {
 
     render(
       <ChatApproval
-        approval={{ summary: "Continue?", approvalKind: null }}
+        approval={createApprovalState({
+          summary: "Continue?",
+          approvalKind: null,
+        })}
         isDisabled
         onApprove={onApprove}
         onCorrect={onCorrect}
@@ -111,5 +124,31 @@ describe("ChatApproval", () => {
         : correctionRoot.querySelector("textarea");
     expect(textarea).toBeTruthy();
     expect(textarea).toBeDisabled();
+  });
+
+  it("routes profile_draft to ProfileApprovalCard with Save Profile / Request Changes", () => {
+    const onApprove = vi.fn();
+    const onRequest = vi.fn();
+    render(
+      <ChatApproval
+        approval={createApprovalState({
+          summary: "Save this profile?",
+          approvalKind: "profile_draft",
+          currentTitle: "Engineer",
+          instanceKey: "p1",
+        })}
+        isDisabled={false}
+        onApprove={onApprove}
+        onCorrect={vi.fn()}
+        onRequestChanges={onRequest}
+      />,
+    );
+
+    expect(screen.getByTestId("profile-approval-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-approval-correction")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-approval-save"));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("profile-approval-request-changes"));
+    expect(onRequest).toHaveBeenCalledTimes(1);
   });
 });
