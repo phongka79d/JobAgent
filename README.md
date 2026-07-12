@@ -261,6 +261,26 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
+## Plan 4 progress (Batch01)
+
+Batch01 establishes the validated Candidate persistence and context foundation;
+it does not yet ingest or upload CV files:
+
+- Strict Candidate Profile, Job Preferences, pending-draft, and bounded approval-summary contracts validate opaque SQLite JSON at repository boundaries.
+- Deterministic skill normalization uses an approval-only packaged YAML seed; unknown skills remain provisional, with stable keys and explicit exclusion preservation.
+- Singleton profile/preferences and pending-draft repositories use caller-owned transactions, while chat context reuses one compact approved projection without raw document bodies, contact fields, storage paths, or provider payloads.
+
+Focused Batch01 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/schemas/test_candidate.py tests/schemas/test_preferences.py tests/schemas/test_profile_draft.py
+python -m pytest -q tests/services/test_skill_normalization.py
+python -m pytest -q tests/repositories/test_profiles.py tests/repositories/test_preferences.py tests/repositories/test_profile_drafts.py tests/services/test_context_assembly.py
+python -m ruff check app/repositories app/schemas app/services/profile_context.py app/services/skill_normalization.py app/services/chat_context.py tests/repositories tests/schemas tests/services/test_skill_normalization.py tests/services/test_context_assembly.py
+python -m mypy app/repositories app/schemas app/services/profile_context.py app/services/skill_normalization.py app/services/chat_context.py
+```
+
 ## Plan 3 progress (Batch01)
 
 Batch01 establishes the durable chat and SSE contract foundation only:
@@ -396,12 +416,13 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 3 Batch04 / Phase 2)
+## Current limitations (after Plan 4 Batch01)
 
 - Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
-  for local fake-backed proof; Plan 4+ domain behavior is not implemented.
-- No CV/JD extraction, profile approval payloads, matching, ranking, or
-  evaluation UI.
+  for local fake-backed proof. Plan 4 now has validated Candidate contracts,
+  persistence, normalization, and compact context only.
+- No CV upload/extraction, profile approval transport/UI, Candidate graph sync,
+  JD ingestion, matching, ranking, or evaluation UI yet.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.
 - Production tool registry is empty; the seven Master §13 domain tools are

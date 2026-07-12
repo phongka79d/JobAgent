@@ -1,11 +1,12 @@
 """Bounded chat context assembly for Agent runs.
 
-Reuses Plan 2 structured records (CandidateProfile, JobPreferences, MemoryFact)
-and ConversationRepository message bounds. Does not create alternate memory
-storage. Optional profile/preferences/memory are absent when rows do not exist.
+Reuses Plan 2/4 validated profile/preferences via ``ProfileContextService``,
+MemoryFact rows, and ConversationRepository message bounds. Does not create
+alternate memory storage. Optional profile/preferences/memory are absent when
+rows do not exist.
 
 Large PDF/JD bodies stay out of Agent state: only attachment IDs and structured
-JSON slices are assembled into ``AgentState``.
+compact slices are assembled into ``AgentState``.
 """
 
 from __future__ import annotations
@@ -24,10 +25,9 @@ from app.agent.state import (
     initial_agent_state,
     validate_agent_state,
 )
-from app.db.base import SINGLETON_PK
 from app.db.models.memory import MemoryFact
-from app.db.models.profile import CandidateProfile, JobPreferences
 from app.repositories.conversations import ConversationRepository
+from app.services.profile_context import ProfileContextError, ProfileContextService
 
 # Default and hard ceilings for the recent window (repository max is 100).
 DEFAULT_RECENT_CONTEXT_LIMIT: Final[int] = 20
@@ -35,8 +35,8 @@ MAX_RECENT_CONTEXT_LIMIT: Final[int] = 100
 MAX_MEMORY_FACTS: Final[int] = 50
 MAX_ATTACHMENT_IDS: Final[int] = 32
 
-# Keys stripped from opaque profile/preferences JSON so raw document bodies
-# never enter candidate_context even if later writers store them.
+# Keys stripped from memory value_json so raw document bodies never enter
+# candidate_context even if later writers store them.
 _STRIP_BODY_KEYS: Final[frozenset[str]] = frozenset(
     {
         "pdf_body",
@@ -143,8 +143,9 @@ class ChatContextAssembler:
     """Assemble bounded AgentState for one turn.
 
     Caller owns the ``AsyncSession`` transaction. Uses
-    ``ConversationRepository.list_recent_for_context`` for the recent window
-    and optional singleton/profile/memory rows when present.
+    ``ConversationRepository.list_recent_for_context`` for the recent window,
+    ``ProfileContextService`` for validated compact approved profile/preferences,
+    and optional memory rows when present.
     """
 
     def __init__(
@@ -152,9 +153,11 @@ class ChatContextAssembler:
         session: AsyncSession,
         *,
         conversation_repo: ConversationRepository | None = None,
+        profile_context: ProfileContextService | None = None,
     ) -> None:
         self._session = session
         self._conversations = conversation_repo or ConversationRepository(session)
+        self._profile_context = profile_context or ProfileContextService(session)
 
     async def load_optional_candidate_context(
         self,
@@ -164,13 +167,16 @@ class ChatContextAssembler:
     ) -> dict[str, Any] | None:
         """Load approved profile, preferences, and memory facts when available.
 
-        Missing tables/rows yield ``None`` slices — never invents storage.
+        Profile/preferences come from one validated compact projection — never
+        parallel unvalidated JSON parsing. Missing rows yield ``None`` slices.
         """
         if memory_limit < 1 or memory_limit > MAX_MEMORY_FACTS:
             raise ChatContextError("invalid memory_limit")
 
-        profile_row = await self._session.get(CandidateProfile, SINGLETON_PK)
-        prefs_row = await self._session.get(JobPreferences, SINGLETON_PK)
+        try:
+            approved = await self._profile_context.load_compact_approved_context()
+        except ProfileContextError as exc:
+            raise ChatContextError(str(exc) or "profile context failed") from exc
 
         facts_result = await self._session.execute(
             select(MemoryFact)
@@ -179,16 +185,6 @@ class ChatContextAssembler:
         )
         fact_rows = list(facts_result.scalars().all())
 
-        profile = (
-            _sanitize_structured_mapping(profile_row.profile_json)
-            if profile_row is not None
-            else None
-        )
-        preferences = (
-            _sanitize_structured_mapping(prefs_row.preferences_json)
-            if prefs_row is not None
-            else None
-        )
         memory_facts: list[dict[str, Any]] = []
         for fact in fact_rows:
             entry: dict[str, Any] = {
@@ -204,9 +200,14 @@ class ChatContextAssembler:
 
         safe_ids = _normalize_attachment_ids(attachment_ids)
 
+        profile = approved.profile
+        preferences = approved.preferences
+        active_attachment_id = approved.active_attachment_id
+
         if (
             profile is None
             and preferences is None
+            and active_attachment_id is None
             and not memory_facts
             and not safe_ids
         ):
@@ -217,6 +218,9 @@ class ChatContextAssembler:
             context["profile"] = profile
         if preferences is not None:
             context["preferences"] = preferences
+        if active_attachment_id is not None:
+            # ID only — never storage paths.
+            context["active_attachment_id"] = active_attachment_id
         if memory_facts:
             context["memory_facts"] = memory_facts
         if safe_ids:
