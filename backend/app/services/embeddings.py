@@ -570,11 +570,17 @@ class JobEmbeddingService:
         texts: Sequence[str],
         *,
         client: EmbeddingsClientLike | None = None,
+        representation_version: str | None = None,
     ) -> JobEmbeddingResult:
         """Embed pre-built texts under the locked contract.
 
         Validates batch bounds, normalizes inputs (no E5 prefixes), preserves
         input/output order, and requires exactly 1536 finite floats per vector.
+
+        ``representation_version`` defaults to the Job builder version. Callers
+        that embed a different versioned representation (for example Candidate
+        text) pass their explicit version so identity stays accurate without a
+        second provider/model stack.
         """
         try:
             reject_if_disallowed_contract(
@@ -588,6 +594,11 @@ class JobEmbeddingService:
         if len(texts) > self._max_batch_size:
             raise JobEmbeddingError(JobEmbeddingErrorCode.BATCH_SIZE_EXCEEDED)
 
+        version = (
+            representation_version
+            if representation_version is not None
+            else self._representation_version
+        )
         normalized = [normalize_embedding_text(text) for text in texts]
         active = client or self.build_client()
         rows = self._embed_with_retry(active, normalized)
@@ -604,7 +615,7 @@ class JobEmbeddingService:
             vectors=vectors,
             model=self._model,
             dimensions=self._dimensions,
-            representation_version=self._representation_version,
+            representation_version=version,
             encoding=EMBEDDING_ENCODING,
         )
 

@@ -715,3 +715,54 @@ async def test_set_embedding_identity_stored_but_omitted_from_compact(
             assert row is not None
             assert row.embedding_model == "text-embedding-3-small"
             assert row.embedding_dimensions == 1536
+
+
+# ---------------------------------------------------------------------------
+# Bounded bulk get_by_ids (retrieval rejoin)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_by_ids_bulk_join_bounds_and_missing(tmp_path: Path) -> None:
+    async with temporary_db(tmp_path) as db:
+        async with db.session_scope() as session:
+            repo = JobPostRepository(session)
+            a = await repo.create_received(
+                source_type="text", raw_content="Bulk job A content."
+            )
+            b = await repo.create_received(
+                source_type="text", raw_content="Bulk job B content."
+            )
+            await repo.mark_processing(a.record.id)
+            await repo.mark_processed(
+                a.record.id,
+                extraction=_full_identity_extraction(jd_quality="full"),
+            )
+            await repo.mark_processing(b.record.id)
+            await repo.mark_processed(
+                b.record.id,
+                extraction=_full_identity_extraction(
+                    title="Other Role",
+                    company="Beta LLC",
+                    location="Munich, DE",
+                    jd_quality="partial",
+                ),
+            )
+
+            missing = uuid4()
+            # Duplicates collapse; missing omitted; order of map is by found rows.
+            loaded = await repo.get_by_ids(
+                [b.record.id, a.record.id, b.record.id, missing]
+            )
+            assert set(loaded.keys()) == {a.record.id, b.record.id}
+            assert loaded[a.record.id].jd_quality == "full"
+            assert loaded[b.record.id].jd_quality == "partial"
+            for item in loaded.values():
+                _assert_compact(item)
+
+            with pytest.raises(JobPostValidationError, match="empty"):
+                await repo.get_by_ids([])
+            with pytest.raises(JobPostValidationError, match="maximum"):
+                await repo.get_by_ids([uuid4() for _ in range(MAX_LIST_LIMIT + 1)])
+            with pytest.raises(JobPostValidationError, match="invalid job_id"):
+                await repo.get_by_ids(["not-a-uuid"])  # type: ignore[list-item]

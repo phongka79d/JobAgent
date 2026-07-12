@@ -549,3 +549,21 @@ def test_zero_network_for_required_path(block_sockets: None) -> None:
     assert result.identity["model"] == ALLOWED_EMBEDDING_MODEL
     assert result.identity["dimensions"] == ALLOWED_EMBEDDING_DIMENSIONS
     assert result.identity["representation_version"] == JOB_TEXT_REPRESENTATION_VERSION
+
+
+def test_embed_texts_optional_representation_version_override(
+    block_sockets: None,
+) -> None:
+    """Candidate path may label identity without a second adapter stack."""
+    del block_sockets
+    service, _ = _service()
+    default = service.embed_texts(["probe text"])
+    assert default.representation_version == JOB_TEXT_REPRESENTATION_VERSION
+    custom = service.embed_texts(
+        ["probe text"],
+        representation_version="candidate_embedding_text_v1",
+    )
+    assert custom.representation_version == "candidate_embedding_text_v1"
+    assert custom.model == ALLOWED_EMBEDDING_MODEL
+    assert custom.dimensions == ALLOWED_EMBEDDING_DIMENSIONS
+    assert len(custom.vectors[0].values) == ALLOWED_EMBEDDING_DIMENSIONS

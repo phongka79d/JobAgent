@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
@@ -437,6 +438,36 @@ class JobPostRepository:
         if row is None:
             return None
         return self._to_record(row)
+
+    async def get_by_ids(self, job_ids: Sequence[UUID]) -> dict[UUID, JobPostRecord]:
+        """Bounded bulk load by primary key (max ``MAX_LIST_LIMIT`` unique IDs).
+
+        Returns a map of found rows only (missing IDs omitted). Never returns
+        raw content. Rejects empty input, non-UUID values, and more than
+        ``MAX_LIST_LIMIT`` unique IDs. Duplicate IDs in the request are
+        collapsed (one lookup per identity).
+        """
+        if not isinstance(job_ids, Sequence) or isinstance(job_ids, (str, bytes)):
+            raise JobPostValidationError("invalid job_ids")
+        if len(job_ids) < 1:
+            raise JobPostValidationError("job_ids empty")
+
+        unique: list[UUID] = []
+        seen: set[UUID] = set()
+        for item in job_ids:
+            validated = _validate_uuid(item, name="job_id")
+            if validated in seen:
+                continue
+            seen.add(validated)
+            unique.append(validated)
+            if len(unique) > MAX_LIST_LIMIT:
+                raise JobPostValidationError("job_ids exceeds maximum")
+
+        result = await self._session.execute(
+            select(JobPost).where(JobPost.id.in_(unique))
+        )
+        rows = list(result.scalars().all())
+        return {row.id: self._to_record(row) for row in rows}
 
     async def get_by_content_hash(self, content_hash: str) -> JobPostRecord | None:
         """Exact-hash lookup returning the compact record, or ``None``."""
