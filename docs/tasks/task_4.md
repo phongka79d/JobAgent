@@ -401,7 +401,7 @@ continuous worker.
 
 ### Tasks
 
-- [ ] (03A): Implement coalescing Candidate outbox work and idempotent graph projection
+- [x] (03A): Implement coalescing Candidate outbox work and idempotent graph projection
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.6 Candidate graph synchronization`; `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`; `docs/plans/Master_plan.md` > `## 21. SQLite-to-Neo4j Synchronization`
   - Source Requirements:
     - Requeue graph work in the same transaction for every approved Candidate change and attempt bounded processing after commit and at startup.
@@ -428,7 +428,7 @@ continuous worker.
   - Blocked Condition: Correct repeated singleton sync requires weakening accepted uniqueness/transaction guarantees or adding a second canonical Candidate identity; stop as `BLOCKED_BY_ARCHITECTURE_CONFLICT` rather than using process memory or duplicate graph identities.
   - Files: `backend/app/repositories/graph_outbox.py`, `backend/app/graph/candidate_sync.py`, `backend/app/graph/__init__.py`, `backend/app/main.py`, `infrastructure/scripts/rebuild_graph.py`, `backend/tests/repositories/test_graph_outbox.py`, `backend/tests/graph/test_candidate_sync.py`, `backend/tests/integration/test_candidate_sync.py`, `backend/tests/infrastructure/test_rebuild_graph.py`, `backend/tests/test_lifecycle.py`
 
-- [ ] (03B): Atomically commit a draft with filesystem compensation and cleanup retry
+- [x] (03B): Atomically commit a draft with filesystem compensation and cleanup retry
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.5 Atomic replacement`; `docs/plans/Master_plan.md` > `### 6.2 Profile storage rule`; `docs/plans/Master_plan.md` > `### 10.4 Atomic replacement`; `docs/plans/Master_plan.md` > `### 21.1 Outbox rule`
   - Source Requirements:
     - Keep the previous approved profile/CV usable until final approval and never expose an intermediate no-profile state.

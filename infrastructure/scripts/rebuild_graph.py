@@ -8,9 +8,9 @@ Destructive clearing requires ``--confirm-destructive``. Only JobAgent-derived
 labels are cleared (``Candidate``, ``Job``, ``Skill``, ``JobFamily``). The
 command never issues a database-wide unlabeled delete.
 
-After clear + schema reapplication (delegated to ``ensure_graph_schema``), later
-rebuild stages remain explicitly unimplemented and return a non-success exit
-code so a partial skeleton cannot be mistaken for a full rebuild.
+After clear + schema reapplication (delegated to ``ensure_graph_schema``), the
+approved Candidate singleton is rebuilt from SQLite. Job, JobFamily, embedding,
+verification, and remaining sync stages stay explicitly incomplete.
 
 Secrets, credential-bearing URIs, raw payloads, and document content are never
 printed.
@@ -34,6 +34,11 @@ _BACKEND_ROOT: Final[Path] = _REPO_ROOT / "backend"
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
+from app.db.session import (  # noqa: E402
+    DatabaseSessionManager,
+    create_session_manager,
+)
+from app.graph.candidate_sync import rebuild_candidate_projection  # noqa: E402
 from app.graph.client import Neo4jClient  # noqa: E402
 from app.graph.errors import GraphError  # noqa: E402
 from app.graph.schema import ensure_graph_schema  # noqa: E402
@@ -72,6 +77,7 @@ class StageName(StrEnum):
 
     CLEAR_DERIVED = "clear_jobagent_derived"
     RECREATE_SCHEMA = "recreate_schema"
+    REBUILD_CANDIDATE = "rebuild_candidate"
     LOAD_SQLITE_RECORDS = "load_sqlite_records"
     REBUILD_ENTITIES = "rebuild_entities"
     RECOMPUTE_EMBEDDINGS = "recompute_embeddings"
@@ -91,6 +97,7 @@ class StageStatus(StrEnum):
 IMPLEMENTED_STAGES: Final[tuple[StageName, ...]] = (
     StageName.CLEAR_DERIVED,
     StageName.RECREATE_SCHEMA,
+    StageName.REBUILD_CANDIDATE,
 )
 DEFERRED_STAGES: Final[tuple[StageName, ...]] = (
     StageName.LOAD_SQLITE_RECORDS,
@@ -233,6 +240,7 @@ async def run_rebuild(
     dry_run: bool,
     confirm_destructive: bool,
     client: Neo4jClient | None = None,
+    database: DatabaseSessionManager | None = None,
     ensure_schema: EnsureSchemaFn | None = None,
 ) -> RebuildReport:
     """Execute or plan the rebuild pipeline.
@@ -344,7 +352,7 @@ async def run_rebuild(
                 detail=exc.code.value,
             )
         )
-        for name in DEFERRED_STAGES:
+        for name in (StageName.REBUILD_CANDIDATE, *DEFERRED_STAGES):
             stage_results.append(
                 StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
             )
@@ -363,7 +371,7 @@ async def run_rebuild(
                 detail="schema_failed",
             )
         )
-        for name in DEFERRED_STAGES:
+        for name in (StageName.REBUILD_CANDIDATE, *DEFERRED_STAGES):
             stage_results.append(
                 StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
             )
@@ -374,6 +382,49 @@ async def run_rebuild(
             exit_code=EXIT_FAILURE,
             messages=tuple(messages),
         )
+
+    # --- Stage: rebuild the approved Candidate slice from canonical SQLite ---
+    if database is None:
+        stage_results.append(
+            StageResult(
+                name=StageName.REBUILD_CANDIDATE,
+                status=StageStatus.NOT_IMPLEMENTED,
+                detail="database_not_provided",
+            )
+        )
+    else:
+        try:
+            projected = await rebuild_candidate_projection(database, client)
+            stage_results.append(
+                StageResult(
+                    name=StageName.REBUILD_CANDIDATE,
+                    status=StageStatus.COMPLETED,
+                    detail=f"projected={projected}",
+                )
+            )
+        except Exception:
+            stage_results.append(
+                StageResult(
+                    name=StageName.REBUILD_CANDIDATE,
+                    status=StageStatus.FAILED,
+                    detail="candidate_rebuild_failed",
+                )
+            )
+            for name in DEFERRED_STAGES:
+                stage_results.append(
+                    StageResult(
+                        name=name,
+                        status=StageStatus.SKIPPED,
+                        detail="prior_failure",
+                    )
+                )
+            messages.append("error=candidate_rebuild_failed")
+            return RebuildReport(
+                dry_run=False,
+                stages=tuple(stage_results),
+                exit_code=EXIT_FAILURE,
+                messages=tuple(messages),
+            )
 
     # --- Deferred stages: honest not-implemented (no fake success) ---
     for name in DEFERRED_STAGES:
@@ -386,7 +437,7 @@ async def run_rebuild(
         )
     messages.append(
         "rebuild_incomplete=true; deferred stages not implemented; "
-        "full rebuild requires later SQLite loaders and sync"
+        "Job/JobFamily/embedding and verification stages remain deferred"
     )
     return RebuildReport(
         dry_run=False,
@@ -396,19 +447,23 @@ async def run_rebuild(
     )
 
 
-def _load_client_from_root_settings() -> Neo4jClient:
-    """Construct a client from root settings without printing configuration."""
+def _load_runtime_from_root_settings() -> tuple[Neo4jClient, DatabaseSessionManager]:
+    """Construct runtime dependencies without printing configuration."""
     from app.config import load_settings
 
     settings = load_settings()
-    return Neo4jClient.from_settings(settings)
+    return (
+        Neo4jClient.from_settings(settings),
+        create_session_manager(settings.sqlite_path),
+    )
 
 
 async def _run_destructive_with_lifecycle() -> RebuildReport:
     """Open client, run destructive pipeline, always close the client."""
     client: Neo4jClient | None = None
+    database: DatabaseSessionManager | None = None
     try:
-        client = _load_client_from_root_settings()
+        client, database = _load_runtime_from_root_settings()
     except Exception:
         # Settings / construction failures must not leak secrets.
         return RebuildReport(
@@ -429,6 +484,7 @@ async def _run_destructive_with_lifecycle() -> RebuildReport:
             dry_run=False,
             confirm_destructive=True,
             client=client,
+            database=database,
         )
     finally:
         close_failed = False
@@ -439,6 +495,11 @@ async def _run_destructive_with_lifecycle() -> RebuildReport:
         if close_failed:
             # Close failures are non-fatal for reporting; never attach details.
             pass
+        if database is not None:
+            try:
+                await database.dispose()
+            except Exception:
+                pass
 
 
 def main(
@@ -447,6 +508,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     client: Neo4jClient | None = None,
+    database: DatabaseSessionManager | None = None,
     ensure_schema: EnsureSchemaFn | None = None,
 ) -> int:
     """CLI entrypoint. Injectable client/streams for tests; no live defaults."""
@@ -473,6 +535,7 @@ def main(
                 dry_run=False,
                 confirm_destructive=confirm,
                 client=client,
+                database=database,
                 ensure_schema=ensure_schema,
             )
         )

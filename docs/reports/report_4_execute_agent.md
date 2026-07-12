@@ -925,12 +925,12 @@ batch_scope_repair
 
 
 ## Batch
-Mandatory Batch02 - Safe PDF Intake to Profile Draft
+Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
 
 
 
 ## Task
-batch_scope - Restore A3-identified historical documentation only
+batch_scope - Remove historical report edits from the Batch03 candidate
 
 
 
@@ -940,23 +940,21 @@ complete
 
 
 ## Selected Scope
-- Batch: Mandatory Batch02 - Safe PDF Intake to Profile Draft
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
 - Task ID: batch_scope
-- Task title: Restore A3-identified historical documentation only
-- Files allowed / repair scope: Restore four pre-Batch02 mojibake substitutions in the existing 01C execution-report block; restore the existing 01B A2 review mode. Preserve all Batch02 evidence and task checkboxes.
+- Task title: Remove historical report edits from the Batch03 candidate
+- Files allowed / repair scope: Restore the four historical 01C character positions to the committed baseline while preserving the accepted 03A/03B execution evidence and all task checkboxes.
 
 
 
 ## Completed Work
-- Restored the four historical section/em-dash characters in the existing 01C A1 execution-report block.
-- Restored the pre-existing 01B A2 review mode to `orchestrated`.
-- Preserved the accepted Batch02 execution/review evidence and task checkbox state.
+- Restored the four pre-Batch03 01C character positions to their exact committed baseline values.
+- Preserved the accepted 03A/03B execution evidence and Batch03 task checkbox state.
 
 
 
 ## Files Created or Modified
-- docs/reports/report_4_execute_agent.md (restored historical 01C content; appended this batch-scope repair block)
-- docs/review/review_4_review_agent.md (restored historical 01B mode value)
+- docs/reports/report_4_execute_agent.md (restored historical baseline content; updated this batch-scope repair block)
 
 
 
@@ -964,14 +962,14 @@ complete
 - command/check: Targeted `git diff -- docs/reports/report_4_execute_agent.md docs/review/review_4_review_agent.md` inspection
 - required: yes
 - result: passed
-- evidence or reason: the only historical corrections are the four 01C character restorations and the 01B `orchestrated` mode restoration; Batch02 blocks remain present.
+- evidence or reason: no historical 01C substitution remains in the diff; Batch03 execution blocks remain present.
 
 
 
-- command/check: `rg -n "^- \\[x\\] \\(02[ABC]\\)" docs/tasks/task_4.md`
+- command/check: `rg -n "^- \\[x\\] \\(03[AB]\\)" docs/tasks/task_4.md`
 - required: yes
 - result: passed
-- evidence or reason: 02A, 02B, and 02C remain checked; no task file was modified.
+- evidence or reason: 03A and 03B remain checked; no task file was modified.
 
 
 
@@ -983,9 +981,9 @@ complete
 
 
 ## Acceptance Check
-- condition: Restore only unrelated historical documentation content while preserving Batch02 evidence and task tracking.
+- condition: Remove only unrelated historical documentation edits while preserving Batch03 evidence and task tracking.
 - status: satisfied
-- evidence: restored the exact A3-identified 01C/01B historical values; no implementation files or task checkboxes changed.
+- evidence: restored the exact committed 01C values; no implementation files, review files, or task checkboxes changed.
 
 
 
@@ -997,8 +995,8 @@ complete
 
 
 ## Notes for Review Agent
-- changed files: docs/reports/report_4_execute_agent.md, docs/review/review_4_review_agent.md
-- validations to rerun: targeted report diff and Batch02 checkbox inspection only.
+- changed files: docs/reports/report_4_execute_agent.md only.
+- validations to rerun: targeted report diff and Batch03 checkbox inspection only.
 - risk areas: none; this repair intentionally does not modify implementation or accepted Batch02 evidence.
 - next task readiness: ready for A3 scope re-audit.
 
@@ -1022,3 +1020,263 @@ complete
 - changes made: restored four 01C characters in the A1 report and the existing 01B A2 mode value.
 - validations rerun: targeted historical diff inspection, accepted Batch02 checkbox inspection, and `git diff --check`.
 - outcome: complete - only the A3-listed documentation scope findings were repaired.
+
+### 2026-07-12 (Batch03 scope repair)
+- reason for repair: A3 SCOPE_ISSUE found four historical 01C character substitutions mixed into the Batch03 execution-report diff.
+- changes made: restored those four character positions to the exact committed baseline and preserved all 03A/03B evidence.
+- validations rerun: targeted historical diff inspection, accepted Batch03 checkbox inspection, and `git diff --check`.
+- outcome: complete - the execution-report diff now contains Batch03/batch-scope evidence only.
+
+---
+
+# Task Execution Report - 03A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+
+## Task
+03A - Implement coalescing Candidate outbox work and idempotent graph projection
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Task ID: 03A
+- Task title: Implement coalescing Candidate outbox work and idempotent graph projection
+- Files allowed / repair scope: Candidate outbox coalescing, approved-profile enqueue, Candidate/Skill projection, bounded startup retry, Candidate-only graph rebuild, and directly required tests listed by task 03A.
+
+## Source of Truth Used
+- `docs/plans/Plan_4.md` > `### 7.6 Candidate graph synchronization`
+- `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`
+- `docs/plans/Master_plan.md` > `## 21. SQLite-to-Neo4j Synchronization`
+
+## Dependency and User Action Check
+- Dependencies (01B) and (01C) are checked complete; existing graph uniqueness constraints/client and `GraphOutboxRepository` were inspected and reused.
+- User Action: None; all required graph tests use injected fakes.
+
+## Completed Work
+- Added opt-in outbox coalescing that replaces only validated safe payloads, requeues pending/failed/synced logical identities, clears stale error state, and preserves attempt history without changing default replay behavior for unrelated callers.
+- Enqueued identifier-only Candidate sync work in the same caller-owned transaction as every approved singleton profile replacement.
+- Added a focused projector that reloads the current validated Candidate from SQLite, merges one Candidate and canonical Skill nodes, removes stale `HAS_SKILL` edges, excludes non-score-bearing skills, preserves aliases/provisional status as properties, and never creates `RELATED_TO` edges.
+- Added bounded operation-filtered processing, failed-work replay, sanitized failure status, best-effort startup processing, and the Candidate-only rebuild stage. Job, JobFamily, embedding, verification, and remaining stages stay explicitly incomplete.
+- Added repository, fake-graph, integration, rebuild, and lifecycle coverage for coalescing, successive approvals, rollback, outage/replay, exact relationship replacement, exclusion, alias/provisional properties, slash-bearing skill text, startup retry, and duplicate prevention.
+
+## Files Created or Modified
+- backend/app/repositories/graph_outbox.py
+- backend/app/repositories/profiles.py
+- backend/app/graph/candidate_sync.py (created)
+- backend/app/graph/__init__.py
+- backend/app/main.py
+- infrastructure/scripts/rebuild_graph.py
+- backend/tests/repositories/test_graph_outbox.py
+- backend/tests/graph/test_candidate_sync.py (created)
+- backend/tests/integration/test_candidate_sync.py (created)
+- backend/tests/infrastructure/test_rebuild_graph.py
+- backend/tests/test_lifecycle.py
+- docs/reports/report_4_execute_agent.md
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/infrastructure/test_rebuild_graph.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 57 passed in 5.85s on the final required run.
+
+- command/check: `cd backend; python -m ruff check app/repositories/graph_outbox.py app/graph/candidate_sync.py tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed on the final required run.
+
+- command/check: `cd backend; python -m mypy app/repositories/graph_outbox.py app/graph/candidate_sync.py`
+- required: yes
+- result: passed
+- evidence or reason: Success; no issues found in 2 source files.
+
+- command/check: touched-file Ruff for graph exports, lifecycle, profile repository, rebuild implementation, and their tests
+- required: no
+- result: passed
+- evidence or reason: All checks passed after mechanical import ordering.
+
+- command/check: `cd backend; python -m pytest -q tests/repositories/test_profiles.py`
+- required: no
+- result: passed
+- evidence or reason: 7 passed in 1.60s.
+
+- command/check: `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: exit code 0; only line-ending conversion warnings were emitted.
+
+- command/check: `cd backend; python -m pytest -q -m neo4j tests/integration/test_candidate_sync.py`
+- required: no
+- result: not_run
+- evidence or reason: optional live Neo4j validation was not needed; required integration coverage uses the task-mandated fake graph client.
+
+## Acceptance Check
+- condition: successive singleton Candidate changes remain one durable row but each becomes processable current-state sync work.
+- status: satisfied
+- evidence: repository and integration tests cover pending coalescing plus failed/synced requeue across two approvals, preserving one outbox identity.
+
+- condition: replay/restart produces one Candidate, one Skill per canonical key, and the exact current non-excluded `HAS_SKILL` set.
+- status: satisfied
+- evidence: the parameter-bound `MERGE` projection deletes stale Candidate skill edges before merging the current set; stateful fake integration and startup/rebuild tests pass.
+
+- condition: Neo4j failure preserves canonical SQLite state and retryable sanitized work without private payloads or trusted `RELATED_TO` edges.
+- status: satisfied
+- evidence: outage/rollback/replay tests pass; outbox payload is exactly `{candidate_id: 1}`; graph query contains no `RELATED_TO`; skill display/alias text including `CI/CD` projects normally.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids task checkbox and batch-status updates.
+
+## Notes for Review Agent
+- changed files: all files listed above; pre-existing dirty 03A workspace work was inspected, preserved, and completed.
+- validations to rerun: both task-required validation groups.
+- risk areas: graph projection uses one atomic Cypher statement; optional live Neo4j marker validation was not run. Job/JobFamily/embedding rebuild stages intentionally remain incomplete.
+- next task readiness: ready for A2 review of 03A only.
+
+## Workflow Integrity Check
+- exactly one task executed: 03A
+- mode: orchestrated
+- no sibling task, checkbox, batch status, commit, or staging performed
+
+---
+
+# Task Execution Report - 03B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+
+## Task
+03B - Atomically commit a draft with filesystem compensation and cleanup retry
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Task ID: 03B
+- Task title: Atomically commit a draft with filesystem compensation and cleanup retry
+- Files allowed / repair scope: profile commit unit of work, inverse contained storage promotion, safe unreferenced-attachment cleanup selection, and directly required tests.
+
+## Dependency and User Action Check
+- dependencies: 01C, 02C, and 03A are A2 ACCEPTED; accepted caller-owned storage/repository transaction boundaries are present.
+- user actions: none required.
+
+## Source of Truth Used
+- `docs/plans/Plan_4.md` - `### 7.5 Atomic replacement`
+- `docs/plans/Master_plan.md` - `### 6.2 Profile storage rule`
+- `docs/plans/Master_plan.md` - `### 10.4 Atomic replacement`
+- `docs/plans/Master_plan.md` - `### 21.1 Outbox rule`
+
+## Files Inspected Before Editing
+- `README.md`
+- `docs/tasks/task_4.md`
+- cited Plan 4 and Master Plan sections
+- accepted attachment storage operations and all storage lifecycle callers
+- attachment/profile/preference/draft/outbox repositories and callers
+- transaction manager and directly relevant tests
+
+## Completed Work
+- Added one `ProfileCommitService` unit of work that validates the pending draft/source, promotes staged bytes before SQLite commit, marks the source active, replaces the profile singleton, replaces preferences only when proposed, deletes the draft, and requeues identifier-only Candidate sync through the accepted profile repository transaction.
+- Added contained active-to-staged restore by refactoring promotion and compensation onto the existing non-overwriting cross-area publisher.
+- Added pre-commit compensation: ordinary failures restore promoted bytes to staged state; injected restore failure durably corrects source metadata to the still-usable active bytes while preserving the old approved profile and pending draft.
+- Added post-commit old-file cleanup and bounded retry. Cleanup candidates exclude approved-profile and pending-draft references; metadata deletion is flushed transactionally, bytes are deleted before commit, and failures retain a durable retryable row.
+- Preserved active-context/already-active sources without moving/deleting the current PDF, and preserved singleton preferences when omitted from the draft.
+- Added failure coverage for validation, promotion, attachment/profile/preference/draft mutations, outbox enqueue, SQLite commit, compensation, byte/metadata cleanup, and referenced-old-source protection.
+- Repaired post-promotion cancellation handling so `BaseException` paths compensate the filesystem before cancellation is re-raised unchanged; added a regression proving the pending source remains readable at its canonical staged path.
+
+## Files Created or Modified
+- `backend/app/services/profile_service.py` (created)
+- `backend/app/services/attachment_storage.py`
+- `backend/app/repositories/attachments.py`
+- `backend/tests/services/test_profile_service.py` (created)
+- `backend/tests/integration/test_profile_replacement.py` (created)
+- `backend/tests/repositories/test_attachments.py`
+- `docs/reports/report_4_execute_agent.md`
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/services/test_profile_service.py tests/integration/test_profile_replacement.py tests/repositories/test_attachments.py tests/repositories/test_graph_outbox.py`
+- required: yes
+- result: passed
+- evidence or reason: 59 passed in 6.51s after the cancellation repair.
+
+- command/check: `cd backend; python -m ruff check app/services/profile_service.py app/services/attachment_storage.py app/repositories tests/services/test_profile_service.py tests/integration/test_profile_replacement.py`
+- required: yes
+- result: passed
+- evidence or reason: all checks passed.
+
+- command/check: `cd backend; python -m mypy app/services/profile_service.py app/services/attachment_storage.py app/repositories`
+- required: yes
+- result: passed
+- evidence or reason: success with no issues in 11 source files.
+
+- command/check: focused TDD and referenced-old-source regression runs
+- required: no
+- result: passed
+- evidence or reason: 31 focused tests passed after the referenced-old-source regression first failed and the cleanup root cause was corrected.
+
+- command/check: `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: exit code 0; existing line-ending conversion warnings only.
+
+## Acceptance Check
+- condition: success leaves one singleton pointing to the intended active source, applies only proposed preferences, removes the draft, and requeues identifier-only Candidate sync in the same commit.
+- status: satisfied
+- evidence: success tests validate singleton/profile/preference/draft/attachment state; outbox payload is exactly `{candidate_id: 1}`.
+
+- condition: every pre-commit failure preserves the prior approved profile/CV and a recoverable pending draft/source without a public no-profile/no-file interval.
+- status: satisfied
+- evidence: injected validation, promotion, repository, outbox, commit, and compensation failures keep old approved bytes readable and the proposed source usable as staged or durably corrected active state.
+
+- condition: cleanup-only failure keeps the newly approved state usable and leaves bounded durable cleanup work removable later.
+- status: satisfied
+- evidence: byte- and metadata-cleanup failures retain the unreferenced row and bounded retry removes it; referenced active sources are excluded.
+
+- condition: active-context/already-active sources commit without moving/deleting the current PDF, and omitted preferences remain unchanged.
+- status: satisfied
+- evidence: the active-source test preserves attachment ID/path/bytes and prior preferences while updating the profile.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same-task repair mode forbids task checkbox and batch-status updates.
+
+## Notes for Review Agent
+- changed files: only the six 03B implementation/test files above plus this report block; accepted pre-existing 03A changes were preserved and not attributed to 03B.
+- validations to rerun: both task-required validation groups.
+- risk areas: compensation fallback records the promoted source active only when inverse restore fails; the pending draft reference excludes it from cleanup.
+- next task readiness: ready for A2 review of 03B only.
+
+## Workflow Integrity Check
+- exactly one task executed: 03B
+- mode: same_task_repair
+- no sibling task, checkbox, batch status, commit, or staging performed
+
+## Repair Log
+
+### 2026-07-12
+- reason for repair: A2 rejected the initial handoff because `asyncio.CancelledError` after promotion bypassed filesystem compensation and could strand staged metadata pointing to active-only bytes.
+- changes made: added a cancellation regression first, confirmed the canonical staged path was unreadable, then widened the outer cleanup boundary to `BaseException` while preserving non-`Exception` cancellation semantics after compensation.
+- validations rerun: cancellation regression passed; exact required pytest passed with 59 tests; exact Ruff and mypy commands passed.
+- outcome: the pending draft source remains readable through canonical staged metadata after post-promotion cancellation; ready for same-task A2 re-review.

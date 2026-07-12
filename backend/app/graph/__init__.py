@@ -6,6 +6,13 @@ graph unavailability must not mutate or delete SQLite/filesystem state.
 
 from __future__ import annotations
 
+from app.graph.candidate_sync import (
+    CANDIDATE_SYNC_OPERATION,
+    DEFAULT_CANDIDATE_SYNC_BATCH_SIZE,
+    CandidateGraphClient,
+    process_candidate_sync_outbox,
+    rebuild_candidate_projection,
+)
 from app.graph.client import DEFAULT_HEALTH_TIMEOUT_SECONDS, Neo4jClient
 from app.graph.errors import (
     GraphError,
@@ -24,6 +31,9 @@ from app.graph.schema import (
 
 __all__ = [
     "DEFAULT_HEALTH_TIMEOUT_SECONDS",
+    "CANDIDATE_SYNC_OPERATION",
+    "CandidateGraphClient",
+    "DEFAULT_CANDIDATE_SYNC_BATCH_SIZE",
     "EMBEDDING_VECTOR_DIMENSIONS",
     "SCHEMA_STATEMENTS",
     "VECTOR_INDEX_NAME",
@@ -33,6 +43,8 @@ __all__ = [
     "GraphHealth",
     "GraphHealthStatus",
     "Neo4jClient",
+    "process_candidate_sync_outbox",
+    "rebuild_candidate_projection",
     "ensure_graph_schema",
     "schema_statements_for_dimensions",
 ]

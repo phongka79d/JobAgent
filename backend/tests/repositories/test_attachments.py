@@ -104,6 +104,45 @@ async def test_add_staged_and_mark_active_round_trip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cleanup_candidates_exclude_profile_and_draft_references(
+    tmp_path: Path,
+) -> None:
+    async with temporary_db(tmp_path) as db:
+        async with db.session_scope() as session:
+            repository = AttachmentRepository(session)
+            cleanup = _staged_input()
+            profile_source = _staged_input()
+            draft_source = _staged_input()
+            for payload in (cleanup, profile_source, draft_source):
+                await repository.add_staged(payload)
+                await repository.mark_active(
+                    payload.id,
+                    storage_path=f"active/{payload.id}",
+                )
+            from app.db.base import SINGLETON_PK
+            from app.db.models.profile import CandidateProfile, ProfileDraft
+
+            session.add(
+                CandidateProfile(
+                    id=SINGLETON_PK,
+                    active_attachment_id=profile_source.id,
+                    profile_json={},
+                )
+            )
+            session.add(
+                ProfileDraft(
+                    id=uuid4(),
+                    source_attachment_id=draft_source.id,
+                    draft_json={},
+                    state="pending",
+                )
+            )
+            await session.flush()
+
+            rows = await repository.list_unreferenced_active(limit=10)
+            assert [row.id for row in rows] == [cleanup.id]
+
+@pytest.mark.asyncio
 async def test_mark_active_rejects_invalid_transitions(tmp_path: Path) -> None:
     async with temporary_db(tmp_path) as db:
         attachment_id = uuid4()

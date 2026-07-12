@@ -11,9 +11,12 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from app.db.session import create_session_manager
 from app.graph.client import Neo4jClient
 from app.graph.errors import GraphError, GraphErrorCode
 from app.graph.schema import SCHEMA_STATEMENTS, ensure_graph_schema
+from app.repositories.profiles import ProfileRepository
+from app.schemas.candidate import CandidateProfile
 from tests.graph.fakes import FakeDriver
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -215,6 +218,49 @@ async def test_destructive_clear_and_schema_then_unimplemented(
     assert "rebuild_incomplete=true" in joined_messages
     assert SENTINEL_PASSWORD not in joined_messages
     assert SENTINEL_URI not in joined_messages or "bolt://" not in joined_messages
+
+
+@pytest.mark.asyncio
+async def test_destructive_rebuild_projects_candidate_before_deferred_stages(
+    rebuild: ModuleType,
+    tmp_path: Path,
+) -> None:
+    database = create_session_manager(tmp_path / "rebuild-candidate.db")
+    await database.create_all()
+    try:
+        profile = CandidateProfile.model_validate(
+            {
+                "summary": "Engineer.",
+                "current_title": "Engineer",
+                "total_experience_years": None,
+                "skills": [],
+                "experiences": [],
+                "education": [],
+                "languages": [],
+                "extraction_confidence": 0.8,
+            }
+        )
+        async with database.session_scope() as session:
+            await ProfileRepository(session).replace(profile)
+
+        driver = FakeDriver()
+        report = await rebuild.run_rebuild(
+            dry_run=False,
+            confirm_destructive=True,
+            client=_client(driver),
+            database=database,
+        )
+
+        statuses = {stage.name: stage for stage in report.stages}
+        candidate = statuses[rebuild.StageName.REBUILD_CANDIDATE]
+        assert candidate.status == rebuild.StageStatus.COMPLETED
+        assert candidate.detail == "projected=1"
+        assert driver.queries[-1].parameters["candidate_id"] == "1"
+        assert driver.queries[-1].parameters["skills"] == []
+        for name in rebuild.DEFERRED_STAGES:
+            assert statuses[name].status == rebuild.StageStatus.NOT_IMPLEMENTED
+    finally:
+        await database.dispose()
 
 
 def test_main_destructive_with_injected_client_unimplemented_exit(

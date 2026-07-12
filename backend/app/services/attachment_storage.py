@@ -85,6 +85,8 @@ class AttachmentStorage(Protocol):
 
     async def promote(self, storage_path: str) -> str: ...
 
+    async def restore(self, storage_path: str) -> str: ...
+
     async def delete(self, storage_path: str) -> None: ...
 
     async def open(self, storage_path: str) -> AsyncIterator[bytes]: ...
@@ -185,12 +187,36 @@ class FilesystemAttachmentStorage:
 
     async def promote(self, storage_path: str) -> str:
         """Atomically move a staged object into the active area without overwrite."""
-        area, name = parse_service_storage_path(storage_path)
-        if area != STAGED_AREA:
-            raise AttachmentStorageStateError(safe_message("not staged"))
+        return await self._move_between_areas(
+            storage_path,
+            source_area=STAGED_AREA,
+            destination_area=ACTIVE_AREA,
+            invalid_state="not staged",
+        )
 
-        def _promote_sync() -> str:
-            src_area = self._ops.area_dir(STAGED_AREA)
+    async def restore(self, storage_path: str) -> str:
+        """Atomically return promoted bytes to staged storage for compensation."""
+        return await self._move_between_areas(
+            storage_path,
+            source_area=ACTIVE_AREA,
+            destination_area=STAGED_AREA,
+            invalid_state="not active",
+        )
+
+    async def _move_between_areas(
+        self,
+        storage_path: str,
+        *,
+        source_area: str,
+        destination_area: str,
+        invalid_state: str,
+    ) -> str:
+        area, name = parse_service_storage_path(storage_path)
+        if area != source_area:
+            raise AttachmentStorageStateError(safe_message(invalid_state))
+
+        def _move_sync() -> str:
+            src_area = self._ops.area_dir(source_area)
             src = src_area / name
             if self._ops_is_link(src):
                 raise InvalidStoragePathError(safe_message("invalid path"))
@@ -198,15 +224,17 @@ class FilesystemAttachmentStorage:
                 raise AttachmentStorageNotFoundError(safe_message("not found"))
             if not src.is_file():
                 raise InvalidStoragePathError(safe_message("invalid path"))
-            self._ops.area_dir(ACTIVE_AREA)
-            self._ops.publish_across_areas(STAGED_AREA, name, ACTIVE_AREA, name)
-            active_rel = service_path_for(ACTIVE_AREA, UUID(name))
-            published = self._ops.area_dir(ACTIVE_AREA) / name
+            self._ops.area_dir(destination_area)
+            self._ops.publish_across_areas(
+                source_area, name, destination_area, name
+            )
+            destination_rel = service_path_for(destination_area, UUID(name))
+            published = self._ops.area_dir(destination_area) / name
             if not published.is_file() or self._ops_is_link(published):
-                raise AttachmentStorageIOError(safe_message("promote failed"))
-            return active_rel
+                raise AttachmentStorageIOError(safe_message("move failed"))
+            return destination_rel
 
-        return await asyncio.to_thread(_promote_sync)
+        return await asyncio.to_thread(_move_sync)
 
     async def delete(self, storage_path: str) -> None:
         """Delete a staged or active object. Missing targets are a no-op."""

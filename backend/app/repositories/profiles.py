@@ -18,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import SINGLETON_PK
 from app.db.models.profile import CandidateProfile as CandidateProfileRow
+from app.repositories.graph_outbox import (
+    CANDIDATE_SYNC_OPERATION,
+    GraphOutboxRepository,
+)
 from app.schemas.candidate import CandidateProfile
 
 
@@ -136,6 +140,13 @@ class ProfileRepository:
             integrity_error = exc
         if integrity_error is not None:
             raise ProfileRepositoryError("profile write failed") from integrity_error
+
+        await GraphOutboxRepository(self._session).enqueue(
+            operation=CANDIDATE_SYNC_OPERATION,
+            entity_id=str(SINGLETON_PK),
+            payload={"candidate_id": str(SINGLETON_PK)},
+            requeue_existing=True,
+        )
 
         return ApprovedProfileRecord(
             profile=validated,

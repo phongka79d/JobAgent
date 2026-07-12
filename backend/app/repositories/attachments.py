@@ -19,9 +19,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from app.db.enums import AttachmentState
 from app.db.models.attachments import Attachment
+from app.db.models.profile import CandidateProfile, ProfileDraft
 from app.services.attachment_storage_errors import InvalidStoragePathError
 from app.services.attachment_storage_paths import (
     require_canonical_service_path as _require_canonical_service_path,
@@ -149,6 +151,40 @@ class AttachmentRepository:
             select(Attachment).where(Attachment.file_hash == file_hash)
         )
         return result.scalar_one_or_none()
+
+    async def list_unreferenced_active(self, *, limit: int) -> list[Attachment]:
+        """Return a bounded cleanup slice not referenced by profile or drafts."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise AttachmentRepositoryError("invalid cleanup limit")
+        result = await self._session.execute(
+            self._unreferenced_active_query()
+            .order_by(Attachment.created_at.asc(), Attachment.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_unreferenced_active(
+        self, attachment_id: UUID
+    ) -> Attachment | None:
+        """Load one safe cleanup candidate, or None when still referenced."""
+        result = await self._session.execute(
+            self._unreferenced_active_query().where(Attachment.id == attachment_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def _unreferenced_active_query() -> Select[tuple[Attachment]]:
+        profile_reference = select(CandidateProfile.id).where(
+            CandidateProfile.active_attachment_id == Attachment.id
+        )
+        draft_reference = select(ProfileDraft.id).where(
+            ProfileDraft.source_attachment_id == Attachment.id
+        )
+        return select(Attachment).where(
+            Attachment.state == AttachmentState.ACTIVE.value,
+            ~profile_reference.exists(),
+            ~draft_reference.exists(),
+        )
 
     async def mark_active(
         self,

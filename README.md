@@ -262,7 +262,7 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Plan 4 progress (Batches01-02)
+## Plan 4 progress (Batches01-03)
 
 Batch01 establishes the validated Candidate persistence and context foundation;
 it does not yet ingest or upload CV files:
@@ -292,6 +292,28 @@ Batch02 adds the safe intake-to-pending-draft pipeline:
 - Candidate extraction uses the locked structured adapter with its single
   schema-repair ceiling, normalizes skills, and writes only a pending profile
   draft. Approved profile/preferences and attachment state remain unchanged.
+
+Batch03 adds atomic approved-state replacement and replay-safe Candidate graph
+synchronization behind the pending-draft boundary:
+
+- Approved profile changes enqueue one identifier-only, coalescing Candidate
+  outbox identity in the same SQLite transaction; bounded startup/rebuild
+  processing reloads current canonical state and idempotently replaces the
+  non-excluded `HAS_SKILL` projection.
+- `ProfileCommitService` promotes staged bytes before commit, atomically replaces
+  profile/preference/draft/attachment state, compensates every pre-commit
+  failure including cancellation, and retains durable cleanup work when only
+  old-file cleanup fails.
+
+Focused Batch03 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/infrastructure/test_rebuild_graph.py tests/test_lifecycle.py
+python -m pytest -q tests/services/test_profile_service.py tests/integration/test_profile_replacement.py tests/repositories/test_attachments.py tests/repositories/test_graph_outbox.py
+python -m ruff check app/repositories/graph_outbox.py app/graph/candidate_sync.py app/services/profile_service.py app/services/attachment_storage.py tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/services/test_profile_service.py tests/integration/test_profile_replacement.py
+python -m mypy app/repositories/graph_outbox.py app/graph/candidate_sync.py app/services/profile_service.py app/services/attachment_storage.py app/repositories
+```
 
 ## Plan 3 progress (Batch01)
 
@@ -428,19 +450,20 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 4 Batch02)
+## Current limitations (after Plan 4 Batch03)
 
 - Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
   for local fake-backed proof. Plan 4 now also has safe CV staging, layout text
-  extraction, deterministic PII redaction, and pending-draft extraction.
-- No profile approval transport/UI, Candidate graph sync, JD ingestion,
-  matching, ranking, or evaluation UI yet.
+  extraction, deterministic PII redaction, pending-draft extraction, atomic
+  approved-state replacement, and Candidate graph synchronization.
+- No profile approval transport/UI, JD ingestion, matching, ranking, or
+  evaluation UI yet.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.
 - Production tool registry is empty; the seven Master §13 domain tools are
   reserved names only — Plan 4 registers real tools through the existing seam.
-- Graph rebuild data-load stages after clear+schema remain intentionally
-  incomplete.
+- Graph rebuild now loads the Candidate/Skill slice; Job, JobFamily, embedding,
+  verification, and later data-load stages remain intentionally incomplete.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
 
 ## Plan 4 handoff (Master Phase 3) — stable seams only

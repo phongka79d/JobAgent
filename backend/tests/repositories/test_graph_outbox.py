@@ -152,6 +152,57 @@ async def test_replay_enqueue_returns_same_row_without_reset(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_replay_enqueue_can_requeue_terminal_identity(tmp_path: Path) -> None:
+    async with temporary_db(tmp_path) as db:
+        entity_id = str(uuid4())
+        async with db.session_scope() as session:
+            repo = GraphOutboxRepository(session)
+            row = await repo.enqueue(
+                operation="sync_candidate",
+                entity_id=entity_id,
+                payload={"candidate_id": entity_id},
+            )
+            await repo.mark_failed(row.id, error="neo4j_unavailable")
+            await repo.mark_synced(row.id)
+
+            replay = await repo.enqueue(
+                operation="sync_candidate",
+                entity_id=entity_id,
+                payload={"candidate_id": entity_id},
+                requeue_existing=True,
+            )
+
+            assert replay.id == row.id
+            assert replay.status == OutboxStatus.PENDING.value
+            assert replay.attempts == 1
+            assert replay.payload == {"candidate_id": entity_id}
+            assert replay.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_opt_in_pending_coalescing_replaces_only_safe_payload(tmp_path: Path) -> None:
+    async with temporary_db(tmp_path) as db:
+        entity_id = str(uuid4())
+        async with db.session_scope() as session:
+            repo = GraphOutboxRepository(session)
+            first = await repo.enqueue(
+                operation="sync_candidate",
+                entity_id=entity_id,
+                payload={"candidate_id": entity_id, "revision": 1},
+            )
+            replay = await repo.enqueue(
+                operation="sync_candidate",
+                entity_id=entity_id,
+                payload={"candidate_id": entity_id, "revision": 2},
+                requeue_existing=True,
+            )
+
+            assert replay.id == first.id
+            assert replay.payload == {"candidate_id": entity_id, "revision": 2}
+            assert replay.attempts == 0
+
+
+@pytest.mark.asyncio
 async def test_cross_session_replay_is_idempotent(tmp_path: Path) -> None:
     """After commit, a later session replaying the same identity reuses the row."""
     async with temporary_db(tmp_path) as db:

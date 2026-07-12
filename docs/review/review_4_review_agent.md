@@ -650,32 +650,31 @@ batch_scope_repair
 ACCEPTED
 
 ## Reviewed Scope
-- Batch: Mandatory Batch02 - Safe PDF Intake to Profile Draft
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
 - Task ID: batch_scope
-- Task title: Restore A3-identified historical documentation only
+- Task title: Remove historical report edits from the Batch03 candidate
 - Executor status reported: complete
 
 ## Git Diff Evidence
 - git status reviewed: yes
 - git diff reviewed: yes
-- changed files from the repair: `docs/reports/report_4_execute_agent.md` and `docs/review/review_4_review_agent.md` only; the wider dirty tree is the existing Batch02 candidate.
+- changed files from the repair: `docs/reports/report_4_execute_agent.md` only; the wider dirty tree is the accepted Batch03 candidate.
 
 ## Files Reviewed
-- `docs/reports/report_4_execute_agent.md`: in scope - the four A3-identified historical 01C byte substitutions are restored and the Batch02 report entries remain.
-- `docs/review/review_4_review_agent.md`: in scope - the A3-identified historical 01B mode is restored to `orchestrated`; no task checkbox was changed.
-- `docs/tasks/task_4.md`: inspected only - 02A, 02B, and 02C remain checked.
+- `docs/reports/report_4_execute_agent.md`: in scope - the four A3-identified historical 01C byte substitutions no longer appear in the diff; accepted 03A/03B and current batch-scope evidence remain.
+- `docs/tasks/task_4.md`: inspected only - 03A and 03B remain checked.
 
 ## Validations Reviewed
-- Command/check: targeted historical report byte comparison, Batch02 checkbox inspection, and `git diff --check`
+- Command/check: targeted historical report byte comparison, Batch03 checkbox inspection, and `git diff --check`
 - Required: yes
 - Reported result: passed
-- Rerun result: historical restoration verified through A1 evidence/current diff; 02A/02B/02C checked; no whitespace errors
+- Rerun result: the first execution-report diff hunk is now the current batch-scope block; 03A/03B are checked; no whitespace errors
 - Status: passed
 
 ## Acceptance Review
 - Task acceptance: satisfied
 - Status: satisfied
-- Evidence: The repair is limited to A3's two historical documentation findings; it modifies no implementation, configuration, task tracking, or accepted Batch02 behavior.
+- Evidence: The repair is limited to A3's four historical execution-report byte findings; it modifies no implementation, tests, configuration, task tracking, or accepted Batch03 behavior.
 
 ## Progress Tracking
 - Selected task checkbox before review: n/a
@@ -704,3 +703,234 @@ ACCEPTED
 
 ## Repair Instructions
 - None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12 (Batch03 scope repair)
+- what was re-checked: the exact four historical byte positions, current execution-report diff boundaries, Batch03 checkbox state, and `git diff --check`.
+- repairs verified: no pre-Batch03 historical substitution remains dirty; 03A/03B and the current batch-scope evidence remain intact.
+- remaining issues: None blocking or major.
+- updated outcome: ACCEPTED; A3 may rerun.
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Task ID: 03A
+- Task title: Implement coalescing Candidate outbox work and idempotent graph projection
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `backend/app/graph/__init__.py`, `backend/app/main.py`, `backend/app/repositories/graph_outbox.py`, `backend/app/repositories/profiles.py`, `backend/app/graph/candidate_sync.py`, `infrastructure/scripts/rebuild_graph.py`, `backend/tests/repositories/test_graph_outbox.py`, `backend/tests/graph/test_candidate_sync.py`, `backend/tests/integration/test_candidate_sync.py`, `backend/tests/infrastructure/test_rebuild_graph.py`, `backend/tests/test_lifecycle.py`, and `docs/reports/report_4_execute_agent.md`.
+
+## Files Reviewed
+- `backend/app/repositories/graph_outbox.py`: in scope - opt-in coalescing preserves unrelated replay behavior, validates replacement payloads, preserves attempts, and adds bounded operation filtering/requeue.
+- `backend/app/repositories/profiles.py`: in scope - every singleton replacement enqueues identifier-only Candidate work in the caller-owned transaction.
+- `backend/app/graph/candidate_sync.py`: in scope - current approved state is reloaded from SQLite; one parameter-bound MERGE projection replaces active skill edges and records sanitized retry state.
+- `backend/app/graph/__init__.py`: in scope - exports the focused Candidate synchronization seam.
+- `backend/app/main.py`: in scope - performs one bounded best-effort startup retry.
+- `infrastructure/scripts/rebuild_graph.py`: in scope - rebuilds the Candidate slice after clear/schema and leaves later graph stages explicitly incomplete.
+- `backend/tests/repositories/test_graph_outbox.py`: in scope - covers pending coalescing and terminal identity requeue without duplicate rows.
+- `backend/tests/graph/test_candidate_sync.py`: in scope - covers projection parameters, exclusions, privacy-safe payload, outage replay, slash-bearing skill text, and rebuild replay.
+- `backend/tests/integration/test_candidate_sync.py`: in scope - covers successive approvals, exact current relationships, idempotency, rollback, and outage recovery.
+- `backend/tests/infrastructure/test_rebuild_graph.py`: in scope - verifies the Candidate rebuild stage before deferred stages.
+- `backend/tests/test_lifecycle.py`: in scope - verifies one bounded startup retry; the route-count assertion reflects the already accepted attachment route.
+- `docs/reports/report_4_execute_agent.md`: in scope - matching 03A evidence block is materially accurate.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/infrastructure/test_rebuild_graph.py tests/test_lifecycle.py`
+- Required: yes
+- Reported result: 57 passed
+- Rerun result: 57 passed in 7.03s
+- Status: passed
+- Notes: fake-backed; no provider or live Neo4j access.
+
+- Command/check: `cd backend; python -m ruff check app/repositories/graph_outbox.py app/graph/candidate_sync.py tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+
+- Command/check: `cd backend; python -m mypy app/repositories/graph_outbox.py app/graph/candidate_sync.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success; no issues found in 2 source files
+- Status: passed
+
+- Command/check: `cd backend; python -m pytest -q tests/repositories/test_profiles.py`
+- Required: no
+- Reported result: 7 passed
+- Rerun result: 7 passed in 2.03s
+- Status: passed
+- Notes: confirms the root profile repository behavior remains compatible.
+
+- Command/check: `git diff --check`
+- Required: no
+- Reported result: passed
+- Rerun result: exit 0 with line-ending conversion warnings only
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: Successive approved singleton changes coalesce into one processable durable identity; the projector uses the singleton ID and canonical skill keys, removes stale active edges, excludes corrected skills, retains alias/provisional properties, and never emits trusted `RELATED_TO` edges. Graph failure commits sanitized retry evidence without changing canonical profile data. Startup and rebuild integration are bounded. The immediate post-commit processing seam is available for the dependent 03B commit service, which does not yet exist in production.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch03 - Atomic Approved State and Candidate Graph Sync
+- Task ID: 03B
+- Task title: Atomically commit a draft with filesystem compensation and cleanup retry
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the six A1-reported 03B implementation/test files and matching execution-report block were inspected separately from the accepted pre-existing 03A changes.
+
+## Files Reviewed
+- `backend/app/services/profile_service.py`: in scope - owns promotion, one SQLite transaction, compensation, and bounded cleanup; its repaired `BaseException` boundary compensates promoted bytes before re-raising cancellation unchanged.
+- `backend/app/services/attachment_storage.py`: in scope - adds contained active-to-staged restore by reusing the existing cross-area publication primitive.
+- `backend/app/repositories/attachments.py`: in scope - adds bounded active rows that exclude current profile and draft references.
+- `backend/tests/services/test_profile_service.py`: in scope - covers ordinary mutation/commit/restore/cleanup failures and the repaired cancellation-after-promotion path.
+- `backend/tests/integration/test_profile_replacement.py`: in scope - proves direct promote/restore only.
+- `backend/tests/repositories/test_attachments.py`: in scope - proves referenced attachments are excluded from cleanup selection.
+- `docs/reports/report_4_execute_agent.md`: in scope - the 03B block was updated in place with the repair, red/green regression evidence, and current required validation results.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/services/test_profile_service.py tests/integration/test_profile_replacement.py tests/repositories/test_attachments.py tests/repositories/test_graph_outbox.py`
+- Required: yes
+- Reported result: 59 passed in 6.51s
+- Rerun result: 59 passed in 6.29s
+- Status: passed
+- Notes: the required suite now includes cancellation after filesystem promotion.
+
+- Command/check: `cd backend; python -m ruff check app/services/profile_service.py app/services/attachment_storage.py app/repositories tests/services/test_profile_service.py tests/integration/test_profile_replacement.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+
+- Command/check: `cd backend; python -m mypy app/services/profile_service.py app/services/attachment_storage.py app/repositories`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success; no issues found in 11 source files
+- Status: passed
+
+- Command/check: independent cancellation-after-promotion probe by injecting `asyncio.CancelledError` at `ProfileRepository.replace`
+- Required: supports the every-pre-commit-failure acceptance condition
+- Reported result: passed after first reproducing the prior unreadable staged path
+- Rerun result: passed - cancellation was re-raised while metadata remained staged, the draft remained pending, and the canonical staged bytes were readable
+- Status: passed
+- Notes: the outer `BaseException` cleanup boundary now compensates before preserving non-`Exception` semantics.
+
+- Command/check: `git diff --check`
+- Required: no
+- Reported result: passed
+- Rerun result: passed with line-ending conversion warnings only
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: every pre-commit failure must preserve the prior approved singleton/file and a recoverable pending draft/source.
+- Status: satisfied
+- Evidence: the exact prior cancellation probe is now an automated passing regression; all 59 required tests plus Ruff and mypy pass, and no blocking or major issue remains.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: the prior cancellation finding, repaired production boundary, new regression, exact required pytest/Ruff/mypy commands, git evidence, report accuracy, and 03B checkbox integrity.
+- repairs verified: post-promotion cancellation now restores readable staged bytes before propagating cancellation; the pending draft and canonical metadata remain consistent.
+- remaining issues: None blocking, major, or minor.
+- updated outcome: ACCEPTED (prior outcome: REJECTED).

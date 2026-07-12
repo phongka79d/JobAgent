@@ -6,7 +6,8 @@ polling, worker services, and domain-specific Candidate/Job payload builders
 are intentionally out of scope.
 
 Logical identity is ``(operation, entity_id)``. Replaying the same identity
-returns the existing durable row without resetting attempts or terminal state.
+returns the existing durable row without resetting attempts or terminal state
+unless a domain caller explicitly opts into coalescing the latest safe work.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ _MAX_PAYLOAD_DEPTH = 6
 _MAX_PAYLOAD_NODES = 200
 _MAX_STRING_LEN = 2048
 _MAX_COLLECTION_LEN = 100
+CANDIDATE_SYNC_OPERATION = "sync_candidate"
 
 _OPERATION_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _ENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
@@ -353,11 +355,14 @@ class GraphOutboxRepository:
         operation: str,
         entity_id: str,
         payload: Mapping[str, Any],
+        requeue_existing: bool = False,
     ) -> GraphSyncOutbox:
         """Insert a pending outbox row in the caller's transaction.
 
-        Does not commit. Replaying the same ``(operation, entity_id)`` returns
-        the existing row without mutating attempts, status, payload, or error.
+        Does not commit. By default, replaying the same identity returns the
+        existing row unchanged. ``requeue_existing=True`` replaces the safe
+        payload, clears stale error state, and makes the row pending while
+        preserving its attempt count.
         Concurrent uniqueness conflicts raise ``GraphOutboxDuplicateError``
         after a failed flush; the session remains unusable until the caller
         rolls back.
@@ -366,8 +371,16 @@ class GraphOutboxRepository:
         entity_id = _validate_entity_id(entity_id)
         safe_payload = validate_outbox_payload(payload)
 
+        if not isinstance(requeue_existing, bool):
+            raise GraphOutboxRepositoryError("invalid requeue_existing")
+
         existing = await self.get_by_identity(operation, entity_id)
         if existing is not None:
+            if requeue_existing:
+                existing.payload = safe_payload
+                existing.status = OutboxStatus.PENDING.value
+                existing.last_error = None
+                await self._session.flush()
             return existing
 
         row = GraphSyncOutbox(
@@ -390,7 +403,12 @@ class GraphOutboxRepository:
             ) from None
         return row
 
-    async def claim_pending(self, *, limit: int) -> list[GraphSyncOutbox]:
+    async def claim_pending(
+        self,
+        *,
+        limit: int,
+        operation: str | None = None,
+    ) -> list[GraphSyncOutbox]:
         """Return a bounded, deterministically ordered batch of pending rows.
 
         Order is ``created_at ASC, id ASC``. Does not mutate rows, commit, or
@@ -402,16 +420,46 @@ class GraphOutboxRepository:
         if limit < 1 or limit > _MAX_CLAIM_LIMIT:
             raise GraphOutboxRepositoryError("invalid claim limit")
 
+        statement = select(GraphSyncOutbox).where(
+            GraphSyncOutbox.status == OutboxStatus.PENDING.value
+        )
+        if operation is not None:
+            statement = statement.where(GraphSyncOutbox.operation == _validate_operation(operation))
         result = await self._session.execute(
-            select(GraphSyncOutbox)
-            .where(GraphSyncOutbox.status == OutboxStatus.PENDING.value)
-            .order_by(
+            statement.order_by(
                 GraphSyncOutbox.created_at.asc(),
                 GraphSyncOutbox.id.asc(),
-            )
-            .limit(limit)
+            ).limit(limit)
         )
         return list(result.scalars().all())
+
+    async def requeue_failed_by_operation(
+        self,
+        *,
+        operation: str,
+        limit: int,
+    ) -> list[GraphSyncOutbox]:
+        """Make a bounded ordered slice of failed work claimable again."""
+        operation = _validate_operation(operation)
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise GraphOutboxRepositoryError("invalid claim limit")
+        if limit < 1 or limit > _MAX_CLAIM_LIMIT:
+            raise GraphOutboxRepositoryError("invalid claim limit")
+        result = await self._session.execute(
+            select(GraphSyncOutbox)
+            .where(
+                GraphSyncOutbox.operation == operation,
+                GraphSyncOutbox.status == OutboxStatus.FAILED.value,
+            )
+            .order_by(GraphSyncOutbox.created_at.asc(), GraphSyncOutbox.id.asc())
+            .limit(limit)
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            row.status = OutboxStatus.PENDING.value
+        if rows:
+            await self._session.flush()
+        return rows
 
     async def mark_synced(self, outbox_id: UUID) -> GraphSyncOutbox:
         """Transition pending or failed work to synced. Does not commit."""

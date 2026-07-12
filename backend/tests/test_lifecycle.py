@@ -237,7 +237,8 @@ def test_chat_service_injected_in_lifespan_without_provider_network(
         assert "/api/chat/history" in paths
         assert "/api/chat/turns" in paths
         assert "/api/chat/runs/{run_id}/resume" in paths
-        assert len(paths) == 4
+        assert "/api/attachments/cv" in paths
+        assert len(paths) == 5
 
 
 def test_lifespan_uses_injected_settings_loader(tmp_path: Path) -> None:
@@ -263,3 +264,58 @@ def test_lifespan_uses_injected_settings_loader(tmp_path: Path) -> None:
     with TestClient(application) as client:
         assert client.get("/api/health").status_code == 200
     assert calls["n"] == 1
+
+
+def test_lifespan_retries_failed_candidate_sync_once(tmp_path: Path) -> None:
+    from app.repositories.graph_outbox import GraphOutboxRepository
+    from app.repositories.profiles import ProfileRepository
+    from app.schemas.candidate import CandidateProfile
+
+    settings = _settings(tmp_path)
+    db = create_session_manager(settings.sqlite_path)
+
+    async def seed() -> None:
+        await db.create_all()
+        profile = CandidateProfile.model_validate(
+            {
+                "summary": "Engineer.",
+                "current_title": "Engineer",
+                "total_experience_years": None,
+                "skills": [],
+                "experiences": [],
+                "education": [],
+                "languages": [],
+                "extraction_confidence": 0.8,
+            }
+        )
+        async with db.session_scope() as session:
+            await ProfileRepository(session).replace(profile)
+            row = await GraphOutboxRepository(session).get_by_identity(
+                "sync_candidate", "1"
+            )
+            assert row is not None
+            await GraphOutboxRepository(session).mark_failed(
+                row.id, error="neo4j_unavailable"
+            )
+
+    import anyio
+
+    anyio.run(seed)
+    driver = FakeDriver()
+    application = create_app(
+        settings=settings,
+        session_manager=db,
+        storage=FilesystemAttachmentStorage(settings.files_dir),
+        neo4j_client=Neo4jClient.from_settings(
+            settings,
+            driver_factory=lambda: driver,
+            health_timeout_seconds=0.2,
+        ),
+        run_schema_setup=False,
+    )
+    with TestClient(application) as client:
+        assert client.get("/api/health").status_code == 200
+    candidate_queries = [
+        item for item in driver.queries if "MERGE (c:Candidate" in item.query
+    ]
+    assert len(candidate_queries) == 1
