@@ -248,7 +248,7 @@ deduplicate, embed, synchronize, register tools, or change public routes.
 
 ### Tasks
 
-- [ ] (01A): Enforce DNS/redirect-aware URL policy and bounded HTTP retrieval
+- [x] (01A): Enforce DNS/redirect-aware URL policy and bounded HTTP retrieval
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.1 URL security contract`; `docs/plans/Plan_5.md` > `## 5. Out of Scope`; `docs/plans/Master_plan.md` > `### 11.2 URL security`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Permit only credential-free HTTP/HTTPS URLs; block localhost, loopback, private, link-local, unspecified, multicast, and metadata destinations for IPv4 and IPv6.
@@ -274,7 +274,7 @@ deduplicate, embed, synchronize, register tools, or change public routes.
   - Blocked Condition: Locked httpx/Trafilatura versions cannot be resolved for Python 3.13 or the chosen transport cannot bind/verify vetted addresses; report `BLOCKED_BY_ENVIRONMENT` or `BLOCKED_BY_SOURCE_CONFLICT` with evidence and do not weaken SSRF policy.
   - Files: `backend/app/security/__init__.py`, `backend/app/security/url_policy.py`, `backend/app/services/url_fetcher.py`, `backend/pyproject.toml`, `backend/tests/security/test_url_policy.py`, `backend/tests/services/test_url_fetcher.py`
 
-- [ ] (01B): Produce deterministic meaningful JD text from URL or pasted input
+- [x] (01B): Produce deterministic meaningful JD text from URL or pasted input
   - Source of Truth: `docs/plans/Plan_5.md` > `## 4. Scope`; `docs/plans/Plan_5.md` > `## 5. Out of Scope`; `docs/plans/Plan_5.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 11.1 Accepted inputs`; `docs/plans/Master_plan.md` > `### 11.2 URL security`
   - Source Requirements:
     - Accept exactly one public URL or raw JD text, use Trafilatura only for HTML main text, and use plain text directly.

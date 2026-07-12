@@ -1,0 +1,10 @@
+Senior Backend Engineer
+
+Company: Example Corp
+Location: Remote
+
+Responsibilities:
+- Design and implement APIs with Python and FastAPI.
+- Collaborate with product and design.
+
+Required skills: Python, FastAPI, SQL

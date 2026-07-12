@@ -79,6 +79,8 @@ out of scope.
 | LangGraph | `langgraph==1.2.9` (optional extra / later execution plans) |
 | Neo4j driver | `neo4j==6.2.0` |
 | Compose Neo4j image | `neo4j:5.26-community` |
+| HTTP fetch (Plan 5) | `httpx==0.28.1` (SSRF-safe bounded fetch; no ambient proxy/cookies/auth) |
+| HTML main text (Plan 5) | `trafilatura==2.1.0` (URL path only; paste path is plain text) |
 
 Normal automated tests use fakes or temporary local files and never call
 ShopAIKey. Optional Phase 0 live diagnostics remain separate (see below).
@@ -569,24 +571,59 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 4 Batch06 / Phase 3 exit)
+## Current limitations (after Plan 5 Batch01)
 
 - Phase 3 CV-to-approved-profile workflow is complete for local fake-backed
   proof: shared upload, redaction/extraction, draft-only proposal/correction,
   guarded approval, atomic replacement, Candidate graph sync, public profile
   reads, and the shared Astryx sidebar/composer experience.
-- JD ingestion, Job graph data, matching, ranking, evaluation UI, OCR/DOCX/image
-  CVs, profile history, and a full profile editor remain out of scope.
+- Plan 5 Batch01 added **internal** safe JD URL/paste acquisition only (SSRF
+  policy, bounded fetch, Trafilatura/plain canonical text). It does **not**
+  expose tools, public job routes, Job persistence, extraction, embeddings, or
+  Job graph sync yet.
+- Matching, ranking, evaluation UI, OCR/DOCX/image CVs, profile history, and a
+  full profile editor remain out of scope.
 - No public profile/job CRUD mutations, authentication, continuous outbox
   worker, Qdrant, CI, or cloud deployment.
 - Production registers the four Plan 4 Candidate tools only; Job ingestion,
-  query, and matching tools remain reserved for later phases.
+  query, and matching tools remain reserved for later Plan 5 batches.
 - Graph rebuild loads the Candidate/Skill slice; Job, JobFamily, embedding,
   verification, and later data-load stages remain intentionally incomplete.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
 - Optional live ShopAIKey/Neo4j/Compose observation is not required for Phase 3
   acceptance and is not claimed here unless the user supplies ignored secrets
   and records a separate observation.
+
+## Plan 5 progress (Batch01) — safe public JD input acquisition
+
+**Plan 5 Batch01 is evidence-backed.** Normal automated tests use injected DNS
+and transport fakes only — no public network fetches and no ShopAIKey calls.
+
+| Batch | Outcome |
+|---|---|
+| Batch01 | DNS/redirect-aware URL policy, bounded HTTP retrieval, deterministic URL-or-paste JD text acquisition |
+
+Batch01 establishes the controlled acquisition foundation only:
+
+- Credential-free HTTP/HTTPS policy blocks localhost, metadata, and forbidden
+  IPv4/IPv6 classes; every DNS answer and redirect target is re-validated
+  (`backend/app/security/url_policy.py`).
+- Bounded fetch uses pinned `httpx`, at most three redirects, configured
+  timeout/body ceilings, `text/html|text/plain` only, and code-only failures
+  (`backend/app/services/url_fetcher.py`).
+- Exactly one URL or raw pasted JD produces canonical Unicode text plus SHA-256
+  content hash; HTML uses Trafilatura main text only; blank extraction returns
+  `JD_TEXT_REQUIRED` with no browser/alternate-parser fallback
+  (`backend/app/services/jd_source.py`).
+
+Focused Batch01 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/security/test_url_policy.py tests/services/test_url_fetcher.py tests/services/test_jd_source.py
+python -m ruff check app/security app/services/url_fetcher.py app/services/jd_source.py tests/security tests/services/test_url_fetcher.py tests/services/test_jd_source.py
+python -m mypy app/security app/services/url_fetcher.py app/services/jd_source.py
+```
 
 ## Plan 5 handoff (Master Phase 4) — stable seams only
 

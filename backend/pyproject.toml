@@ -24,6 +24,9 @@ dependencies = [
     "langgraph-checkpoint-sqlite==3.1.0",
     # Plan 4 skill seed loader (01B): approval-only skills_seed.yaml.
     "PyYAML==6.0.2",
+    # Plan 5 Batch01: locked HTTP client + HTML main-text extraction stack.
+    "httpx==0.28.1",
+    "trafilatura==2.1.0",
 ]
 
 [tool.setuptools.package-data]
