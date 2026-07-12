@@ -50,7 +50,7 @@ Persistence ownership:
 | Filesystem (`FILES_DIR`) | Uploaded attachment bytes under service-owned `staged/` and `active/` paths |
 | Neo4j | Derived, fully rebuildable graph data only; never the sole copy of canonical state |
 
-Public application endpoints after Plan 4 Batch05:
+Public application endpoints after Plan 4 (exactly seven application routes):
 
 - `GET /api/health`
 - `POST /api/attachments/cv`
@@ -265,7 +265,20 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Plan 4 progress (Batches01-05)
+## Plan 4 progress (Batches01-06) — Phase 3 exit
+
+**Plan 4 Phase 3 (CV, Candidate Profile, approval workflow) is evidence-backed
+across Batches 01–06.** Normal automated tests use injected fakes and temporary
+local files only — zero real ShopAIKey calls and zero live Neo4j requirements.
+
+| Batch | Outcome |
+|---|---|
+| Batch01 | Strict Candidate/Preference/draft contracts, skill normalization, repositories |
+| Batch02 | Safe PDF intake, layout extraction, PII redaction, pending-draft extraction |
+| Batch03 | Atomic approved replacement + replay-safe Candidate graph outbox/sync |
+| Batch04 | Four production tools on the existing approval/resume seam |
+| Batch05 | Public profile reads + shared Astryx sidebar/composer CV experience |
+| Batch06 | Full fake-backed backend/frontend exit proof + Plan 5 handoff |
 
 Batch01 establishes the validated Candidate persistence and context foundation;
 it does not yet ingest or upload CV files:
@@ -351,6 +364,75 @@ Batch05 adds the public read surface and shared Astryx CV experience:
 - Profile proposals use a bounded approval card. **Save Profile** resumes the
   guarded approval, while **Request Changes** sends the next composer message
   through the same-run correction workflow before presenting a fresh card.
+
+Batch06 proves the complete Phase 3 slice end-to-end with fakes only:
+
+- Backend full workflow: synthetic digital PDF upload → redacted structured
+  extraction → same-draft correction → unauthorized commit rejected → one
+  approval → profile/preferences/active file persisted → Candidate outbox
+  process/replay (no duplicate nodes/edges, no excluded skill edges) → restart
+  re-read of approved state
+  (`backend/tests/integration/test_full_profile_workflow.py`).
+- Replacement failure injection: every pre-commit boundary leaves the prior
+  profile/CV readable; cleanup-only failure leaves the new state readable and
+  retryable. Upload/pipeline failures return sanitized codes with zero contact
+  sentinel leakage across requests, SSE, history, durable rows, outbox, and logs.
+- Frontend full workflow: raw SSE through the real parser/reducer/shell for
+  sidebar upload, composer token, proposal card, Request Changes, Save Profile,
+  duplicate actions, errors, and disconnect
+  (`frontend/src/test/profile-workflow.integration.test.tsx`).
+- Production exposure: exactly four Candidate tools; application routes are
+  exactly the seven authorized paths above; synthetic tools and later Job tools
+  remain absent from production modules.
+
+### Phase 3 quality gates (evidence-backed commands)
+
+Backend (no ShopAIKey network calls):
+
+```powershell
+cd backend
+python -m ruff check app tests
+python -m mypy app
+python -m pytest -q
+python -m pytest -q tests/integration/test_full_profile_workflow.py
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm ci --ignore-scripts
+npm run check:astryx
+npm run lint
+npm run typecheck
+npm run test -- --run
+npm run test -- --run src/test/profile-workflow.integration.test.tsx
+npm run build
+```
+
+Compose static (uses `.env.example`; no live secrets required):
+
+```powershell
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml config
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml build
+```
+
+Production exposure / route inventory scans (domain names present only where
+authorized; four Candidate tools and the seven application routes are allowed):
+
+```powershell
+rg -n "synthetic|echo_label|raw_cv|document_text|contact_address|propose_profile_from_cv|commit_profile_draft|save_job|match_jobs" backend/app frontend/src
+rg -n "@(router|app)\.(get|post|put|patch|delete)" backend/app/api
+git diff --check
+```
+
+Optional live observation (user-owned root `.env` only; not required for
+acceptance and not claimed as run by this handoff):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d
+# Then one user-observed upload/approve/read flow against real secrets.
+```
 
 ## Plan 3 progress (Batch01)
 
@@ -487,28 +569,53 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 4 Batch04)
+## Current limitations (after Plan 4 Batch06 / Phase 3 exit)
 
-- Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
-  for local fake-backed proof. Plan 4 now also has safe CV staging, layout text
-  extraction, deterministic PII redaction, pending-draft extraction, atomic
-  approved-state replacement, Candidate graph synchronization, four production
-  Candidate tools, and backend same-run approval/correction transport.
-- The shared frontend CV upload/profile approval experience is not implemented
-  yet; neither are JD ingestion, matching, ranking, or evaluation UI.
-- No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
-  CI, or cloud deployment.
+- Phase 3 CV-to-approved-profile workflow is complete for local fake-backed
+  proof: shared upload, redaction/extraction, draft-only proposal/correction,
+  guarded approval, atomic replacement, Candidate graph sync, public profile
+  reads, and the shared Astryx sidebar/composer experience.
+- JD ingestion, Job graph data, matching, ranking, evaluation UI, OCR/DOCX/image
+  CVs, profile history, and a full profile editor remain out of scope.
+- No public profile/job CRUD mutations, authentication, continuous outbox
+  worker, Qdrant, CI, or cloud deployment.
 - Production registers the four Plan 4 Candidate tools only; Job ingestion,
   query, and matching tools remain reserved for later phases.
-- Graph rebuild now loads the Candidate/Skill slice; Job, JobFamily, embedding,
+- Graph rebuild loads the Candidate/Skill slice; Job, JobFamily, embedding,
   verification, and later data-load stages remain intentionally incomplete.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
+- Optional live ShopAIKey/Neo4j/Compose observation is not required for Phase 3
+  acceptance and is not claimed here unless the user supplies ignored secrets
+  and records a separate observation.
 
-## Plan 4 handoff (Master Phase 3) — stable seams only
+## Plan 5 handoff (Master Phase 4) — stable seams only
 
-Plan 4 receives these **stable Phase 2 primitives** and must extend them rather
-than recreate alternate graphs, conversations, SSE contracts, or tool HTTP
+Plan 5 receives these **stable Phase 3 outputs** and must extend them rather
+than recreate profile approval, skill canonicalization, or alternate outbox
 paths:
+
+| Seam | Location / contract |
+|---|---|
+| Approved singleton profile + preferences | SQLite `CandidateProfile` / `JobPreferences` via `backend/app/repositories/profiles.py`, `preferences.py`; public reads `GET /api/profile`, `GET /api/profile/cv` |
+| Skill normalization | Shared provisional/verified rules + seed (`backend/app/services/skill_normalization.py`, `backend/app/data/skills_seed.yaml`) |
+| Redaction / structured extraction | Deterministic PII redaction + locked ShopAIKey structured adapter (`backend/app/services/pii_redaction.py`, `profile_extraction.py`, `shopaikey_chat.py`) |
+| Tool authorization | Four Candidate tools only; application-state auth for commit (`backend/app/tools/`, `backend/app/tools/registry.py`) |
+| Outbox / Candidate graph sync | Identifier-only Candidate outbox + rebuildable projection (`backend/app/repositories/graph_outbox.py`, `backend/app/graph/candidate_sync.py`) |
+| Structured card / SSE seams | Eight-event SSE union + profile approval payload through `approval_required` (`backend/app/schemas/sse.py`; frontend `frontend/src/features/chat/`) |
+| Shared upload / shell | One multipart client for sidebar + composer (`frontend/src/features/profile/`); single `AppShell` chat experience |
+| Public application routes | Exactly the seven routes listed above |
+| Phase 2 transport primitives | One LangGraph, turn/resume idempotency, checkpoint lifecycle, Compose/config/health |
+
+Plan 5 owns **only** JD persistence/extraction/deduplication and Job graph
+synchronization. It must **not** alter profile approval semantics, create
+profile history, duplicate skill canonicalization, bypass the outbox, invent a
+second graph/SSE contract, add public profile mutations, or call tools back
+into FastAPI.
+
+## Plan 4 handoff consumed by Phase 3 (stable Phase 2 primitives)
+
+Plan 4 extended these **stable Phase 2 primitives** rather than recreating
+alternate graphs, conversations, SSE contracts, or tool HTTP paths:
 
 | Seam | Location / contract |
 |---|---|
@@ -518,16 +625,11 @@ paths:
 | One controlled LangGraph | `backend/app/agent/graph.py` — decision → `ToolNode` → iteration guard → approval interrupt → persist → checkpoint cleanup |
 | Approval / idempotency | Same run/thread resume; turn + resume idempotency keys; no write replay (`ChatService`, `AgentRunRepository`) |
 | Repositories | Conversation/messages, agent runs, tool executions (`backend/app/repositories/`) |
-| Context assembly | Bounded recent window + attachment IDs only (`backend/app/services/chat_context.py`) |
+| Context assembly | Bounded recent window + attachment IDs + compact approved profile context |
 | Prompt / domain redirect | System policy + untrusted document delimiters + zero-tool redirect (`backend/app/agent/prompt.py`) |
-| Tool registration | Phase 2 established graph-time injection; Plan 4 Batch04 now registers four Candidate tools (`backend/app/tools/registry.py`) |
+| Tool registration | Plan 4 registers exactly four Candidate tools (`backend/app/tools/registry.py`) |
 | ShopAIKey adapter | Locked model/modes (`backend/app/services/shopaikey_chat.py`); normal tests use fakes |
 | Compose / config | Root `.env` contract, three-service Compose, sanitized `GET /api/health` |
-
-Plan 4 Batch04 added CV/profile tools and approval payloads **through these
-seams**. Later work must **not** create a second graph, second conversation
-path, alternate SSE contract, direct frontend→store/provider access, or HTTP
-calls from tools back into FastAPI.
 
 ## Prior phase handoff consumed by Plan 3
 

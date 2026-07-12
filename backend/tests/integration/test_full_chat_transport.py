@@ -60,11 +60,11 @@ SENTINEL_URI = "bolt://full-transport-test.invalid:7687"
 # Unique raw tool-argument value that must never reach public/durable surfaces.
 RAW_ARG_SENTINEL = "RAW_ARG_SENTINEL_7f3a9c2e_UNIQUE_PING_xQ9m"
 
-# Production modules must not import or hardcode the test-only tool name.
+# Production modules must not import synthetic helpers or later Job tools.
+# Plan 4 Candidate tools (including commit_profile_draft) are authorized.
 _PRODUCTION_FORBIDDEN_RE = re.compile(
     r"echo_label|make_echo_label_tool|tests\.fakes\.agent_tools|"
-    r"commit_profile_draft\s*\(|save_job\s*\(|query_jobs\s*\(|"
-    r"match_jobs\s*\("
+    r"save_job\s*\(|query_jobs\s*\(|match_jobs\s*\("
 )
 
 
@@ -803,15 +803,37 @@ async def test_full_path_disconnect_reconnect_no_replay(tmp_path: Path) -> None:
 
 
 def test_production_registry_seam_and_no_forbidden_tool_exposure() -> None:
+    # Empty default registry remains a valid injection base; Plan 4 production
+    # startup registers exactly the four Candidate tools via create_production_registry.
+    from app.tools.registry import (
+        CURRENT_PROFILE_TOOL_NAMES,
+        create_production_registry,
+    )
+    from langchain_core.tools import StructuredTool
+
     registry = ToolRegistry()
     assert len(registry) == 0
     assert "echo_label" not in registry
     assert "propose_action" not in registry
-    assert "propose_profile_from_cv" not in registry
     assert "match_jobs" not in registry
 
-    # Production may implement the three accepted 04A Candidate tools, but not
-    # synthetic helpers, guarded commit (04B), or later Job/matching tools.
+    production = create_production_registry(
+        [
+            StructuredTool.from_function(
+                func=lambda: "ok", name=name, description=name
+            )
+            for name in sorted(CURRENT_PROFILE_TOOL_NAMES)
+        ]
+    )
+    assert production.names() == CURRENT_PROFILE_TOOL_NAMES
+    assert production.names() == {
+        "get_candidate_context",
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    }
+
+    # Synthetic helpers and later Job/matching tools must not appear in app code.
     hits: list[str] = []
     for path in APP_SRC.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
@@ -848,21 +870,23 @@ async def test_full_path_route_inventory_only_approved_public_paths(
         )
         with TestClient(application) as client:
             paths = set(client.app.openapi()["paths"])  # type: ignore[attr-defined]
-            assert paths == {
+            # Plan 4 application surface: health + CV upload + profile reads + chat.
+            app_paths = {p for p in paths if p.startswith("/api/")}
+            assert app_paths == {
                 "/api/health",
+                "/api/attachments/cv",
+                "/api/profile",
+                "/api/profile/cv",
                 "/api/chat/history",
                 "/api/chat/turns",
                 "/api/chat/runs/{run_id}/resume",
             }
             forbidden_fragments = (
                 "synthetic",
-                "upload",
-                "profile",
                 "job",
                 "match",
-                "attachment",
             )
-            for path in paths:
+            for path in app_paths:
                 lowered = path.lower()
                 for frag in forbidden_fragments:
                     assert frag not in lowered, path

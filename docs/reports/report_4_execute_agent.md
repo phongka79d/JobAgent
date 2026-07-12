@@ -2178,3 +2178,151 @@ complete
 - no Batch06 / Phase exit work
 - no checkbox/batch status update
 - no git stage or commit
+
+---
+
+# Task Execution Report - 06A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch06 - Phase 3 Exit Proof and Plan 5 Handoff
+
+## Task
+06A - Prove the full profile workflow and publish the Plan 5 handoff
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch06 - Phase 3 Exit Proof and Plan 5 Handoff
+- Task ID: 06A
+- Task title: Prove the full profile workflow and publish the Plan 5 handoff
+- Files allowed / repair scope: A2 same-task repair — oversized PDF proof + split full profile workflow test monolith; test-only under backend/tests/
+
+## Source of Truth Used
+- docs/plans/Plan_4.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_4.md > ## 10. Handoff Notes for Plan 5 (Master Phase 4)
+- docs/plans/Master_plan.md > ## 24. Local Testing Strategy
+- docs/plans/Master_plan.md > ### Phase 3 — CV, Candidate Profile, and approval workflow
+
+## Dependency and User Action Check
+- dependencies satisfied: yes (Batches 01-05 accepted; Plan 2/3 fixtures present)
+- user actions satisfied: yes (none required; optional live observation not run)
+
+## Files Inspected Before Editing
+- backend/tests/integration/test_full_profile_workflow.py (prior monolith)
+- backend/app/services/cv_ingestion.py (PDF_TOO_LARGE / size gate)
+- backend/app/api/attachments.py (413 mapping)
+- backend/tests/fixtures/cv_pdfs/__init__.py
+- docs/reports/report_4_execute_agent.md
+
+## Completed Work
+- Initial 06A: full fake-backed backend/frontend Phase 3 exit proof, route/registry updates, README Plan 5 handoff (prior execution).
+- Same-task repair (A2 REJECTED):
+  1. Added real oversized-PDF rejection with reduced `MAX_PDF_SIZE_MB=1`, asserting HTTP 413 / `PDF_TOO_LARGE` and zero profile, draft, attachment, outbox, and staged/active file effects.
+  2. Split the ~1055-line monolith into shared support + workflow/failure/exposure case modules under `backend/tests/integration/profile_workflow/`, re-exported from the historical `test_full_profile_workflow.py` entry so focused collection still runs the full suite once.
+
+## Files Created or Modified
+- backend/tests/integration/test_full_profile_workflow.py (entrypoint re-exports; prior monolith replaced)
+- backend/tests/integration/profile_workflow/__init__.py (created)
+- backend/tests/integration/profile_workflow/support.py (created)
+- backend/tests/integration/profile_workflow/workflow_cases.py (created)
+- backend/tests/integration/profile_workflow/failure_cases.py (created; includes oversized PDF)
+- backend/tests/integration/profile_workflow/exposure_cases.py (created)
+- frontend/src/test/profile-workflow.integration.test.tsx (prior 06A)
+- backend/tests/integration/test_full_chat_transport.py (prior 06A)
+- backend/tests/api/test_chat.py (prior 06A)
+- backend/tests/api/test_health.py (prior 06A)
+- backend/tests/integration/test_chat_transport.py (prior 06A)
+- backend/tests/test_config.py (prior 06A)
+- backend/app/schemas/attachments.py (prior 06A)
+- README.md (prior 06A)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m ruff check app tests`
+  - required: yes
+  - result: passed
+  - evidence or reason: All checks passed (repair re-run)
+- command/check: `cd backend; python -m mypy app`
+  - required: yes
+  - result: passed
+  - evidence or reason: Success: no issues found in 75 source files (repair re-run)
+- command/check: `cd backend; python -m pytest -q tests/integration/test_full_profile_workflow.py`
+  - required: yes
+  - result: passed
+  - evidence or reason: 7 passed (includes oversized PDF case)
+- command/check: `cd backend; python -m pytest -q`
+  - required: yes
+  - result: passed
+  - evidence or reason: 808 passed, 2 skipped (repair re-run)
+- command/check: prior 06A frontend/docker/exposure gates
+  - required: yes (initial task)
+  - result: passed
+  - evidence or reason: unchanged by this repair; initial 06A evidence retained
+
+## Acceptance Check
+- condition: Full fake-backed backend/frontend flows pass with zero real provider calls and zero contact sentinel leakage across application surfaces
+  - status: satisfied
+  - evidence: re-exported suite 7 passed + prior frontend integration
+- condition: Unauthorized/direct/duplicate actions cause zero extra profile/file/draft/tool/outbox effects; restart retains approved corrections/preferences
+  - status: satisfied
+  - evidence: workflow_cases happy path
+- condition: Every pre-commit injected failure leaves prior profile/CV readable; cleanup-only failure leaves new state readable and retryable
+  - status: satisfied
+  - evidence: failure_cases replacement injection
+- condition: Oversized PDF rejected with sanitized code and zero durable side effects
+  - status: satisfied
+  - evidence: test_oversized_pdf_rejected_with_zero_side_effects (MAX_PDF_SIZE_MB=1, 413 PDF_TOO_LARGE)
+- condition: Candidate outbox replay produces no duplicate nodes/relationships and no excluded active skill edge
+  - status: satisfied
+  - evidence: process_candidate_sync_outbox + rebuild_candidate_projection
+- condition: Root README truthfully records Plan 4 completion evidence, commands/routes, limitations, Plan 5 ownership boundary
+  - status: satisfied
+  - evidence: prior 06A README; not altered by repair
+- condition: Monolith split into focused support/workflow/failure/exposure modules
+  - status: satisfied
+  - evidence: profile_workflow package + thin historical entrypoint
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Reused existing fixtures rather than a second harness.
+- Case modules use non-`test_` package paths and re-export through the historical entry so full suite does not double-collect.
+- Oversized proof uses deliberately reduced `MAX_PDF_SIZE_MB=1` settings override and stream-exceeding payload with valid `%PDF-` magic.
+
+## Risks or Open Issues
+- None blocking. Support/workflow modules are slightly above 300 lines where the E2E/shared setup cannot shrink further without losing coverage.
+
+## Notes for Review Agent
+- changed files this repair: profile_workflow package + test_full_profile_workflow.py entry
+- validations to rerun: ruff, mypy, focused full_profile_workflow, full pytest
+- risk areas: re-export collection pattern; reduced MAX_PDF_SIZE_MB isolation
+- next task readiness: can_review
+- no stage/commit; no checkbox/batch status update
+
+## Workflow Integrity Check
+- exactly one task repaired: 06A
+- no Plan 5/JD/matching or production behavior changes
+- no checkbox/batch status update
+- no git stage or commit
+
+## Repair Log
+
+### 2026-07-12 (A2 REJECTED same_task_repair)
+- reason for repair: A2 rejected missing real oversized-PDF path and required split of 1055-line monolith into focused modules
+- changes made:
+  - Added `test_oversized_pdf_rejected_with_zero_side_effects` using `MAX_PDF_SIZE_MB=1` and `oversized_pdf_bytes`; asserts 413/`PDF_TOO_LARGE` and zero profile/draft/attachment/outbox/filesystem effects
+  - Split suite into `profile_workflow/support.py`, `workflow_cases.py`, `failure_cases.py`, `exposure_cases.py`; historical entry re-exports for single collection
+- validations rerun: `ruff check app tests` pass; `mypy app` pass; focused workflow 7 passed; full pytest 808 passed, 2 skipped
+- outcome: complete

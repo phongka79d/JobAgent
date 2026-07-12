@@ -437,6 +437,9 @@ async def test_route_inventory_and_cors_on_live_app(tmp_path: Path) -> None:
             paths = set(client.app.openapi()["paths"])  # type: ignore[attr-defined]
             assert paths == {
                 "/api/health",
+                "/api/attachments/cv",
+                "/api/profile",
+                "/api/profile/cv",
                 "/api/chat/history",
                 "/api/chat/turns",
                 "/api/chat/runs/{run_id}/resume",

@@ -650,7 +650,7 @@ future hardening features.
 
 ### Tasks
 
-- [ ] (06A): Prove the full profile workflow and publish the Plan 5 handoff
+- [x] (06A): Prove the full profile workflow and publish the Plan 5 handoff
   - Source of Truth: `docs/plans/Plan_4.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_4.md` > `## 10. Handoff Notes for Plan 5 (Master Phase 4)`; `docs/plans/Master_plan.md` > `## 24. Local Testing Strategy`; `docs/plans/Master_plan.md` > `### Phase 3 — CV, Candidate Profile, and approval workflow`
   - Source Requirements:
     - Prove shared sidebar/chat upload, draft-only proposal/correction, guarded approval, atomic replacement, restart persistence, PII isolation, and replay-safe Candidate sync.
