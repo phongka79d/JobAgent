@@ -36,12 +36,21 @@ from app.services.embeddings import (
     validate_embedding_vectors,
 )
 from dotenv import dotenv_values
+
 from evaluation.embedding_benchmark_schema import (
     AggregateEmbeddingResult,
     CompatibilityEvidence,
     LatencyMetrics,
     PassCriteriaSnapshot,
     QualityMetrics,
+)
+from evaluation.metrics import (
+    RANKING_METRIC_K,
+    ndcg_at_k,
+    percentile,
+)
+from evaluation.metrics import (
+    RELEVANT_LABEL_MIN as SHARED_RELEVANT_LABEL_MIN,
 )
 
 # Phase 0 historical name for configuration failures.
@@ -114,8 +123,9 @@ DEFAULT_OUTPUT = (
     / "embedding_benchmark.json"
 )
 
-RELEVANT_LABEL_MIN = 2
-METRIC_K = 10
+# Shared ranking relevance floor (Master §19.5 labels 2–3); re-export for callers.
+RELEVANT_LABEL_MIN = SHARED_RELEVANT_LABEL_MIN
+METRIC_K = RANKING_METRIC_K
 
 
 @dataclass(frozen=True)
@@ -353,23 +363,6 @@ def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     return dot / (math.sqrt(left_norm) * math.sqrt(right_norm))
 
 
-def _dcg_at_k(relevances: Sequence[float], k: int) -> float:
-    total = 0.0
-    for index, relevance in enumerate(relevances[:k]):
-        total += (2.0 ** float(relevance) - 1.0) / math.log2(index + 2.0)
-    return total
-
-
-def ndcg_at_k(relevances_in_rank_order: Sequence[float], k: int = METRIC_K) -> float:
-    if not relevances_in_rank_order or k <= 0:
-        return 0.0
-    dcg = _dcg_at_k(relevances_in_rank_order, k)
-    ideal = _dcg_at_k(sorted(relevances_in_rank_order, reverse=True), k)
-    if ideal <= 0.0:
-        return 0.0
-    return dcg / ideal
-
-
 def recall_at_k(
     relevances_in_rank_order: Sequence[int],
     *,
@@ -395,24 +388,7 @@ def median(values: Sequence[float]) -> float:
     return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
-def percentile(values: Sequence[float], p: float) -> float:
-    """Inclusive linear-interpolation percentile for p in [0, 100]."""
-    if not values:
-        return 0.0
-    if p <= 0:
-        return float(min(values))
-    if p >= 100:
-        return float(max(values))
-    ordered = sorted(float(v) for v in values)
-    if len(ordered) == 1:
-        return ordered[0]
-    rank = (p / 100.0) * (len(ordered) - 1)
-    low = int(math.floor(rank))
-    high = int(math.ceil(rank))
-    if low == high:
-        return ordered[low]
-    weight = rank - low
-    return ordered[low] * (1.0 - weight) + ordered[high] * weight
+# ndcg_at_k and percentile are imported from evaluation.metrics (shared pure primitives).
 
 
 def _read_json(path: Path) -> dict[str, Any]:

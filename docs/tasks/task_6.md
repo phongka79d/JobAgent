@@ -496,7 +496,7 @@ metrics, or change production weights.
 
 ### Tasks
 
-- [ ] (05A): Seal private dataset contracts and the fixed 60/20/20 split
+- [x] (05A): Seal private dataset contracts and the fixed 60/20/20 split
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.6 Evaluation protocol`; `docs/plans/Master_plan.md` > `### 19.1 Data policy` through `### 19.4 Tool-selection dataset`; `docs/plans/Master_plan.md` > `### 22.4 Logging`
   - Source Requirements:
     - Define local inputs for 150-200 relevance-labeled public JDs, at least 30 extraction annotations, at least 50 tool scenarios, and one Candidate context under the locked privacy policy.
@@ -522,7 +522,7 @@ metrics, or change production weights.
   - Blocked Condition: Existing tracked evaluation data contains real/private content or the split cannot be sealed without exposing held-out labels to tuning code; report `BLOCKED_BY_SECURITY` and do not proceed to runner or evaluation work.
   - Files: `backend/evaluation/dataset_contracts.py`, `backend/evaluation/split_protocol.py`, `backend/evaluation/labels/matching_protocol.json`, `backend/evaluation/labels/relevance_labels.template.json`, `backend/evaluation/labels/extraction_labels.template.json`, `backend/evaluation/labels/tool_selection_scenarios.template.json`, `backend/evaluation/fixtures/matching_synthetic.json`, `backend/tests/evaluation/test_dataset_contracts.py`, `backend/tests/evaluation/test_split_protocol.py`, `.gitignore`
 
-- [ ] (05B): Implement extraction and tool-selection threshold runners
+- [x] (05B): Implement extraction and tool-selection threshold runners
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.6 Evaluation protocol`; `docs/plans/Master_plan.md` > `### 19.3 Extraction dataset` through `### 19.5 Pass/fail metrics`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Compute required/preferred skill entity F1, seniority/work-mode macro-F1, location accuracy, tool-selection accuracy, invalid-argument rate, unauthorized profile commits, PII leaks, false success, first-SSE latency, and extraction timeout.
@@ -548,7 +548,7 @@ metrics, or change production weights.
   - Blocked Condition: A locked metric cannot be computed from the approved extraction/tool contracts without raw/private data in committed output; report `BLOCKED_BY_SOURCE_CONFLICT` and do not weaken privacy or thresholds.
   - Files: `backend/evaluation/metrics.py`, `backend/evaluation/run_extraction.py`, `backend/evaluation/run_tool_selection.py`, `backend/tests/evaluation/test_run_extraction.py`, `backend/tests/evaluation/test_run_tool_selection.py`
 
-- [ ] (05C): Implement ranking grid search, latency, sealed test, and graph ablation
+- [x] (05C): Implement ranking grid search, latency, sealed test, and graph ablation
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.6 Evaluation protocol`; `docs/plans/Master_plan.md` > `### 18.4 Weight tuning`; `docs/plans/Master_plan.md` > `### 18.5 Graph ablation rule`; `docs/plans/Master_plan.md` > `### 19.5 Pass/fail metrics`
   - Source Requirements:
     - Evaluate semantic-only, exact-skill-only, semantic+exact, semantic+skill-graph, and full-hybrid configurations.

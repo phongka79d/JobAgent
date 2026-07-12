@@ -840,9 +840,9 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one user-observed public-URL or raw-text save/query chat flow.
 ```
 
-## Plan 6 progress (Batches 01–04) — matching tool, transport, and cards
+## Plan 6 progress (Batches 01–05) — sealed evaluation tooling
 
-**Plan 6 Batches 01–04 are evidence-backed.** Normal validation uses injected
+**Plan 6 Batches 01–05 are evidence-backed.** Normal validation uses injected
 graph/database fakes and pure inputs only — no live Neo4j, ShopAIKey, or LLM
 call is required or claimed.
 
@@ -869,6 +869,12 @@ call is required or claimed.
   bounded live/history match cards, safe source links, matched/related/missing
   skills, and collapsible effective-weight breakdowns. Evaluation datasets and
   tuning remain later Plan 6 batches.
+- Batch05 provides versioned templates, synthetic fixtures, deterministic
+  entity-level 60/20/20 splits, aggregate-only extraction/tool/ranking runners,
+  validation-only weight locks, and one-time sealed-test guards. Real
+  annotation data, held-out execution, and production-weight changes remain
+  private/user-authorized Batch06 work; ignored private paths are never read by
+  tuning or committed.
 
 Focused Batch02 verification:
 

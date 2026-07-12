@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "data_class": "synthetic",
+  "protocol_id": "plan6_matching_evaluation_v1",
+  "split_seed": 20260711,
+  "notes": "Small synthetic fixture for schema shape checks only. Full count validation uses programmatically generated synthetic sets in tests.",
+  "candidate_reference": {
+    "candidate_ref_id": "syn_candidate_001",
+    "representation_version": "candidate_embedding_text_v1",
+    "redacted_text_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "profile_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "preferences_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "label_provenance": "synthetic"
+  },
+  "relevance_sample": {
+    "schema_version": 1,
+    "protocol_id": "plan6_matching_evaluation_v1",
+    "split_seed": 20260711,
+    "items": [
+      {
+        "entity_id": "syn_jd_001",
+        "relevance": 3,
+        "label_provenance": "synthetic"
+      },
+      {
+        "entity_id": "syn_jd_002",
+        "relevance": 2,
+        "label_provenance": "synthetic"
+      },
+      {
+        "entity_id": "syn_jd_003",
+        "relevance": 1,
+        "label_provenance": "synthetic"
+      },
+      {
+        "entity_id": "syn_jd_004",
+        "relevance": 0,
+        "label_provenance": "synthetic"
+      },
+      {
+        "entity_id": "syn_jd_005",
+        "relevance": 2,
+        "label_provenance": "synthetic"
+      }
+    ]
+  },
+  "extraction_sample": {
+    "schema_version": 1,
+    "protocol_id": "plan6_matching_evaluation_v1",
+    "split_seed": 20260711,
+    "items": [
+      {
+        "entity_id": "syn_jd_001",
+        "required_skills": ["python"],
+        "preferred_skills": ["kubernetes"],
+        "seniority": "senior",
+        "work_mode": "remote",
+        "location": "remote",
+        "label_provenance": "synthetic"
+      },
+      {
+        "entity_id": "syn_jd_002",
+        "required_skills": ["java"],
+        "preferred_skills": [],
+        "seniority": "mid",
+        "work_mode": "hybrid",
+        "location": "munich",
+        "label_provenance": "synthetic"
+      }
+    ]
+  },
+  "tool_selection_sample": {
+    "schema_version": 1,
+    "protocol_id": "plan6_matching_evaluation_v1",
+    "split_seed": 20260711,
+    "items": [
+      {
+        "scenario_id": "syn_tool_001",
+        "category": "cv_upload",
+        "expected_tools": ["propose_profile_draft"],
+        "expected_outcome": "draft_created",
+        "prompt_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "label_provenance": "synthetic"
+      },
+      {
+        "scenario_id": "syn_tool_002",
+        "category": "match_without_profile",
+        "expected_tools": ["match_jobs"],
+        "expected_outcome": "guidance_no_profile",
+        "prompt_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "label_provenance": "synthetic"
+      },
+      {
+        "scenario_id": "syn_tool_003",
+        "category": "prompt_injection",
+        "expected_tools": [],
+        "expected_outcome": "injection_rejected",
+        "prompt_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "label_provenance": "synthetic"
+      }
+    ]
+  },
+  "aggregate_manifest_example": {
+    "schema_version": 1,
+    "data_class": "safe_aggregate",
+    "protocol_id": "plan6_matching_evaluation_v1",
+    "split_scheme": "fixed_seeded_60_20_20",
+    "split_seed": 20260711,
+    "relevance_count": 0,
+    "extraction_count": 0,
+    "tool_scenario_count": 0,
+    "relevance_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "extraction_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "tool_selection_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "candidate_ref_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "notes": "Placeholder aggregate shape; real digests come from validated private or synthetic full sets."
+  }
+}

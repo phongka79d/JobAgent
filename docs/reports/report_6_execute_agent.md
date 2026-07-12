@@ -688,7 +688,7 @@ docs/reports/report_6_execute_agent.md
 batch_scope_repair
 
 ## Batch
-Batch02 - Deterministic Scoring and Explanations
+Batch05 - Sealed Evaluation Tooling
 
 ## Task
 batch_scope - Pre-commit formatting repair after A3 PASS
@@ -697,34 +697,34 @@ batch_scope - Pre-commit formatting repair after A3 PASS
 complete
 
 ## Selected Scope
-- Batch: Batch02 - Deterministic Scoring and Explanations
+- Batch: Batch05 - Sealed Evaluation Tooling
 - Task ID: batch_scope
 - Task title: Pre-commit formatting repair after A3 PASS
-- Files allowed / repair scope: Remove extra EOF blank line from backend/tests/services/test_matching.py only; do not alter test behavior or broaden scope
+- Files allowed / repair scope: Remove only the EOF blank line in backend/evaluation/extraction_scoring.py; do not alter runner behavior or task checkboxes/status/staging
 
 ## Completed Work
-- Removed the trailing extra blank line at EOF in backend/tests/services/test_matching.py (file now ends with single trailing newline after final closing paren)
-- No test logic, assertions, or other files altered for this repair
+- Removed the trailing extra blank line at EOF in backend/evaluation/extraction_scoring.py (file now ends with single trailing CRLF after final `return` closing paren; no runner/behavior changes)
+- No evaluation logic, scoring, runners, task checkboxes, status, or staging altered
 
 ## Files Created or Modified
-- backend/tests/services/test_matching.py (EOF blank-line only)
-- docs/reports/report_6_execute_agent.md (this batch_scope report block)
+- backend/evaluation/extraction_scoring.py (EOF blank-line only)
+- docs/reports/report_6_execute_agent.md (this batch_scope report block updated)
 
 ## Tests or Validations Run
 - command/check: git diff --check
 - required: yes
 - result: passed
-- evidence or reason: exit 0; no whitespace/EOF blank-line errors remaining on batch or working tree diffs
+- evidence or reason: exit 0; no whitespace/EOF blank-line errors; extraction_scoring.py last bytes `timeouts,\r\n    )\r\n` (no double blank line)
 
-- command/check: cd backend; python -m pytest -q tests/services/test_matching.py tests/services/test_explanations.py tests/schemas/test_matching.py
+- command/check: cd backend; python -m pytest -q tests/evaluation/test_run_extraction.py tests/evaluation/test_run_tool_selection.py
 - required: yes
 - result: passed
-- evidence or reason: 50 passed in 1.46s
+- evidence or reason: 24 passed in 1.64s
 
 ## Acceptance Check
-- condition: PRE_COMMIT_FINDING fixed — extra blank line at EOF removed from backend/tests/services/test_matching.py only
+- condition: PRE_COMMIT_FINDING fixed — extra blank line at EOF removed from backend/evaluation/extraction_scoring.py only; runner behavior unchanged
 - status: satisfied
-- evidence: file length 24776→24775; last bytes end with `29 0A` (closing paren + single LF); git diff --check exit 0; focused Batch02 matching tests 50 passed
+- evidence: EOF double blank line stripped; git diff --check exit 0; evaluation runner tests 24 passed
 
 ## Progress Update
 - task checkbox updated: no
@@ -732,8 +732,8 @@ complete
 - reason: batch_scope_repair / orchestrated mode forbids checkbox and batch status updates
 
 ## Notes for Review Agent
-- changed files: backend/tests/services/test_matching.py (whitespace EOF only)
-- validations to rerun: git diff --check; optional re-stage + git diff --cached --check before commit
+- changed files: backend/evaluation/extraction_scoring.py (whitespace EOF only)
+- validations to rerun: git diff --check; git diff --cached --check after re-stage; optional pytest evaluation runners
 - risk areas: none — formatting only
 - next task readiness: can_review
 
@@ -743,6 +743,12 @@ complete
 - reason for repair: After A3 PASS, git diff --cached --check failed with backend/tests/services/test_matching.py:676: new blank line at EOF; batch was unstaged without altering working tree
 - changes made: stripped extra trailing blank line at EOF from backend/tests/services/test_matching.py only
 - validations rerun: git diff --check exit 0; pytest Batch02 matching suite 50 passed
+- outcome: complete; pre-commit formatting finding resolved; ready for re-stage/commit by orchestrator
+
+### 2026-07-13T01:13:45Z
+- reason for repair: After A3 PASS for Batch05, git diff --cached --check failed with backend/evaluation/extraction_scoring.py:285 new blank line at EOF; batch files were unstaged without altering the working tree
+- changes made: stripped extra trailing blank line at EOF from backend/evaluation/extraction_scoring.py only; no runner behavior changes
+- validations rerun: git diff --check exit 0; pytest tests/evaluation/test_run_extraction.py tests/evaluation/test_run_tool_selection.py — 24 passed in 1.64s
 - outcome: complete; pre-commit formatting finding resolved; ready for re-stage/commit by orchestrator
 
 ---
@@ -1182,3 +1188,461 @@ complete
 - validations to rerun: required 04A frontend commands above
 - risk areas: Collapsible always mounts children (CSS hide) — tests assert aria-expanded; weight-sum tolerance 1e-6 on frontend vs 1e-9 backend
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 05A
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch05 - Sealed Evaluation Tooling
+
+## Task
+05A - Seal private dataset contracts and the fixed 60/20/20 split
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Sealed Evaluation Tooling
+- Task ID: 05A
+- Task title: Seal private dataset contracts and the fixed 60/20/20 split
+- Files allowed / repair scope: A2 same-task modularity repair only — split `dataset_contracts` and `split_protocol` into focused companion modules so every new/modified production source is ≤300 lines; preserve public imports, privacy validation, deterministic split reproducibility, and held-out isolation without duplicate business logic. Prior deliverables (templates, synthetic fixture, tests) retained.
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ### 7.6 Evaluation protocol
+- docs/plans/Master_plan.md > ### 19.1 Data policy through ### 19.4 Tool-selection dataset
+- docs/plans/Master_plan.md > ### 22.4 Logging
+
+## Supplemental Documents Used
+- README.md
+- docs/tasks/task_6.md (05A block)
+- docs/review/review_6_review_agent.md (A2 modularity finding / repair instructions)
+- backend/app/services/skill_matching.py (public facade re-export pattern)
+- backend/evaluation/embedding_benchmark_schema.py (Phase 0 aggregate-safe pattern)
+- backend/evaluation/labels/embedding_validation_protocol.json (seeded 60/20/20 + held-out policy pattern)
+- .gitignore (existing private evaluation ignore rules)
+
+## Dependency and User Action Check
+- Dependencies: Accepted evaluation directories/.gitignore and Phase 0 seeded-split patterns (present; reused)
+- User Action: None for schemas/templates/tests; real annotation/population deferred to 06A
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_6.md
+- docs/review/review_6_review_agent.md (05A A2 rejection)
+- docs/reports/report_6_execute_agent.md (existing 05A block)
+- backend/evaluation/dataset_contracts.py (pre-repair 537 lines)
+- backend/evaluation/split_protocol.py (pre-repair 647 lines)
+- backend/tests/evaluation/test_dataset_contracts.py
+- backend/tests/evaluation/test_split_protocol.py
+- backend/app/services/skill_matching.py (facade pattern)
+- .gitignore
+
+## Completed Work
+- Prior 05A deliverables preserved: privacy-safe contracts (relevance 0–3, extraction, tool scenarios, Candidate digests, aggregate manifests), deterministic seeded 60/20/20 split, tuning vs sealed-test readers, lock-gated held-out access, templates, synthetic fixture, tests, package `__init__.py`.
+- A2 modularity repair: split mixed-responsibility modules into focused companions with public facades.
+  - Dataset: `dataset_privacy.py` (forbidden fields/digests/safe tokens), `dataset_models.py` (row/envelope contracts + locked counts), `dataset_contracts.py` (count validators, parsers, aggregate builder, re-exports).
+  - Split: `split_assignment.py` (membership math/partition/leakage), `split_lock.py` (lock artifact gate), `split_readers.py` (tuning + sealed-test readers), `split_protocol.py` (public re-exports + aggregate constants).
+- Public imports remain on `evaluation.dataset_contracts` and `evaluation.split_protocol`; no duplicated privacy/split business logic.
+- Line counts after repair (all ≤300): privacy 153, models 275, contracts 217, assignment 211, lock 137, readers 260, protocol 144.
+
+## Files Created or Modified
+- backend/evaluation/__init__.py (created earlier; package marker)
+- backend/evaluation/dataset_privacy.py (created — privacy helpers)
+- backend/evaluation/dataset_models.py (created — row/envelope models)
+- backend/evaluation/dataset_contracts.py (facade + validators/parsers; was mixed module)
+- backend/evaluation/split_assignment.py (created — membership assignment)
+- backend/evaluation/split_lock.py (created — lock gate)
+- backend/evaluation/split_readers.py (created — access readers)
+- backend/evaluation/split_protocol.py (facade re-exports; was mixed module)
+- backend/evaluation/labels/matching_protocol.json (created earlier)
+- backend/evaluation/labels/relevance_labels.template.json (created earlier)
+- backend/evaluation/labels/extraction_labels.template.json (created earlier)
+- backend/evaluation/labels/tool_selection_scenarios.template.json (created earlier)
+- backend/evaluation/fixtures/matching_synthetic.json (created earlier)
+- backend/tests/evaluation/test_dataset_contracts.py (created earlier; unchanged this repair)
+- backend/tests/evaluation/test_split_protocol.py (created earlier; unchanged this repair)
+- docs/reports/report_6_execute_agent.md (05A block updated in place)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/evaluation/test_dataset_contracts.py tests/evaluation/test_split_protocol.py`
+- required: yes
+- result: passed
+- evidence or reason: 29 passed
+
+- command/check: `cd backend; python -m ruff check evaluation/dataset_contracts.py evaluation/dataset_privacy.py evaluation/dataset_models.py evaluation/split_protocol.py evaluation/split_assignment.py evaluation/split_lock.py evaluation/split_readers.py tests/evaluation`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed
+
+- command/check: `cd backend; python -m mypy evaluation/dataset_contracts.py evaluation/dataset_privacy.py evaluation/dataset_models.py evaluation/split_protocol.py evaluation/split_assignment.py evaluation/split_lock.py evaluation/split_readers.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 7 source files
+
+- command/check: `git check-ignore backend/evaluation/private/probe.json backend/evaluation/labels/local-private/probe.json backend/evaluation/fixtures/local-private/probe.json`
+- required: yes
+- result: passed
+- evidence or reason: all three probe paths listed as ignored
+
+- command/check: module line counts (≤300 for new/modified production sources)
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: dataset_privacy 153, dataset_models 275, dataset_contracts 217, split_assignment 211, split_lock 137, split_readers 260, split_protocol 144
+
+- command/check: `git diff --check`
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: exit 0 (CRLF conversion warnings only; no whitespace errors)
+
+## Acceptance Check
+- condition: Contract validation enforces 150–200 relevance, ≥30 extraction, ≥50 required-scenario items, labels 0–3, unique IDs, deterministic 60/20/20 membership
+- status: satisfied
+- evidence: parse_* count validators + assign_entity_splits/tests for uniqueness, labels, and 96/32/32 on n=160 (29 pytest passed after modular split)
+
+- condition: Development/validation loaders cannot return held-out labels; only explicit sealed-test path accesses held-out after lock artifact exists
+- status: satisfied
+- evidence: TuningDatasetReader returns held_out_test=(); SealedTestDatasetReader/load_relevance_for_sealed_test require lock; completed lock denied
+
+- condition: Committed files contain no real CV/JD body, contact PII, private labels, or secret/path material; private paths remain gitignored
+- status: satisfied
+- evidence: forbidden-field guards + synthetic fixture privacy tests; git check-ignore probes pass; templates note private copy paths
+
+- condition: Templates are concrete schema examples, not prefilled fabricated evaluation evidence
+- status: satisfied
+- evidence: templates ship one example item + `_template_notes` stating not evaluation evidence; full-count parse rejects single-item template
+
+- condition: Every new or modified production source is ≤300 lines; public imports preserved without duplicated business logic
+- status: satisfied
+- evidence: all seven production modules ≤300 lines; tests still import from evaluation.dataset_contracts and evaluation.split_protocol
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Key Implementation Decisions
+- Reused Phase 0 aggregate-safe / validation-only-load patterns; Plan 6 evaluation responsibilities stay out of embedding benchmark code.
+- Held-out access is gated by a typed `matching_config_lock_v1` artifact with data/config digests; tuning readers hard-filter held-out even if labels exist on disk.
+- Tool scenarios without relevance membership receive independent seeded 60/20/20 assignment; tuning still drops held-out.
+- Modularity repair mirrors skill_matching facade: stable public modules re-export companions; single ownership per concern (privacy, models, validators, assignment, lock, readers).
+- No `__init__.py` under `tests/evaluation/` to avoid shadowing the production `evaluation` package under pytest prepend import mode.
+
+## Risks or Open Issues
+- None material for 05A. Runners (05B/05C) and real private dataset population (06A) remain out of scope.
+
+## Notes for Review Agent
+- changed files this repair: dataset_privacy.py, dataset_models.py, dataset_contracts.py, split_assignment.py, split_lock.py, split_readers.py, split_protocol.py, report_6_execute_agent.md (05A block)
+- validations to rerun: required 05A pytest/ruff/mypy/private-ignore plus module line counts and git diff --check
+- risk areas: pytest import shadowing if `tests/evaluation/__init__.py` is added later; lock schema remains the sole held-out gate for future runners
+- next task readiness: can_review
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED_WITH_WARNINGS)
+- reason for repair: A2 major modularity finding — newly created `dataset_contracts.py` (537 lines) and `split_protocol.py` (647 lines) exceeded the focused-module ≤300-line ceiling as mixed-responsibility modules.
+- changes made: Split contracts/validators from privacy helpers/models (`dataset_privacy`, `dataset_models`, facade `dataset_contracts`). Split membership/lock/access readers (`split_assignment`, `split_lock`, `split_readers`, facade `split_protocol`). Preserved public imports and behavior; no checkbox/status/stage/commit.
+- validations rerun: pytest 29 passed; ruff all checks passed; mypy 7 source files clean; git check-ignore three private probes ignored; all production modules ≤300 lines; git diff --check exit 0.
+- outcome: complete — modularity finding addressed; 05A acceptance preserved.
+
+---
+
+# Task Execution Report - 05B
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch05 - Sealed Evaluation Tooling
+
+## Task
+05B - Implement extraction and tool-selection threshold runners
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Sealed Evaluation Tooling
+- Task ID: 05B
+- Task title: Implement extraction and tool-selection threshold runners
+- Files allowed / repair scope: backend/evaluation/metrics.py, backend/evaluation/run_extraction.py, backend/evaluation/run_tool_selection.py, companion scoring/parse modules, backend/tests/evaluation/test_run_extraction.py, backend/tests/evaluation/test_run_tool_selection.py
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ### 7.6 Evaluation protocol
+- docs/plans/Master_plan.md > ### 19.3 Extraction dataset through ### 19.5 Pass/fail metrics
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+
+## Supplemental Documents Used
+- README.md
+- docs/tasks/task_6.md (05B block)
+- backend/evaluation/dataset_contracts.py / split_protocol.py (05A loaders)
+- backend/app/tools/* production tool input schemas and PRODUCTION_TOOL_NAMES
+
+## Dependency and User Action Check
+- Dependencies: (05A) validated development/validation dataset loaders and accepted production Agent/extraction contracts � present
+- User Action: None for runner implementation and synthetic verification
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_6.md
+- docs/plans/Plan_6.md (�7.6)
+- docs/plans/Master_plan.md (�19.3�19.5, �20)
+- backend/evaluation/dataset_contracts.py, dataset_models.py, split_protocol.py
+- backend/evaluation/benchmark_embeddings.py (metric reuse patterns)
+- backend/app/tools/registry.py, profile_commit.py, match_jobs.py, save_job.py, query_jobs.py, profile_draft.py, candidate_context.py
+- backend/app/services/skill_normalization.py (normalize_skill_match_key)
+- backend/tests/evaluation/test_dataset_contracts.py
+
+## Completed Work
+- Added pure shared metrics module with locked Master �19.5 thresholds: entity set F1, multiclass macro-F1, field accuracy, percentile, and PASS/FAIL gate helpers.
+- Implemented extraction scoring + CLI (`extraction_scoring.py`, `run_extraction.py`): loads 05A ExtractionDataset gold + prediction envelope; missing/invalid/timeout fail closed; computes required/preferred skill entity F1 (combined skill_entity_f1), seniority/work-mode macro-F1, location accuracy, and max extraction duration vs 45s ceiling; aggregate-only JSON output; nonzero exit on any FAIL gate.
+- Implemented tool-selection scoring + CLI (`tool_run_parse.py`, `tool_selection_scoring.py`, `run_tool_selection.py`): scores production tool name sets/outcomes; optional fake-backed production Pydantic arg validation; accuracy, invalid-argument rate, zero unauthorized commits/PII leaks/false success, first-SSE latency strict <1s; covers all required scenario categories in synthetic tests.
+- Added synthetic tests for metric boundaries, perfect pass, missing/invalid/timeout/safety failures, privacy-forbidden fields, CLI help/modes, and zero provider/network/Neo4j imports in runners.
+- No production mutations, no held-out reads, no private row reports, no threshold weakening.
+
+## Files Created or Modified
+- backend/evaluation/metrics.py (created)
+- backend/evaluation/extraction_scoring.py (created)
+- backend/evaluation/run_extraction.py (created)
+- backend/evaluation/tool_run_parse.py (created)
+- backend/evaluation/tool_selection_scoring.py (created)
+- backend/evaluation/run_tool_selection.py (created)
+- backend/tests/evaluation/test_run_extraction.py (created)
+- backend/tests/evaluation/test_run_tool_selection.py (created)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/evaluation/test_run_extraction.py tests/evaluation/test_run_tool_selection.py`
+- required: yes
+- result: passed
+- evidence or reason: 24 passed
+
+- command/check: `cd backend; python -m evaluation.run_extraction --help; python -m evaluation.run_tool_selection --help`
+- required: yes
+- result: passed
+- evidence or reason: both CLIs document --labels/--predictions/--input/--runs/--output/--split modes without loading private data
+
+- command/check: `cd backend; python -m ruff check evaluation/run_extraction.py evaluation/run_tool_selection.py tests/evaluation; python -m mypy evaluation/run_extraction.py evaluation/run_tool_selection.py`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 2 source files
+
+- command/check: companion module ruff/mypy for metrics, extraction_scoring, tool_run_parse, tool_selection_scoring
+- required: no (local completeness)
+- result: passed
+- evidence or reason: All checks passed; mypy Success: no issues found in 4 source files
+
+## Acceptance Check
+- condition: Extraction runner computes all five locked extraction/timeout measures with exact thresholds; missing/invalid output treated as failure
+- status: satisfied
+- evidence: five gates skill_entity_f1, seniority_macro_f1, work_mode_macro_f1, location_accuracy, extraction_timeout_seconds; missing/invalid/timeout tests fail closed
+
+- condition: Tool runner computes accuracy, invalid arguments, zero-count safety metrics, and first-event latency across every required scenario category
+- status: satisfied
+- evidence: 50 synthetic scenarios covering all REQUIRED_TOOL_CATEGORIES; metrics and gates match Master �19.5; safety zero-count FAIL tests
+
+- condition: Failures never become skipped/pass; no production state mutation outside temporary fixtures; reports aggregate/safe IDs only
+- status: satisfied
+- evidence: missing run/prediction counts as FAIL; as_dict data_class=safe_aggregate; privacy sentinel tests; no network/provider imports
+
+- condition: Normal tests use fakes and make zero ShopAIKey/public-network/live-Neo4j calls
+- status: satisfied
+- evidence: pure in-process scoring with synthetic fixtures; source-scan tests assert no ShopAIKey/httpx/GraphDatabase
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Key Implementation Decisions
+- Entity matching reuses production `normalize_skill_match_key` for deterministic skill set F1.
+- skill_entity_f1 is the mean of required and preferred macro set-F1 (single locked =0.80 gate per Master line item).
+- First SSE gate is strict less-than 1.0 second per Master �19.5 wording.
+- Modules split under =300-line focused ownership (metrics, extraction scoring, tool parse, tool scoring, thin CLIs).
+- Prediction/run envelopes are separate from gold labels so private gold can stay ignored while synthetic tests inject fakes.
+
+## Risks or Open Issues
+- None material for 05B. Ranking/ablation runner is 05C; private dataset population and sealed runs remain 06A.
+
+## Notes for Review Agent
+- changed files: metrics.py, extraction_scoring.py, run_extraction.py, tool_run_parse.py, tool_selection_scoring.py, run_tool_selection.py, test_run_extraction.py, test_run_tool_selection.py, report_6_execute_agent.md (this block)
+- validations to rerun: required pytest/help/ruff/mypy commands above
+- risk areas: exact skill_entity_f1 aggregation definition (mean of required+preferred); first-SSE strict vs non-strict boundary
+- next task readiness: can_review
+---
+
+# Task Execution Report - 05C
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch05 - Sealed Evaluation Tooling
+
+## Task
+05C - Implement ranking grid search, latency, sealed test, and graph ablation
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch05 - Sealed Evaluation Tooling
+- Task ID: 05C
+- Task title: Implement ranking grid search, latency, sealed test, and graph ablation
+- Files allowed / repair scope: A2 same-task repair only - split ranking_scoring and metrics into focused modules <=300 lines preserving imports/locked metrics/validation-only tuning/one-time sealed test/graph decision; update this 05C report to remove EOF blank line; rerun 05C tests, expanded lint/mypy, module-count check, and git diff check. No checkbox/status/stage/commit.
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ### 7.6 Evaluation protocol
+- docs/plans/Master_plan.md > ### 18.4 Weight tuning
+- docs/plans/Master_plan.md > ### 18.5 Graph ablation rule
+- docs/plans/Master_plan.md > ### 19.5 Pass/fail metrics
+- A2 REJECTED_WITH_WARNINGS repair instructions for 05C (module size + EOF blank line)
+
+## Supplemental Documents Used
+- README.md
+- docs/tasks/task_6.md (05C block)
+- docs/review/review_6_review_agent.md (05C review)
+- backend/evaluation/dataset_contracts.py (prior focused-module facade pattern)
+
+## Dependency and User Action Check
+- Dependencies: (05A) sealed splits; Batch02 versioned scoring configuration; Phase 0 nDCG/latency functions - present
+- User Action: None for runner implementation and synthetic verification (private tuning/test deferred to 06A)
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_6.md
+- docs/review/review_6_review_agent.md (05C REJECTED_WITH_WARNINGS)
+- backend/evaluation/metrics.py, ranking_scoring.py, ranking_tune.py, ranking_sealed.py, run_ranking.py
+- backend/evaluation/dataset_contracts.py (facade re-export pattern)
+- backend/tests/evaluation/test_run_ranking.py
+- docs/reports/report_6_execute_agent.md (existing 05C block)
+
+## Completed Work
+- Shared pure ranking metrics: ndcg_at_k, dcg_at_k, precision_at_k, PRECISION_AT_10_MIN=0.70, MATCHING_LATENCY_P95_SECONDS_MAX=2.0, MATCHING_LATENCY_JOB_COUNT=200; Phase 0 benchmark_embeddings imports ndcg/percentile from metrics (no formula duplication).
+- ranking_scoring facade + companions: five locked ablations, bounded deterministic weight grid from hybrid_seed_v1, stable lex tie-break on validation nDCG@10, ranking gates, graph-enable rule (related boosts only if semantic_plus_skill_graph nDCG > semantic_plus_exact).
+- ranking_tune.py: development/validation-only grid search via TuningDatasetReader; no sealed-test imports; writes content-digested matching_config_lock_v1 with normalized nonnegative weights.
+- ranking_sealed.py: one-shot held-out path; verifies lock digests/weights; refuses missing/tampered/reused locks; runs five ablations + Precision@10 + baseline wins + 200-job P95 latency; records graph decision; marks sealed_test_completed.
+- run_ranking.py CLI: subcommands tune and sealed-test with explicit --input/--features/--lock/--validation-output|--output paths.
+- Extended MatchingConfigLock with optional weights, weight_config_version, related_skill_boosts_enabled, validation_ndcg_at_10 (backward-compatible with 05A minimal locks).
+- Same-task repair: split oversized metrics.py (312) and ranking_scoring.py (604) into focused modules all <=300 lines with stable public re-exports; removed 05C report EOF blank line.
+- Synthetic tests: metric math, grid bounds, stable selection, ablation/graph decision, latency threshold, lock tamper/reuse/digest mismatch, held-out isolation, aggregate-only privacy, CLI end-to-end, shared nDCG identity with embedding benchmark.
+- No private data, no production weight mutation, no claimed real-corpus passing metrics.
+
+## Files Created or Modified
+- backend/evaluation/metrics.py (facade - extraction/tool thresholds, percentile, MetricGate; re-exports)
+- backend/evaluation/metrics_classification.py (created - entity-set F1 / field accuracy / macro-F1)
+- backend/evaluation/metrics_ranking.py (created - nDCG / Precision@k and ranking thresholds)
+- backend/evaluation/ranking_scoring.py (facade - scoring, ablations, grid; re-exports)
+- backend/evaluation/ranking_types.py (created - constants, dataclasses, weight normalize/digest)
+- backend/evaluation/ranking_features.py (created - feature envelope parsing)
+- backend/evaluation/ranking_report.py (created - aggregate builders and ranking gates)
+- backend/evaluation/benchmark_embeddings.py (prior - reuse metrics.ndcg_at_k/percentile)
+- backend/evaluation/split_lock.py (prior - weight-bearing lock fields)
+- backend/evaluation/ranking_tune.py (prior)
+- backend/evaluation/ranking_sealed.py (prior)
+- backend/evaluation/run_ranking.py (prior)
+- backend/tests/evaluation/test_run_ranking.py (prior)
+- docs/reports/report_6_execute_agent.md (this 05C block updated; EOF blank line removed)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/evaluation/test_run_ranking.py tests/test_embedding_benchmark.py`
+- required: yes
+- result: passed
+- evidence or reason: 53 passed after focused-module split
+
+- command/check: `cd backend; python -m evaluation.run_ranking --help`
+- required: yes
+- result: passed
+- evidence or reason: documents tune and sealed-test subcommands with explicit safe paths
+
+- command/check: `cd backend; python -m ruff check evaluation/run_ranking.py evaluation/metrics.py evaluation/metrics_classification.py evaluation/metrics_ranking.py evaluation/benchmark_embeddings.py evaluation/ranking_scoring.py evaluation/ranking_types.py evaluation/ranking_features.py evaluation/ranking_report.py evaluation/ranking_tune.py evaluation/ranking_sealed.py tests/evaluation/test_run_ranking.py; python -m mypy evaluation/run_ranking.py evaluation/metrics.py evaluation/metrics_classification.py evaluation/metrics_ranking.py evaluation/ranking_scoring.py evaluation/ranking_types.py evaluation/ranking_features.py evaluation/ranking_report.py evaluation/ranking_tune.py evaluation/ranking_sealed.py`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 10 source files
+
+- command/check: module line-count check (<=300) for metrics*, ranking_* evaluation modules
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: metrics.py 189, metrics_classification.py 119, metrics_ranking.py 63, ranking_scoring.py 294, ranking_types.py 127, ranking_features.py 109, ranking_report.py 152, ranking_tune.py 148, ranking_sealed.py 206, run_ranking.py 209
+
+- command/check: `git diff --check`
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: no whitespace errors after removing 05C report EOF blank line
+
+## Acceptance Check
+- condition: Tuning code has no held-out-reader import/path and cannot emit a lock from test metrics; weights finite, nonnegative, versioned, normalized
+- status: satisfied
+- evidence: AST import scan of ranking_tune.py; write_tuning_lock rejects empty weights; normalize_weights enforces [0,inf) and sum-to-one; held_out_used=false in tune report
+
+- condition: Sealed-test refuses missing/tampered/reused locks and records five ablations, Precision@10, nDCG@10, baselines, P95 latency, graph decision
+- status: satisfied
+- evidence: tests for missing lock, config_digest tamper, data_digest mismatch, completed reuse; sealed result includes ablations map length 5 and metrics/gates
+
+- condition: Related boosts enabled only when graph ablation improves held-out nDCG@10
+- status: satisfied
+- evidence: graph_boosts_enabled strict greater-than between semantic_plus_skill_graph and semantic_plus_exact; synthetic help/hurt cases
+
+- condition: Synthetic tests prove failures reported, not hidden by threshold/model/weight changes
+- status: satisfied
+- evidence: ranking_gates FAIL on low precision and failed baseline comparisons; latency P95 FAIL path; sealed overall PASS/FAIL without mutating thresholds
+
+- condition: Focused modules <=300 lines with preserved public imports (A2 repair)
+- status: satisfied
+- evidence: all metrics/ranking evaluation modules <=300; tests still import evaluation.metrics and evaluation.ranking_scoring
+
+- condition: 05C report EOF blank line removed; git diff --check clean (A2 repair)
+- status: satisfied
+- evidence: report ends with single trailing newline after next task readiness line
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Key Implementation Decisions
+- Ranking features are an explicit --features envelope (precomputed components + optional latencies) so synthetic tooling does not call providers/Neo4j; 06A can populate real features offline.
+- Graph decision compares ablation 4 vs 3 (semantic+skill_graph vs semantic+exact) on held-out nDCG@10 only after lock.
+- Lock schema extended in place so sealed-test gate and weight payload share one matching_config.json artifact.
+- Tuning module deliberately omits sealed reader imports for static isolation tests.
+- Metrics/ranking public facades re-export focused companions (dataset_contracts pattern) so task-facing imports stay stable.
+
+## Risks or Open Issues
+- None material for 05C tooling. Private corpus population, production weight apply, and authorized one-time held-out run remain 06A.
+
+## Notes for Review Agent
+- changed files (repair): metrics.py, metrics_classification.py, metrics_ranking.py, ranking_scoring.py, ranking_types.py, ranking_features.py, ranking_report.py, report_6_execute_agent.md
+- validations to rerun: required pytest/help/ruff/mypy, module line-count <=300, git diff --check
+- risk areas: facade re-export completeness; features envelope shape for 06A; strict > graph rule when nDCG ties
+- next task readiness: can_review
+
+## Repair Log
+
+### 2026-07-13T12:00:00Z
+- reason for repair: A2 REJECTED_WITH_WARNINGS - ranking_scoring.py (604) and metrics.py (312) exceeded focused-module limit; 05C execution report had EOF blank line failing git diff --check
+- changes made: split metrics into metrics_classification + metrics_ranking with metrics facade re-exports; split ranking_scoring into ranking_types + ranking_features + ranking_report with ranking_scoring facade re-exports; updated this 05C block and removed EOF blank line
+- validations rerun: pytest 53 passed; run_ranking --help passed; ruff/mypy on expanded module set passed; all related modules <=300 lines; git diff --check passed
+- outcome: complete

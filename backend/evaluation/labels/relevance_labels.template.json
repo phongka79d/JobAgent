@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "protocol_id": "plan6_matching_evaluation_v1",
+  "split_seed": 20260711,
+  "items": [
+    {
+      "entity_id": "jd_public_example_001",
+      "relevance": 2,
+      "label_provenance": "private_local"
+    }
+  ],
+  "_template_notes": [
+    "Replace items with 150-200 unique public-JD entity IDs and labels 0-3.",
+    "Do not store raw JD bodies, contact fields, or secrets in this file.",
+    "Copy to an ignored private path (e.g. evaluation/private/relevance.json) for local use.",
+    "This committed template is a schema example only, not evaluation evidence."
+  ]
+}
