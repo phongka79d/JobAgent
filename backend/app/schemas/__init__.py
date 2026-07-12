@@ -27,6 +27,14 @@ from app.schemas.health import (
     OverallStatus,
     overall_status,
 )
+from app.schemas.job_post import (
+    EmploymentType,
+    JdQuality,
+    JobPostExtraction,
+    JobSeniority,
+    JobSkill,
+    JobWorkMode,
+)
 from app.schemas.preferences import JobPreferences, TargetSeniority, WorkMode
 from app.schemas.profile_draft import (
     ProfileApprovalSummary,
@@ -53,11 +61,17 @@ __all__ = [
     "ComponentHealth",
     "ComponentState",
     "EducationItem",
+    "EmploymentType",
     "ExperienceItem",
     "HealthResponse",
     "HistoryMessage",
     "HistoryResponse",
+    "JdQuality",
+    "JobPostExtraction",
     "JobPreferences",
+    "JobSeniority",
+    "JobSkill",
+    "JobWorkMode",
     "LanguageItem",
     "OverallStatus",
     "ProfileApprovalSummary",

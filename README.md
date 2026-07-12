@@ -571,16 +571,16 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 5 Batch01)
+## Current limitations (after Plan 5 Batch02)
 
 - Phase 3 CV-to-approved-profile workflow is complete for local fake-backed
   proof: shared upload, redaction/extraction, draft-only proposal/correction,
   guarded approval, atomic replacement, Candidate graph sync, public profile
   reads, and the shared Astryx sidebar/composer experience.
-- Plan 5 Batch01 added **internal** safe JD URL/paste acquisition only (SSRF
-  policy, bounded fetch, Trafilatura/plain canonical text). It does **not**
-  expose tools, public job routes, Job persistence, extraction, embeddings, or
-  Job graph sync yet.
+- Plan 5 Batch01–02 added **internal** JD acquisition, grounded Job extraction,
+  deterministic quality classification, and SQLite JobPost persistence/duplicate
+  primitives only. They do **not** expose tools, public job routes, embeddings,
+  Job skill normalization tables, or Job graph sync yet.
 - Matching, ranking, evaluation UI, OCR/DOCX/image CVs, profile history, and a
   full profile editor remain out of scope.
 - No public profile/job CRUD mutations, authentication, continuous outbox
@@ -602,6 +602,7 @@ and transport fakes only — no public network fetches and no ShopAIKey calls.
 | Batch | Outcome |
 |---|---|
 | Batch01 | DNS/redirect-aware URL policy, bounded HTTP retrieval, deterministic URL-or-paste JD text acquisition |
+| Batch02 | Grounded Job extraction, deterministic JD quality, persistence-first JobPost repository and duplicate primitives |
 
 Batch01 establishes the controlled acquisition foundation only:
 
@@ -623,6 +624,39 @@ cd backend
 python -m pytest -q tests/security/test_url_policy.py tests/services/test_url_fetcher.py tests/services/test_jd_source.py
 python -m ruff check app/security app/services/url_fetcher.py app/services/jd_source.py tests/security tests/services/test_url_fetcher.py tests/services/test_jd_source.py
 python -m mypy app/security app/services/url_fetcher.py app/services/jd_source.py
+```
+
+## Plan 5 progress (Batch02) — validated Job records and persistence
+
+**Plan 5 Batch02 is evidence-backed.** Schema/quality/extraction tests use fakes
+only (no real ShopAIKey). Repository tests use temporary SQLite only.
+
+Batch02 turns acquired JD text into a strict grounded extraction and a durable
+SQLite Job record:
+
+- `JobPostExtraction` / `JobSkill` strict contracts reuse shared `SkillRef`
+  bounds; salary remains display-only; extra fields forbidden
+  (`backend/app/schemas/job_post.py`).
+- Deterministic `full|partial|unscorable` quality classifier stores non-full
+  reasons outside the extraction object
+  (`backend/app/services/jd_quality.py`).
+- Structured extraction reuses the locked ShopAIKey adapter ceilings, untrusted
+  JD delimiting, evidence grounding, and contact-PII fail-closed redaction
+  (`backend/app/services/jd_extraction.py`).
+- Caller-owned `JobPostRepository` persists novel raw content before LLM work,
+  enforces exact-hash no-insert plus normalized-key duplicate marking, independent
+  status dimensions, sanitized failures, and compact bounded reads (default 10 /
+  max 50) without raw content
+  (`backend/app/repositories/job_posts.py`).
+
+Focused Batch02 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py tests/services/test_shopaikey_chat.py tests/services/test_pii_redaction.py
+python -m pytest -q tests/repositories/test_job_posts.py tests/db/test_models.py tests/integration/test_migrations.py
+python -m ruff check app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py app/repositories/job_posts.py tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py tests/repositories/test_job_posts.py
+python -m mypy app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py app/repositories/job_posts.py
 ```
 
 ## Plan 5 handoff (Master Phase 4) — stable seams only

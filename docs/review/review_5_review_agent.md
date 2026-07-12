@@ -244,3 +244,261 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 02A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch02 - Validated Job Records and Persistence
+- Task ID: 02A
+- Task title: Validate grounded Job extraction and deterministic quality
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (02A-scoped among broader Plan 5 tree):
+  - `backend/app/schemas/job_post.py` (untracked; created)
+  - `backend/app/services/jd_quality.py` (untracked; created)
+  - `backend/app/services/jd_extraction.py` (untracked; created)
+  - `backend/app/schemas/__init__.py` (modified; job_post exports)
+  - `backend/tests/schemas/test_job_post.py` (untracked; created)
+  - `backend/tests/services/test_jd_quality.py` (untracked; created)
+  - `backend/tests/services/test_jd_extraction.py` (untracked; created)
+  - `docs/reports/report_5_execute_agent.md` (modified; 02A execution block; not product code)
+
+## Files Reviewed
+- `backend/app/schemas/job_post.py`: in scope - JobPostExtraction exact master field inventory; JobSkill wraps SkillRef + relationship confidence/evidence; enums; extra=forbid; salary display-only
+- `backend/app/services/jd_quality.py`: in scope - pure deterministic full/partial/unscorable classifier; nine scoring groups majority-of-5; reasons outside extraction; salary excluded
+- `backend/app/services/jd_extraction.py`: in scope - untrusted JD wrapper; single adapter.invoke_structured; evidence grounding; PII fail-closed; quality overwrite; code-only JdExtractionError
+- `backend/app/schemas/__init__.py`: in scope - public re-exports of Job contracts
+- `backend/tests/schemas/test_job_post.py`: in scope - field set, enums, bounds, extra forbid, overlong evidence
+- `backend/tests/services/test_jd_quality.py`: in scope - full/partial/unscorable/contact-only boundaries and reasons
+- `backend/tests/services/test_jd_extraction.py`: in scope - grounding, PII, injection delimiting, one retry, one repair, zero raw/provider leak
+- `docs/reports/report_5_execute_agent.md` (02A block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md ¬ß7.2 Job extraction contract: exact field list; SkillRef+confidence/evidence; salary display-only; reasons separate; full/partial/unscorable rules
+- Plan_5.md ¬ß7.3 Persistence-first state machine: one provider transient retry + at most one schema repair (adapter ceilings reused; persistence owned by 02B)
+- Master_plan.md ¬ß7.1 Shared skill contract: SkillRef shape reused unchanged
+- Master_plan.md ¬ß7.4 Job extraction: field inventory and enums match implementation exactly
+- Master_plan.md ¬ß7.5 JD quality rules: full/partial/unscorable with reasons for non-full
+
+## Implementation Reality
+- Real strict Pydantic models reusing Candidate SkillRef/evidence/confidence/years helpers
+- Real pure classifier with no provider calls; overwrites LLM-supplied jd_quality
+- Real grounding path requiring skill evidence substrings in canonical JD (casefold/whitespace-normalized)
+- Real PII fail-closed via redact_pii on serialized extraction (reject, not silent strip)
+- Single invoke_structured call; adapter owns MAX_TRANSIENT_RETRIES=1 and MAX_SCHEMA_REPAIR_REQUESTS=1; no second wrapper loop
+- Quality reasons on JdQualityAssessment / JobExtractionResult.quality_reasons (outside nested extraction fields beyond enum)
+
+## Hardcoding Review
+- No fixture-string special-casing in production modules
+- No hardcoded success quality/hashes for specific titles
+- Tests use injectable StructuredFactory; zero real ShopAIKey network
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py tests/services/test_shopaikey_chat.py tests/services/test_pii_redaction.py`
+  - Required: yes
+  - Reported result: 115 passed
+  - Rerun result: 115 passed in ~1.06s
+  - Status: passed
+  - Notes: fakes only
+
+- Command/check: `cd backend; python -m ruff check app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py`
+  - Required: yes
+  - Reported result: All checks passed
+  - Rerun result: All checks passed
+  - Status: passed
+
+- Command/check: `cd backend; python -m mypy app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py`
+  - Required: yes
+  - Reported result: Success: no issues found in 3 source files
+  - Rerun result: Success: no issues found in 3 source files
+  - Status: passed
+
+## Acceptance Review
+- Extraction schema contains exactly source-required fields and rejects extra/invalid enums, confidence, years, evidence: satisfied ‚Äî exact 18-field set; extra=forbid; enum/bound tests
+- Required/preferred evidence short, contact-redacted, grounded; fabricated cannot persist: satisfied ‚Äî schema MAX_EVIDENCE_SNIPPET_LEN; grounding rejects non-substring evidence; PII reject on email/phone surfaces
+- full/partial/unscorable/contact-only deterministic with reasons for non-full: satisfied ‚Äî classifier tests and extraction path overwrite tests
+- Exactly one transient retry and one schema repair via reused adapter; zero real provider: satisfied ‚Äî timeout/repair ceiling tests; StructuredFactory; MAX_* == 1 assertions
+- Status: satisfied
+- Evidence: production modules + tests + A2 validation rerun
+
+## Dependency Review
+- (01B) accepted and checked
+- SkillRef from app.schemas.candidate reused (not duplicated)
+- ShopAIKeyChatAdapter.invoke_structured reused
+- redact_pii reused for contact fail-closed
+- Dependencies satisfied: yes
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 02B remains unchecked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Nine scoring-field groups + majority threshold 5 are an executable interpretation of Master ¬ß7.5 ‚Äúmost scoring fields‚Äù + hybrid alignment (salary excluded); documented by A1; acceptable for 02A
+- Persistence of quality_reasons on Job rows is 02B scope; 02A correctly returns reasons on JobExtractionResult only
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 02B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch02 - Validated Job Records and Persistence
+- Task ID: 02B
+- Task title: Implement persistence-first Job state and duplicate primitives
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (02B-scoped among broader Plan 5 tree):
+  - `backend/app/repositories/job_posts.py` (untracked; created)
+  - `backend/app/repositories/__init__.py` (modified; job_posts exports)
+  - `backend/tests/repositories/test_job_posts.py` (untracked; created)
+  - `docs/reports/report_5_execute_agent.md` (modified; 02B execution block; not product code)
+  - Note: `tests/db/test_models.py` and `tests/integration/test_migrations.py` unchanged (compatibility validation only; suite green)
+  - Sibling/unrelated working-tree noise from Batch01/02A left uncommitted (not reviewed as 02B product scope)
+
+## Files Reviewed
+- `backend/app/repositories/job_posts.py`: in scope - JobPostRepository, CreateReceivedResult, JobPostRecord compact view, normalized key builder, FSM transitions, exact ON CONFLICT create, sanitized errors
+- `backend/app/repositories/__init__.py`: in scope - public re-exports of job_posts symbols
+- `backend/tests/repositories/test_job_posts.py`: in scope - state, exact/normalized duplicate, concurrency, JSON validation, rollback, bounded list, compact privacy
+- `backend/tests/db/test_models.py`: in scope (unchanged) - existing job_posts schema constraints still green
+- `backend/tests/integration/test_migrations.py`: in scope (unchanged) - migration compatibility still green
+- `backend/app/db/models/jobs.py` / `backend/app/db/enums.py`: inspected for schema reuse (no new migration/Skill table)
+- `docs/reports/report_5_execute_agent.md` (02B block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md ß7.3 Persistence-first state machine: received ? processing ? processed|failed; independent processing/jd_quality/graph_sync/record dimensions; raw retained before LLM; sanitized failure fields
+- Plan_5.md ß7.4 Duplicate policy: exact hash no-insert; normalized key only when company/title/location sufficient; ignored_duplicate + duplicate_of_job_id + not_required; force_new primitive present (authorization owned by 04B)
+- Plan_5.md ß7.7 Tool outputs: compact bounded reads (default 10 / max 50); no raw content in public views
+- Master_plan.md ß6.3 Job status dimensions: four independent columns match enums/ORM
+- Master_plan.md ß11.4 Duplicate policy: exact then normalized; insufficient keys ? exact only
+
+## Implementation Reality
+- Real async SQLAlchemy repository on caller-owned AsyncSession (flush-only; no commit/rollback ownership)
+- Exact dedup: pre-select + SQLite INSERT ON CONFLICT DO NOTHING on unique raw_content_hash + re-select
+- Normalized identity: v1: + SHA-256 over length-delimited NFC/casefold/whitespace-collapsed company/title/location; None if any blank
+- mark_processed stores validated JobPostExtraction JSON + quality_reasons; auto-marks ignored_duplicate against oldest active processed peer unless force_new
+- Compact JobPostRecord slots deliberately omit raw_content, hash, embedding identity, and error internals
+- No Skill table; no new migration; reuses existing JobPost ORM/migration and hash_canonical_text
+
+## Hardcoding Review
+- No fixture-string special-casing in production repository
+- No hardcoded success IDs/hashes for specific JD bodies
+- Concurrent race test has a vacuous `or True` clause but still asserts single-row count and shared ID (behavior proven)
+- Temporary SQLite only; no network/provider calls
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/repositories/test_job_posts.py tests/db/test_models.py tests/integration/test_migrations.py`
+  - Required: yes
+  - Reported result: 43 passed
+  - Rerun result: 43 passed in ~5.59s
+  - Status: passed
+  - Notes: temporary SQLite only
+
+- Command/check: `cd backend; python -m ruff check app/repositories/job_posts.py tests/repositories/test_job_posts.py tests/db/test_models.py tests/integration/test_migrations.py; python -m mypy app/repositories/job_posts.py`
+  - Required: yes
+  - Reported result: Ruff all checks passed; mypy Success: no issues found in 1 source file
+  - Rerun result: Ruff all checks passed; mypy Success: no issues found in 1 source file
+  - Status: passed
+
+## Acceptance Review
+- Novel received with raw content/hash before provider; failure retains content + sanitized error: satisfied ó create_received + mark_failed tests; ORM retains raw_content; compact omits it
+- Exact hash returns original ID; no second row; concurrent attempts collapse to one: satisfied ó exact and concurrent tests; outbox count 0
+- Different hash + sufficient normalized key ? ignored_duplicate/not_required/duplicate_of_job_id; insufficient keys exact-only: satisfied ó normalized, force_new, and insufficient-key tests
+- Illegal transitions rejected; JSON validated at boundary; no raw/unbounded reads: satisfied ó FSM, corrupt JSON, list default 10 / max 50 tests
+- Status: satisfied
+- Evidence: production repository + tests + A2 validation rerun
+
+## Dependency Review
+- (02A) accepted and checked; JobPostExtraction available
+- Existing JobPost ORM/migration unique raw_content_hash reused (no schema revision)
+- Caller-owned transaction patterns align with agent_runs/profiles repositories
+- Dependencies satisfied: yes
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 02A remains checked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- create_received hashes/stores caller-supplied text via hash_canonical_text without re-running canonicalize_jd_text; contract expects already-canonical content from 04A acquisition (acceptable repository boundary)
+- Concurrent exact-hash test includes a vacuous `assert any(...) or True` line; row-count and shared-ID assertions still prove the race outcome
+- force_new is a repository Boolean only; application-owned authorization/audit remains 04B (correct scope split)
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

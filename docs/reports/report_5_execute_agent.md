@@ -248,3 +248,259 @@ complete
 - validations to rerun: the two required backend command groups above
 - risk areas: Trafilatura main-text output can include nav/footer noise on real pages; quality gating is intentionally out of scope for 01B
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 02A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch02 - Validated Job Records and Persistence
+
+## Task
+02A - Validate grounded Job extraction and deterministic quality
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch02 - Validated Job Records and Persistence
+- Task ID: 02A
+- Task title: Validate grounded Job extraction and deterministic quality
+- Files allowed / repair scope: `backend/app/schemas/job_post.py`, `backend/app/services/jd_quality.py`, `backend/app/services/jd_extraction.py`, `backend/app/schemas/__init__.py`, `backend/tests/schemas/test_job_post.py`, `backend/tests/services/test_jd_quality.py`, `backend/tests/services/test_jd_extraction.py`
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.2 Job extraction contract
+- docs/plans/Plan_5.md > ### 7.3 Persistence-first state machine
+- docs/plans/Master_plan.md > ### 7.1 Shared skill contract
+- docs/plans/Master_plan.md > ### 7.4 Job extraction
+- docs/plans/Master_plan.md > ### 7.5 JD quality rules
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_5.md (02A block)
+
+## Dependency and User Action Check
+- Dependencies: (01B) accepted; existing `SkillRef`, deterministic PII redaction, untrusted-document wrapper pattern, and `ShopAIKeyChatAdapter.invoke_structured`
+- User Action: None required
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_5.md
+- docs/plans/Plan_5.md (ยง7.2, ยง7.3)
+- docs/plans/Master_plan.md (ยง7.1, ยง7.4, ยง7.5, ยง8.2, ยง18.2)
+- backend/app/schemas/candidate.py
+- backend/app/schemas/preferences.py
+- backend/app/schemas/__init__.py
+- backend/app/services/profile_extraction.py
+- backend/app/services/shopaikey_chat.py
+- backend/app/services/pii_redaction.py
+- backend/app/db/enums.py
+- backend/app/db/models/jobs.py
+- backend/tests/schemas/test_candidate.py
+- backend/tests/services/test_profile_extraction.py
+- backend/tests/fakes/profile_extraction.py
+- backend/tests/services/test_shopaikey_chat.py
+
+## Completed Work
+- Reused Candidate strict Pydantic bounds (`SkillRef`, evidence/confidence/years helpers), profile extraction grounding/PII fail-closed pattern, untrusted document delimiting, and `ShopAIKeyChatAdapter.invoke_structured` ceilings (no second retry loop).
+- Defined `JobSkill` as shared `SkillRef` plus relationship-level confidence/evidence only (no weights, match fields, or trusted graph relationships).
+- Defined `JobPostExtraction` with exact master field inventory and enums: seniority, work_mode (+unknown), employment_type, jd_quality; salary display-only; `extra="forbid"`.
+- Implemented deterministic classifier in `jd_quality.py`: full = usable title + description + grounded responsibility/skill evidence + majority (5/9) scoring-field groups; partial = semantic + grounded skill signals below full; unscorable for contact-only/lower cases; reasons outside extraction for every non-full outcome; salary excluded from scoring groups.
+- Implemented `jd_extraction.py`: untrusted JD wrapper, single adapter invoke, evidence grounding against canonical source, contact-PII reject via `redact_pii`, deterministic quality overwrite, stable code-only failures.
+- Added fake-backed tests for schema/enums/bounds, quality category boundaries/reasons, fabricated evidence, overlong evidence, prompt injection delimiting, PII failure, one transient retry, one schema repair, and zero raw/provider leakage.
+
+## Files Created or Modified
+- backend/app/schemas/job_post.py (created)
+- backend/app/services/jd_quality.py (created)
+- backend/app/services/jd_extraction.py (created)
+- backend/app/schemas/__init__.py (exports)
+- backend/tests/schemas/test_job_post.py (created)
+- backend/tests/services/test_jd_quality.py (created)
+- backend/tests/services/test_jd_extraction.py (created)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py tests/services/test_shopaikey_chat.py tests/services/test_pii_redaction.py`
+- required: yes
+- result: passed
+- evidence or reason: 115 passed in ~1.3s; fakes only (no real ShopAIKey calls).
+
+- command/check: `cd backend; python -m ruff check app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py tests/schemas/test_job_post.py tests/services/test_jd_quality.py tests/services/test_jd_extraction.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed (after isort auto-fix on two test modules).
+
+- command/check: `cd backend; python -m mypy app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 3 source files.
+
+## Acceptance Check
+- condition: Extraction schema contains exactly source-required fields and rejects extra/invalid enums, confidence, years, and evidence
+- status: satisfied
+- evidence: `test_job_post.py` exact field-set assertion, enum/confidence/years/evidence/extra-forbid cases.
+
+- condition: Required/preferred evidence is short, contact-redacted, and grounded in canonical JD text; fabricated evidence cannot persist
+- status: satisfied
+- evidence: grounding tests reject fabricated/empty evidence; PII tests reject email/phone in extraction; schema rejects overlong evidence.
+
+- condition: Representative full, partial, unscorable, and contact-only fixtures produce deterministic categories with reasons for every non-full result
+- status: satisfied
+- evidence: `test_jd_quality.py` and extraction path tests for full (empty reasons), partial (reasons), unscorable/contact-only (reasons).
+
+- condition: Tests prove exactly one transient retry and one invalid-schema repair ceiling through the reused adapter, with zero real provider calls
+- status: satisfied
+- evidence: `test_jd_extraction.py` timeout retry once, repair once then succeed/fail; `StructuredFactory` injectable fake; existing `test_shopaikey_chat.py` ceilings remain green.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode โ€” A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- `JobSkill` wraps unchanged `SkillRef` with relationship confidence/evidence (Master ยง8.2 REQUIRES/PREFERS props); no SkillRef mutation.
+- Nine scoring-field groups aligned to hybrid components plus education/language/job_family; majority threshold is 5; salary excluded.
+- Classifier always overwrites LLM-supplied `jd_quality`; reasons live on `JdQualityAssessment` / `JobExtractionResult.quality_reasons`, not inside nested fields beyond the enum value itself.
+- Contact PII fail-closed mirrors profile extraction (reject rather than silently strip) so contact evidence cannot persist.
+
+## Notes for Review Agent
+- changed files: `job_post.py`, `jd_quality.py`, `jd_extraction.py`, `schemas/__init__.py`, three new test modules
+- validations to rerun: the two required backend command groups in the task Validation section
+- risk areas: majority threshold and nine-group inventory are an executable interpretation of Master ยง7.5 + ยง18.2; 02B owns persistence of `quality_reasons`
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 02B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch02 - Validated Job Records and Persistence
+
+## Task
+02B - Implement persistence-first Job state and duplicate primitives
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch02 - Validated Job Records and Persistence
+- Task ID: 02B
+- Task title: Implement persistence-first Job state and duplicate primitives
+- Files allowed / repair scope: `backend/app/repositories/job_posts.py`, `backend/app/repositories/__init__.py`, `backend/tests/repositories/test_job_posts.py`, `backend/tests/db/test_models.py`, `backend/tests/integration/test_migrations.py`
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.3 Persistence-first state machine
+- docs/plans/Plan_5.md > ### 7.4 Duplicate policy
+- docs/plans/Plan_5.md > ### 7.7 Tool outputs
+- docs/plans/Master_plan.md > ### 6.3 Job status dimensions
+- docs/plans/Master_plan.md > ### 11.4 Duplicate policy
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_5.md (02B block)
+- docs/reports/report_5_execute_agent.md (prior 02A block for quality_reasons handoff)
+
+## Dependency and User Action Check
+- Dependencies: (02A) JobPostExtraction/JdQuality schemas present; existing JobPost ORM/migration with unique raw_content_hash and four independent status columns; caller-owned repository patterns (profiles, agent_runs) present
+- User Action: None required
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_5.md
+- docs/plans/Plan_5.md (ง7.3, ง7.4, ง7.7)
+- docs/plans/Master_plan.md (ง6.3, ง11.3, ง11.4, ง13.5-13.6)
+- backend/app/db/models/jobs.py
+- backend/app/db/enums.py
+- backend/app/schemas/job_post.py
+- backend/app/services/jd_source.py (hash_canonical_text)
+- backend/app/services/jd_quality.py (quality_reasons shape)
+- backend/app/repositories/agent_runs.py (ON CONFLICT + FSM pattern)
+- backend/app/repositories/profiles.py (validated JSON boundary pattern)
+- backend/app/repositories/tool_executions.py (error sanitization)
+- backend/app/repositories/__init__.py
+- backend/migrations/versions/c885a5846d85_initial_application_schema.py (job_posts unique hash)
+- backend/tests/db/test_models.py
+- backend/tests/integration/test_migrations.py
+- backend/tests/repositories/test_agent_runs.py (concurrent race pattern)
+- backend/tests/repositories/test_profiles.py
+
+## Completed Work
+- Searched JobPost/migration/repository/hash callers; reused existing job_posts schema only (no Skill table, no new migration). Confirmed unique `raw_content_hash` supports exact no-insert under SQLite concurrency via INSERT ON CONFLICT DO NOTHING.
+- Implemented `JobPostRepository` (caller-owned flush-only transactions): exact-hash lookup, novel `received` create-or-return, guarded `received -> processing -> processed|failed` transitions, validated extraction/quality storage, automatic + explicit ignored-duplicate marking, independent graph-sync updates, embedding identity storage, sanitized error code/message.
+- Implemented versioned normalized identity (`v1:` + SHA-256 over length-delimited NFC/casefold/whitespace-collapsed company/title/location); returns None when any component blank (exact dedup only).
+- Compact `JobPostRecord` omits raw content, hashes, embeddings, and error internals. List filters default 10 / max 50; no unbounded list API.
+- Temporary-SQLite tests cover state combinations, rollback, corrupt JSON, exact races, normalized duplicates, force_new, insufficient keys, failure retention, bounded reads, and compact-view privacy.
+
+## Files Created or Modified
+- backend/app/repositories/job_posts.py (created)
+- backend/app/repositories/__init__.py (exports)
+- backend/tests/repositories/test_job_posts.py (created)
+- backend/tests/db/test_models.py (unchanged; existing schema compatibility covered by suite)
+- backend/tests/integration/test_migrations.py (unchanged; existing migration suite remains green)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/repositories/test_job_posts.py tests/db/test_models.py tests/integration/test_migrations.py`
+- required: yes
+- result: passed
+- evidence or reason: 43 passed in ~6.8s (temporary SQLite only; no real providers/network).
+
+- command/check: `cd backend; python -m ruff check app/repositories/job_posts.py tests/repositories/test_job_posts.py tests/db/test_models.py tests/integration/test_migrations.py; python -m mypy app/repositories/job_posts.py`
+- required: yes
+- result: passed
+- evidence or reason: Ruff all checks passed; mypy Success: no issues found in 1 source file.
+
+## Acceptance Check
+- condition: Novel record committed as `received` with canonical raw content/hash before provider call; later failure retains content and sanitized failure state
+- status: satisfied
+- evidence: `test_novel_received_persists_raw_before_processing`, `test_failure_retains_raw_content_and_sanitized_error` (ORM row retains raw_content; compact view omits it).
+
+- condition: Repeating the same hash returns original ID; row/provider/embedding/outbox counts unchanged, including concurrent attempts
+- status: satisfied
+- evidence: `test_exact_hash_returns_existing_no_second_row`, `test_concurrent_exact_hash_inserts_one_row` (count==1, outbox==0).
+
+- condition: Different hash with same sufficient normalized key can persist as `ignored_duplicate` with `duplicate_of_job_id` and `graph_sync_status=not_required`; insufficient keys use exact dedup only
+- status: satisfied
+- evidence: `test_normalized_duplicate_marks_ignored_not_required`, `test_insufficient_identity_uses_exact_dedup_only`, `test_force_new_keeps_active_despite_normalized_match`.
+
+- condition: Status transitions reject illegal combinations; repository reads validate JSON; no read/filter path returns raw JD or unbounded corpus
+- status: satisfied
+- evidence: illegal transition tests; corrupt JSON raises JobPostValidationError; list limit max 50; JobPostRecord slots exclude raw/hash/error/embedding fields.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Reuse `hash_canonical_text` from jd_source for hash verification; optional caller-supplied hash must match.
+- Exact races: pre-select + SQLite INSERT ON CONFLICT DO NOTHING on `raw_content_hash` then re-select (agent_runs pattern).
+- Normalized key: `v1:` + SHA-256 of length-delimited normalized components; column remains non-unique so ignored duplicates share the key.
+- mark_processed applies automatic ignored-duplicate when an older active processed peer owns the same key unless `force_new=True`.
+- Compact reads never surface error_code/error_message (stored on ORM for failure retention); services can load ORM if needed for save_job display.
+
+## Notes for Review Agent
+- changed files: `job_posts.py` repository, `__init__.py` exports, `test_job_posts.py`; model/migration test modules unchanged
+- validations to rerun: the two required backend command groups in the task Validation section
+- risk areas: concurrent normalized-duplicate both-active race is mitigated by SQLite write serialization + post-flush peer lookup; partial unique index was not required and no migration was added
+- next task readiness: can_review

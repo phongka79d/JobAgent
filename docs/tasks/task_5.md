@@ -318,7 +318,7 @@ does not expose tools, embed, synchronize Neo4j, or render frontend cards.
 
 ### Tasks
 
-- [ ] (02A): Validate grounded Job extraction and deterministic quality
+- [x] (02A): Validate grounded Job extraction and deterministic quality
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.2 Job extraction contract`; `docs/plans/Plan_5.md` > `### 7.3 Persistence-first state machine`; `docs/plans/Master_plan.md` > `### 7.1 Shared skill contract`; `docs/plans/Master_plan.md` > `### 7.4 Job extraction`; `docs/plans/Master_plan.md` > `### 7.5 JD quality rules`
   - Source Requirements:
     - Implement every master-defined `JobPostExtraction` field exactly; salary remains display-only.
@@ -344,7 +344,7 @@ does not expose tools, embed, synchronize Neo4j, or render frontend cards.
   - Blocked Condition: The master `JobSkill` name and Plan 5's “SkillRef plus confidence/evidence” cannot be represented without changing the accepted `SkillRef` semantics; report `BLOCKED_BY_SOURCE_CONFLICT` rather than duplicating or mutating the shared contract.
   - Files: `backend/app/schemas/job_post.py`, `backend/app/services/jd_quality.py`, `backend/app/services/jd_extraction.py`, `backend/app/schemas/__init__.py`, `backend/tests/schemas/test_job_post.py`, `backend/tests/services/test_jd_quality.py`, `backend/tests/services/test_jd_extraction.py`
 
-- [ ] (02B): Implement persistence-first Job state and duplicate primitives
+- [x] (02B): Implement persistence-first Job state and duplicate primitives
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.3 Persistence-first state machine`; `docs/plans/Plan_5.md` > `### 7.4 Duplicate policy`; `docs/plans/Plan_5.md` > `### 7.7 Tool outputs`; `docs/plans/Master_plan.md` > `### 6.3 Job status dimensions`; `docs/plans/Master_plan.md` > `### 11.4 Duplicate policy`
   - Source Requirements:
     - Persist novel raw content before LLM extraction and retain it after provider/schema failure with stable sanitized error data.
