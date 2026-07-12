@@ -840,6 +840,40 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one user-observed public-URL or raw-text save/query chat flow.
 ```
 
+## Plan 6 progress (Batches 01–02) — retrieval and deterministic matching
+
+**Plan 6 Batches 01–02 are evidence-backed.** Normal validation uses injected
+graph/database fakes and pure inputs only — no live Neo4j, ShopAIKey, or LLM
+call is required or claimed.
+
+- Candidate vectors use a versioned, redacted representation through the locked
+  embedding adapter; graph retrieval is bounded to 50 Job IDs and rechecks
+  canonical SQLite eligibility before any matching work.
+- Matching uses shared skill normalization with direct/verified-alias strength
+  1.0, verified `RELATED_TO` strength 0.6, and fail-closed provisional or
+  unverified paths. Required/preferred coverage, non-skill components, hybrid
+  seed weights, missing-value renormalization, and quality multipliers are all
+  deterministic and versioned.
+- Results are a bounded, stable top 10 with Job-ID tie breaks, full component
+  weight transparency, bounded direct/related/missing skill paths, deterministic
+  explanations, and only a validated public source URL. Ranking, explanations,
+  and schemas make no model calls or Job mutations.
+- Production exposure remains exactly six tools and seven public application
+  routes. `match_jobs` transport/UI integration, evaluation datasets, and
+  tuning remain later Plan 6 batches.
+
+Focused Batch02 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_retrieval.py tests/repositories/test_job_posts.py tests/graph/test_job_sync.py
+python -m pytest -q tests/services/test_skill_matching.py tests/services/test_skill_normalization.py tests/services/test_job_skill_normalization.py
+python -m pytest -q tests/services/test_score_components.py tests/services/test_matching.py
+python -m pytest -q tests/services/test_explanations.py tests/schemas/test_matching.py
+python -m ruff check app/services/retrieval.py app/services/skill_matching.py app/services/skill_match_contracts.py app/services/skill_match_evidence.py app/services/skill_match_coverage.py app/services/score_components.py app/services/matching.py app/services/matching_aggregate.py app/services/matching_rank.py app/services/explanations.py app/schemas/matching.py app/schemas/matching_result.py app/schemas/score_breakdown.py tests/services/test_retrieval.py tests/services/test_skill_matching.py tests/services/test_score_components.py tests/services/test_matching.py tests/services/test_explanations.py tests/schemas/test_matching.py
+python -m mypy app/services/retrieval.py app/services/skill_matching.py app/services/skill_match_contracts.py app/services/skill_match_evidence.py app/services/skill_match_coverage.py app/services/score_components.py app/services/matching.py app/services/matching_aggregate.py app/services/matching_rank.py app/services/explanations.py app/schemas/matching.py app/schemas/matching_result.py app/schemas/score_breakdown.py
+```
+
 ## Plan 6 handoff (Master Phase 5) — stable seams only
 
 Plan 6 receives these **stable Phase 4 outputs** and must extend them rather

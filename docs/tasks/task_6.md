@@ -286,7 +286,7 @@ render UI, tune weights, or read held-out evaluation data.
 
 ### Tasks
 
-- [ ] (02A): Compute direct, alias, and verified-related skill evidence
+- [x] (02A): Compute direct, alias, and verified-related skill evidence
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.2 Skill score`; `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`; `docs/plans/Master_plan.md` > `### 18.1 Skill coverage`
   - Source Requirements:
     - Apply strongest-match precedence: direct canonical or verified alias 1.0, verified `RELATED_TO` 0.6, provisional/unverified/no match 0.0.
@@ -311,7 +311,7 @@ render UI, tune weights, or read held-out evaluation data.
   - Blocked Condition: Verified relationship status/source cannot be distinguished from provisional graph data; report `BLOCKED_BY_SOURCE_CONFLICT` and treat related boosts as disabled rather than trusting ambiguous edges.
   - Files: `backend/app/services/skill_matching.py`, `backend/app/services/retrieval.py`, `backend/tests/services/test_skill_matching.py`, `backend/tests/services/test_retrieval.py`
 
-- [ ] (02B): Compute non-skill components and renormalized hybrid scores
+- [x] (02B): Compute non-skill components and renormalized hybrid scores
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.3 Non-skill components`; `docs/plans/Plan_6.md` > `### 7.4 Hybrid aggregation`; `docs/plans/Master_plan.md` > `### 18.2 Initial hybrid seed`; `docs/plans/Master_plan.md` > `### 18.3 Missing fields`
   - Source Requirements:
     - Implement semantic, seniority, experience, location, and work-mode rules exactly, returning `[0,1]` or unavailable.
@@ -336,7 +336,7 @@ render UI, tune weights, or read held-out evaluation data.
   - Blocked Condition: A source-required Candidate or Job field has incompatible accepted enum semantics; report `BLOCKED_BY_SOURCE_CONFLICT` without guessing mappings or altering upstream extraction.
   - Files: `backend/app/services/score_components.py`, `backend/app/services/matching.py`, `backend/app/schemas/score_breakdown.py`, `backend/tests/services/test_score_components.py`, `backend/tests/services/test_matching.py`
 
-- [ ] (02C): Rank top 10 and generate bounded evidence-backed explanations
+- [x] (02C): Rank top 10 and generate bounded evidence-backed explanations
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.4 Hybrid aggregation`; `docs/plans/Plan_6.md` > `### 7.5 Match result contract`; `docs/plans/Plan_6.md` > `## 5. Out of Scope`
   - Source Requirements:
     - Return Job identity/display fields, final score, quality, every component/effective weight, matched/related/missing required skills, explanation lines, and safe public source URL.

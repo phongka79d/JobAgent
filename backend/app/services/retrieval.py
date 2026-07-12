@@ -6,9 +6,10 @@ Owns the matching retrieval boundary only:
 - parameterized cosine vector query (index identity fixed, k ≤ 50)
 - optional explicit saved-Job-ID filter (1–50 unique IDs)
 - reload and filter against current SQLite Job rows
+- read-only verified ``RELATED_TO`` edge fetch (no writes, no inference)
 - never treat Neo4j node properties as canonical application state
 
-Scoring, skill-graph expansion, tools, and match cards are owned by later tasks.
+Scoring formulas, tools, and match cards are owned by later tasks.
 """
 
 from __future__ import annotations
@@ -37,6 +38,10 @@ from app.repositories.job_posts import (
     JobPostValidationError,
 )
 from app.schemas.job_post import JobPostExtraction
+from app.services.skill_matching import (
+    MAX_RELATED_SOURCE_LEN,
+    VerifiedRelatedEdge,
+)
 
 # ---------------------------------------------------------------------------
 # Bounds and identity
@@ -45,6 +50,10 @@ from app.schemas.job_post import JobPostExtraction
 MAX_RETRIEVAL_CANDIDATES: Final[int] = 50
 RETRIEVAL_VECTOR_DIMENSIONS: Final[int] = ALLOWED_EMBEDDING_DIMENSIONS
 RETRIEVAL_VECTOR_INDEX_NAME: Final[str] = VECTOR_INDEX_NAME
+
+# Bounded verified skill-graph read (Master §8.4 / Plan 6 §7.2).
+MAX_RELATED_SKILL_KEYS: Final[int] = 200
+MAX_RELATED_EDGE_RESULTS: Final[int] = 500
 
 # Static Cypher: index name is bound, never interpolated from untrusted input.
 # Returns only Job id + cosine score — no embedding, raw text, or secrets.
@@ -64,6 +73,21 @@ RETURN j.id AS job_id,
        vector.similarity.cosine(j.embedding, $embedding) AS score
 ORDER BY score DESC
 LIMIT $k
+""".strip()
+
+# Read-only verified RELATED_TO: undirected one-hop, verified=true only.
+# Returns bounded keys/source/weight — never raw documents or Skill bodies.
+_VERIFIED_RELATED_CYPHER: Final[str] = """
+MATCH (a:Skill)-[r:RELATED_TO]-(b:Skill)
+WHERE a.canonical_key IN $keys
+  AND r.verified = true
+  AND a.canonical_key <> b.canonical_key
+RETURN a.canonical_key AS from_key,
+       b.canonical_key AS to_key,
+       r.source AS source,
+       r.verified AS verified,
+       r.weight AS weight
+LIMIT $limit
 """.strip()
 
 
@@ -122,15 +146,16 @@ class RetrievalCandidate:
     """Canonical scorable Job after SQLite rejoin (Neo4j rank preserved).
 
     ``record`` is always the current SQLite compact row. Graph properties never
-    override title/skills/status. ``graph_evidence`` is reserved for later
-    verified relationship reads and is empty at this boundary.
+    override title/skills/status. ``graph_evidence`` holds only bounded
+    verified ``RELATED_TO`` facts when a caller attaches them; the vector join
+    itself leaves it empty (skill edges are skill-global, not Job rank hits).
     """
 
     job_id: UUID
     semantic_similarity: float
     record: JobPostRecord
     extraction: JobPostExtraction
-    graph_evidence: tuple[object, ...] = ()
+    graph_evidence: tuple[VerifiedRelatedEdge, ...] = ()
 
 
 class GraphReadClient(Protocol):
@@ -274,6 +299,90 @@ def _sanitize_graph_hits(
     return hits
 
 
+def _normalize_skill_keys_for_related(
+    skill_keys: Sequence[str],
+) -> tuple[str, ...]:
+    """Validate and dedupe skill keys for the verified RELATED_TO read."""
+    if not isinstance(skill_keys, Sequence) or isinstance(skill_keys, (str, bytes)):
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+    if len(skill_keys) > MAX_RELATED_SKILL_KEYS:
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in skill_keys:
+        if not isinstance(raw, str):
+            raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+        key = raw.strip()
+        if not key:
+            raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return tuple(ordered)
+
+
+def _parse_related_weight(raw: object) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _sanitize_related_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    limit: int = MAX_RELATED_EDGE_RESULTS,
+) -> tuple[VerifiedRelatedEdge, ...]:
+    """Keep only verified=true edges with bounded keys/source; undirected dedupe."""
+    edges: list[VerifiedRelatedEdge] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for row in rows:
+        if len(edges) >= limit:
+            break
+        if not isinstance(row, Mapping):
+            continue
+        verified_raw = row.get("verified")
+        if verified_raw is not True:
+            # Fail closed: ambiguous/missing/false verified never boosts.
+            continue
+        from_raw = row.get("from_key")
+        to_raw = row.get("to_key")
+        if not isinstance(from_raw, str) or not isinstance(to_raw, str):
+            continue
+        from_key = from_raw.strip()
+        to_key = to_raw.strip()
+        if not from_key or not to_key or from_key == to_key:
+            continue
+        pair = (from_key, to_key) if from_key <= to_key else (to_key, from_key)
+        if pair in seen_pairs:
+            continue
+        source_raw = row.get("source")
+        if source_raw is None:
+            source = ""
+        elif not isinstance(source_raw, str):
+            continue
+        else:
+            source = source_raw.strip()
+            if len(source) > MAX_RELATED_SOURCE_LEN:
+                source = source[:MAX_RELATED_SOURCE_LEN]
+        seen_pairs.add(pair)
+        edges.append(
+            VerifiedRelatedEdge(
+                from_key=from_key,
+                to_key=to_key,
+                source=source,
+                verified=True,
+                weight=_parse_related_weight(row.get("weight")),
+            )
+        )
+    return tuple(edges)
+
+
 # ---------------------------------------------------------------------------
 # Graph query boundary
 # ---------------------------------------------------------------------------
@@ -331,6 +440,55 @@ async def query_job_vector_index(
     if not isinstance(rows, list):
         raise RetrievalError(RetrievalErrorCode.GRAPH_FAILED)
     return _sanitize_graph_hits(rows, limit=limit)
+
+
+async def query_verified_related_edges(
+    client: GraphReadClient,
+    skill_keys: Sequence[str],
+    *,
+    limit: int = MAX_RELATED_EDGE_RESULTS,
+) -> tuple[VerifiedRelatedEdge, ...]:
+    """Read-only verified ``RELATED_TO`` edges for the given skill keys.
+
+    Never writes, never infers missing edges, and never returns unverified or
+    provisional relationships. Empty ``skill_keys`` yields an empty tuple with
+    zero graph calls. Failures map to sanitized ``RetrievalError`` codes.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+    if limit > MAX_RELATED_EDGE_RESULTS:
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)
+
+    keys = _normalize_skill_keys_for_related(skill_keys)
+    if not keys:
+        return ()
+
+    # Static guard: related query must filter verified=true and must not mutate.
+    if "RELATED_TO" not in _VERIFIED_RELATED_CYPHER:
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)  # pragma: no cover
+    if "r.verified = true" not in _VERIFIED_RELATED_CYPHER:
+        raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)  # pragma: no cover
+    lowered = _VERIFIED_RELATED_CYPHER.lower()
+    for banned in ("create ", "merge ", "delete ", "set ", "remove ", "detach "):
+        if banned in lowered:
+            raise RetrievalError(RetrievalErrorCode.INVALID_INPUT)  # pragma: no cover
+
+    parameters: dict[str, Any] = {
+        "keys": list(keys),
+        "limit": limit,
+    }
+    try:
+        rows = await client.fetch_records(_VERIFIED_RELATED_CYPHER, parameters)
+    except GraphError as exc:
+        raise _map_graph_error(exc) from None
+    except RetrievalError:
+        raise
+    except Exception:
+        raise RetrievalError(RetrievalErrorCode.GRAPH_FAILED) from None
+
+    if not isinstance(rows, list):
+        raise RetrievalError(RetrievalErrorCode.GRAPH_FAILED)
+    return _sanitize_related_rows(rows, limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +621,8 @@ async def retrieve_top_job_candidates(
 
 
 __all__ = [
+    "MAX_RELATED_EDGE_RESULTS",
+    "MAX_RELATED_SKILL_KEYS",
     "MAX_RETRIEVAL_CANDIDATES",
     "RETRIEVAL_VECTOR_DIMENSIONS",
     "RETRIEVAL_VECTOR_INDEX_NAME",
@@ -475,6 +635,7 @@ __all__ = [
     "clamp_semantic_similarity",
     "join_canonical_jobs",
     "query_job_vector_index",
+    "query_verified_related_edges",
     "retry_pending_job_graph_work",
     "retrieve_top_job_candidates",
 ]

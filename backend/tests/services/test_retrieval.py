@@ -25,6 +25,8 @@ from app.services.embeddings import (
 )
 from app.services.jd_source import hash_canonical_text
 from app.services.retrieval import (
+    MAX_RELATED_EDGE_RESULTS,
+    MAX_RELATED_SKILL_KEYS,
     MAX_RETRIEVAL_CANDIDATES,
     RETRIEVAL_VECTOR_INDEX_NAME,
     GraphRankHit,
@@ -34,9 +36,11 @@ from app.services.retrieval import (
     clamp_semantic_similarity,
     join_canonical_jobs,
     query_job_vector_index,
+    query_verified_related_edges,
     retrieve_top_job_candidates,
     retry_pending_job_graph_work,
 )
+from app.services.skill_matching import MAX_RELATED_SOURCE_LEN, VerifiedRelatedEdge
 
 VECTOR_DIM = ALLOWED_EMBEDDING_DIMENSIONS
 
@@ -557,3 +561,110 @@ async def test_error_repr_hides_secrets_and_content() -> None:
     assert "password" not in text.lower()
     assert "authorization" not in text.lower()
     assert "embedding" not in text or "retrieval" in text
+
+
+# ---------------------------------------------------------------------------
+# Verified RELATED_TO read-only query (02A)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_query_verified_related_filters_and_bounds() -> None:
+    long_source = "s" * (MAX_RELATED_SOURCE_LEN + 50)
+    client = FakeGraphClient(
+        vector_rows=[
+            {
+                "from_key": "django",
+                "to_key": "python",
+                "source": "seed_taxonomy",
+                "verified": True,
+                "weight": 0.7,
+            },
+            {
+                "from_key": "flask",
+                "to_key": "python",
+                "source": "llm_guess",
+                "verified": False,
+                "weight": 0.9,
+            },
+            {
+                "from_key": "python",
+                "to_key": "django",  # reverse duplicate
+                "source": "seed_taxonomy",
+                "verified": True,
+                "weight": 0.7,
+            },
+            {
+                "from_key": "rust",
+                "to_key": "go",
+                "source": long_source,
+                "verified": True,
+                "weight": None,
+            },
+            {
+                "from_key": "missing_flag",
+                "to_key": "python",
+                "source": "ambiguous",
+                # verified absent → dropped
+                "weight": 1.0,
+            },
+            {
+                "from_key": "self",
+                "to_key": "self",
+                "source": "noop",
+                "verified": True,
+            },
+        ]
+    )
+    edges = await query_verified_related_edges(
+        client, ["django", "python", "rust", "flask"]
+    )
+    assert len(edges) == 2
+    by_pair = {
+        (e.from_key, e.to_key) if e.from_key <= e.to_key else (e.to_key, e.from_key): e
+        for e in edges
+    }
+    assert ("django", "python") in by_pair
+    assert ("go", "rust") in by_pair
+    assert all(isinstance(e, VerifiedRelatedEdge) for e in edges)
+    assert all(e.verified is True for e in edges)
+    rust_edge = by_pair[("go", "rust")]
+    assert len(rust_edge.source) == MAX_RELATED_SOURCE_LEN
+
+    query, params = client.fetch_queries[0]
+    assert "RELATED_TO" in query
+    assert "r.verified = true" in query
+    assert "CREATE" not in query.upper().replace("RELATED_TO", "")
+    assert set(params["keys"]) == {"django", "python", "rust", "flask"}
+    assert params["limit"] == MAX_RELATED_EDGE_RESULTS
+
+
+@pytest.mark.asyncio
+async def test_query_verified_related_empty_keys_no_graph_call() -> None:
+    client = FakeGraphClient(vector_rows=[{"from_key": "a", "to_key": "b"}])
+    edges = await query_verified_related_edges(client, [])
+    assert edges == ()
+    assert client.fetch_queries == []
+
+
+@pytest.mark.asyncio
+async def test_query_verified_related_rejects_overlimit_keys() -> None:
+    client = FakeGraphClient()
+    keys = [f"skill_{i}" for i in range(MAX_RELATED_SKILL_KEYS + 1)]
+    with pytest.raises(RetrievalError) as excinfo:
+        await query_verified_related_edges(client, keys)
+    assert excinfo.value.code is RetrievalErrorCode.INVALID_INPUT
+    assert client.fetch_queries == []
+
+
+@pytest.mark.asyncio
+async def test_query_verified_related_graph_failure_sanitized() -> None:
+    client = FakeGraphClient(
+        fetch_error=GraphError(GraphErrorCode.UNAVAILABLE),
+    )
+    with pytest.raises(RetrievalError) as excinfo:
+        await query_verified_related_edges(client, ["python"])
+    err = excinfo.value
+    assert err.code is RetrievalErrorCode.NEO4J_UNAVAILABLE
+    assert err.__cause__ is None
+    assert "password" not in str(err).lower()

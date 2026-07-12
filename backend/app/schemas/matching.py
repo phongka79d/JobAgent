@@ -1,9 +1,12 @@
-"""Matching input/result primitives for Phase 5 Candidate retrieval text.
+"""Matching input and result contracts for Phase 5.
 
-Owns the versioned Candidate embedding surface only: strict field inventory for
-embedding text, representation version identity, and sanitized failure codes.
-Scoring breakdowns, tool payloads, and full match cards are owned by later
-tasks and must not be invented here.
+Owns:
+- Versioned Candidate embedding surface (Plan 6 §7.1)
+- Public re-exports of bounded MatchResult contracts (Plan 6 §7.5)
+
+Match-result transport types live in ``matching_result`` so this module stays
+focused on Candidate embedding identity/errors while preserving stable imports
+from ``app.schemas.matching``.
 """
 
 from __future__ import annotations
@@ -11,6 +14,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
+
+from app.schemas.matching_result import (
+    MATCH_RESULT_CONTRACT_VERSION,
+    MAX_COMPONENT_ENTRIES,
+    MAX_EXPLANATION_LINE_LEN,
+    MAX_EXPLANATION_LINES,
+    MAX_MATCH_RESULTS,
+    MAX_MATCH_SKILL_ITEMS,
+    MAX_RANK_INPUTS,
+    MAX_RELATED_PATH_KEYS,
+    MatchComponentEntry,
+    MatchingSchemaBase,
+    MatchResult,
+    MatchResultCollection,
+    MatchSkillPath,
+    VisibleMatchKind,
+)
 
 # ---------------------------------------------------------------------------
 # Representation identity
@@ -112,8 +132,22 @@ class CandidateEmbeddingResult:
 
 __all__ = [
     "CANDIDATE_TEXT_REPRESENTATION_VERSION",
+    "MATCH_RESULT_CONTRACT_VERSION",
+    "MAX_COMPONENT_ENTRIES",
+    "MAX_EXPLANATION_LINE_LEN",
+    "MAX_EXPLANATION_LINES",
+    "MAX_MATCH_RESULTS",
+    "MAX_MATCH_SKILL_ITEMS",
+    "MAX_RANK_INPUTS",
+    "MAX_RELATED_PATH_KEYS",
     "CandidateEmbeddingError",
     "CandidateEmbeddingErrorCode",
     "CandidateEmbeddingFields",
     "CandidateEmbeddingResult",
+    "MatchComponentEntry",
+    "MatchResult",
+    "MatchResultCollection",
+    "MatchSkillPath",
+    "MatchingSchemaBase",
+    "VisibleMatchKind",
 ]
