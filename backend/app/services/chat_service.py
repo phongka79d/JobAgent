@@ -73,6 +73,8 @@ GraphRunner = Callable[
 
 _MAX_ASSISTANT_CONTENT: Final[int] = 32_768
 _DEFAULT_RECENT_LIMIT: Final[int] = 20
+# Allowlisted durable/public tool outcome token (never tool args/results/docs).
+PUBLIC_TOOL_OUTCOME_COMPLETED: Final[str] = "completed"
 
 
 class ChatServiceError(Exception):
@@ -766,7 +768,12 @@ class ChatService:
         run_id: UUID,
         graph_result: Mapping[str, Any],
     ) -> None:
-        """Record sanitized tool observability from graph turn messages."""
+        """Record sanitized tool observability from graph turn messages.
+
+        Never stores ``ToolMessage`` / tool-result bodies, raw arguments, or
+        document text. Durable ``arguments_summary`` is restricted to a
+        generic allowlisted status token for public SSE mapping.
+        """
         messages = graph_result.get("messages_for_this_turn") or ()
         if not isinstance(messages, Sequence):
             return
@@ -778,13 +785,11 @@ class ChatService:
 
         for item in messages:
             name: str | None = None
-            summary: str | None = None
             failed = False
             if isinstance(item, ToolMessage):
                 name = str(item.name or "tool")
                 content = item.content
                 text = content if isinstance(content, str) else str(content)
-                summary = text[:200] if text else None
                 status = getattr(item, "status", None)
                 if status == "error" or (
                     text
@@ -799,7 +804,6 @@ class ChatService:
                 name = str(item.get("name") or "tool")
                 content = item.get("content", "")
                 text = content if isinstance(content, str) else str(content)
-                summary = text[:200] if text else None
                 if text and (
                     text.startswith("ERROR:")
                     or '"ok": false' in text.lower()
@@ -829,19 +833,11 @@ class ChatService:
                         duration_ms=0,
                     )
                 else:
-                    # Store only a short sanitized outcome summary, never raw args.
-                    short = None
-                    if summary is not None:
-                        short = " ".join(summary.split())[:120]
-                        if any(
-                            token in short.lower()
-                            for token in ("password", "secret", "token", "api_key")
-                        ):
-                            short = "tool_completed"
+                    # Generic allowlisted status only — never result/argument body.
                     await tools_repo.finish(
                         row.id,
                         duration_ms=0,
-                        arguments_summary=short,
+                        arguments_summary=PUBLIC_TOOL_OUTCOME_COMPLETED,
                     )
             except (ToolExecutionValidationError, Exception):
                 # Observability must not fail the durable turn outcome.

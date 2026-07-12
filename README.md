@@ -16,6 +16,10 @@ re-benchmarking Phase 0 gates.
 | Batch04 | Idempotent Neo4j schema primitives, durable replay-safe graph outbox, rebuild skeleton |
 | Batch05 | Production-shaped Compose (frontend/backend/Neo4j), sanitized `GET /api/health`, green local quality + live exit evidence |
 
+**Plan 3 Phase 2 chat transport / Agent runtime is evidence-backed** across
+Batches 01–04 (see Phase 2 quality gates and Plan 4 handoff below). Normal
+automated tests use injected fakes and never call ShopAIKey.
+
 Re-running live three-service Compose exit checks requires a populated ignored
 root `.env` (especially a non-empty `NEO4J_PASSWORD`). Do not paste secret
 values into reports, commits, or chat.
@@ -46,9 +50,15 @@ Persistence ownership:
 | Filesystem (`FILES_DIR`) | Uploaded attachment bytes under service-owned `staged/` and `active/` paths |
 | Neo4j | Derived, fully rebuildable graph data only; never the sole copy of canonical state |
 
-The only public Phase 1 application endpoint is `GET /api/health` (plus framework
-documentation routes). Chat, Agent, upload, public CRUD, matching, continuous
-workers, Qdrant, CI, and cloud deployment remain out of scope for Plan 2.
+Public application endpoints after Phase 2 (Plan 3):
+
+- `GET /api/health`
+- `GET /api/chat/history`
+- `POST /api/chat/turns`
+- `POST /api/chat/runs/{run_id}/resume`
+
+(plus framework documentation routes). Upload, public profile/job CRUD, matching
+UI, continuous workers, Qdrant, CI, and cloud deployment remain out of scope.
 
 ## Locked dependency decisions
 
@@ -310,36 +320,128 @@ npm run typecheck
 npm run build
 ```
 
-## Current limitations (after Plan 3 Batch03)
+## Plan 3 progress (Batch04) — Phase 2 transport proof
 
-- Phase-wide full transport proof and synthetic-tool removal are deferred to Batch04.
-- No CV/JD extraction, profile approval, matching, ranking, or evaluation UI.
+Batch04 proves the complete local frontend-to-Agent transport with injected
+fakes only, confirms production has no synthetic tool, and records the stable
+Plan 4 handoff. Public tool outcomes are fail-closed to short allowlisted status
+tokens only; raw tool arguments/results never enter durable
+`arguments_summary` or SSE.
+
+- Full-path backend fixture: real FastAPI routes → `ChatService` → production
+  LangGraph + `ToolNode` → validated SSE → durable history/run/tool rows and
+  completed-checkpoint cleanup (`backend/tests/integration/test_full_chat_transport.py`).
+  Proofs include unique raw-argument sentinel absence across parsed SSE, raw
+  wire, history, durable tool rows, and captured logs; instrumented approval
+  tool action and durable tool-row counts stay exactly one after duplicate
+  turn/resume keys.
+- Full-path frontend fixture: raw SSE frames through real
+  `streamChatTurn` / `streamChatResume` (parser) into the pure reducer and
+  ChatShell for ordinary completion, tool activity, approval/resume,
+  duplicates, failure, and disconnect
+  (`frontend/src/test/chat-transport.integration.test.tsx`).
+- Synthetic `echo_label` / approval helpers exist only under `backend/tests/`;
+  production registry remains empty by default.
+- Public application routes remain exactly:
+  `GET /api/health`, `GET /api/chat/history`, `POST /api/chat/turns`,
+  `POST /api/chat/runs/{run_id}/resume`.
+
+### Phase 2 quality gates (evidence-backed commands)
+
+Backend (no ShopAIKey network calls):
+
+```powershell
+cd backend
+python -m ruff check app tests
+python -m mypy app
+python -m pytest -q
+python -m pytest -q tests/integration/test_full_chat_transport.py
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm ci --ignore-scripts
+npm run check:astryx
+npm run lint
+npm run typecheck
+npm run test -- --run
+npm run test -- --run src/test/chat-transport.integration.test.tsx
+npm run build
+```
+
+Compose static (uses `.env.example`; no live secrets required):
+
+```powershell
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml config
+docker compose --env-file .env.example -f infrastructure/docker-compose.yml build
+```
+
+Production exposure / route inventory scans (expected: no production
+`echo_label` tool; domain names may appear only as reserved later-phase
+constants in `backend/app/tools/registry.py`; routes only health + chat):
+
+```powershell
+rg -n "synthetic|echo_label|propose_profile_from_cv|commit_profile_draft|save_job|match_jobs" backend/app frontend/src
+rg -n "@(router|app)\.(get|post|put|patch|delete)" backend/app/api
+git diff --check
+```
+
+Optional live observation (user-owned root `.env` only; not required for
+acceptance):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d
+# Then one ordinary chat turn through the UI against the production adapter.
+```
+
+## Current limitations (after Plan 3 Batch04 / Phase 2)
+
+- Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
+  for local fake-backed proof; Plan 4+ domain behavior is not implemented.
+- No CV/JD extraction, profile approval payloads, matching, ranking, or
+  evaluation UI.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.
-- Graph rebuild data-load stages after clear+schema are intentionally incomplete.
-- Outbox repository is durable and replay-safe; no background poller ships in
-  Phase 1 (claim only at explicit lifecycle points in later plans).
+- Production tool registry is empty; the seven Master §13 domain tools are
+  reserved names only — Plan 4 registers real tools through the existing seam.
+- Graph rebuild data-load stages after clear+schema remain intentionally
+  incomplete.
+- Outbox repository is durable and replay-safe; no background poller ships yet.
 
-## Plan 3 handoff (Master Phase 2)
+## Plan 4 handoff (Master Phase 3) — stable seams only
 
-Plan 3 receives these **stable primitives** and must reuse them rather than
-recreate them:
+Plan 4 receives these **stable Phase 2 primitives** and must extend them rather
+than recreate alternate graphs, conversations, SSE contracts, or tool HTTP
+paths:
+
+| Seam | Location / contract |
+|---|---|
+| Public chat endpoints | `GET /api/chat/history`, `POST /api/chat/turns`, `POST /api/chat/runs/{run_id}/resume` (`backend/app/api/chat.py`) |
+| SSE event union | Eight-event validated union + order rules (`backend/app/schemas/sse.py`); frontend mirror (`frontend/src/features/chat/contracts.ts`) |
+| Frontend transport / reducer / shell | `frontend/src/features/chat/{api,reducer,components}/` + `lib/sse/parser.ts` |
+| One controlled LangGraph | `backend/app/agent/graph.py` — decision → `ToolNode` → iteration guard → approval interrupt → persist → checkpoint cleanup |
+| Approval / idempotency | Same run/thread resume; turn + resume idempotency keys; no write replay (`ChatService`, `AgentRunRepository`) |
+| Repositories | Conversation/messages, agent runs, tool executions (`backend/app/repositories/`) |
+| Context assembly | Bounded recent window + attachment IDs only (`backend/app/services/chat_context.py`) |
+| Prompt / domain redirect | System policy + untrusted document delimiters + zero-tool redirect (`backend/app/agent/prompt.py`) |
+| Tool registration | Empty production registry; inject tools at graph build (`backend/app/tools/registry.py`) |
+| ShopAIKey adapter | Locked model/modes (`backend/app/services/shopaikey_chat.py`); normal tests use fakes |
+| Compose / config | Root `.env` contract, three-service Compose, sanitized `GET /api/health` |
+
+Plan 4 must add CV/profile tools and approval payloads **through these seams**.
+It must **not** create a second graph, second conversation path, alternate SSE
+contract, direct frontend→store/provider access, or HTTP calls from tools back
+into FastAPI.
+
+## Prior phase handoff consumed by Plan 3
+
+Plan 3 reused (and did not re-benchmark) Plan 2 / Phase 0 primitives:
 
 - Runnable frontend/backend/Neo4j Compose services and the typed root
   configuration contract (`backend/app/config.py`, root `.env` / `.env.example`).
-- Async SQLite session lifecycle (`DatabaseSessionManager`) and all eleven
-  application tables via the reviewed Alembic head.
-- Conversation, message, agent-run, tool-execution, memory, attachment,
-  candidate/job, and graph-outbox tables ready for repositories.
-- Contained attachment storage (`FilesystemAttachmentStorage` +
-  `AttachmentRepository`).
-- Neo4j client lifecycle, idempotent `ensure_graph_schema`, and rebuild command
-  skeleton.
-- Transactional, replay-safe graph outbox repository (enqueue/claim/mark
-  synced/failed; no continuous worker).
-- Sanitized `GET /api/health` and the local lint/type-check/test/migration/Compose
-  commands documented above.
-
-Plan 3 owns chat transport and Agent runtime. It must not implement CV/JD domain
-workflows before their dedicated plans, and it must not re-benchmark Phase 0
-adapter decisions.
+- Async SQLite session lifecycle (`DatabaseSessionManager`) and application
+  tables via Alembic (including Plan 3 run-idempotency revision).
+- Contained attachment storage, Neo4j client/schema, graph outbox skeleton.
+- Sanitized `GET /api/health` and the local quality/Compose commands above.

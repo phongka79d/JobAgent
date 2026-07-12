@@ -295,7 +295,7 @@ def test_fastapi_app_is_importable_with_health_only() -> None:
     assert isinstance(app, FastAPI)
     built = create_app()
     assert isinstance(built, FastAPI)
-    # Framework docs exist; OpenAPI application surface is health-only.
+    # Framework docs exist; OpenAPI application surface is health + Plan 3 chat.
     route_paths = {
         route.path
         for route in app.routes  # type: ignore[attr-defined]
@@ -303,8 +303,16 @@ def test_fastapi_app_is_importable_with_health_only() -> None:
     }
     assert "/docs" in route_paths or "/openapi.json" in route_paths
     openapi_paths = set(app.openapi()["paths"])
-    assert openapi_paths == {"/api/health"}
+    assert openapi_paths == {
+        "/api/health",
+        "/api/chat/history",
+        "/api/chat/turns",
+        "/api/chat/runs/{run_id}/resume",
+    }
     assert not any(
-        any(marker in path for marker in ("chat", "attachments", "profile", "jobs"))
+        any(
+            marker in path
+            for marker in ("attachments", "profile", "jobs", "upload", "match")
+        )
         for path in openapi_paths
     )

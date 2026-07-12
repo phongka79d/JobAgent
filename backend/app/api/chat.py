@@ -75,6 +75,16 @@ _FRIENDLY_LABEL_RE: Final[re.Pattern[str]] = re.compile(
     r"^[A-Za-z][A-Za-z0-9 _./-]{0,127}$"
 )
 _ERROR_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+# Public tool outcome is fail-closed to short status tokens only.
+_ALLOWED_PUBLIC_TOOL_OUTCOMES: Final[frozenset[str]] = frozenset(
+    {
+        "completed",
+        "tool_completed",
+        "ok",
+        "success",
+        "done",
+    }
+)
 
 
 def _chat_service(request: Request) -> ChatService:
@@ -121,20 +131,22 @@ def _friendly_tool_label(tool_name: str) -> str:
 
 
 def _safe_outcome(summary: str | None) -> str | None:
+    """Map durable tool summary to a public SSE outcome.
+
+    Fail closed: free-form tool results, arguments, and document text never
+    reach the wire. Only short allowlisted status tokens are accepted.
+    """
     if summary is None:
         return None
     cleaned = " ".join(str(summary).split())
     if not cleaned:
         return None
-    if len(cleaned) > 120:
-        cleaned = cleaned[:120]
-    lowered = cleaned.lower()
-    for token in ("password", "secret", "token", "api_key", "authorization"):
-        if token in lowered:
-            return "tool_completed"
-    if "\\" in cleaned or cleaned.startswith(("/", "./", "../")):
-        return "tool_completed"
-    return cleaned
+    token = cleaned.lower()
+    if token in _ALLOWED_PUBLIC_TOOL_OUTCOMES:
+        # Normalize synonyms to a single public status token.
+        return "completed"
+    # Unknown free text (including raw tool bodies) is never emitted.
+    return "completed"
 
 
 def _chunk_text(text: str) -> list[str]:

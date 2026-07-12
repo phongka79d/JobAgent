@@ -11,9 +11,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from langchain_core.tools import StructuredTool
-
 from app.services.shopaikey_chat import DecisionResult, ObservedToolCall
+from langchain_core.tools import StructuredTool
 
 
 def make_echo_label_tool(*, fail: bool = False) -> StructuredTool:

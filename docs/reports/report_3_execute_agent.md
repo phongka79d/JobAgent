@@ -1406,3 +1406,182 @@ complete
   - Tests: empty/whitespace Correct disabled without resume; successful Correct resume payload includes trimmed `correction_text`; Approve path unchanged.
 - validations rerun: `npm run check:astryx` PASS; focused tests 5 files / 24 passed; lint, typecheck, build all exit 0.
 - outcome: complete — A2 listed repair items addressed; required 03C quality gates passed.
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - Full transport proof and Plan 4 handoff
+
+## Task
+04A - Prove the synthetic tool and interrupt path end to end, then publish the Plan 4 handoff
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Full transport proof and Plan 4 handoff
+- Task ID: 04A
+- Task title: Prove the synthetic tool and interrupt path end to end, then publish the Plan 4 handoff
+- Files allowed / repair scope: A2 same-task repair only — public tool outcome sanitization, full-transport sentinel/idempotency proofs, frontend raw-SSE client path, README + report evidence
+
+## Completed Work
+- Added deterministic full-path backend transport harness using real FastAPI chat routes, ChatService, production graph/ToolNode, validated SSE, durable repositories, and checkpoint cleanup with injected ScriptedDecision + test-only synthetic tools (no ShopAIKey network).
+- Covered ordinary completion, echo_label tool activity, request-boundary interrupt/resume, duplicate turn/resume keys (no write replay), disconnect/reconnect, controlled failure, unrelated redirect with zero tools, history retention, and completed-checkpoint cleanup.
+- Added frontend full-path transport integration tests driving real streamChatTurn/streamChatResume + pure reducer + ChatShell for tool activity, approval/resume, duplicates, failure, disconnect, and approved-path-only routing.
+- Confirmed production registry empty and no production echo_label / domain tool implementations; domain names remain reserved constants only in registry.py.
+- Repaired Plan 3-owned exit defects: outdated health-only route assertions in test_health.py and test_config.py now expect the four approved public paths; ruff import fix in tests/fakes/agent_tools.py.
+- Updated root README with Phase 2 quality gates, public chat surface, limitations, and exact Plan 4 stable handoff seams table.
+- **Same-task repair (A2 REJECTED):** closed public tool-outcome leak, hardened full-transport proofs, and forced frontend acceptance paths through real SSE parsing.
+
+## Files Created or Modified
+- backend/tests/integration/test_full_chat_transport.py (created; repaired)
+- frontend/src/test/chat-transport.integration.test.tsx (created; repaired)
+- README.md
+- backend/tests/api/test_health.py
+- backend/tests/test_config.py
+- backend/tests/fakes/agent_tools.py
+- backend/app/services/chat_service.py (repair: generic allowlisted durable tool outcome only)
+- backend/app/api/chat.py (repair: fail-closed public tool outcome allowlist)
+
+## Tests or Validations Run
+- command/check: cd backend; python -m ruff check app tests
+- required: yes
+- result: passed
+- evidence or reason: All checks passed! (re-run after repair)
+
+- command/check: cd backend; python -m mypy app
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 53 source files (re-run after repair)
+
+- command/check: cd backend; python -m pytest -q
+- required: yes
+- result: passed
+- evidence or reason: 563 passed, 2 skipped in 19.72s (no ShopAIKey network; re-run after repair)
+
+- command/check: cd backend; python -m pytest -q tests/integration/test_full_chat_transport.py
+- required: yes
+- result: passed
+- evidence or reason: 8 passed (sentinel recursive absence + instrumented single tool action)
+
+- command/check: cd frontend; npm run check:astryx; npm run lint; npm run typecheck; npm run test -- --run; npm run build
+- required: yes
+- result: passed
+- evidence or reason: Astryx 16 components PASS; lint ok; typecheck ok; 72 tests passed (11 files); vite production build ok (re-run after repair). `npm ci` not re-run in this repair cycle (lockfile unchanged; install layer already present).
+
+- command/check: cd frontend; npm run test -- --run src/test/chat-transport.integration.test.tsx
+- required: yes
+- result: passed
+- evidence or reason: 6 passed (tool/approval paths use real streamChatTurn/streamChatResume)
+
+- command/check: docker compose --env-file .env.example -f infrastructure/docker-compose.yml config; docker compose --env-file .env.example -f infrastructure/docker-compose.yml build
+- required: yes
+- result: passed
+- evidence or reason: config_exit=0; build_exit=0; images jobagent-backend and jobagent-frontend Built (repair re-run)
+
+- command/check: rg production synthetic/domain + route inventory + git diff --check
+- required: yes
+- result: passed
+- evidence or reason: no production echo_label; domain names only as reserved later-phase constants in registry.py; comments mention synthetic for test-injection guidance; routes only health + three chat endpoints; git diff --check clean (CRLF warnings only)
+
+- command/check: optional live Compose/provider observation
+- required: no
+- result: not_run
+- evidence or reason: optional; not required for acceptance without live credentials exercise
+
+## Acceptance Check
+- condition: Test-only synthetic path traverses frontend, FastAPI, LangGraph, ToolNode, validated SSE, and frontend reducer/presentation without bypass
+- status: satisfied
+- evidence: backend full-path tool test with unique RAW_ARG_SENTINEL absent from SSE/wire/history/durable tool rows/logs; frontend tool case drives raw SSE through real streamChatTurn into reducer + ChatShell
+
+- condition: Interrupt/resume survives request boundary; duplicate keys no write/tool replay; unrelated messages zero tools
+- status: satisfied
+- evidence: instrumented approval tool action count remains 1 after resume + duplicate turn/resume; durable ToolExecution count remains 1; redirect zero-tools test passes
+
+- condition: Completed checkpoints absent while messages, run outcome, and sanitized tool records remain
+- status: satisfied
+- evidence: count_thread_checkpoints_on_disk == 0 after completed tool/resume paths; ToolExecution arguments_summary is generic allowlisted status only
+
+- condition: Production route/registry/build scans contain no synthetic tool, later-phase domain implementation, extra public route, or prohibited data
+- status: satisfied
+- evidence: empty production registry; rg + focused production scan; OpenAPI paths exactly four approved routes
+
+- condition: README records Phase 2 runtime, commands, limitations, and Plan 4 seams without claiming CV/profile/JD/matching completion
+- status: satisfied
+- evidence: README Batch04 section updated to document fail-closed public tool outcomes, sentinel proofs, and real frontend SSE client path
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates
+
+## Notes for Review Agent
+- changed files (repair): chat_service.py, chat.py, test_full_chat_transport.py, chat-transport.integration.test.tsx, README.md, report_3_execute_agent.md
+- validations to rerun: full backend pytest/ruff/mypy; full frontend suite; focused full-transport tests; Compose config/build; production rg scans
+- risk areas: SSE remains post-completion batch style (not mid-run streaming from graph); domain tool names appear only as reserved constants
+- next task readiness: can_review
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_3.md > ## 10. Handoff Notes for Plan 4
+- docs/plans/Master_plan.md > Phase 2 + local testing strategy
+
+## Supplemental Documents Used
+- docs/plans/Plan_3.md
+- docs/plans/Master_plan.md
+- docs/tasks/task_3.md 04A block
+- docs/review/review_3_review_agent.md (04A A2 REJECTED)
+
+## Dependency and User Action Check
+- dependencies satisfied: yes (03A/03B/03C and earlier Plan 3 tasks complete)
+- user actions satisfied: yes (none required for fake-backed proof)
+
+## Files Inspected Before Editing
+- backend/tests/integration/test_chat_transport.py
+- backend/tests/integration/test_agent_lifecycle.py
+- backend/tests/fakes/agent_tools.py
+- backend/app/tools/registry.py
+- backend/app/services/chat_service.py
+- backend/app/api/chat.py
+- backend/app/repositories/tool_executions.py
+- frontend/src/features/chat/{api,reducer,contracts,components}/*
+- frontend/src/test/app.chat.test.tsx
+- README.md
+- docs/tasks/task_3.md 04A acceptance block
+- docs/review/review_3_review_agent.md 04A block
+
+## Key Implementation Decisions
+- Synthetic tools remain test-injected only; production registry factory stays empty.
+- Durable tool `arguments_summary` and public SSE outcome use generic allowlisted status only — never ToolMessage.content / raw args / results.
+- Full-path harness uses unique sentinel recursive absence checks (not substring-only ineffective assertions).
+- Frontend acceptance paths inject fetch only; ChatShell uses real streamChatTurn/streamChatResume wrappers.
+- Route inventory tests updated to Phase 2 four-route public surface.
+
+## Workflow Integrity Check
+- single task 04A only
+- no Plan 4 domain behavior implemented
+- no checkbox update, no staging, no commit
+
+## Repair Log
+
+### 2026-07-12
+- reason for repair: A2 REJECTED 04A — public `tool_completed.outcome` leaked raw synthetic tool result (`echo:ping`); full-transport leakage assertions were ineffective; frontend synthetic/approval UI path injected pre-parsed events; duplicate checks did not prove single tool action.
+- changes made:
+  1. `backend/app/services/chat_service.py` `_persist_tool_records`: stop storing ToolMessage.content; persist allowlisted `PUBLIC_TOOL_OUTCOME_COMPLETED` (`"completed"`) only.
+  2. `backend/app/api/chat.py` `_safe_outcome`: fail-closed allowlist; free-form tool bodies never reach SSE.
+  3. `backend/tests/integration/test_full_chat_transport.py`: unique `RAW_ARG_SENTINEL`, recursive absence across parsed SSE/raw wire/history/durable rows/logs; instrumented approval tool proves action count and durable tool-row count remain exactly 1 after duplicate turn/resume.
+  4. `frontend/src/test/chat-transport.integration.test.tsx`: synthetic-tool and approval paths drive raw SSE frames through real `streamChatTurn`/`streamChatResume` into reducer and ChatShell.
+  5. README + this report updated to claim completion only with the hardened evidence.
+- validations rerun: backend ruff/mypy/full pytest (563 passed, 2 skipped); focused full_chat_transport (8); frontend astryx/lint/typecheck/full tests (72)/build; focused transport integration (6); compose config + build (both images Built); production rg + route inventory + git diff --check.
+- outcome: complete — A2 repair items closed; ready for A2 re-review

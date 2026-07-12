@@ -875,3 +875,130 @@ None
 - repairs verified: `postSSE()` no longer re-notifies errors from `consumeSSEResponse()`; malformed SSE JSON calls `onError` once and still rejects as `ChatContractError`.
 - remaining issues: None.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Full transport proof and Plan 4 handoff
+- Task ID: 04A
+- Task title: Prove the synthetic tool and interrupt path end to end, then publish the Plan 4 handoff
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: cumulative 04A files plus repair changes to `backend/app/services/chat_service.py`, `backend/app/api/chat.py`, `backend/tests/integration/test_full_chat_transport.py`, `frontend/src/test/chat-transport.integration.test.tsx`, `README.md`, and `docs/reports/report_3_execute_agent.md`.
+
+## Files Reviewed
+- `backend/app/services/chat_service.py`: in scope - successful tool observability now stores only the generic allowlisted `completed` status, never `ToolMessage.content`.
+- `backend/app/api/chat.py`: in scope - public tool outcomes fail closed to the normalized `completed` status; arbitrary durable text cannot reach SSE.
+- `backend/tests/integration/test_full_chat_transport.py`: in scope - recursively proves unique sentinel absence across parsed SSE, raw wire, history, durable rows, and captured logs; also proves one approval action and one durable tool row after duplicate turn/resume.
+- `frontend/src/test/chat-transport.integration.test.tsx`: in scope - tool and approval acceptance paths now feed raw SSE frames through real `streamChatTurn` / `streamChatResume` parsing into the reducer and ChatShell.
+- `README.md`: in scope - accurately records fail-closed outcomes, the hardened proof, current limitations, and stable Plan 4 seams.
+- `backend/tests/api/test_health.py`: in scope - route inventory expectation correctly reflects the accepted Phase 2 surface.
+- `backend/tests/test_config.py`: in scope - route inventory expectation correctly reflects the accepted Phase 2 surface.
+- `backend/tests/fakes/agent_tools.py`: in scope - import-order-only validation repair.
+- `docs/reports/report_3_execute_agent.md`: evidence file - matching 04A block updated in place for same-task repair and materially matches repository evidence.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m ruff check app tests; python -m mypy app`
+- Required: yes
+- Reported result: passed after repair; ruff clean and mypy clean across 53 source files
+- Rerun result: A2 touched-file ruff passed and mypy passed for `app/api/chat.py` and `app/services/chat_service.py`
+- Status: passed
+
+- Command/check: `cd backend; python -m pytest -q`
+- Required: yes
+- Reported result: 563 passed, 2 skipped after repair
+- Rerun result: full suite not repeated by A2; focused repaired transport suite rerun separately below
+- Status: passed
+
+- Command/check: `cd backend; python -m pytest -q tests/integration/test_full_chat_transport.py`
+- Required: yes
+- Reported result: 8 passed after repair
+- Rerun result: 8 passed
+- Status: passed
+- Notes: the repaired test recursively checks a unique raw-argument sentinel across parsed SSE, wire, history, durable tool rows, and captured logs, and asserts one approval action plus one durable tool row after duplicate requests.
+
+- Command/check: public tool outcome and sentinel repair verification
+- Required: yes - verifies Plan 3 raw-argument exclusion
+- Reported result: durable/public outcome normalized to `completed`; unique sentinel absent from all required surfaces
+- Rerun result: focused test passed; source review confirms `ToolMessage.content` is no longer persisted and unknown public summaries fail closed to `completed`
+- Status: passed
+
+- Command/check: `cd frontend; npm run check:astryx; npm run lint; npm run typecheck; npm run test -- --run; npm run test -- --run src/test/chat-transport.integration.test.tsx; npm run build`
+- Required: yes
+- Reported result: Astryx check, lint, typecheck, 72 full tests, 6 focused tests, and production build passed after repair
+- Rerun result: A2 lint and typecheck passed; focused transport file passed 6 tests
+- Status: passed
+- Notes: `npm ci --ignore-scripts` was not rerun because A2 review policy forbids install commands; A1 reported it passed and the Compose frontend build completed from the locked install layer.
+
+- Command/check: `docker compose --env-file .env.example -f infrastructure/docker-compose.yml config; docker compose --env-file .env.example -f infrastructure/docker-compose.yml build`
+- Required: yes
+- Reported result: config passed and backend/frontend images built after repair
+- Rerun result: not repeated by A2; A1 live handoff and execution report agree
+- Status: passed
+
+- Command/check: production synthetic/domain and route scans plus `git diff --check`
+- Required: yes
+- Reported result: passed
+- Rerun result: production registry remains empty; domain names occur only as reserved registry constants; public routes are health plus the three chat routes; no whitespace errors
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: the root outcome path now stores/emits only generic fail-closed status; the hardened backend fixture proves sentinel absence and exactly-once tool behavior; the frontend tool and approval paths consume raw SSE through the real client/parser into reducer and shell; focused A2 reruns pass; README and execution evidence match the repaired behavior.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: all three prior 04A repair instructions, the full repair diff, matching same-task execution report, README claims, checkbox state, touched-file static checks, focused backend/frontend transport suites, production exposure/route scans, and `git diff --check`.
+- repairs verified: public/durable tool outcome is fail-closed to `completed`; recursive sentinel checks cover parsed SSE, raw wire, history, durable rows, and logs; duplicate turn/resume retains exactly one approval action and one tool row; frontend tool/approval raw frames traverse real `streamChatTurn` / `streamChatResume` parsing into reducer and ChatShell.
+- remaining issues: None.
+- updated outcome: ACCEPTED.

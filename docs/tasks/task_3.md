@@ -438,7 +438,7 @@ uploads, profile approval payloads, JD workflows, matching, or new architecture.
 
 ### Tasks
 
-- [ ] (04A): Prove the synthetic tool and interrupt path end to end, then publish the Plan 4 handoff
+- [x] (04A): Prove the synthetic tool and interrupt path end to end, then publish the Plan 4 handoff
   - Source of Truth: `docs/plans/Plan_3.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_3.md` > `## 10. Handoff Notes for Plan 4 (Master Phase 3)`; `docs/plans/Master_plan.md` > `### Phase 2 — Chat transport, Agent runtime, and persistence`; `docs/plans/Master_plan.md` > `## 24. Local Testing Strategy`
   - Source Requirements:
     - Prove one synthetic tool across frontend, FastAPI, LangGraph, `ToolNode`, validated SSE, and frontend state/presentation.
