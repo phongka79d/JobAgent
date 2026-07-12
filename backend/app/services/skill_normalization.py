@@ -1,16 +1,18 @@
-"""Deterministic Candidate skill normalization and approval-only seed loading.
+"""Deterministic Candidate/Job skill normalization and approval-only seed loading.
 
-Plan 4 / Master Plan §9 shared seam:
+Plan 4 / Plan 5 / Master Plan §9 shared seam:
 
 1. Unicode normalize, trim/collapse whitespace, casefold, normalize separators.
 2. Resolve only checked-in approved seed aliases as ``verified``.
 3. Unknown skills receive a deterministic provisional canonical key.
-4. Preserve evidence/source/exclusion fields; never re-add an excluded skill
-   from the same extraction input without new approval.
-5. Never create trusted ``RELATED_TO`` relationships.
+4. Candidate path: preserve evidence/source/exclusion fields; never re-add an
+   excluded skill from the same extraction input without new approval.
+5. Job path: normalize nested SkillRefs, preserve relationship confidence and
+   evidence, dedupe required/preferred lists; never upgrade unapproved identity.
+6. Never create trusted ``RELATED_TO`` relationships.
 
 This module is pure (no I/O beyond explicit seed path load) and is the single
-normalization entry point Plan 5 must reuse unchanged.
+normalization entry point for Candidate and Job surfaces.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from app.schemas.candidate import (
     SkillRef,
     SkillStatus,
 )
+from app.schemas.job_post import JobSkill
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -293,13 +296,12 @@ def empty_skill_seed_catalog() -> SkillSeedCatalog:
 
 
 # ---------------------------------------------------------------------------
-# Candidate skill list normalization
+# Shared SkillRef resolution (Candidate + Job)
 # ---------------------------------------------------------------------------
 
 
-def _lookup_texts_for_skill(skill: CandidateSkill) -> list[str]:
+def _lookup_texts_for_ref(ref: SkillRef) -> list[str]:
     """Surface strings used to match seed / existing / exclusion keys."""
-    ref = skill.skill
     texts: list[str] = []
     for value in (ref.display_name, ref.canonical_key, *ref.aliases):
         if isinstance(value, str) and value.strip():
@@ -307,53 +309,63 @@ def _lookup_texts_for_skill(skill: CandidateSkill) -> list[str]:
     return texts
 
 
-def _resolve_seed_entry(
-    skill: CandidateSkill,
+def _index_existing_canonical_keys(
+    existing_canonical_keys: Iterable[str],
+) -> dict[str, str]:
+    """Map match-key → first existing canonical key (caller-supplied reuse set)."""
+    existing_by_match: dict[str, str] = {}
+    for key in existing_canonical_keys:
+        if not isinstance(key, str) or not key.strip():
+            continue
+        cleaned = key.strip()
+        match_key = normalize_skill_match_key(cleaned)
+        if match_key and match_key not in existing_by_match:
+            existing_by_match[match_key] = cleaned
+    return existing_by_match
+
+
+def _resolve_seed_entry_for_ref(
+    ref: SkillRef,
     catalog: SkillSeedCatalog,
 ) -> SeedSkillEntry | None:
-    for text in _lookup_texts_for_skill(skill):
+    for text in _lookup_texts_for_ref(ref):
         entry = catalog.resolve(normalize_skill_match_key(text))
         if entry is not None:
             return entry
     return None
 
 
-def _match_existing_canonical_key(
-    skill: CandidateSkill,
+def _match_existing_canonical_key_for_ref(
+    ref: SkillRef,
     existing_by_match: Mapping[str, str],
 ) -> str | None:
-    for text in _lookup_texts_for_skill(skill):
+    for text in _lookup_texts_for_ref(ref):
         match_key = normalize_skill_match_key(text)
         if match_key in existing_by_match:
             return existing_by_match[match_key]
     return None
 
 
-def _is_excluded(
-    *,
-    skill: CandidateSkill,
-    resolved_key: str,
-    excluded_canonical: set[str],
-    excluded_match: set[str],
-) -> bool:
-    if resolved_key in excluded_canonical:
-        return True
-    if normalize_skill_match_key(resolved_key) in excluded_match:
-        return True
-    for text in _lookup_texts_for_skill(skill):
-        if normalize_skill_match_key(text) in excluded_match:
-            return True
-    return False
-
-
-def _build_resolved_ref(
-    skill: CandidateSkill,
+def resolve_skill_ref(
+    ref: SkillRef,
     *,
     catalog: SkillSeedCatalog,
-    existing_by_match: Mapping[str, str],
+    existing_canonical_keys: Iterable[str] = (),
+    existing_by_match: Mapping[str, str] | None = None,
 ) -> SkillRef:
-    ref = skill.skill
-    seed_entry = _resolve_seed_entry(skill, catalog)
+    """Resolve one SkillRef through seed → existing-canonical → provisional.
+
+    Shared by Candidate and Job adapters. Seed hits become ``verified``; existing
+    or provisional identities stay ``provisional`` (never upgraded without seed).
+    Nested confidence/evidence on the SkillRef are preserved.
+    """
+    match_index = (
+        existing_by_match
+        if existing_by_match is not None
+        else _index_existing_canonical_keys(existing_canonical_keys)
+    )
+
+    seed_entry = _resolve_seed_entry_for_ref(ref, catalog)
     if seed_entry is not None:
         return SkillRef(
             canonical_key=seed_entry.canonical_key,
@@ -365,7 +377,7 @@ def _build_resolved_ref(
             evidence=list(ref.evidence),
         )
 
-    existing_key = _match_existing_canonical_key(skill, existing_by_match)
+    existing_key = _match_existing_canonical_key_for_ref(ref, match_index)
     source_text = ref.display_name.strip() or ref.canonical_key.strip()
     if existing_key is not None:
         return SkillRef(
@@ -387,6 +399,28 @@ def _build_resolved_ref(
         confidence=ref.confidence,
         evidence=list(ref.evidence),
     )
+
+
+# ---------------------------------------------------------------------------
+# Candidate skill list normalization
+# ---------------------------------------------------------------------------
+
+
+def _is_excluded(
+    *,
+    skill: CandidateSkill,
+    resolved_key: str,
+    excluded_canonical: set[str],
+    excluded_match: set[str],
+) -> bool:
+    if resolved_key in excluded_canonical:
+        return True
+    if normalize_skill_match_key(resolved_key) in excluded_match:
+        return True
+    for text in _lookup_texts_for_ref(skill.skill):
+        if normalize_skill_match_key(text) in excluded_match:
+            return True
+    return False
 
 
 def normalize_candidate_skills(
@@ -411,14 +445,7 @@ def normalize_candidate_skills(
     if catalog is None:
         catalog = load_skills_seed()
 
-    existing_by_match: dict[str, str] = {}
-    for key in existing_canonical_keys:
-        if not isinstance(key, str) or not key.strip():
-            continue
-        cleaned = key.strip()
-        match_key = normalize_skill_match_key(cleaned)
-        if match_key and match_key not in existing_by_match:
-            existing_by_match[match_key] = cleaned
+    existing_by_match = _index_existing_canonical_keys(existing_canonical_keys)
 
     excluded_canonical: set[str] = set()
     excluded_match: set[str] = set()
@@ -436,8 +463,8 @@ def normalize_candidate_skills(
         if not skill.excluded:
             continue
         # Resolve identity only to register the exclusion key; do not drop yet.
-        ref = _build_resolved_ref(
-            skill,
+        ref = resolve_skill_ref(
+            skill.skill,
             catalog=catalog,
             existing_by_match=existing_by_match,
         )
@@ -445,7 +472,7 @@ def normalize_candidate_skills(
         match_key = normalize_skill_match_key(ref.canonical_key)
         if match_key:
             excluded_match.add(match_key)
-        for text in _lookup_texts_for_skill(skill):
+        for text in _lookup_texts_for_ref(skill.skill):
             mk = normalize_skill_match_key(text)
             if mk:
                 excluded_match.add(mk)
@@ -453,8 +480,8 @@ def normalize_candidate_skills(
     resolved_by_key: dict[str, CandidateSkill] = {}
 
     for skill in skills:
-        new_ref = _build_resolved_ref(
-            skill,
+        new_ref = resolve_skill_ref(
+            skill.skill,
             catalog=catalog,
             existing_by_match=existing_by_match,
         )
@@ -499,6 +526,84 @@ def normalize_candidate_skills(
     return [resolved_by_key[k] for k in ordered_keys]
 
 
+# ---------------------------------------------------------------------------
+# Job skill list normalization
+# ---------------------------------------------------------------------------
+
+
+def normalize_job_skills(
+    skills: Sequence[JobSkill],
+    *,
+    catalog: SkillSeedCatalog | None = None,
+    existing_canonical_keys: Iterable[str] = (),
+) -> list[JobSkill]:
+    """Normalize nested SkillRefs and dedupe one Job skill list deterministically.
+
+    - Same seed / existing-canonical / provisional pipeline as Candidate.
+    - Relationship-level ``confidence`` and ``evidence`` on ``JobSkill`` are
+      preserved (independent of nested SkillRef confidence/evidence).
+    - Within-list duplicates collapse by resolved ``canonical_key``; first
+      occurrence wins; output order is stable by ``canonical_key``.
+    - Does not consult Neo4j; does not invent verified status or RELATED_TO.
+    """
+    if catalog is None:
+        catalog = load_skills_seed()
+
+    existing_by_match = _index_existing_canonical_keys(existing_canonical_keys)
+    resolved_by_key: dict[str, JobSkill] = {}
+
+    for job_skill in skills:
+        new_ref = resolve_skill_ref(
+            job_skill.skill,
+            catalog=catalog,
+            existing_by_match=existing_by_match,
+        )
+        new_job_skill = job_skill.model_copy(
+            update={
+                "skill": new_ref,
+                # relationship confidence / evidence preserved via model_copy
+            }
+        )
+        if new_ref.canonical_key not in resolved_by_key:
+            resolved_by_key[new_ref.canonical_key] = new_job_skill
+
+    ordered_keys = sorted(resolved_by_key.keys())
+    return [resolved_by_key[k] for k in ordered_keys]
+
+
+def normalize_job_skill_lists(
+    *,
+    required_skills: Sequence[JobSkill] = (),
+    preferred_skills: Sequence[JobSkill] = (),
+    catalog: SkillSeedCatalog | None = None,
+    existing_canonical_keys: Iterable[str] = (),
+) -> tuple[list[JobSkill], list[JobSkill]]:
+    """Normalize required and preferred lists with one shared catalog/index.
+
+    Preferred skills whose resolved ``canonical_key`` already appears in
+    required are dropped so REQUIRES wins over PREFERS deterministically.
+    """
+    if catalog is None:
+        catalog = load_skills_seed()
+
+    existing_keys = tuple(existing_canonical_keys)
+    required = normalize_job_skills(
+        required_skills,
+        catalog=catalog,
+        existing_canonical_keys=existing_keys,
+    )
+    preferred = normalize_job_skills(
+        preferred_skills,
+        catalog=catalog,
+        existing_canonical_keys=existing_keys,
+    )
+    required_keys = {item.skill.canonical_key for item in required}
+    preferred = [
+        item for item in preferred if item.skill.canonical_key not in required_keys
+    ]
+    return required, preferred
+
+
 __all__ = [
     "DEFAULT_SKILLS_SEED_PATH",
     "SeedSkillEntry",
@@ -508,7 +613,10 @@ __all__ = [
     "empty_skill_seed_catalog",
     "load_skills_seed",
     "normalize_candidate_skills",
+    "normalize_job_skill_lists",
+    "normalize_job_skills",
     "normalize_skill_match_key",
     "provisional_canonical_key",
+    "resolve_skill_ref",
     "skill_seed_catalog_from_data",
 ]

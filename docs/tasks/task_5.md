@@ -389,7 +389,7 @@ write Neo4j, register tools, or implement retrieval/matching.
 
 ### Tasks
 
-- [ ] (03A): Extend the shared normalization seam to Job skills
+- [x] (03A): Extend the shared normalization seam to Job skills
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.5 Skill normalization`; `docs/plans/Master_plan.md` > `### 8.4 Graph safety rules`; `docs/plans/Master_plan.md` > `## 9. Skill Normalization`; `docs/plans/Plan_4.md` > `## 10. Handoff Notes for Plan 5 (Master Phase 4)`
   - Source Requirements:
     - Candidate and Job inputs use one Unicode/whitespace/case/punctuation, verified-alias, existing-canonical, and provisional-key pipeline.
@@ -414,7 +414,7 @@ write Neo4j, register tools, or implement retrieval/matching.
   - Blocked Condition: A nonempty verified production seed is required for acceptance but no approved user/evaluation alias evidence exists; report `BLOCKED_BY_USER_ACTION` and do not promote test data.
   - Files: `backend/app/services/skill_normalization.py`, optional focused shared files under `backend/app/services/` or `backend/app/schemas/`, `backend/app/data/skills_seed.yaml` only with approved evidence, `backend/tests/services/test_skill_normalization.py`, `backend/tests/services/test_job_skill_normalization.py`
 
-- [ ] (03B): Build versioned Job text and locked ShopAIKey embeddings
+- [x] (03B): Build versioned Job text and locked ShopAIKey embeddings
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.6 Embedding and graph synchronization`; `docs/plans/Master_plan.md` > `### 16.1 Configuration`; `docs/plans/Master_plan.md` > `### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md` > `### 17.3 Text representations`
   - Source Requirements:
     - Build Job text from title, summary, responsibilities, required skills, and preferred skills only.

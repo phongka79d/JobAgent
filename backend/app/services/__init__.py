@@ -28,8 +28,11 @@ from app.services.skill_normalization import (
     SkillSeedError,
     load_skills_seed,
     normalize_candidate_skills,
+    normalize_job_skill_lists,
+    normalize_job_skills,
     normalize_skill_match_key,
     provisional_canonical_key,
+    resolve_skill_ref,
 )
 
 # profile_context is imported from ``app.services.profile_context`` directly by
@@ -56,8 +59,11 @@ __all__ = [
     "extract_pdf_text",
     "load_skills_seed",
     "normalize_candidate_skills",
+    "normalize_job_skill_lists",
+    "normalize_job_skills",
     "normalize_skill_match_key",
     "provisional_canonical_key",
     "redact_pii",
+    "resolve_skill_ref",
     "usable_character_count",
 ]

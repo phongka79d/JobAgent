@@ -11,7 +11,6 @@ import argparse
 import json
 import math
 import os
-import re
 import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -20,8 +19,23 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+# Shared locked-contract primitives live in production embeddings service so
+# Phase 0 diagnostics and Job embeddings cannot silently diverge.
+from app.config import REDACTED
+from app.services.embeddings import (
+    ALLOWED_EMBEDDING_DIMENSIONS,
+    ALLOWED_EMBEDDING_MODEL,
+    DEFAULT_MAX_BATCH_SIZE,
+    DEFAULT_TIMEOUT_SECONDS,
+    EmbeddingConfigurationError,
+    EmbeddingProviderError,
+    EmbeddingVector,
+    normalize_embedding_text,
+    reject_if_disallowed_contract,
+    sanitize_failure_message,
+    validate_embedding_vectors,
+)
 from dotenv import dotenv_values
-
 from evaluation.embedding_benchmark_schema import (
     AggregateEmbeddingResult,
     CompatibilityEvidence,
@@ -29,6 +43,9 @@ from evaluation.embedding_benchmark_schema import (
     PassCriteriaSnapshot,
     QualityMetrics,
 )
+
+# Phase 0 historical name for configuration failures.
+ConfigurationError = EmbeddingConfigurationError
 
 # Re-export schema for a single import surface.
 __all__ = [
@@ -97,38 +114,8 @@ DEFAULT_OUTPUT = (
     / "embedding_benchmark.json"
 )
 
-ALLOWED_EMBEDDING_MODEL = "text-embedding-3-small"
-ALLOWED_EMBEDDING_DIMENSIONS = 1536
-DEFAULT_MAX_BATCH_SIZE = 16
-DEFAULT_TIMEOUT_SECONDS = 30
 RELEVANT_LABEL_MIN = 2
 METRIC_K = 10
-REDACTED = "[REDACTED]"
-
-_E5_QUERY_PREFIX = "query: "
-_E5_PASSAGE_PREFIX = "passage: "
-_WHITESPACE_RE = re.compile(r"\s+")
-_SENSITIVE_MARKERS = (
-    "authorization",
-    "apikey",
-    "api_key",
-    "bearer",
-    "query_text",
-    "document_text",
-)
-
-
-class ConfigurationError(RuntimeError):
-    """Invalid embedding configuration (never carries secrets)."""
-
-
-class EmbeddingProviderError(RuntimeError):
-    """Sanitized provider failure; never carries secrets or raw payloads."""
-
-    def __getattribute__(self, name: str) -> object:
-        if name in {"__cause__", "__context__"}:
-            return None
-        return super().__getattribute__(name)
 
 
 @dataclass(frozen=True)
@@ -149,12 +136,6 @@ class EmbeddingConfig:
         )
 
     __str__ = __repr__
-
-
-@dataclass(frozen=True)
-class EmbeddingVector:
-    index: int
-    values: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -246,49 +227,6 @@ def load_root_embedding_config() -> EmbeddingConfig:
     return load_embedding_config(values)
 
 
-def reject_if_disallowed_contract(*, model: str, dimensions: int) -> None:
-    if model != ALLOWED_EMBEDDING_MODEL or dimensions != ALLOWED_EMBEDDING_DIMENSIONS:
-        raise ConfigurationError(
-            "Disallowed embedding contract: only "
-            f"{ALLOWED_EMBEDDING_MODEL} with dimensions="
-            f"{ALLOWED_EMBEDDING_DIMENSIONS} is permitted."
-        )
-
-
-def normalize_embedding_text(text: str) -> str:
-    """Strip and collapse internal whitespace. Never apply E5 prefixes."""
-    if text.startswith(_E5_QUERY_PREFIX) or text.startswith(_E5_PASSAGE_PREFIX):
-        # Strip accidental E5 prefixes rather than forward them.
-        if text.lower().startswith(_E5_QUERY_PREFIX):
-            text = text[len(_E5_QUERY_PREFIX) :]
-        elif text.lower().startswith(_E5_PASSAGE_PREFIX):
-            text = text[len(_E5_PASSAGE_PREFIX) :]
-    return _WHITESPACE_RE.sub(" ", text.strip())
-
-
-def sanitize_failure_message(
-    message: str,
-    *,
-    secrets: Sequence[str] = (),
-    private_fragments: Sequence[str] = (),
-) -> str:
-    """Return a bounded failure code/summary with secrets and private text removed."""
-    lowered = message.lower().replace("-", "").replace("_", "")
-    if any(marker in lowered for marker in _SENSITIVE_MARKERS):
-        return "sanitized_provider_failure"
-    for secret in secrets:
-        if secret and secret in message:
-            return "sanitized_provider_failure"
-    for fragment in private_fragments:
-        if fragment and len(fragment) >= 8 and fragment in message:
-            return "sanitized_provider_failure"
-    # Keep only short, alphanumeric failure codes when possible.
-    cleaned = re.sub(r"[^a-zA-Z0-9_.: -]", "", message).strip()
-    if not cleaned or len(cleaned) > 120:
-        return "sanitized_provider_failure"
-    return cleaned
-
-
 def _default_openai_client(
     config: EmbeddingConfig,
 ) -> EmbeddingClient:
@@ -342,28 +280,6 @@ def _default_openai_client(
             )
 
     return _OpenAIEmbeddingClient()
-
-
-def validate_embedding_vectors(
-    *,
-    input_count: int,
-    vectors: Sequence[EmbeddingVector],
-    expected_dimensions: int = ALLOWED_EMBEDDING_DIMENSIONS,
-) -> None:
-    if len(vectors) != input_count:
-        raise EmbeddingProviderError("vector_count_mismatch")
-    seen_indexes: set[int] = set()
-    for expected_index, vector in enumerate(vectors):
-        if vector.index != expected_index:
-            raise EmbeddingProviderError("ordering_violation")
-        if vector.index in seen_indexes:
-            raise EmbeddingProviderError("duplicate_vector_index")
-        seen_indexes.add(vector.index)
-        if len(vector.values) != expected_dimensions:
-            raise EmbeddingProviderError("dimension_mismatch")
-        for value in vector.values:
-            if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                raise EmbeddingProviderError("non_finite_value")
 
 
 def embed_scalar(

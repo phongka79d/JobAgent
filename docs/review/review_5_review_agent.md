@@ -502,3 +502,237 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch03 - Shared Normalization and Locked Embeddings
+- Task ID: 03A
+- Task title: Extend the shared normalization seam to Job skills
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03A-scoped):
+  - `backend/app/services/skill_normalization.py` (modified)
+  - `backend/app/services/__init__.py` (modified; public exports)
+  - `backend/tests/services/test_job_skill_normalization.py` (untracked; created)
+  - `docs/reports/report_5_execute_agent.md` (modified; 03A execution block; not product code)
+- Production seed `backend/app/data/skills_seed.yaml` unchanged (`skills: []`)
+
+## Files Reviewed
+- `backend/app/services/skill_normalization.py`: in scope - shared `resolve_skill_ref`, Candidate path via shared core, Job adapters `normalize_job_skills` / `normalize_job_skill_lists`
+- `backend/app/services/__init__.py`: in scope - public re-exports for stable consumption (`resolve_skill_ref`, `normalize_job_skills`, `normalize_job_skill_lists`)
+- `backend/tests/services/test_job_skill_normalization.py`: in scope - Job adapter, required/preferred, Candidate↔Job parity, provisional, empty production seed, no RELATED_TO/weight
+- `backend/app/data/skills_seed.yaml`: inspected - remains empty (no approved production alias evidence)
+- `backend/app/schemas/job_post.py` / `backend/app/schemas/candidate.py`: inspected - JobSkill/SkillRef contracts reused, not mutated
+- `docs/reports/report_5_execute_agent.md` (03A block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md §7.5 Skill normalization: one shared verified-alias/provisional pipeline for Candidate and Job
+- Master_plan.md §8.4 Graph safety: no trusted RELATED_TO from LLM; aliases are properties of Skills
+- Master_plan.md §9 Skill Normalization: Unicode/whitespace/case/punctuation → seed → existing-canonical → provisional
+- Plan_4 handoff: preserve Candidate normalization/seed; production seed empty unless approved evidence
+
+## Implementation Reality
+- Real shared `resolve_skill_ref` on SkillRef (seed → existing-canonical → provisional); Candidate `normalize_candidate_skills` refactored to call it
+- Job adapter normalizes nested SkillRefs, preserves JobSkill relationship confidence/evidence, within-list first-wins dedupe, stable canonical_key sort
+- `normalize_job_skill_lists` shares catalog/index; preferred drops keys already in required (REQUIRES over PREFERS)
+- Candidate exclusions remain Candidate-only; profile_extraction still imports `normalize_candidate_skills`
+- No second seed, no SQLite Skill table, no alias nodes, no Neo4j authority, no production seed promotion
+
+## Hardcoding Review
+- No fixture-string special-casing in production normalization
+- Synthetic fixture seed used only in tests; production path loads empty seed
+- Deterministic provisional keys via shared `provisional_canonical_key` (not test-overfit)
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/services/test_skill_normalization.py tests/services/test_job_skill_normalization.py tests/services/test_profile_extraction.py tests/graph/test_candidate_sync.py`
+  - Required: yes
+  - Reported result: 59 passed in 4.22s
+  - Rerun result: 59 passed in 3.63s
+  - Status: passed
+  - Notes: Candidate regression + Job parity/provisional; no network/provider calls
+
+- Command/check: `cd backend; python -m ruff check app/services/skill_normalization.py app/schemas/candidate.py app/schemas/job_post.py tests/services/test_skill_normalization.py tests/services/test_job_skill_normalization.py; python -m mypy app/services/skill_normalization.py app/schemas/candidate.py app/schemas/job_post.py`
+  - Required: yes
+  - Reported result: ruff All checks passed; mypy Success: no issues found in 3 source files
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 3 source files
+  - Status: passed
+
+## Acceptance Review
+- Equivalent Candidate and Job surfaces resolve to same seed key/status/aliases; unknown → same provisional key: satisfied — parity tests + shared resolve_skill_ref
+- Existing canonical keys reused without Neo4j; required/preferred evidence and Candidate exclusions intact: satisfied — job reuse/evidence/list tests + exclusion regression
+- Candidate normalization/profile/graph tests green; no second seed/Skill table/alias node/trusted LLM relationship: satisfied — required suite green; dump rejects related_to/weight; production seed empty
+- Production seed changes cite evidence; synthetic aliases not in production: satisfied — skills_seed.yaml unchanged; empty-seed tests
+- Status: satisfied
+- Evidence: production service + tests + A2 validation rerun
+
+## Dependency Review
+- (02A) JobSkill contract present and A2-accepted
+- Plan 4 normalization/seed present; production seed empty is acceptable (blocked condition not triggered)
+- Dependencies satisfied: yes
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 03B remains unchecked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Optional focused modules under services/schemas not split out; shared core stays in skill_normalization.py (task allowed; avoids duplicate pipelines)
+- Job normalization not yet called from ingestion (04A ownership; correct scope boundary)
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch03 - Shared Normalization and Locked Embeddings
+- Task ID: 03B
+- Task title: Build versioned Job text and locked ShopAIKey embeddings
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03B-relevant subset among dirty tree):
+  - `backend/app/services/embeddings.py` (untracked; production service)
+  - `backend/evaluation/benchmark_embeddings.py` (modified; shared primitive reuse)
+  - `backend/tests/services/test_embeddings.py` (untracked; fake-backed suite)
+  - Sibling Batch03 / prior-task dirt also present (`skill_normalization.py`, services `__init__`, `test_job_skill_normalization.py`, docs) — attributed to accepted 03A / orchestration artifacts, not claimed as 03B implementation
+- recent commits reviewed: not_needed (03B work is uncommitted working-tree evidence)
+
+## Files Reviewed
+- `backend/app/services/embeddings.py`: in scope - versioned Job text builder, shared contract primitives, injectable `JobEmbeddingService`, sanitized failures
+- `backend/evaluation/benchmark_embeddings.py`: in scope - Phase 0 benchmark imports shared normalize/validate/allowlist/sanitize from production module (no duplicated contract rules)
+- `backend/tests/services/test_embeddings.py`: in scope - scalar/batch/order/dimensions/retry/cancel/secret/socket-blocked coverage
+- `backend/tests/test_embedding_benchmark.py`: in scope for compatibility (unchanged; still green via shared imports)
+- `docs/reports/report_5_execute_agent.md` (03B block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md §7.6: ShopAIKey text-embedding-3-small / 1536; Job fields title+summary+responsibilities+required+preferred; bounded batches; order; no E5
+- Master_plan.md §16.1: base URL + embedding model/dimensions settings
+- Master_plan.md §17.1: locked embedding contract; no silent model/dimension switch; no local runtime
+- Master_plan.md §17.3: Job representation field set; no E5; documented whitespace normalization / versioned builders
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/services/test_embeddings.py tests/test_embedding_benchmark.py`
+  - Required: yes
+  - Reported result: passed (50)
+  - Rerun result: passed (50 in ~1.65s)
+  - Status: passed
+  - Notes: fakes only; no live ShopAIKey; socket-blocked path covered
+
+- Command/check: `cd backend; python -m ruff check app/services/embeddings.py evaluation/benchmark_embeddings.py tests/services/test_embeddings.py tests/test_embedding_benchmark.py`
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: All checks passed
+  - Status: passed
+
+- Command/check: `cd backend; python -m mypy app/services/embeddings.py`
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: Success: no issues found in 1 source file
+  - Status: passed
+
+- Command/check: optional live `python -m evaluation.benchmark_embeddings`
+  - Required: no
+  - Reported result: not_run
+  - Rerun result: not_run (envelope forbids live embedding benchmark)
+  - Status: not_run
+
+## Acceptance Review
+- Task acceptance: versioned Job embedding text + locked injectable ShopAIKey adapter with shared Phase 0 primitives
+- Status: satisfied
+- Evidence:
+  - `build_job_embedding_text` / `job_embedding_text_v1` fixed field order; excludes salary/company/location/URL/education/evidence/match features; strips accidental E5 prefixes; whitespace collapse
+  - `JobEmbeddingService` locks model/dimensions via config allowlist; batch ≤16; one transient timeout/rate-limit retry; `max_retries=0` on client; validates count/order/1536/finite; code-only errors; REDACTED api_key in repr
+  - Benchmark reuses production primitives; existing `tests/test_embedding_benchmark.py` remains compatible
+  - Required A2 validation reruns all green
+
+## Implementation Reality
+- Real production path constructs `langchain_openai.OpenAIEmbeddings` with ShopAIKey base_url/api_key; tests inject fakes only
+- No TODO stubs, fixed success vectors, or silent model/dimension fallbacks
+- Hardcoding: none material; contract constants match locked config (`text-embedding-3-small` / 1536)
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 03A left checked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Production adapter rebuilds vector indexes from list position (langchain `embed_documents` ordered rows); provider content-permutation is not fail-closed as `ordering_violation` (indexes always 0..n-1). Acceptable for locked OpenAIEmbeddings surface; graph consumers must keep batch order contracts.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

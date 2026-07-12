@@ -571,28 +571,32 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 5 Batch02)
+## Current limitations (after Plan 5 Batch03)
 
 - Phase 3 CV-to-approved-profile workflow is complete for local fake-backed
   proof: shared upload, redaction/extraction, draft-only proposal/correction,
   guarded approval, atomic replacement, Candidate graph sync, public profile
   reads, and the shared Astryx sidebar/composer experience.
-- Plan 5 Batch01–02 added **internal** JD acquisition, grounded Job extraction,
-  deterministic quality classification, and SQLite JobPost persistence/duplicate
-  primitives only. They do **not** expose tools, public job routes, embeddings,
-  Job skill normalization tables, or Job graph sync yet.
+- Plan 5 Batch01–03 added **internal** JD acquisition, grounded Job extraction,
+  SQLite JobPost persistence/duplicate primitives, shared Candidate/Job skill
+  normalization, and a locked injectable Job embedding adapter only. They do
+  **not** expose Job tools, public job routes, `save_job` orchestration, Job
+  graph outbox/sync, retrieval/matching, or continuous embedding workers yet.
 - Matching, ranking, evaluation UI, OCR/DOCX/image CVs, profile history, and a
   full profile editor remain out of scope.
 - No public profile/job CRUD mutations, authentication, continuous outbox
   worker, Qdrant, CI, or cloud deployment.
 - Production registers the four Plan 4 Candidate tools only; Job ingestion,
   query, and matching tools remain reserved for later Plan 5 batches.
-- Graph rebuild loads the Candidate/Skill slice; Job, JobFamily, embedding,
-  verification, and later data-load stages remain intentionally incomplete.
+- Graph rebuild loads the Candidate/Skill slice; Job, JobFamily, embedding
+  projection, verification, and later data-load stages remain intentionally
+  incomplete.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
 - Optional live ShopAIKey/Neo4j/Compose observation is not required for Phase 3
   acceptance and is not claimed here unless the user supplies ignored secrets
-  and records a separate observation.
+  and records a separate observation. Normal embedding tests use fakes only;
+  optional live `python -m evaluation.benchmark_embeddings` needs ignored root
+  credentials and is never required for acceptance.
 
 ## Plan 5 progress (Batch01) — safe public JD input acquisition
 
@@ -603,6 +607,7 @@ and transport fakes only — no public network fetches and no ShopAIKey calls.
 |---|---|
 | Batch01 | DNS/redirect-aware URL policy, bounded HTTP retrieval, deterministic URL-or-paste JD text acquisition |
 | Batch02 | Grounded Job extraction, deterministic JD quality, persistence-first JobPost repository and duplicate primitives |
+| Batch03 | Shared Candidate/Job skill normalization + versioned Job text and locked ShopAIKey embeddings |
 
 Batch01 establishes the controlled acquisition foundation only:
 
@@ -659,6 +664,40 @@ python -m ruff check app/schemas/job_post.py app/services/jd_quality.py app/serv
 python -m mypy app/schemas/job_post.py app/services/jd_quality.py app/services/jd_extraction.py app/repositories/job_posts.py
 ```
 
+## Plan 5 progress (Batch03) — shared normalization and locked embeddings
+
+**Plan 5 Batch03 is evidence-backed.** Normalization and embedding tests use
+injected fakes / temporary fixtures only — zero live ShopAIKey embedding calls
+for acceptance.
+
+Batch03 reuses one Candidate/Job skill identity pipeline and adds a production
+Job embedding adapter on the locked ShopAIKey contract:
+
+- Shared `resolve_skill_ref` + Candidate path preserve exclusion semantics;
+  Job adapters `normalize_job_skills` / `normalize_job_skill_lists` normalize
+  nested `SkillRef`s, preserve relationship confidence/evidence, reuse existing
+  canonical keys, and dedupe required/preferred lists deterministically
+  (`backend/app/services/skill_normalization.py`). Production seed remains empty
+  unless approved alias evidence is supplied.
+- Versioned Job embedding text (`job_embedding_text_v1`) is built only from
+  title, summary, responsibilities, required skills, and preferred skills —
+  no E5 prefixes, salary, company/location, URL, HTML, or match features
+  (`backend/app/services/embeddings.py`).
+- Injectable `JobEmbeddingService` locks ShopAIKey `text-embedding-3-small` /
+  1536 finite floats, batch size ≤16, stable order, one transient retry, and
+  sanitized fail-closed errors. Phase 0 `benchmark_embeddings.py` reuses the
+  same production contract primitives so diagnostics cannot silently diverge.
+
+Focused Batch03 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_skill_normalization.py tests/services/test_job_skill_normalization.py tests/services/test_profile_extraction.py tests/graph/test_candidate_sync.py
+python -m pytest -q tests/services/test_embeddings.py tests/test_embedding_benchmark.py
+python -m ruff check app/services/skill_normalization.py app/services/embeddings.py evaluation/benchmark_embeddings.py tests/services/test_skill_normalization.py tests/services/test_job_skill_normalization.py tests/services/test_embeddings.py tests/test_embedding_benchmark.py
+python -m mypy app/services/skill_normalization.py app/services/embeddings.py
+```
+
 ## Plan 5 handoff (Master Phase 4) — stable seams only
 
 Plan 5 receives these **stable Phase 3 outputs** and must extend them rather
@@ -668,7 +707,8 @@ paths:
 | Seam | Location / contract |
 |---|---|
 | Approved singleton profile + preferences | SQLite `CandidateProfile` / `JobPreferences` via `backend/app/repositories/profiles.py`, `preferences.py`; public reads `GET /api/profile`, `GET /api/profile/cv` |
-| Skill normalization | Shared provisional/verified rules + seed (`backend/app/services/skill_normalization.py`, `backend/app/data/skills_seed.yaml`) |
+| Skill normalization | Shared Candidate/Job provisional/verified rules + seed (`backend/app/services/skill_normalization.py`, `backend/app/data/skills_seed.yaml`) |
+| Job embeddings (Plan 5 Batch03) | Versioned Job text + locked ShopAIKey adapter (`backend/app/services/embeddings.py`; Phase 0 benchmark reuses shared primitives) |
 | Redaction / structured extraction | Deterministic PII redaction + locked ShopAIKey structured adapter (`backend/app/services/pii_redaction.py`, `profile_extraction.py`, `shopaikey_chat.py`) |
 | Tool authorization | Four Candidate tools only; application-state auth for commit (`backend/app/tools/`, `backend/app/tools/registry.py`) |
 | Outbox / Candidate graph sync | Identifier-only Candidate outbox + rebuildable projection (`backend/app/repositories/graph_outbox.py`, `backend/app/graph/candidate_sync.py`) |
@@ -677,11 +717,11 @@ paths:
 | Public application routes | Exactly the seven routes listed above |
 | Phase 2 transport primitives | One LangGraph, turn/resume idempotency, checkpoint lifecycle, Compose/config/health |
 
-Plan 5 owns **only** JD persistence/extraction/deduplication and Job graph
-synchronization. It must **not** alter profile approval semantics, create
-profile history, duplicate skill canonicalization, bypass the outbox, invent a
-second graph/SSE contract, add public profile mutations, or call tools back
-into FastAPI.
+Plan 5 owns JD acquisition/extraction/persistence, shared Job skill
+normalization, locked Job embeddings, and later Job graph synchronization. It
+must **not** alter profile approval semantics, create profile history, duplicate
+skill canonicalization, bypass the outbox, invent a second graph/SSE contract,
+add public profile mutations, or call tools back into FastAPI.
 
 ## Plan 4 handoff consumed by Phase 3 (stable Phase 2 primitives)
 
