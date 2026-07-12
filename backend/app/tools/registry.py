@@ -82,10 +82,29 @@ class ToolRegistry:
         self.register_many(tools)
 
 
-def create_empty_production_registry() -> ToolRegistry:
-    """Return a fresh empty registry for production startup.
+CURRENT_PROFILE_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "get_candidate_context",
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    }
+)
 
-    Domain tools must not be registered here. Callers that need synthetic tools
-    for tests must inject them via graph construction, not this factory.
-    """
-    return ToolRegistry()
+
+def create_production_registry(tools: Iterable[BaseTool]) -> ToolRegistry:
+    """Register exactly the Plan 4 tools implemented at this boundary."""
+    registry = ToolRegistry()
+    registry.register_many(tools)
+    if registry.names() != CURRENT_PROFILE_TOOL_NAMES:
+        raise ToolRegistryError("invalid production tool set")
+    return registry
+
+
+__all__ = [
+    "CURRENT_PROFILE_TOOL_NAMES",
+    "LATER_PHASE_DOMAIN_TOOL_NAMES",
+    "ToolRegistry",
+    "ToolRegistryError",
+    "create_production_registry",
+]

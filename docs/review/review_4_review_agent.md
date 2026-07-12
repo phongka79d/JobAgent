@@ -218,6 +218,9 @@ ACCEPTED
 
 ---
 
+
+---
+
 # Task Review Report - 01B
 
 ## Source Task File
@@ -932,5 +935,231 @@ ACCEPTED
 ### 2026-07-12
 - what was re-checked: the prior cancellation finding, repaired production boundary, new regression, exact required pytest/Ruff/mypy commands, git evidence, report accuracy, and 03B checkbox integrity.
 - repairs verified: post-promotion cancellation now restores readable staged bytes before propagating cancellation; the pending draft and canonical metadata remain consistent.
+- remaining issues: None blocking, major, or minor.
+- updated outcome: ACCEPTED (prior outcome: REJECTED).
+
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch04 - Production Tools and Approval Workflow
+- Task ID: 04A
+- Task title: Register compact-context and draft-proposal tools through one service seam
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: all A1-reported tool, registry, graph/service wiring, compatibility-test, focused-test, and execution-report paths were inspected, including untracked files.
+
+## Files Reviewed
+- `backend/app/tools/candidate_context.py`: in scope - strict read-only compact-context wrapper with stable unavailable/invalid outcomes.
+- `backend/app/tools/profile_draft.py`: in scope - application-state-authorized CV/update proposals, same-draft retention, bounded marker, and no approved writes.
+- `backend/app/tools/registry.py`, `backend/app/tools/__init__.py`: in scope - exact three-tool production factory and exports.
+- `backend/app/main.py`, `backend/app/services/chat_service.py`, `backend/app/agent/graph.py`: in scope - inject the production registry through the existing one-graph seam.
+- `backend/tests/tools/profile_tool_helpers.py`, `backend/tests/tools/test_candidate_context.py`, `backend/tests/tools/test_profile_draft.py`, `backend/tests/tools/test_registry.py`: in scope - focused authorization/privacy/strictness coverage.
+- `backend/tests/agent/test_graph.py`: in scope - explicit empty registry remains available for synthetic graph tests.
+- `backend/tests/integration/test_full_chat_transport.py`: in scope - repaired exposure scan permits exactly the current Candidate tools while retaining synthetic/04B/future-tool prohibitions.
+- `docs/reports/report_4_execute_agent.md`: in scope - matching 04A block and repair log accurately report current validation evidence.
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/tools/test_candidate_context.py tests/tools/test_profile_draft.py tests/tools/test_registry.py tests/services/test_context_assembly.py`
+- Required: yes
+- Reported result: 29 passed
+- Rerun result: 29 passed
+- Status: passed
+- Notes: tool contracts, authorization, registry, and privacy coverage pass.
+
+- Command/check: exact required Ruff and mypy commands
+- Required: yes
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: no focused lint or type errors.
+
+- Command/check: `cd backend; python -m pytest -q tests/integration/test_full_chat_transport.py`
+- Required: no, but the file is modified by 04A and contains the production exposure regression
+- Reported result: targeted repaired exposure regression passed (1 passed, 7 deselected)
+- Rerun result: targeted repaired exposure regression passed (1 passed, 7 deselected)
+- Status: passed
+- Notes: the separate route-inventory failure predates 04A and omits the accepted attachment route.
+
+## Acceptance Review
+- Task acceptance: the three real production tools are strict, state-authorized, privacy-bounded, dependency-injected through the existing graph seam, and fully covered by current required and compatibility evidence.
+- Status: satisfied
+- Evidence: 29 required tests, focused Ruff/mypy, and the repaired production exposure regression all pass.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- A separate pre-existing route inventory assertion in chat/full-transport tests omits `/api/attachments/cv`; this is not attributed to 04A.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: prior exposure-regression finding, exact required pytest/Ruff/mypy gates, repaired regex/name/comment, report accuracy, and 04A checkbox integrity.
+- repairs verified: current three Candidate tools are permitted; synthetic, guarded commit, and future Job/query/matching tool bodies remain forbidden.
+- remaining issues: no blocking or major issue; the unrelated stale route-inventory assertion remains a minor pre-existing observation.
+- updated outcome: ACCEPTED (prior outcome: REJECTED_WITH_WARNINGS).
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch04 - Production Tools and Approval Workflow
+- Task ID: 04B
+- Task title: Guard commit and same-draft corrections with typed same-run approval
+- Executor status reported: complete
+- Repair scope: verify run/draft/key replay identity and removal of backend/tmp_forge_test only.
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from the repair: backend/app/tools/profile_commit.py, backend/tests/tools/test_profile_commit.py, and the matching execution-report update; backend/tmp_forge_test was removed.
+- accepted uncommitted 04A and prior correct 04B changes were inspected as dependency evidence but not re-reviewed as new repair scope.
+
+## Files Reviewed
+- backend/app/tools/profile_commit.py: in scope - the in-process replay identity is now the authorized run, draft, and key tuple; bare client keys cannot collide across runs.
+- backend/tests/tools/test_profile_commit.py: in scope - adds a real persistence-backed regression that commits two distinct authorized drafts using the same client key on different runs and keeps same-run/draft replay idempotent.
+- backend/tmp_forge_test/: removed - absent from filesystem and full untracked git status.
+- docs/reports/report_4_execute_agent.md: in scope - latest 04B same-task-repair block accurately reports the two repairs and validation results.
+
+## Validations Reviewed
+- Command/check: cd backend; python -m pytest -q tests/tools/test_profile_commit.py tests/agent/test_profile_approval.py tests/integration/test_profile_approval.py tests/api/test_chat.py tests/schemas/test_sse.py
+- Required: yes
+- Reported result: 74 passed in 7.42s
+- Rerun result: 74 passed in 8.34s
+- Status: passed
+- Notes: Includes the new cross-run same-client-key regression.
+
+- Command/check: exact required focused Ruff command
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+- Notes: None.
+
+- Command/check: exact required focused mypy command
+- Required: yes
+- Reported result: passed
+- Rerun result: Success; no issues found in 10 source files
+- Status: passed
+- Notes: None.
+
+- Command/check: python -m pytest -q tests/tools/test_profile_commit.py -k same_client_key_commits_distinct_runs_and_stays_idempotent_per_run
+- Required: yes - directly verifies the prior major finding
+- Reported result: included in required group
+- Rerun result: 1 passed, 4 deselected
+- Status: passed
+- Notes: Both distinct authorized drafts commit; replay of the original run/draft remains idempotent.
+
+- Command/check: full git status and filesystem check for backend/tmp_forge_test/
+- Required: yes - directly verifies the prior scope finding
+- Reported result: absent
+- Rerun result: absent
+- Status: passed
+- Notes: No scratch database or active-file artifact remains.
+
+- Command/check: git diff --check
+- Required: no
+- Reported result: not reported
+- Rerun result: passed with line-ending warnings only
+- Status: passed
+- Notes: No whitespace errors.
+
+## Acceptance Review
+- Task acceptance: both A2 repair instructions are fully satisfied and the original 04B authorization, same-run correction, replay, and eight-event SSE gates remain green.
+- Status: satisfied
+- Evidence: implementation/caller inspection, the persistence-backed collision regression, all 74 required tests, Ruff, mypy, and clean scratch-path evidence pass without blocking or major findings.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: prior A2 rejection, scoped replay identity, cross-run same-key regression, exact required pytest/Ruff/mypy gates, full untracked status, scratch-path absence, execution-report accuracy, and 04B checkbox integrity.
+- repairs verified: a valid key reused on a different authorized run/draft no longer suppresses the later commit; same run/draft replay remains idempotent; backend/tmp_forge_test is absent.
 - remaining issues: None blocking, major, or minor.
 - updated outcome: ACCEPTED (prior outcome: REJECTED).

@@ -26,7 +26,19 @@ from app.graph.errors import GraphError
 from app.graph.schema import ensure_graph_schema
 from app.services.attachment_storage import FilesystemAttachmentStorage
 from app.services.chat_service import ChatService
+from app.services.cv_ingestion import CvIngestionService
+from app.services.profile_service import ProfileCommitService
 from app.services.shopaikey_chat import ShopAIKeyChatAdapter
+from app.tools.candidate_context import (
+    CandidateContextToolService,
+    create_candidate_context_tool,
+)
+from app.tools.profile_commit import (
+    ProfileCommitToolService,
+    create_profile_commit_tool,
+)
+from app.tools.profile_draft import ProfileDraftToolService, create_profile_draft_tools
+from app.tools.registry import create_production_registry
 
 SettingsLoader = Callable[[], Settings]
 
@@ -111,10 +123,31 @@ def create_app(
         if chat is None:
             # Adapter stores settings only; ChatOpenAI is built on first use.
             decision = ShopAIKeyChatAdapter.from_settings(cfg)
+            ingestion = CvIngestionService(
+                db,
+                store,
+                max_size_bytes=cfg.max_pdf_size_mb * 1024 * 1024,
+                max_pages=cfg.max_pdf_pages,
+                profile_adapter=decision,
+            )
+            draft_tools = create_profile_draft_tools(
+                ProfileDraftToolService(db, ingestion)
+            )
+            commit_tool = create_profile_commit_tool(
+                ProfileCommitToolService(ProfileCommitService(db, store))
+            )
+            registry = create_production_registry(
+                [
+                    create_candidate_context_tool(CandidateContextToolService(db)),
+                    *draft_tools,
+                    commit_tool,
+                ]
+            )
             chat = ChatService(
                 db,
                 sqlite_path=cfg.sqlite_path,
                 decision=decision,
+                registry=registry,
             )
 
         app.state.settings = cfg

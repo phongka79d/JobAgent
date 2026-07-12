@@ -497,10 +497,21 @@ class ToolCompletedPayload(_PayloadBase):
 
 
 class ApprovalRequiredPayload(_PayloadBase):
-    """Interrupt: short sanitized approval summary only (no draft/document bodies)."""
+    """Interrupt: short sanitized approval summary only (no draft/document bodies).
+
+    Compatible extension for Plan 4 profile drafts: optional display-safe
+    preference/profile preview fields. Internal draft/run authorization tokens
+    must never appear here.
+    """
 
     summary: str = Field(max_length=_MAX_APPROVAL_SUMMARY_LEN)
     approval_kind: str | None = None
+    current_title: str | None = Field(default=None, max_length=_MAX_LABEL_LEN)
+    skill_names: list[str] | None = Field(default=None, max_length=20)
+    experience_count: int | None = Field(default=None, ge=0)
+    education_count: int | None = Field(default=None, ge=0)
+    has_preference_changes: bool | None = None
+    target_roles_preview: list[str] | None = Field(default=None, max_length=16)
 
     @field_validator("summary")
     @classmethod
@@ -516,6 +527,39 @@ class ApprovalRequiredPayload(_PayloadBase):
     @classmethod
     def _check_kind(cls, value: str | None) -> str | None:
         return _validate_approval_kind(value)
+
+    @field_validator("current_title")
+    @classmethod
+    def _check_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("invalid current_title")
+        cleaned = _collapse_ws(value)
+        if not cleaned:
+            return None
+        if len(cleaned) > _MAX_LABEL_LEN:
+            raise ValueError("current_title too large")
+        return _reject_unsafe_text(cleaned, field="current_title")
+
+    @field_validator("skill_names", "target_roles_preview")
+    @classmethod
+    def _check_name_lists(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("invalid name list")
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("invalid name list item")
+            piece = _collapse_ws(item)
+            if not piece:
+                continue
+            if len(piece) > _MAX_LABEL_LEN:
+                raise ValueError("name list item too large")
+            cleaned.append(_reject_unsafe_text(piece, field="name_list"))
+        return cleaned or None
 
 
 class TextDeltaPayload(_PayloadBase):

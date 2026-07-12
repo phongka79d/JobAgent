@@ -336,7 +336,7 @@ complete
 - README.md
 - docs/tasks/task_4.md
 - docs/plans/Plan_4.md
-- docs/plans/Master_plan.md (§6.2, §7.x, §13.1)
+- docs/plans/Master_plan.md (ï¿½6.2, ï¿½7.x, ï¿½13.1)
 - backend/app/db/models/profile.py
 - backend/app/schemas/candidate.py
 - backend/app/schemas/preferences.py
@@ -362,9 +362,9 @@ complete
 - backend/app/repositories/profiles.py (created)
 - backend/app/repositories/preferences.py (created)
 - backend/app/repositories/profile_drafts.py (created)
-- backend/app/repositories/__init__.py (modified — exports)
+- backend/app/repositories/__init__.py (modified ï¿½ exports)
 - backend/app/services/profile_context.py (created)
-- backend/app/services/chat_context.py (modified — reuse compact context service)
+- backend/app/services/chat_context.py (modified ï¿½ reuse compact context service)
 - backend/app/services/__init__.py (inspected; profile_context not package-exported to avoid cycles)
 - backend/tests/repositories/test_profiles.py (created)
 - backend/tests/repositories/test_preferences.py (created)
@@ -409,7 +409,7 @@ complete
 ## Progress Update
 - task checkbox updated: no
 - batch status updated: no
-- reason: orchestrated mode — A1 must not update checkboxes or batch status
+- reason: orchestrated mode ï¿½ A1 must not update checkboxes or batch status
 
 ## Notes for Review Agent
 - changed files: profiles/preferences/profile_drafts repositories, profile_context service, chat_context wiring, four test modules, repositories/__init__ exports
@@ -1280,3 +1280,311 @@ complete
 - changes made: added a cancellation regression first, confirmed the canonical staged path was unreadable, then widened the outer cleanup boundary to `BaseException` while preserving non-`Exception` cancellation semantics after compensation.
 - validations rerun: cancellation regression passed; exact required pytest passed with 59 tests; exact Ruff and mypy commands passed.
 - outcome: the pending draft source remains readable through canonical staged metadata after post-promotion cancellation; ready for same-task A2 re-review.
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch04 - Production Tools and Approval Workflow
+
+## Task
+04A - Register compact-context and draft-proposal tools through one service seam
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch04 - Production Tools and Approval Workflow
+- Task ID: 04A
+- Task title: Register compact-context and draft-proposal tools through one service seam
+- Files allowed / repair scope: Candidate context/profile-draft tool factories, dependency-injected production registry and ChatService/main wiring, directly required tests, and compatibility updates for registry test injection.
+
+## Source of Truth Used
+- `docs/plans/Plan_4.md` - `### 7.4 Tool behavior and authorization`
+- `docs/plans/Master_plan.md` - `### 13.1` through `### 13.3` and `### 13.8`
+
+## Completed Work
+- Added a strict read-only `get_candidate_context` tool backed by the existing bounded approved projection; missing/invalid approved state fails closed with stable codes.
+- Added strict `propose_profile_from_cv` and `propose_profile_update` tools backed by the existing CV ingestion and caller-transaction-owned draft repositories. Proposal results emit one bounded `APPROVAL_REQUIRED:` marker and never write approved profile/preferences/CV state.
+- Enforced application-state authorization for pending-draft, stale-draft, and active-context paths; same-draft corrections retain the same identity and preserve an existing preference proposal when preferences are omitted.
+- Replaced the empty production startup factory with an exact three-name dependency-injected registry while retaining explicit empty `ToolRegistry` construction for synthetic tests.
+- Wired the registry through the existing ChatService graph seam and FastAPI lifespan without internal HTTP calls or a second graph/global registry.
+- Added TDD coverage for privacy, strict inputs, state availability, stale IDs, sanitized errors, same-draft/active-context updates, approved-state immutability, registry names, and no internal HTTP calls.
+
+## Files Created or Modified
+- `backend/app/tools/candidate_context.py` (created)
+- `backend/app/tools/profile_draft.py` (created)
+- `backend/app/tools/registry.py`
+- `backend/app/tools/__init__.py`
+- `backend/app/services/chat_service.py`
+- `backend/app/agent/graph.py`
+- `backend/app/main.py`
+- `backend/tests/tools/profile_tool_helpers.py` (created)
+- `backend/tests/tools/test_candidate_context.py` (created)
+- `backend/tests/tools/test_profile_draft.py` (created)
+- `backend/tests/tools/test_registry.py`
+- `backend/tests/agent/test_graph.py`
+- `backend/tests/integration/test_full_chat_transport.py`
+- `docs/reports/report_4_execute_agent.md`
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/tools/test_candidate_context.py tests/tools/test_profile_draft.py tests/tools/test_registry.py tests/services/test_context_assembly.py`
+- required: yes
+- result: passed
+- evidence or reason: 29 passed in 5.13s.
+
+- command/check: `cd backend; python -m ruff check app/tools/candidate_context.py app/tools/profile_draft.py app/tools/registry.py tests/tools`
+- required: yes
+- result: passed
+- evidence or reason: all checks passed.
+
+- command/check: `cd backend; python -m mypy app/tools/candidate_context.py app/tools/profile_draft.py app/tools/registry.py`
+- required: yes
+- result: passed
+- evidence or reason: success with no issues in 3 source files.
+
+- command/check: `cd backend; python -m pytest -q tests/test_lifecycle.py tests/agent/test_graph.py tests/integration/test_agent_lifecycle.py`
+- required: no
+- result: passed
+- evidence or reason: 29 passed in 5.35s; production registry injection preserves the existing graph/lifecycle seam.
+
+- command/check: touched-file Ruff and mypy for main, ChatService, graph, tools, and registry compatibility tests
+- required: no
+- result: passed
+- evidence or reason: all checks passed; mypy found no issues in 7 source files.
+
+- command/check: exploratory run including `tests/api/test_chat.py`
+- required: no
+- result: failed
+- evidence or reason: 39 passed and one pre-existing route-inventory assertion failed because its approved set omits the already accepted `/api/attachments/cv`; 04A does not change public routes.
+
+- command/check: `git diff --check`
+- required: no
+- result: passed
+- evidence or reason: exit 0 with line-ending conversion warnings only.
+
+## Acceptance Check
+- condition: state-authorized strict tools fail closed with sanitized outcomes.
+- status: satisfied
+- evidence: focused tests cover empty/active/pending/stale state, extra/null inputs, and stable bounded responses.
+
+- condition: every valid proposal creates or updates one pending draft without approved writes.
+- status: satisfied
+- evidence: repository-backed tests verify new CV draft, same-draft correction, active-context proposal, preference omission semantics, and unchanged approved singletons.
+
+- condition: production registry exposes only the three Plan 4 tools implemented so far.
+- status: satisfied
+- evidence: exact registry-name test passes; no synthetic, commit, Job, query, or matching tool is registered.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode reserves progress tracking for A2.
+
+## Notes for Review Agent
+- changed files: the thirteen implementation/test paths listed above plus this report block.
+- validations to rerun: both exact required validation groups; optionally the 29-test graph/lifecycle seam group.
+- risk areas: the current marker carries only a bounded display summary string; typed approval payload and commit authorization remain explicitly owned by 04B.
+- next task readiness: ready for A2 review of 04A only.
+
+## Workflow Integrity Check
+- exactly one task executed: 04A
+- mode: orchestrated
+- no 04B commit tool, approval authorization, correction-resume loop, checkbox, batch status, staging, or commit was performed.
+## Repair Log
+
+### 2026-07-12
+- reason for repair: A2 REJECTED_WITH_WARNINGS because the modified full-transport production-exposure regression still forbade the newly accepted 04A Candidate tools.
+- changes made: updated only the exposure regex/name/comment to allow the three 04A tools while continuing to forbid synthetic helpers, guarded commit, and future Job/query/matching tools.
+- validations rerun: targeted exposure regression passed (1 passed, 7 deselected); exact required pytest passed with 29 tests; exact Ruff and mypy commands passed.
+- outcome: complete - the compatibility regression now matches the 04A production boundary; the unrelated stale public-route inventory assertion remains out of scope.
+---
+
+# Task Execution Report - 04B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Report File
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch04 - Production Tools and Approval Workflow
+
+## Task
+04B - Guard commit and same-draft corrections with typed same-run approval
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch04 - Production Tools and Approval Workflow
+- Task ID: 04B
+- Task title: Guard commit and same-draft corrections with typed same-run approval
+- Files allowed / repair scope: A2 same-task repair only â€” `profile_commit` replay identity + remove generated `backend/tmp_forge_test/`; preserve 04A and correct 04B work
+
+## Source of Truth Used
+- docs/plans/Plan_4.md > ### 7.4 Tool behavior and authorization
+- docs/plans/Master_plan.md > ### 10.3 Chat approval
+- docs/plans/Master_plan.md > ### 13.4 `commit_profile_draft`
+- docs/plans/Plan_3.md > ## 10. Handoff Notes for Plan 4 (Master Phase 3)
+
+## Supplemental Documents Used
+- docs/plans/Plan_4.md
+- docs/plans/Master_plan.md
+- docs/plans/Plan_3.md
+- README.md
+- docs/tasks/task_4.md (04B block)
+- A2_REPAIR_INSTRUCTIONS (04B rejection 1)
+
+## Dependency and User Action Check
+- Dependencies: (03B), (04A), checkpoint/same-run resume, resume idempotency, SSE serializer, graph approval marker â€” present
+- User Action: None
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- backend/app/agent/graph.py
+- backend/app/agent/lifecycle.py
+- backend/app/agent/state.py
+- backend/app/agent/approval.py
+- backend/app/tools/profile_commit.py
+- backend/app/tools/profile_draft.py
+- backend/app/tools/registry.py
+- backend/app/tools/candidate_context.py
+- backend/app/schemas/sse.py
+- backend/app/schemas/chat.py
+- backend/app/schemas/profile_draft.py
+- backend/app/services/chat_service.py
+- backend/app/services/profile_service.py
+- backend/app/api/chat.py
+- backend/app/main.py
+- backend/tests/tools/test_profile_commit.py
+- backend/tests/api/test_chat.py
+- backend/tests/schemas/test_sse.py
+- backend/tests/fakes/agent_tools.py
+- callers of ProfileCommitToolService / `_consumed_keys` (only profile_commit owns the set)
+- docs/plans/Plan_4.md, Master_plan.md, Plan_3.md handoff
+
+## Completed Work
+- Added application-owned approval module (`app/agent/approval.py`) with resume parsing/enrichment, commit authorization matching, profile display summary stripping of internal draft/run auth, and interrupt sanitization that preserves bounded skill/role previews.
+- Fixed the correction root gap: approve/correct resume handling in `await_approval` injects either one guarded `commit_profile_draft` tool call (with `approval_authorization` state) or a HumanMessage correction into the same checkpointed turn; routing can re-enter tools after approve.
+- Implemented guarded `commit_profile_draft` tool using LangGraph `InjectedState` authorization; direct/forged/mismatched calls refuse and write nothing.
+- Extended `approval_required` SSE payload with optional display-safe profile/preference fields without adding a ninth event name; chat SSE maps via `profile_display_summary` only.
+- Registered four Plan 4 tools in production registry/main wiring; enriched ChatService resume values with application-owned idempotency keys.
+- Added unit/agent/integration tests for unauthorized commit, same-run correction re-interrupt, duplicate resume key, and sanitized SSE payloads. Updated stale chat route inventory to include accepted `/api/attachments/cv`.
+- Same-task repair: scoped in-process commit replay guard from bare resume key to authorized `(run_id, draft_id, key)` identity so the same client key may commit distinct properly authorized drafts on different runs while same-run/draft duplicate remains idempotent.
+- Same-task repair: removed generated out-of-scope `backend/tmp_forge_test/` after verifying the path is inside this repository; not part of implementation scope or commit candidates.
+
+## Files Created or Modified
+- backend/app/agent/approval.py (created)
+- backend/app/agent/graph.py
+- backend/app/agent/lifecycle.py
+- backend/app/tools/profile_commit.py (created; repair: replay identity scoped to run/draft/key)
+- backend/app/tools/profile_draft.py
+- backend/app/tools/registry.py
+- backend/app/tools/__init__.py
+- backend/app/schemas/sse.py
+- backend/app/services/chat_service.py
+- backend/app/api/chat.py
+- backend/app/main.py
+- backend/tests/tools/test_profile_commit.py (created; repair: cross-run same-key regression)
+- backend/tests/agent/test_profile_approval.py (created)
+- backend/tests/integration/test_profile_approval.py (created)
+- backend/tests/tools/test_registry.py
+- backend/tests/api/test_chat.py
+- backend/tests/schemas/test_sse.py
+- docs/reports/report_4_execute_agent.md
+- backend/tmp_forge_test/ (removed; was unreported generated scratch, not implementation scope)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/tools/test_profile_commit.py tests/agent/test_profile_approval.py tests/integration/test_profile_approval.py tests/api/test_chat.py tests/schemas/test_sse.py`
+- required: yes
+- result: passed
+- evidence or reason: 74 passed in 7.42s (includes new cross-run same-client-key regression).
+
+- command/check: `cd backend; python -m ruff check app/agent app/tools/profile_commit.py app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py tests/agent/test_profile_approval.py tests/tools/test_profile_commit.py tests/integration/test_profile_approval.py`
+- required: yes
+- result: passed
+- evidence or reason: all checks passed.
+
+- command/check: `cd backend; python -m mypy app/agent app/tools/profile_commit.py app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py`
+- required: yes
+- result: passed
+- evidence or reason: success with no issues in 10 source files.
+
+- command/check: `git status --short --untracked-files=all` (no `backend/tmp_forge_test/` paths)
+- required: yes (A2 repair validation)
+- result: passed
+- evidence or reason: scratch directory removed; status listing has no `tmp_forge_test` paths.
+
+- command/check: regression `tests/tools/test_registry.py tests/tools/test_profile_draft.py tests/agent/test_graph.py tests/integration/test_agent_lifecycle.py`
+- required: no
+- result: passed
+- evidence or reason: 37 passed on original execution; not re-run during this repair (required 04B groups + new regression cover the repair).
+
+## Acceptance Check
+- condition: Direct or forged commit execution changes nothing; only approve resume for matching pending run/draft can commit.
+- status: satisfied
+- evidence: tool unit tests refuse missing/forged/mismatched auth; agent graph forge path fails without approved profile write; approve path commits once.
+
+- condition: Replaying the same resume idempotency key returns durable outcome without second commit/file/outbox/tool effects.
+- status: satisfied
+- evidence: integration test asserts completed state, tool count and outbox count unchanged on duplicate resume key; same-run/draft tool-level replay remains idempotent via scoped identity.
+
+- condition: Same client resume key on a later authorized run/draft is not suppressed as false success.
+- status: satisfied
+- evidence: `test_same_client_key_commits_distinct_runs_and_stays_idempotent_per_run` commits draft A then draft B with shared key and distinct run ids; only same run/draft duplicate returns idempotent.
+
+- condition: Correction resumes the same run, updates the same draft, preserves approved state, and produces another valid approval_required.
+- status: satisfied
+- evidence: agent and integration correction tests keep draft_id, inject correction text, re-interrupt with fresh summary, leave approved singleton null until final approve.
+
+- condition: SSE union still has exactly eight event names and exposes no raw CV text, contact PII, tool arguments, storage paths, or internal authorization token.
+- status: satisfied
+- evidence: SSE schema tests still lock eight events; profile payload extension test asserts skill preview fields and absence of draft_id/resume/path/cv_text.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode reserves progress tracking for A2 / orchestrator.
+
+## Notes for Review Agent
+- repairOf: 04B/A2 rejection 1
+- changed files this repair: `backend/app/tools/profile_commit.py`, `backend/tests/tools/test_profile_commit.py`, report update; deleted untracked `backend/tmp_forge_test/`
+- validations to rerun: both exact required 04B command groups plus cross-run same-key regression (already included in first pytest group).
+- risk areas: in-process guard is now intentionally secondary to durable ChatService resume idempotency and missing-draft fail-closed; bare keys no longer collide across runs.
+- next task readiness: ready for A2 re-review of 04B only.
+
+## Workflow Integrity Check
+- exactly one task repaired: 04B
+- mode: same_task_repair
+- no checkbox, batch status, staging, or commit performed
+- no sibling 05x frontend/profile GET work implemented
+- 04A and prior correct 04B work preserved
+
+## Repair Log
+
+### 2026-07-12 (A2 rejection 1 / same_task_repair)
+- reason for repair: A2 REJECTED â€” process-global bare `_consumed_keys` suppressed valid later-run commits; unreported `backend/tmp_forge_test/` scratch outside scope.
+- changes made:
+  - Replaced `_consumed_keys: set[str]` with `_consumed_identities: set[tuple[str, str, str]]` scoped to authorized `(run_id, draft_id, key)`.
+  - Added regression `test_same_client_key_commits_distinct_runs_and_stays_idempotent_per_run`.
+  - Removed only `backend/tmp_forge_test/` after path-inside-repo check.
+- validations rerun:
+  - required pytest group: 74 passed in 7.42s
+  - required ruff + mypy: passed
+  - git status: no `backend/tmp_forge_test/` paths
+- outcome: repair complete; acceptance satisfied for listed A2 issues.

@@ -31,6 +31,13 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
+from app.agent.approval import (
+    build_commit_authorization,
+    build_commit_tool_message,
+    extract_draft_id,
+    parse_resume_command,
+    sanitize_profile_approval_fields,
+)
 from app.agent.prompt import (
     DOMAIN_REDIRECT_MESSAGE,
     build_system_prompt,
@@ -42,7 +49,7 @@ from app.services.shopaikey_chat import (
     ObservedToolCall,
     ShopAIKeyChatError,
 )
-from app.tools.registry import ToolRegistry, create_empty_production_registry
+from app.tools.registry import ToolRegistry
 
 # Exact controlled failure codes (stable; never embed secrets or raw payloads).
 TOOL_LOOP_LIMIT_EXCEEDED: Final[str] = "TOOL_LOOP_LIMIT_EXCEEDED"
@@ -60,7 +67,7 @@ NODE_PERSIST_RESPONSE: Final[str] = "persist_response"
 NODE_CLEANUP_CHECKPOINT: Final[str] = "cleanup_checkpoint"
 
 RouteAfterDecision = Literal["tools", "await_approval"]
-RouteAfterApproval = Literal["agent_decision", "persist_response"]
+RouteAfterApproval = Literal["agent_decision", "persist_response", "tools"]
 
 
 def _append_messages(
@@ -96,6 +103,10 @@ class AgentGraphState(TypedDict):
     checkpoint_cleaned: NotRequired[bool]
     # Resume value returned by request_human_approval / await_approval (internal).
     approval_resume_value: NotRequired[Any]
+    # Application-owned commit grant (never manufactured by the LLM/document).
+    approval_authorization: NotRequired[dict[str, Any] | None]
+    # Pending profile draft id for same-run correction continuity (internal).
+    profile_draft_id: NotRequired[str | None]
 
 
 class DecisionPort(Protocol):
@@ -130,29 +141,12 @@ def _error_payload(code: str, **extra: Any) -> dict[str, Any]:
 def sanitize_approval_payload(
     payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a small JSON-safe approval payload for interrupt surfaces."""
-    out: dict[str, Any] = {"kind": "approval_required"}
-    if not isinstance(payload, Mapping):
-        return out
-    for key, item in payload.items():
-        if not isinstance(key, str) or not key:
-            continue
-        safe_key = key[:64]
-        if safe_key == "kind" and isinstance(item, str) and item.strip():
-            out["kind"] = item.strip()[:64]
-            continue
-        if isinstance(item, bool) or item is None:
-            out[safe_key] = item
-        elif isinstance(item, int) and not isinstance(item, bool):
-            out[safe_key] = item
-        elif isinstance(item, float):
-            out[safe_key] = item
-        elif isinstance(item, str):
-            if len(item) <= 512:
-                out[safe_key] = item
-        else:
-            out[safe_key] = type(item).__name__
-    return out
+    """Build a small JSON-safe approval payload for interrupt surfaces.
+
+    Profile drafts keep bounded display fields plus internal ``draft_id`` for
+    same-run authorization. Public SSE must strip internal auth keys.
+    """
+    return sanitize_profile_approval_fields(payload)
 
 
 def request_human_approval(
@@ -245,6 +239,45 @@ def _count_pending_tool_calls(messages: Sequence[Any]) -> int:
 
 def _last_ai_has_tool_calls(messages: Sequence[Any]) -> bool:
     return _count_pending_tool_calls(messages) > 0
+
+
+def _unanswered_tool_call_ids(messages: Sequence[Any]) -> set[str]:
+    """Tool-call ids on the latest AI tool request that still lack a ToolMessage."""
+    pending: set[str] = set()
+    for item in messages:
+        if isinstance(item, AIMessage) and item.tool_calls:
+            pending = set()
+            for call in item.tool_calls:
+                if isinstance(call, Mapping):
+                    call_id = call.get("id")
+                else:
+                    call_id = getattr(call, "id", None)
+                if isinstance(call_id, str) and call_id:
+                    pending.add(call_id)
+            continue
+        if isinstance(item, Mapping) and str(item.get("role", "")).lower() in {
+            "assistant",
+            "ai",
+        }:
+            raw = item.get("tool_calls") or ()
+            if isinstance(raw, Sequence) and raw:
+                pending = set()
+                for call in raw:
+                    if isinstance(call, Mapping):
+                        call_id = call.get("id")
+                        if isinstance(call_id, str) and call_id:
+                            pending.add(call_id)
+            continue
+        if isinstance(item, ToolMessage):
+            pending.discard(str(item.tool_call_id))
+            continue
+        if isinstance(item, Mapping) and str(item.get("role", "")).lower() == "tool":
+            pending.discard(str(item.get("tool_call_id") or ""))
+    return pending
+
+
+def _has_unanswered_tool_calls(messages: Sequence[Any]) -> bool:
+    return bool(_unanswered_tool_call_ids(messages))
 
 
 def _recent_tool_messages(messages: Sequence[Any]) -> list[ToolMessage]:
@@ -354,7 +387,7 @@ def build_agent_graph(
     if tool_loop_limit < 1:
         raise ValueError("tool_loop_limit must be positive")
 
-    active_registry = registry if registry is not None else create_empty_production_registry()
+    active_registry = registry if registry is not None else ToolRegistry()
     if tools is None:
         bound_tools: list[Any] = list(active_registry.list_tools())
     else:
@@ -554,6 +587,11 @@ def build_agent_graph(
         When ``pending_approval`` is set, pause via ``request_human_approval``
         (LangGraph ``interrupt``) on this thread. Resume clears pending approval
         and records the resume value for subsequent commit/decision steps.
+
+        Profile approve resumes inject an application-owned commit authorization
+        and exactly one ``commit_profile_draft`` tool call. Correction resumes
+        inject the nonblank correction text into the same checkpointed turn so
+        ``propose_profile_update`` can update the same draft.
         No-ops when no approval is pending so the normal complete path is unchanged.
         """
         if state.get("error") is not None:
@@ -565,10 +603,49 @@ def build_agent_graph(
         resume_value = request_human_approval(
             dict(payload) if payload is not None else None
         )
-        return {
+        command = parse_resume_command(resume_value)
+        draft_id = extract_draft_id(payload)
+        if draft_id is None:
+            staged_id = state.get("profile_draft_id")
+            if isinstance(staged_id, str) and staged_id.strip():
+                draft_id = staged_id.strip()
+
+        updates: dict[str, Any] = {
             "pending_approval": None,
             "approval_resume_value": resume_value,
+            "approval_authorization": None,
         }
+        if draft_id is not None:
+            updates["profile_draft_id"] = draft_id
+
+        if command.action == "approve" and draft_id is not None:
+            auth = build_commit_authorization(
+                run_id=str(state["run_id"]),
+                draft_id=draft_id,
+                resume_idempotency_key=command.idempotency_key,
+            )
+            updates["approval_authorization"] = auth
+            updates["messages_for_this_turn"] = [
+                build_commit_tool_message(
+                    draft_id=draft_id,
+                    idempotency_key=auth["resume_idempotency_key"],
+                    run_id=str(state["run_id"]),
+                )
+            ]
+            updates["run_outcome"] = None
+            updates["final_assistant_text"] = None
+            return updates
+
+        if command.action == "correct" and command.correction_text:
+            # Root-gap fix: feed correction text back into model/tool state.
+            updates["messages_for_this_turn"] = [
+                HumanMessage(content=command.correction_text)
+            ]
+            updates["run_outcome"] = None
+            updates["final_assistant_text"] = None
+            return updates
+
+        return updates
 
     def route_after_approval(state: AgentGraphState) -> RouteAfterApproval:
         if state.get("error") is not None:
@@ -578,9 +655,17 @@ def build_agent_graph(
         if state.get("run_outcome") == "failed":
             return "persist_response"
         messages = state.get("messages_for_this_turn") or ()
+        # Application-owned approve path: execute the injected commit tool call.
+        if _has_unanswered_tool_calls(messages):
+            return "tools"
         # After tools (+ optional approval), continue the decision loop when the
         # latest AI message requested tools and tool results are present.
         if _last_ai_has_tool_calls(messages) and _recent_tool_messages(messages):
+            return "agent_decision"
+        # Correction resume injects a HumanMessage and must re-enter decision.
+        if state.get("approval_resume_value") is not None and state.get(
+            "run_outcome"
+        ) not in {"completed", "failed"}:
             return "agent_decision"
         return "persist_response"
 
@@ -653,6 +738,7 @@ def build_agent_graph(
         {
             "agent_decision": NODE_AGENT_DECISION,
             "persist_response": NODE_PERSIST_RESPONSE,
+            "tools": NODE_TOOLS,
         },
     )
     graph.add_edge(NODE_PERSIST_RESPONSE, NODE_CLEANUP_CHECKPOINT)

@@ -35,7 +35,7 @@ from app.repositories.tool_executions import ToolExecutionRepository
 from app.schemas.sse import SSEEventOrderValidator, parse_sse_event
 from app.services.attachment_storage import FilesystemAttachmentStorage
 from app.services.chat_service import ChatService
-from app.tools.registry import create_empty_production_registry
+from app.tools.registry import ToolRegistry
 from fastapi.testclient import TestClient
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import func, select
@@ -63,8 +63,8 @@ RAW_ARG_SENTINEL = "RAW_ARG_SENTINEL_7f3a9c2e_UNIQUE_PING_xQ9m"
 # Production modules must not import or hardcode the test-only tool name.
 _PRODUCTION_FORBIDDEN_RE = re.compile(
     r"echo_label|make_echo_label_tool|tests\.fakes\.agent_tools|"
-    r"propose_profile_from_cv\s*\(|commit_profile_draft\s*\(|"
-    r"save_job\s*\(|match_jobs\s*\("
+    r"commit_profile_draft\s*\(|save_job\s*\(|query_jobs\s*\(|"
+    r"match_jobs\s*\("
 )
 
 
@@ -802,16 +802,16 @@ async def test_full_path_disconnect_reconnect_no_replay(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_empty_and_no_synthetic_tool_exposure() -> None:
-    registry = create_empty_production_registry()
+def test_production_registry_seam_and_no_forbidden_tool_exposure() -> None:
+    registry = ToolRegistry()
     assert len(registry) == 0
     assert "echo_label" not in registry
     assert "propose_action" not in registry
     assert "propose_profile_from_cv" not in registry
     assert "match_jobs" not in registry
 
-    # Production source tree must not hardcode synthetic tools or implement
-    # later-phase domain tools (name constants as reserved set are allowed).
+    # Production may implement the three accepted 04A Candidate tools, but not
+    # synthetic helpers, guarded commit (04B), or later Job/matching tools.
     hits: list[str] = []
     for path in APP_SRC.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

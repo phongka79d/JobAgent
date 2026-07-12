@@ -142,6 +142,37 @@ def test_supported_event_types_are_exactly_eight() -> None:
     assert {m.value for m in SSEEventType} == expected
 
 
+def test_profile_approval_payload_extension_is_display_safe() -> None:
+    import json
+
+    event = parse_sse_event(
+        {
+            "event": "approval_required",
+            "event_id": f"evt-{uuid4().hex[:12]}",
+            "run_id": RUN_ID,
+            "timestamp": TS.isoformat().replace("+00:00", "Z"),
+            "payload": {
+                "summary": "Review proposed Engineer",
+                "approval_kind": "profile_draft",
+                "current_title": "Engineer",
+                "skill_names": ["Python", "SQL"],
+                "experience_count": 2,
+                "education_count": 1,
+                "has_preference_changes": True,
+                "target_roles_preview": ["Backend"],
+            },
+        }
+    )
+    serialized = serialize_sse_event(event)
+    assert serialized["event"] == "approval_required"
+    assert serialized["payload"]["skill_names"] == ["Python", "SQL"]
+    blob = json.dumps(serialized)
+    assert "draft_id" not in blob
+    assert "resume_idempotency" not in blob
+    assert "storage_path" not in blob
+    assert "cv_text" not in blob
+
+
 @pytest.mark.parametrize(
     "builder",
     [

@@ -163,19 +163,11 @@ def extract_interrupt_payload(result: Mapping[str, Any] | Any) -> dict[str, Any]
     if value is None:
         return {"kind": "approval_required"}
     if isinstance(value, Mapping):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                continue
-            if isinstance(item, (str, int, float, bool)) or item is None:
-                if isinstance(item, str) and len(item) > 512:
-                    continue
-                out[key] = item
-            else:
-                out[key] = type(item).__name__
-        if "kind" not in out:
-            out["kind"] = "approval_required"
-        return out
+        # Prefer the shared profile-aware sanitizer so skill previews survive
+        # the interrupt → ChatService → SSE path without type-name collapse.
+        from app.agent.approval import sanitize_profile_approval_fields
+
+        return sanitize_profile_approval_fields(value)
     if isinstance(value, str):
         return {"kind": "approval_required", "detail": value[:512]}
     return {"kind": "approval_required"}

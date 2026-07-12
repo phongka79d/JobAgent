@@ -23,6 +23,7 @@ from langgraph.types import Command
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.approval import enrich_resume_value
 from app.agent.graph import (
     DecisionPort,
     build_agent_graph,
@@ -55,6 +56,7 @@ from app.repositories.tool_executions import (
     ToolExecutionValidationError,
 )
 from app.services.chat_context import ChatContextAssembler, ChatContextError
+from app.tools.registry import ToolRegistry
 
 RunOutcomeKind = Literal[
     "completed",
@@ -149,6 +151,7 @@ class ChatService:
         sqlite_path: str | Path,
         decision: DecisionPort | None = None,
         tools: Sequence[Any] | None = None,
+        registry: ToolRegistry | None = None,
         graph_factory: GraphFactory | None = None,
         graph_runner: GraphRunner | None = None,
         recent_context_limit: int = _DEFAULT_RECENT_LIMIT,
@@ -157,6 +160,7 @@ class ChatService:
         self._sqlite_path = Path(sqlite_path)
         self._decision = decision
         self._tools = list(tools) if tools is not None else None
+        self._registry = registry
         self._graph_factory = graph_factory
         self._graph_runner = graph_runner or _default_graph_runner
         self._recent_limit = recent_context_limit
@@ -166,6 +170,7 @@ class ChatService:
             return self._graph_factory(checkpointer)
         return build_agent_graph(
             tools=self._tools,
+            registry=self._registry,
             decision=self._decision,
             checkpointer=checkpointer,
         )
@@ -227,10 +232,15 @@ class ChatService:
         if not isinstance(run_id, UUID):
             raise ChatServiceValidationError("invalid run_id")
 
+        # Application-owned envelope: bind resume idempotency key so commit
+        # authorization cannot be manufactured by the LLM or document text.
         prepared = await self._prepare_resume(
             run_id=run_id,
             resume_idempotency_key=resume_idempotency_key,
-            resume_value=resume_value,
+            resume_value=enrich_resume_value(
+                resume_value,
+                resume_idempotency_key=resume_idempotency_key,
+            ),
         )
         if prepared.early is not None:
             return prepared.early

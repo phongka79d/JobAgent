@@ -1,4 +1,4 @@
-"""Tests for the production tool registry seam (empty-by-default)."""
+"""Tests for the dependency-injected production tool registry."""
 
 from __future__ import annotations
 
@@ -10,17 +10,29 @@ from app.tools.registry import (
     LATER_PHASE_DOMAIN_TOOL_NAMES,
     ToolRegistry,
     ToolRegistryError,
-    create_empty_production_registry,
+    create_production_registry,
 )
 from langchain_core.tools import StructuredTool
 from tests.fakes.agent_tools import make_echo_label_tool
 
 
-def test_production_registry_is_empty() -> None:
-    registry = create_empty_production_registry()
-    assert len(registry) == 0
-    assert registry.list_tools() == []
-    assert registry.names() == frozenset()
+def test_production_registry_contains_only_current_candidate_tools() -> None:
+    tools = [
+        StructuredTool.from_function(func=lambda: "ok", name=name, description=name)
+        for name in (
+            "get_candidate_context",
+            "propose_profile_from_cv",
+            "propose_profile_update",
+            "commit_profile_draft",
+        )
+    ]
+    registry = create_production_registry(tools)
+    assert registry.names() == {
+        "get_candidate_context",
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    }
 
 
 def test_register_and_list_is_sorted_and_gettable() -> None:
@@ -75,9 +87,7 @@ def test_later_phase_domain_tool_names_are_documented_not_registered() -> None:
         "match_jobs",
     }
     assert LATER_PHASE_DOMAIN_TOOL_NAMES == expected
-    registry = create_empty_production_registry()
-    for name in LATER_PHASE_DOMAIN_TOOL_NAMES:
-        assert name not in registry
+    assert {"save_job", "query_jobs", "match_jobs"} <= LATER_PHASE_DOMAIN_TOOL_NAMES
 
 
 def test_synthetic_tool_not_imported_by_production_app_modules() -> None:
@@ -92,14 +102,10 @@ def test_synthetic_tool_not_imported_by_production_app_modules() -> None:
     assert offenders == []
 
 
-def test_production_app_has_no_domain_tool_function_implementations() -> None:
-    """Registry seam only — no Master §13 production tool bodies in app/."""
-    app_root = Path(__file__).resolve().parents[2] / "app"
-    pattern = re.compile(
-        r"def (get_candidate_context|propose_profile_from_cv|"
-        r"propose_profile_update|commit_profile_draft|save_job|"
-        r"query_jobs|match_jobs)\b"
-    )
+def test_production_tools_do_not_call_internal_http() -> None:
+    """Candidate tools reuse services and never call the app's HTTP surface."""
+    app_root = Path(__file__).resolve().parents[2] / "app" / "tools"
+    pattern = re.compile(r"requests\.|httpx\.|/api/attachments|/api/chat")
     hits: list[str] = []
     for path in app_root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from app.agent.approval import profile_display_summary
 from app.db.enums import AgentRunState, ToolExecutionStatus
 from app.db.models.conversation import ToolExecution
 from app.db.session import DatabaseSessionManager
@@ -272,18 +273,27 @@ async def build_sse_events_for_result(
     outcome = result.outcome
 
     if state == AgentRunState.INTERRUPTED.value or outcome == "interrupted":
-        summary = "Approval required to continue"
-        kind = "approval_required"
-        if isinstance(result.pending_approval, dict):
-            pending_kind = result.pending_approval.get("kind")
-            if isinstance(pending_kind, str) and pending_kind.strip():
-                kind = pending_kind.strip().lower().replace("-", "_")[:64]
+        # Display-safe fields only — never draft_id / resume keys / auth tokens.
+        display = profile_display_summary(
+            result.pending_approval
+            if isinstance(result.pending_approval, dict)
+            else None
+        )
         raw.append(
             ApprovalRequiredEvent(
                 event_id=_eid(),
                 run_id=run_id,
                 timestamp=ts,
-                payload=ApprovalRequiredPayload(summary=summary, approval_kind=kind),
+                payload=ApprovalRequiredPayload(
+                    summary=str(display["summary"]),
+                    approval_kind=display.get("approval_kind"),
+                    current_title=display.get("current_title"),
+                    skill_names=display.get("skill_names"),
+                    experience_count=display.get("experience_count"),
+                    education_count=display.get("education_count"),
+                    has_preference_changes=display.get("has_preference_changes"),
+                    target_roles_preview=display.get("target_roles_preview"),
+                ),
             )
         )
     elif state == AgentRunState.FAILED.value or outcome in {"failed", "disconnected"}:

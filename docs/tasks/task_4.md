@@ -476,7 +476,7 @@ tools, or later matching behavior.
 
 ### Tasks
 
-- [ ] (04A): Register compact-context and draft-proposal tools through one service seam
+- [x] (04A): Register compact-context and draft-proposal tools through one service seam
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.4 Tool behavior and authorization`; `docs/plans/Master_plan.md` > ``### 13.1 `get_candidate_context```; `docs/plans/Master_plan.md` > ``### 13.2 `propose_profile_from_cv```; `docs/plans/Master_plan.md` > ``### 13.3 `propose_profile_update```; `docs/plans/Master_plan.md` > `### 13.8 Tool authorization matrix`
   - Source Requirements:
     - `get_candidate_context` is read-only and returns compact approved profile/preferences without raw CV text.
@@ -501,7 +501,7 @@ tools, or later matching behavior.
   - Blocked Condition: The accepted graph/registry cannot receive service dependencies without a second global registry or HTTP callback; stop as `BLOCKED_BY_ARCHITECTURE_CONFLICT` and preserve the Plan 3 seam.
   - Files: `backend/app/tools/candidate_context.py`, `backend/app/tools/profile_draft.py`, `backend/app/tools/registry.py`, `backend/app/tools/__init__.py`, `backend/app/services/chat_service.py`, `backend/app/main.py`, `backend/tests/tools/test_candidate_context.py`, `backend/tests/tools/test_profile_draft.py`, `backend/tests/tools/test_registry.py`
 
-- [ ] (04B): Guard commit and same-draft corrections with typed same-run approval
+- [x] (04B): Guard commit and same-draft corrections with typed same-run approval
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.4 Tool behavior and authorization`; `docs/plans/Master_plan.md` > `### 10.3 Chat approval`; `docs/plans/Master_plan.md` > ``### 13.4 `commit_profile_draft```; `docs/plans/Plan_3.md` > `## 10. Handoff Notes for Plan 4 (Master Phase 3)`
   - Source Requirements:
     - `commit_profile_draft(draft_id, idempotency_key)` runs only from valid application-owned interrupt approval state and refuses direct, stale, mismatched, or duplicate unauthorized execution.

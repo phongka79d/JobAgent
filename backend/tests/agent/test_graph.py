@@ -21,7 +21,7 @@ from app.agent.graph import (
     initial_graph_state,
 )
 from app.agent.prompt import DOMAIN_REDIRECT_MESSAGE
-from app.tools.registry import create_empty_production_registry
+from app.tools.registry import ToolRegistry
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from tests.fakes.agent_tools import (
@@ -286,7 +286,7 @@ def test_unrelated_message_redirect_zero_tools() -> None:
 
 
 def test_registry_injection_empty_production_default() -> None:
-    registry = create_empty_production_registry()
+    registry = ToolRegistry()
     decision = ScriptedDecision([decision_text("no tools bound")])
     graph = build_agent_graph(registry=registry, decision=decision)
     out = graph.invoke(

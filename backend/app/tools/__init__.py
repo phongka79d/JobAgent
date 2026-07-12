@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from app.tools.registry import (
+    CURRENT_PROFILE_TOOL_NAMES,
     LATER_PHASE_DOMAIN_TOOL_NAMES,
     ToolRegistry,
-    create_empty_production_registry,
+    create_production_registry,
 )
 
 __all__ = [
+    "CURRENT_PROFILE_TOOL_NAMES",
     "LATER_PHASE_DOMAIN_TOOL_NAMES",
     "ToolRegistry",
-    "create_empty_production_registry",
+    "create_production_registry",
 ]

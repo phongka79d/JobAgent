@@ -54,6 +54,7 @@ LEAK_TOKENS = (
 
 APPROVED_PATHS = {
     "/api/health",
+    "/api/attachments/cv",
     "/api/chat/history",
     "/api/chat/turns",
     "/api/chat/runs/{run_id}/resume",
@@ -192,7 +193,9 @@ def test_openapi_route_inventory_exactly_health_and_three_chat_paths(
         "/api/chat/runs/{run_id}/resume"
     ]  # type: ignore[attr-defined]
     # No later-phase or synthetic public application routes.
-    forbidden = ("attachment", "profile", "job", "synthetic", "upload", "match")
+    # `/api/attachments/cv` is the accepted Plan 4 upload boundary; profile GETs
+    # and job/match routes remain later-phase.
+    forbidden = ("profile", "job", "synthetic", "upload", "match")
     assert not any(any(m in p for m in forbidden) for p in paths)
 
 

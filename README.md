@@ -262,7 +262,7 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Plan 4 progress (Batches01-03)
+## Plan 4 progress (Batches01-04)
 
 Batch01 establishes the validated Candidate persistence and context foundation;
 it does not yet ingest or upload CV files:
@@ -313,6 +313,29 @@ python -m pytest -q tests/repositories/test_graph_outbox.py tests/graph/test_can
 python -m pytest -q tests/services/test_profile_service.py tests/integration/test_profile_replacement.py tests/repositories/test_attachments.py tests/repositories/test_graph_outbox.py
 python -m ruff check app/repositories/graph_outbox.py app/graph/candidate_sync.py app/services/profile_service.py app/services/attachment_storage.py tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/services/test_profile_service.py tests/integration/test_profile_replacement.py
 python -m mypy app/repositories/graph_outbox.py app/graph/candidate_sync.py app/services/profile_service.py app/services/attachment_storage.py app/repositories
+```
+
+Batch04 exposes the four production Candidate tools through the existing
+LangGraph registry and approval/resume seam:
+
+- `get_candidate_context`, `propose_profile_from_cv`, and
+  `propose_profile_update` reuse the bounded context and pending-draft services;
+  proposal tools never write approved state.
+- `commit_profile_draft` accepts only application-owned authorization from a
+  matching approve resume. Replayed resume keys are idempotent per run/draft.
+- Request Changes feeds the correction back into the same checkpointed run and
+  pending draft, then emits another bounded `approval_required` payload. The
+  public SSE union remains exactly eight event names and excludes internal
+  draft/run authorization data.
+
+Focused Batch04 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/tools/test_candidate_context.py tests/tools/test_profile_draft.py tests/tools/test_registry.py tests/services/test_context_assembly.py
+python -m pytest -q tests/tools/test_profile_commit.py tests/agent/test_profile_approval.py tests/integration/test_profile_approval.py tests/api/test_chat.py tests/schemas/test_sse.py
+python -m ruff check app/agent app/tools app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py tests/agent/test_profile_approval.py tests/tools tests/integration/test_profile_approval.py
+python -m mypy app/agent app/tools app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py
 ```
 
 ## Plan 3 progress (Batch01)
@@ -394,11 +417,11 @@ tokens only; raw tool arguments/results never enter durable
   ChatShell for ordinary completion, tool activity, approval/resume,
   duplicates, failure, and disconnect
   (`frontend/src/test/chat-transport.integration.test.tsx`).
-- Synthetic `echo_label` / approval helpers exist only under `backend/tests/`;
-  production registry remains empty by default.
-- Public application routes remain exactly:
-  `GET /api/health`, `GET /api/chat/history`, `POST /api/chat/turns`,
-  `POST /api/chat/runs/{run_id}/resume`.
+- At the Phase 2 handoff, synthetic `echo_label` / approval helpers existed only
+  under `backend/tests/` and the production registry was empty. Plan 4 Batch04
+  replaces that empty startup registry with the four Candidate tools above.
+- The Phase 2 public route proof covered health plus the three chat endpoints;
+  Plan 4 Batch02 subsequently added `POST /api/attachments/cv`.
 
 ### Phase 2 quality gates (evidence-backed commands)
 
@@ -433,8 +456,8 @@ docker compose --env-file .env.example -f infrastructure/docker-compose.yml buil
 ```
 
 Production exposure / route inventory scans (expected: no production
-`echo_label` tool; domain names may appear only as reserved later-phase
-constants in `backend/app/tools/registry.py`; routes only health + chat):
+`echo_label` or future Job/matching tool; the four Candidate tools and the
+health, CV attachment, and chat routes are allowed):
 
 ```powershell
 rg -n "synthetic|echo_label|propose_profile_from_cv|commit_profile_draft|save_job|match_jobs" backend/app frontend/src
@@ -450,18 +473,19 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 4 Batch03)
+## Current limitations (after Plan 4 Batch04)
 
 - Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
   for local fake-backed proof. Plan 4 now also has safe CV staging, layout text
   extraction, deterministic PII redaction, pending-draft extraction, atomic
-  approved-state replacement, and Candidate graph synchronization.
-- No profile approval transport/UI, JD ingestion, matching, ranking, or
-  evaluation UI yet.
+  approved-state replacement, Candidate graph synchronization, four production
+  Candidate tools, and backend same-run approval/correction transport.
+- The shared frontend CV upload/profile approval experience is not implemented
+  yet; neither are JD ingestion, matching, ranking, or evaluation UI.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.
-- Production tool registry is empty; the seven Master §13 domain tools are
-  reserved names only — Plan 4 registers real tools through the existing seam.
+- Production registers the four Plan 4 Candidate tools only; Job ingestion,
+  query, and matching tools remain reserved for later phases.
 - Graph rebuild now loads the Candidate/Skill slice; Job, JobFamily, embedding,
   verification, and later data-load stages remain intentionally incomplete.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
@@ -482,14 +506,14 @@ paths:
 | Repositories | Conversation/messages, agent runs, tool executions (`backend/app/repositories/`) |
 | Context assembly | Bounded recent window + attachment IDs only (`backend/app/services/chat_context.py`) |
 | Prompt / domain redirect | System policy + untrusted document delimiters + zero-tool redirect (`backend/app/agent/prompt.py`) |
-| Tool registration | Empty production registry; inject tools at graph build (`backend/app/tools/registry.py`) |
+| Tool registration | Phase 2 established graph-time injection; Plan 4 Batch04 now registers four Candidate tools (`backend/app/tools/registry.py`) |
 | ShopAIKey adapter | Locked model/modes (`backend/app/services/shopaikey_chat.py`); normal tests use fakes |
 | Compose / config | Root `.env` contract, three-service Compose, sanitized `GET /api/health` |
 
-Plan 4 must add CV/profile tools and approval payloads **through these seams**.
-It must **not** create a second graph, second conversation path, alternate SSE
-contract, direct frontend→store/provider access, or HTTP calls from tools back
-into FastAPI.
+Plan 4 Batch04 added CV/profile tools and approval payloads **through these
+seams**. Later work must **not** create a second graph, second conversation
+path, alternate SSE contract, direct frontend→store/provider access, or HTTP
+calls from tools back into FastAPI.
 
 ## Prior phase handoff consumed by Plan 3
 
