@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe JobAgent Neo4j graph rebuild command skeleton.
+"""Safe JobAgent Neo4j graph rebuild command.
 
 Default execution is dry-run (non-destructive): prints the planned stages and
 scoped Cypher without connecting or loading configuration values.
@@ -8,9 +8,10 @@ Destructive clearing requires ``--confirm-destructive``. Only JobAgent-derived
 labels are cleared (``Candidate``, ``Job``, ``Skill``, ``JobFamily``). The
 command never issues a database-wide unlabeled delete.
 
-After clear + schema reapplication (delegated to ``ensure_graph_schema``), the
-approved Candidate singleton is rebuilt from SQLite. Job, JobFamily, embedding,
-verification, and remaining sync stages stay explicitly incomplete.
+After clear + schema reapplication, the approved Candidate singleton and every
+active full|partial Job are rebuilt from SQLite (embeddings recomputed), parity
+of IDs/counts is verified, and Job/outbox sync state is updated only after
+success.
 
 Secrets, credential-bearing URIs, raw payloads, and document content are never
 printed.
@@ -25,7 +26,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Final, TextIO
+from typing import Final, Protocol, TextIO
 
 # Allow ``python infrastructure/scripts/rebuild_graph.py`` from the repo root
 # while reusing backend graph primitives (no duplicated driver/schema lifecycle).
@@ -41,12 +42,25 @@ from app.db.session import (  # noqa: E402
 from app.graph.candidate_sync import rebuild_candidate_projection  # noqa: E402
 from app.graph.client import Neo4jClient  # noqa: E402
 from app.graph.errors import GraphError  # noqa: E402
+from app.graph.job_sync import JobEmbeddingPort  # noqa: E402
+from app.graph.rebuild_jobs import (  # noqa: E402
+    RebuildLoadError,
+    RebuildSnapshot,
+    load_rebuild_snapshot,
+    project_jobs_for_rebuild,
+)
+from app.graph.rebuild_verify import (  # noqa: E402
+    RebuildVerifyError,
+    mark_rebuild_sync_states,
+    verify_rebuild_parity,
+)
 from app.graph.schema import ensure_graph_schema  # noqa: E402
 
 # Exit codes (stable for operators and tests).
 EXIT_OK: Final[int] = 0
 EXIT_FAILURE: Final[int] = 1
-EXIT_INCOMPLETE: Final[int] = 2  # clear+schema ok, deferred stages not implemented
+# Retained for compatibility; full rebuild no longer returns incomplete.
+EXIT_INCOMPLETE: Final[int] = 2
 
 # Approved JobAgent-derived node labels only (master §8.3 / §21.4).
 JOBAGENT_DERIVED_LABELS: Final[tuple[str, ...]] = (
@@ -93,22 +107,37 @@ class StageStatus(StrEnum):
     SKIPPED = "skipped"
 
 
-# Stages that clear + schema may complete; the rest stay deferred.
-IMPLEMENTED_STAGES: Final[tuple[StageName, ...]] = (
+ALL_STAGES: Final[tuple[StageName, ...]] = (
     StageName.CLEAR_DERIVED,
     StageName.RECREATE_SCHEMA,
     StageName.REBUILD_CANDIDATE,
-)
-DEFERRED_STAGES: Final[tuple[StageName, ...]] = (
     StageName.LOAD_SQLITE_RECORDS,
     StageName.REBUILD_ENTITIES,
     StageName.RECOMPUTE_EMBEDDINGS,
     StageName.VERIFY_ENTITY_COUNTS,
     StageName.UPDATE_SYNC_STATES,
 )
-ALL_STAGES: Final[tuple[StageName, ...]] = IMPLEMENTED_STAGES + DEFERRED_STAGES
+# All stages are implemented; kept for test compatibility.
+IMPLEMENTED_STAGES: Final[tuple[StageName, ...]] = ALL_STAGES
+DEFERRED_STAGES: Final[tuple[StageName, ...]] = ()
 
 EnsureSchemaFn = Callable[[Neo4jClient], Awaitable[None]]
+
+
+class RebuildClient(Protocol):
+    """Graph surface required by the rebuild pipeline."""
+
+    async def run_query(
+        self,
+        query: str,
+        parameters: dict[str, object] | None = None,
+    ) -> None: ...
+
+    async def fetch_records(
+        self,
+        query: str,
+        parameters: dict[str, object] | None = None,
+    ) -> list[dict[str, object]]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +180,6 @@ def assert_clear_statements_are_scoped(
         expected = f"MATCH (n:{label}) DETACH DELETE n"
         if statement != expected:
             raise ValueError("clear statement must be exact label-scoped DETACH DELETE")
-        # Extra guard: label token must appear; bare MATCH (n) must not.
         if f"(n:{label})" not in statement:
             raise ValueError("clear statement missing approved label")
         if "MATCH (n) " in statement or "MATCH () " in statement:
@@ -164,17 +192,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rebuild_graph.py",
         description=(
-            "Safe JobAgent Neo4j graph rebuild skeleton. "
+            "Safe JobAgent Neo4j graph rebuild. "
             "Default is dry-run (non-destructive): no connection and no config "
             "values are loaded or printed. Destructive clear of only "
             "Candidate/Job/Skill/JobFamily requires --confirm-destructive. "
-            "Later SQLite load, entity rebuild, embedding recompute, count "
-            "verification, and sync-state update stages are not implemented "
-            "and return non-success after clear+schema."
+            "Rebuilds Candidate and active full|partial Jobs from SQLite, "
+            "recomputes embeddings, verifies ID/count parity, and updates "
+            "sync state only after verified success."
         ),
         epilog=(
             "Safety: never clears an entire Neo4j database. "
-            "Schema recreation reuses backend ensure_graph_schema (04A). "
+            "Schema recreation reuses backend ensure_graph_schema. "
             "Passwords, credential-bearing URIs, raw payloads, and document "
             "content are never printed."
         ),
@@ -225,7 +253,7 @@ def _dry_run_report() -> RebuildReport:
         "clear_scope=Candidate,Job,Skill,JobFamily",
         *(f"clear_cypher={statement}" for statement in CLEAR_STATEMENTS),
         "schema_stage=delegates_to_ensure_graph_schema",
-        "deferred_stages=explicit_not_implemented_on_execute",
+        "job_stages=load_project_verify_then_mark_sync",
     )
     return RebuildReport(
         dry_run=True,
@@ -235,12 +263,39 @@ def _dry_run_report() -> RebuildReport:
     )
 
 
+def _fail_report(
+    stage_results: list[StageResult],
+    *,
+    failed: StageName,
+    detail: str,
+    messages: list[str],
+) -> RebuildReport:
+    """Append FAILED for current stage and SKIPPED for remaining stages."""
+    stage_results.append(
+        StageResult(name=failed, status=StageStatus.FAILED, detail=detail)
+    )
+    started = {s.name for s in stage_results}
+    for name in ALL_STAGES:
+        if name not in started:
+            stage_results.append(
+                StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
+            )
+    messages.append(f"error={detail}")
+    return RebuildReport(
+        dry_run=False,
+        stages=tuple(stage_results),
+        exit_code=EXIT_FAILURE,
+        messages=tuple(messages),
+    )
+
+
 async def run_rebuild(
     *,
     dry_run: bool,
     confirm_destructive: bool,
     client: Neo4jClient | None = None,
     database: DatabaseSessionManager | None = None,
+    embedding_service: JobEmbeddingPort | None = None,
     ensure_schema: EnsureSchemaFn | None = None,
 ) -> RebuildReport:
     """Execute or plan the rebuild pipeline.
@@ -253,11 +308,14 @@ async def run_rebuild(
         Must be True for any destructive clear. Ignored when dry_run is True.
     client:
         Required when not dry_run. Injected in tests (fake driver).
+    database:
+        Required for Candidate/Job rebuild from SQLite.
+    embedding_service:
+        Required to recompute Job vectors during rebuild.
     ensure_schema:
         Optional override for schema recreation (defaults to ensure_graph_schema).
     """
     if dry_run or not confirm_destructive:
-        # Non-destructive path: never connect.
         return _dry_run_report()
 
     if client is None:
@@ -296,45 +354,21 @@ async def run_rebuild(
             )
         )
     except GraphError as exc:
-        stage_results.append(
-            StageResult(
-                name=StageName.CLEAR_DERIVED,
-                status=StageStatus.FAILED,
-                detail=exc.code.value,
-            )
-        )
-        for name in ALL_STAGES[1:]:
-            stage_results.append(
-                StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
-            )
-        messages.append(f"error={exc.code.value}")
-        return RebuildReport(
-            dry_run=False,
-            stages=tuple(stage_results),
-            exit_code=EXIT_FAILURE,
-            messages=tuple(messages),
+        return _fail_report(
+            stage_results,
+            failed=StageName.CLEAR_DERIVED,
+            detail=exc.code.value,
+            messages=messages,
         )
     except Exception:
-        stage_results.append(
-            StageResult(
-                name=StageName.CLEAR_DERIVED,
-                status=StageStatus.FAILED,
-                detail="clear_failed",
-            )
-        )
-        for name in ALL_STAGES[1:]:
-            stage_results.append(
-                StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
-            )
-        messages.append("error=clear_failed")
-        return RebuildReport(
-            dry_run=False,
-            stages=tuple(stage_results),
-            exit_code=EXIT_FAILURE,
-            messages=tuple(messages),
+        return _fail_report(
+            stage_results,
+            failed=StageName.CLEAR_DERIVED,
+            detail="clear_failed",
+            messages=messages,
         )
 
-    # --- Stage: recreate constraints / vector index (04A primitive) ---
+    # --- Stage: recreate constraints / vector index ---
     try:
         await schema_fn(client)
         stage_results.append(
@@ -345,116 +379,206 @@ async def run_rebuild(
             )
         )
     except GraphError as exc:
-        stage_results.append(
-            StageResult(
-                name=StageName.RECREATE_SCHEMA,
-                status=StageStatus.FAILED,
-                detail=exc.code.value,
-            )
-        )
-        for name in (StageName.REBUILD_CANDIDATE, *DEFERRED_STAGES):
-            stage_results.append(
-                StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
-            )
-        messages.append(f"error={exc.code.value}")
-        return RebuildReport(
-            dry_run=False,
-            stages=tuple(stage_results),
-            exit_code=EXIT_FAILURE,
-            messages=tuple(messages),
+        return _fail_report(
+            stage_results,
+            failed=StageName.RECREATE_SCHEMA,
+            detail=exc.code.value,
+            messages=messages,
         )
     except Exception:
-        stage_results.append(
-            StageResult(
-                name=StageName.RECREATE_SCHEMA,
-                status=StageStatus.FAILED,
-                detail="schema_failed",
-            )
-        )
-        for name in (StageName.REBUILD_CANDIDATE, *DEFERRED_STAGES):
-            stage_results.append(
-                StageResult(name=name, status=StageStatus.SKIPPED, detail="prior_failure")
-            )
-        messages.append("error=schema_failed")
-        return RebuildReport(
-            dry_run=False,
-            stages=tuple(stage_results),
-            exit_code=EXIT_FAILURE,
-            messages=tuple(messages),
+        return _fail_report(
+            stage_results,
+            failed=StageName.RECREATE_SCHEMA,
+            detail="schema_failed",
+            messages=messages,
         )
 
-    # --- Stage: rebuild the approved Candidate slice from canonical SQLite ---
+    # --- Remaining stages require SQLite + embedding seam ---
     if database is None:
+        return _fail_report(
+            stage_results,
+            failed=StageName.REBUILD_CANDIDATE,
+            detail="database_required",
+            messages=messages,
+        )
+    if embedding_service is None:
+        return _fail_report(
+            stage_results,
+            failed=StageName.REBUILD_CANDIDATE,
+            detail="embedding_service_required",
+            messages=messages,
+        )
+
+    # --- Stage: rebuild Candidate slice ---
+    try:
+        projected = await rebuild_candidate_projection(database, client)
         stage_results.append(
             StageResult(
                 name=StageName.REBUILD_CANDIDATE,
-                status=StageStatus.NOT_IMPLEMENTED,
-                detail="database_not_provided",
+                status=StageStatus.COMPLETED,
+                detail=f"projected={projected}",
             )
         )
-    else:
-        try:
-            projected = await rebuild_candidate_projection(database, client)
-            stage_results.append(
-                StageResult(
-                    name=StageName.REBUILD_CANDIDATE,
-                    status=StageStatus.COMPLETED,
-                    detail=f"projected={projected}",
-                )
-            )
-        except Exception:
-            stage_results.append(
-                StageResult(
-                    name=StageName.REBUILD_CANDIDATE,
-                    status=StageStatus.FAILED,
-                    detail="candidate_rebuild_failed",
-                )
-            )
-            for name in DEFERRED_STAGES:
-                stage_results.append(
-                    StageResult(
-                        name=name,
-                        status=StageStatus.SKIPPED,
-                        detail="prior_failure",
-                    )
-                )
-            messages.append("error=candidate_rebuild_failed")
-            return RebuildReport(
-                dry_run=False,
-                stages=tuple(stage_results),
-                exit_code=EXIT_FAILURE,
-                messages=tuple(messages),
-            )
+    except Exception:
+        return _fail_report(
+            stage_results,
+            failed=StageName.REBUILD_CANDIDATE,
+            detail="candidate_rebuild_failed",
+            messages=messages,
+        )
 
-    # --- Deferred stages: honest not-implemented (no fake success) ---
-    for name in DEFERRED_STAGES:
+    # --- Stage: load active/scorable Jobs from SQLite ---
+    snapshot: RebuildSnapshot
+    try:
+        snapshot = await load_rebuild_snapshot(database)
         stage_results.append(
             StageResult(
-                name=name,
-                status=StageStatus.NOT_IMPLEMENTED,
-                detail="deferred_to_later_plan",
+                name=StageName.LOAD_SQLITE_RECORDS,
+                status=StageStatus.COMPLETED,
+                detail=f"eligible_jobs={len(snapshot.eligible_job_ids)}",
             )
         )
+    except RebuildLoadError as exc:
+        return _fail_report(
+            stage_results,
+            failed=StageName.LOAD_SQLITE_RECORDS,
+            detail=exc.code,
+            messages=messages,
+        )
+    except Exception:
+        return _fail_report(
+            stage_results,
+            failed=StageName.LOAD_SQLITE_RECORDS,
+            detail="load_sqlite_failed",
+            messages=messages,
+        )
+
+    # --- Stage: rebuild Job/Skill/JobFamily entities (with embeddings) ---
+    try:
+        projected_ids = await project_jobs_for_rebuild(
+            snapshot.jobs,
+            client,
+            embedding_service,
+        )
+        stage_results.append(
+            StageResult(
+                name=StageName.REBUILD_ENTITIES,
+                status=StageStatus.COMPLETED,
+                detail=f"projected_jobs={len(projected_ids)}",
+            )
+        )
+        # Embeddings are recomputed inside project_eligible_job (no second pass).
+        stage_results.append(
+            StageResult(
+                name=StageName.RECOMPUTE_EMBEDDINGS,
+                status=StageStatus.COMPLETED,
+                detail=f"recomputed={len(projected_ids)}",
+            )
+        )
+    except RebuildLoadError as exc:
+        return _fail_report(
+            stage_results,
+            failed=StageName.REBUILD_ENTITIES,
+            detail=exc.code,
+            messages=messages,
+        )
+    except Exception:
+        return _fail_report(
+            stage_results,
+            failed=StageName.REBUILD_ENTITIES,
+            detail="entity_rebuild_failed",
+            messages=messages,
+        )
+
+    # --- Stage: verify ID/count parity ---
+    try:
+        observed = await verify_rebuild_parity(client, snapshot)
+        stage_results.append(
+            StageResult(
+                name=StageName.VERIFY_ENTITY_COUNTS,
+                status=StageStatus.COMPLETED,
+                detail=(
+                    f"jobs={len(observed.job_ids)};"
+                    f"skills={observed.skill_count};"
+                    f"families={observed.family_count}"
+                ),
+            )
+        )
+    except RebuildVerifyError as exc:
+        return _fail_report(
+            stage_results,
+            failed=StageName.VERIFY_ENTITY_COUNTS,
+            detail=exc.code,
+            messages=messages,
+        )
+    except GraphError as exc:
+        return _fail_report(
+            stage_results,
+            failed=StageName.VERIFY_ENTITY_COUNTS,
+            detail=exc.code.value,
+            messages=messages,
+        )
+    except Exception:
+        return _fail_report(
+            stage_results,
+            failed=StageName.VERIFY_ENTITY_COUNTS,
+            detail="verify_failed",
+            messages=messages,
+        )
+
+    # --- Stage: mark sync states only after verified success ---
+    try:
+        marked = await mark_rebuild_sync_states(
+            database,
+            snapshot.eligible_job_ids,
+        )
+        stage_results.append(
+            StageResult(
+                name=StageName.UPDATE_SYNC_STATES,
+                status=StageStatus.COMPLETED,
+                detail=f"marked_synced={marked}",
+            )
+        )
+    except RebuildVerifyError as exc:
+        return _fail_report(
+            stage_results,
+            failed=StageName.UPDATE_SYNC_STATES,
+            detail=exc.code,
+            messages=messages,
+        )
+    except Exception:
+        return _fail_report(
+            stage_results,
+            failed=StageName.UPDATE_SYNC_STATES,
+            detail="sync_state_update_failed",
+            messages=messages,
+        )
+
     messages.append(
-        "rebuild_incomplete=true; deferred stages not implemented; "
-        "Job/JobFamily/embedding and verification stages remain deferred"
+        "rebuild_complete=true; "
+        f"eligible_jobs={len(snapshot.eligible_job_ids)}; "
+        f"candidate_projected={snapshot.expected_candidate_count}"
     )
     return RebuildReport(
         dry_run=False,
         stages=tuple(stage_results),
-        exit_code=EXIT_INCOMPLETE,
+        exit_code=EXIT_OK,
         messages=tuple(messages),
     )
 
 
-def _load_runtime_from_root_settings() -> tuple[Neo4jClient, DatabaseSessionManager]:
+def _load_runtime_from_root_settings() -> (
+    tuple[Neo4jClient, DatabaseSessionManager, JobEmbeddingPort]
+):
     """Construct runtime dependencies without printing configuration."""
     from app.config import load_settings
+    from app.services.embeddings import JobEmbeddingService
 
     settings = load_settings()
     return (
         Neo4jClient.from_settings(settings),
         create_session_manager(settings.sqlite_path),
+        JobEmbeddingService.from_settings(settings),
     )
 
 
@@ -463,9 +587,8 @@ async def _run_destructive_with_lifecycle() -> RebuildReport:
     client: Neo4jClient | None = None
     database: DatabaseSessionManager | None = None
     try:
-        client, database = _load_runtime_from_root_settings()
+        client, database, embedding_service = _load_runtime_from_root_settings()
     except Exception:
-        # Settings / construction failures must not leak secrets.
         return RebuildReport(
             dry_run=False,
             stages=(
@@ -485,15 +608,12 @@ async def _run_destructive_with_lifecycle() -> RebuildReport:
             confirm_destructive=True,
             client=client,
             database=database,
+            embedding_service=embedding_service,
         )
     finally:
-        close_failed = False
         try:
             await client.close()
         except Exception:
-            close_failed = True
-        if close_failed:
-            # Close failures are non-fatal for reporting; never attach details.
             pass
         if database is not None:
             try:
@@ -509,6 +629,7 @@ def main(
     stderr: TextIO | None = None,
     client: Neo4jClient | None = None,
     database: DatabaseSessionManager | None = None,
+    embedding_service: JobEmbeddingPort | None = None,
     ensure_schema: EnsureSchemaFn | None = None,
 ) -> int:
     """CLI entrypoint. Injectable client/streams for tests; no live defaults."""
@@ -527,15 +648,14 @@ def main(
             print(line, file=out)
         return report.exit_code
 
-    # Destructive path.
     if client is not None:
-        # Test injection: never load real settings.
         report = asyncio.run(
             run_rebuild(
                 dry_run=False,
                 confirm_destructive=confirm,
                 client=client,
                 database=database,
+                embedding_service=embedding_service,
                 ensure_schema=ensure_schema,
             )
         )

@@ -535,7 +535,7 @@ trusted relationship discovery.
 
 ### Tasks
 
-- [ ] (05A): Process replay-safe Job/Skill/JobFamily outbox projections
+- [x] (05A): Process replay-safe Job/Skill/JobFamily outbox projections
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.6 Embedding and graph synchronization`; `docs/plans/Master_plan.md` > `## 8. Neo4j Derived Model`; `docs/plans/Master_plan.md` > `### 21.1 Outbox rule` through `### 21.3 Idempotency`; `docs/plans/Plan_4.md` > `### 7.6 Candidate graph synchronization`
   - Source Requirements:
     - Only active full/partial Jobs embed and synchronize; ignored/unscorable records never enter Neo4j.
@@ -561,7 +561,7 @@ trusted relationship discovery.
   - Blocked Condition: Job processing requires raw/vector data in the outbox or a second graph client to meet the source; report `BLOCKED_BY_SOURCE_CONFLICT` rather than bypassing identifier-only reload and the shared client.
   - Files: `backend/app/graph/job_sync.py`, optional `backend/app/graph/outbox_processor.py` only when shared by Candidate and Job, `backend/app/graph/lifecycle.py`, `backend/app/main.py`, `backend/tests/graph/test_job_sync.py`, `backend/tests/integration/test_job_sync.py`, `backend/tests/test_lifecycle.py`
 
-- [ ] (05B): Rebuild and verify the complete Candidate/Job derived graph
+- [x] (05B): Rebuild and verify the complete Candidate/Job derived graph
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.6 Embedding and graph synchronization`; `docs/plans/Plan_5.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 8.3 Constraints and indexes`; `docs/plans/Master_plan.md` > `### 21.4 Rebuild`; `docs/plans/Plan_5.md` > `## 10. Handoff Notes for Plan 6 (Master Phase 5)`
   - Source Requirements:
     - The safe rebuild recreates constraints/vector index, preserves the accepted Candidate slice, reloads active/scorable Jobs/Skills/JobFamilies, recomputes vectors when required, and verifies IDs/counts/statuses.

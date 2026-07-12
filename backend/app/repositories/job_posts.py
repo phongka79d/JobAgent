@@ -499,6 +499,37 @@ class JobPostRepository:
         rows = list(result.scalars().all())
         return [self._to_record(row) for row in rows]
 
+    async def list_graph_eligible_page(
+        self,
+        *,
+        after_id: UUID | None = None,
+        limit: int | None = None,
+    ) -> list[JobPostRecord]:
+        """Bounded page of active full|partial processed Jobs for rebuild.
+
+        Keyset pagination on primary key (``id ASC``). Never returns raw
+        content. Page size is capped at ``MAX_LIST_LIMIT`` (default 50).
+        """
+        capped = _validate_limit(limit if limit is not None else MAX_LIST_LIMIT)
+        stmt = (
+            select(JobPost)
+            .where(
+                JobPost.processing_status == ProcessingStatus.PROCESSED.value,
+                JobPost.record_status == RecordStatus.ACTIVE.value,
+                JobPost.jd_quality.in_(
+                    (JdQuality.FULL.value, JdQuality.PARTIAL.value),
+                ),
+            )
+            .order_by(JobPost.id.asc())
+            .limit(capped)
+        )
+        if after_id is not None:
+            cursor = _validate_uuid(after_id, name="after_id")
+            stmt = stmt.where(JobPost.id > cursor)
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+        return [self._to_record(row) for row in rows]
+
     # -- exact create / received ---------------------------------------------
 
     async def create_received(

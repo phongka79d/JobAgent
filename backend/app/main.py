@@ -24,10 +24,12 @@ from app.db.session import DatabaseSessionManager, create_session_manager
 from app.graph.candidate_sync import process_candidate_sync_outbox
 from app.graph.client import Neo4jClient
 from app.graph.errors import GraphError
+from app.graph.job_sync import process_job_sync_outbox
 from app.graph.schema import ensure_graph_schema
 from app.services.attachment_storage import FilesystemAttachmentStorage
 from app.services.chat_service import ChatService
 from app.services.cv_ingestion import CvIngestionService
+from app.services.embeddings import JobEmbeddingService
 from app.services.jd_ingestion import JDIngestionService
 from app.services.profile_service import ProfileCommitService
 from app.services.shopaikey_chat import ShopAIKeyChatAdapter
@@ -189,8 +191,17 @@ def create_app(
                 schema_ok = False
             app.state.schema_ready = schema_ok
 
+        # Bounded startup retries only — no continuous polling worker.
         try:
             await process_candidate_sync_outbox(db, graph)
+        except Exception:
+            pass
+        try:
+            await process_job_sync_outbox(
+                db,
+                graph,
+                JobEmbeddingService.from_settings(cfg),
+            )
         except Exception:
             pass
 

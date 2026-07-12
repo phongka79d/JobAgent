@@ -207,6 +207,67 @@ class Neo4jClient:
         if other_failed:
             raise_query_failed()
 
+    async def fetch_records(
+        self,
+        query: str,
+        parameters: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run one parameter-bound read query and return bounded row dicts.
+
+        Intended for rebuild parity checks (IDs/counts). Callers must pass
+        static Cypher and bind values through ``parameters``. Failures surface
+        as sanitized ``GraphError`` codes only — never credentials, URIs, or
+        raw driver messages.
+        """
+        params: Mapping[str, Any] = parameters if parameters is not None else {}
+        graph_error: GraphError | None = None
+        timed_out = False
+        other_failed = False
+        rows: list[dict[str, Any]] = []
+        try:
+            driver = await self.get_driver()
+            async with driver.session() as session:
+                result = await session.run(query, params)
+                rows = await self._materialize_records(result)
+        except GraphError as exc:
+            graph_error = exc
+        except TimeoutError:
+            timed_out = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            other_failed = True
+        if graph_error is not None:
+            raise GraphError(graph_error.code) from None
+        if timed_out:
+            raise_timeout()
+        if other_failed:
+            raise_query_failed()
+        return rows
+
+    @staticmethod
+    async def _materialize_records(result: Any) -> list[dict[str, Any]]:
+        """Extract plain dict rows from a driver result without leaking internals."""
+        data_fn = getattr(result, "data", None)
+        if callable(data_fn):
+            raw = data_fn()
+            if asyncio.iscoroutine(raw):
+                raw = await raw
+            if isinstance(raw, list):
+                return [dict(item) for item in raw if isinstance(item, Mapping)]
+            return []
+        rows: list[dict[str, Any]] = []
+        async for record in result:
+            if isinstance(record, Mapping):
+                rows.append(dict(record))
+                continue
+            record_data = getattr(record, "data", None)
+            if callable(record_data):
+                payload = record_data()
+                if isinstance(payload, Mapping):
+                    rows.append(dict(payload))
+        return rows
+
     async def _connectivity_once(self) -> None:
         """Single connectivity attempt including lazy construction."""
         driver = await self.get_driver()

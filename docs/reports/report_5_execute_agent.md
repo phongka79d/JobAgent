@@ -1009,3 +1009,265 @@ complete
 - validations to rerun: required pytest list + ruff + mypy on app/tools and app/main.py + seven-route inventory
 - risk areas: broader integration suites that still construct create_production_registry with only four Candidate stubs will fail until they pass all six production tools; PRODUCTION_FORBIDDEN_RE in profile_workflow still bans `save_job(` call-site text (out of 04B file list)
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 05A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch05 - Rebuildable Job Graph Projection
+
+## Task
+05A - Process replay-safe Job/Skill/JobFamily outbox projections
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch05 - Rebuildable Job Graph Projection
+- Task ID: 05A
+- Task title: Process replay-safe Job/Skill/JobFamily outbox projections
+- Files allowed / repair scope: `backend/app/graph/job_sync.py`, optional `backend/app/graph/outbox_processor.py`, `backend/app/graph/lifecycle.py`, `backend/app/main.py`, `backend/tests/graph/test_job_sync.py`, `backend/tests/integration/test_job_sync.py`, `backend/tests/test_lifecycle.py`
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.6 Embedding and graph synchronization
+- docs/plans/Master_plan.md > ## 8. Neo4j Derived Model
+- docs/plans/Master_plan.md > ### 21.1 Outbox rule through ### 21.3 Idempotency
+- docs/plans/Plan_4.md > ### 7.6 Candidate graph synchronization
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md (### 7.6)
+- docs/plans/Master_plan.md (## 8; ### 21.1-21.3)
+- docs/plans/Plan_4.md (### 7.6 Candidate graph synchronization)
+
+## Dependency and User Action Check
+- Dependencies: (03B) embeddings, (04A) JD ingestion/outbox enqueue, existing graph schema/client/fakes, generic outbox, Candidate projector, lifecycle present
+- User Action: None for fake-backed tests
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_5.md
+- backend/app/graph/candidate_sync.py
+- backend/app/graph/lifecycle.py
+- backend/app/graph/schema.py
+- backend/app/graph/client.py
+- backend/app/repositories/graph_outbox.py
+- backend/app/repositories/job_posts.py
+- backend/app/services/jd_ingestion.py
+- backend/app/services/embeddings.py
+- backend/app/main.py
+- backend/tests/graph/test_candidate_sync.py
+- backend/tests/integration/test_candidate_sync.py
+- backend/tests/test_lifecycle.py
+- backend/tests/graph/fakes.py
+
+## Completed Work
+- Searched Candidate/outbox/lifecycle/rebuild callers and Cypher contracts; kept Job processor separate (no shared outbox_processor) because Job needs eligibility/embedding/graph_sync_status mapping that would not remove real duplicated claim logic without Candidate risk.
+- Implemented `process_job_sync_outbox` in `app/graph/job_sync.py`: identifier-only payload `{"job_id"}`, reload/validate SQLite state, reject ignored/unscorable, generate 1536-vector via injectable embedding port, parameter-bound MERGE Cypher for Job/Skill/JobFamily and REQUIRES/PREFERS/IN_FAMILY; never RELATED_TO; alias union on Skill properties; deterministic JobFamily key via provisional_canonical_key when present; stale owned edges deleted before rewrite.
+- Atomically map outbox success/failure to Job `graph_sync_status` (synced/failed/not_required); requeue failed by operation on each bounded process call; no continuous polling.
+- Extended FastAPI lifespan startup to best-effort `process_job_sync_outbox` after Candidate outbox processing (swallowed failures, no SQLite mutation on graph failure).
+- Added fake-Neo4j/outbox unit and integration tests covering eligibility, parameters, embedding/Neo4j failure, replay, stale-edge removal, alias union, Candidate isolation, and zero RELATED_TO.
+
+## Files Created or Modified
+- backend/app/graph/job_sync.py (created)
+- backend/app/main.py (startup job outbox processing)
+- backend/tests/graph/test_job_sync.py (created)
+- backend/tests/integration/test_job_sync.py (created)
+- backend/app/graph/lifecycle.py (unchanged; listed for validation only)
+- backend/app/repositories/graph_outbox.py (unchanged; listed for validation only)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/graph/test_job_sync.py tests/integration/test_job_sync.py tests/repositories/test_graph_outbox.py tests/graph/test_candidate_sync.py tests/integration/test_candidate_sync.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: 54 passed in ~9.4s
+
+- command/check: `cd backend; python -m ruff check app/graph/job_sync.py app/graph/lifecycle.py app/repositories/graph_outbox.py tests/graph/test_job_sync.py tests/integration/test_job_sync.py tests/test_lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed
+
+- command/check: `cd backend; python -m mypy app/graph/job_sync.py app/graph/lifecycle.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 2 source files
+
+## Acceptance Check
+- condition: Processing reloads by Job ID and never carries raw content/vector/path/secret data in the outbox payload
+- status: satisfied
+- evidence: payload contract `{"job_id": <uuid>}` only; tests assert no raw/vector/secret keys; processor reloads via JobPostRepository.get_by_id
+
+- condition: Active full/partial rows produce one Job ID, canonical Skills, optional JobFamily, correct edge sets, and a 1536-vector; ignored/unscorable remain absent
+- status: satisfied
+- evidence: unit parameter assertions + integration StatefulJobGraph; unscorable path projects zero Neo4j queries and sets not_required
+
+- condition: Replaying/requeueing produces no duplicate node/edge and removes stale owned edges without affecting Candidate or unrelated graph data
+- status: satisfied
+- evidence: replay tests, stale-edge replacement, Candidate isolation integration test
+
+- condition: Embedding/Neo4j failure leaves canonical Job processed, marks retryable sync/outbox failure with sanitized codes, never spins continuously
+- status: satisfied
+- evidence: embedding_timeout and neo4j failure tests; bounded claim/requeue only at startup/explicit process calls
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- No shared outbox_processor: claim/requeue loops are small; Job-specific eligibility/embedding/status mapping would couple Candidate and Job if forced into one module.
+- JobFamily key uses `provisional_canonical_key` on the display string only when nonblank; empty/missing family yields no IN_FAMILY edge.
+- Skill aliases union in Cypher via list comprehension against existing property (no alias nodes, no RELATED_TO).
+- Immediate processing surface is `process_job_sync_outbox` (callers/tests invoke after commit); production lifespan runs a bounded batch at startup only.
+
+## Notes for Review Agent
+- changed files: job_sync.py (new), main.py, test_job_sync.py (new unit + integration)
+- validations to rerun: required pytest list + ruff + mypy on job_sync/lifecycle
+- risk areas: live Neo4j FOREACH/MERGE alias-union Cypher not executed against real server (fake-backed only); 05B rebuild not implemented
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 05B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch05 - Rebuildable Job Graph Projection
+
+## Task
+05B - Rebuild and verify the complete Candidate/Job derived graph
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch05 - Rebuildable Job Graph Projection
+- Task ID: 05B
+- Task title: Rebuild and verify the complete Candidate/Job derived graph
+- Files allowed / repair scope: `backend/app/graph/job_sync.py`, focused rebuild support under `backend/app/graph/`, `backend/app/graph/client.py` (bounded result reads), `infrastructure/scripts/rebuild_graph.py`, `backend/tests/infrastructure/test_rebuild_graph.py`, `backend/tests/integration/test_job_sync.py`; plus minimal `job_posts` page loader and graph fakes for parity
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.6 Embedding and graph synchronization
+- docs/plans/Plan_5.md > ## 9. Verification & Testing Plan
+- docs/plans/Master_plan.md > ### 8.3 Constraints and indexes
+- docs/plans/Master_plan.md > ### 21.4 Rebuild
+- docs/plans/Plan_5.md > ## 10. Handoff Notes for Plan 6 (Master Phase 5)
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md (### 7.6; ## 9; ## 10)
+- docs/plans/Master_plan.md (### 8.3; ### 21.4)
+- docs/tasks/task_5.md (05B block)
+
+## Dependency and User Action Check
+- Dependencies: (05A) job projector, existing dry-run/confirmation rebuild CLI, graph schema, Candidate projector present
+- User Action: None for required fake-backed parity
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_5.md
+- docs/plans/Plan_5.md / Master_plan.md (cited sections)
+- infrastructure/scripts/rebuild_graph.py
+- backend/app/graph/job_sync.py
+- backend/app/graph/candidate_sync.py
+- backend/app/graph/client.py
+- backend/app/graph/schema.py
+- backend/app/repositories/job_posts.py
+- backend/app/repositories/graph_outbox.py
+- backend/tests/infrastructure/test_rebuild_graph.py
+- backend/tests/graph/fakes.py
+- backend/tests/graph/test_job_sync.py
+- backend/tests/integration/test_job_sync.py
+
+## Completed Work
+- Kept `infrastructure/scripts/rebuild_graph.py` as a thin CLI orchestrator; Job load/project/verify/mark logic lives in focused `app/graph/rebuild_jobs.py` and `app/graph/rebuild_verify.py`.
+- Exported shared `is_graph_eligible` / `project_eligible_job` from `job_sync.py` so online outbox processing and rebuild share one MERGE path (no Cypher duplication).
+- Added bounded SQLite keyset page `JobPostRepository.list_graph_eligible_page` for active full|partial processed Jobs.
+- Added `Neo4jClient.fetch_records` for parameterized ID/count parity reads with sanitized failures.
+- Completed all rebuild stages: clear (label-scoped), schema, Candidate, load eligible Jobs, project+recompute embeddings, verify Job IDs/entity/edge counts (union Candidate skills), mark Job/outbox sync only after verified success.
+- Default dry-run remains non-destructive; destructive requires `--confirm-destructive`. EXIT_INCOMPLETE no longer returned on success path.
+- Extended FakeDriver to track MERGE/clear for fake-backed parity without live Neo4j.
+- Tests: dry-run, confirmation, partial failure (embedding/verify mismatch), Candidate+Job parity, ignored/unscorable exclusion, replay, sanitized failures, thin-CLI assertion.
+
+## Files Created or Modified
+- backend/app/graph/rebuild_jobs.py (created)
+- backend/app/graph/rebuild_verify.py (created)
+- backend/app/graph/job_sync.py (shared project_eligible_job / is_graph_eligible)
+- backend/app/graph/client.py (fetch_records)
+- backend/app/graph/__init__.py (exports)
+- backend/app/repositories/job_posts.py (list_graph_eligible_page)
+- infrastructure/scripts/rebuild_graph.py (thin complete pipeline)
+- backend/tests/graph/fakes.py (tracked subgraph + fetch data)
+- backend/tests/infrastructure/test_rebuild_graph.py (parity/failure/replay tests)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/infrastructure/test_rebuild_graph.py tests/graph/test_job_sync.py tests/graph/test_candidate_sync.py tests/integration/test_job_sync.py`
+- required: yes
+- result: passed
+- evidence or reason: 37 passed in ~5.9s
+
+- command/check: `python infrastructure/scripts/rebuild_graph.py --help; python infrastructure/scripts/rebuild_graph.py`
+- required: yes
+- result: passed
+- evidence or reason: help documents safety controls; default dry-run prints planned stages and scoped clear Cypher with exit 0; no connection
+
+- command/check: `cd backend; python -m ruff check app/graph ../infrastructure/scripts/rebuild_graph.py tests/infrastructure/test_rebuild_graph.py tests/graph; python -m mypy app/graph`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 9 source files
+
+- command/check: optional live Neo4j pytest -m neo4j
+- required: no
+- result: not_run
+- evidence or reason: optional; no credentials/user authorization for live destructive Neo4j
+
+## Acceptance Check
+- condition: Default dry-run is non-destructive; destructive mode requires explicit confirmation and clears only JobAgent-derived labels/edges
+- status: satisfied
+- evidence: dry-run tests; CLEAR_STATEMENTS label-scoped only; confirm gate tests
+
+- condition: Successful rebuild recreates four constraints/vector index, accepted Candidate projection, every active full/partial Job projection/vector, matching canonical IDs/counts
+- status: satisfied
+- evidence: test_complete_rebuild_parity_candidate_and_jobs; ensure_graph_schema reuse; verify_rebuild_parity
+
+- condition: Ignored/unscorable Jobs remain absent; mismatches fail non-zero with sanitized evidence; sync states not falsely marked on partial failure
+- status: satisfied
+- evidence: exclusion assertions; embedding failure and parity mismatch tests leave graph_sync_status unsynced
+
+- condition: New rebuild logic lives in focused modules; CLI is not a larger god file; does not duplicate online Job projector
+- status: satisfied
+- evidence: rebuild_jobs/rebuild_verify modules; project_eligible_job shared; test_rebuild_logic_not_god_file_in_cli
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Embeddings recomputed inside entity projection (`project_eligible_job`); RECOMPUTE_EMBEDDINGS stage reports the same recomputed count without a second provider pass.
+- Sync/outbox mark runs only after full parity verification succeeds.
+- Skill count expects union of Candidate active skills and Job required/preferred keys.
+
+## Notes for Review Agent
+- changed files: rebuild_jobs.py, rebuild_verify.py, job_sync.py, client.py, job_posts.py, rebuild_graph.py, fakes.py, test_rebuild_graph.py, graph/__init__.py
+- validations to rerun: required pytest list + CLI dry-run + ruff/mypy on app/graph
+- risk areas: FakeDriver subgraph tracking approximates Neo4j counts; live Neo4j rebuild not executed
+- next task readiness: can_review
