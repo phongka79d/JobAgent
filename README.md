@@ -50,9 +50,10 @@ Persistence ownership:
 | Filesystem (`FILES_DIR`) | Uploaded attachment bytes under service-owned `staged/` and `active/` paths |
 | Neo4j | Derived, fully rebuildable graph data only; never the sole copy of canonical state |
 
-Public application endpoints after Phase 2 (Plan 3):
+Public application endpoints after Plan 4 Batch02:
 
 - `GET /api/health`
+- `POST /api/attachments/cv`
 - `GET /api/chat/history`
 - `POST /api/chat/turns`
 - `POST /api/chat/runs/{run_id}/resume`
@@ -261,7 +262,7 @@ ignored locations such as `backend/evaluation/private/`. Committed manifests and
 aggregate reports contain only generic identifiers, digests, and non-identifying
 metrics — never raw document text, real PDFs, private labels, or secrets.
 
-## Plan 4 progress (Batch01)
+## Plan 4 progress (Batches01-02)
 
 Batch01 establishes the validated Candidate persistence and context foundation;
 it does not yet ingest or upload CV files:
@@ -280,6 +281,17 @@ python -m pytest -q tests/repositories/test_profiles.py tests/repositories/test_
 python -m ruff check app/repositories app/schemas app/services/profile_context.py app/services/skill_normalization.py app/services/chat_context.py tests/repositories tests/schemas tests/services/test_skill_normalization.py tests/services/test_context_assembly.py
 python -m mypy app/repositories app/schemas app/services/profile_context.py app/services/skill_normalization.py app/services/chat_context.py
 ```
+
+Batch02 adds the safe intake-to-pending-draft pipeline:
+
+- `POST /api/attachments/cv` streams one PDF into contained staged storage,
+  validates the configured size/page limits, and returns sanitized attachment
+  metadata with deduplication.
+- PDF text extraction is layout-only and fail-closed; deterministic PII
+  redaction happens before the fake-backed structured extraction boundary.
+- Candidate extraction uses the locked structured adapter with its single
+  schema-repair ceiling, normalizes skills, and writes only a pending profile
+  draft. Approved profile/preferences and attachment state remain unchanged.
 
 ## Plan 3 progress (Batch01)
 
@@ -416,13 +428,13 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 4 Batch01)
+## Current limitations (after Plan 4 Batch02)
 
 - Phase 2 chat transport, Agent runtime, SSE, and base chat shell are complete
-  for local fake-backed proof. Plan 4 now has validated Candidate contracts,
-  persistence, normalization, and compact context only.
-- No CV upload/extraction, profile approval transport/UI, Candidate graph sync,
-  JD ingestion, matching, ranking, or evaluation UI yet.
+  for local fake-backed proof. Plan 4 now also has safe CV staging, layout text
+  extraction, deterministic PII redaction, and pending-draft extraction.
+- No profile approval transport/UI, Candidate graph sync, JD ingestion,
+  matching, ranking, or evaluation UI yet.
 - No public profile/job CRUD, authentication, continuous outbox worker, Qdrant,
   CI, or cloud deployment.
 - Production tool registry is empty; the seven Master §13 domain tools are

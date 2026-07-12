@@ -115,21 +115,19 @@ def test_health_healthy_response_shape(healthy_client: TestClient) -> None:
     _assert_no_leaks(response.text)
 
 
-def test_only_public_app_endpoint_is_health(healthy_client: TestClient) -> None:
+def test_public_app_endpoints_match_current_phase(healthy_client: TestClient) -> None:
     # FastAPI 0.139 nests include_router routes; OpenAPI paths are authoritative.
-    # Phase 2 public surface: health + three chat routes (no upload/profile/jobs CRUD).
+    # Plan 4 Task 02B adds the sole attachment upload to the accepted chat/health surface.
     paths = set(healthy_client.app.openapi()["paths"])  # type: ignore[attr-defined]
     assert paths == {
         "/api/health",
+        "/api/attachments/cv",
         "/api/chat/history",
         "/api/chat/turns",
         "/api/chat/runs/{run_id}/resume",
     }
     assert "get" in healthy_client.app.openapi()["paths"]["/api/health"]  # type: ignore[attr-defined]
-    assert not any(
-        any(marker in path for marker in ("attachments", "profile", "jobs", "upload", "match"))
-        for path in paths
-    )
+    assert not any(any(marker in path for marker in ("profile", "jobs", "match")) for path in paths)
 
 
 def test_sqlite_failure_is_degraded_and_sanitized(tmp_path: Path) -> None:

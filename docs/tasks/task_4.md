@@ -307,7 +307,7 @@ Neo4j, or build frontend UI.
 
 ### Tasks
 
-- [ ] (02A): Implement the fail-closed PDF text and deterministic PII boundary
+- [x] (02A): Implement the fail-closed PDF text and deterministic PII boundary
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.3 Processing pipeline`; `docs/plans/Plan_4.md` > `## 9. Verification & Testing Plan`; `docs/plans/Master_plan.md` > `### 10.2 Processing`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Extract with pypdf `layout` mode, enforce at most ten pages through typed settings, and return exact `NO_EXTRACTABLE_TEXT` for zero usable digital text with no OCR fallback.
@@ -330,7 +330,7 @@ Neo4j, or build frontend UI.
   - Blocked Condition: The accepted pypdf version or layout extraction API differs from the locked Phase 0 evidence; stop as `BLOCKED_BY_DEPENDENCY_CONFLICT` rather than selecting another parser or OCR.
   - Files: `backend/app/services/pdf_text.py`, `backend/app/services/pii_redaction.py`, `backend/app/services/__init__.py`, `backend/tests/services/test_pdf_text.py`, `backend/tests/services/test_pii_redaction.py`, `backend/tests/fixtures/cv_pdfs/*`
 
-- [ ] (02B): Expose one streaming, deduplicating staged-CV upload boundary
+- [x] (02B): Expose one streaming, deduplicating staged-CV upload boundary
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.1 Upload and file lifecycle`; `docs/plans/Plan_4.md` > `### 7.3 Processing pipeline`; `docs/plans/Master_plan.md` > `### 10.1 Upload`; `docs/plans/Master_plan.md` > `## 14. Public FastAPI Boundary`
   - Source Requirements:
     - `POST /api/attachments/cv` accepts one multipart PDF and returns an attachment ID plus sanitized metadata.
@@ -355,7 +355,7 @@ Neo4j, or build frontend UI.
   - Blocked Condition: FastAPI multipart parsing cannot be added as one direct pinned dependency compatible with the accepted stack; report `BLOCKED_BY_DEPENDENCY_CONFLICT` and do not hand-roll multipart parsing.
   - Files: `backend/pyproject.toml`, `backend/app/api/attachments.py`, `backend/app/api/__init__.py`, `backend/app/main.py`, `backend/app/services/cv_ingestion.py`, `backend/app/schemas/attachments.py`, `backend/app/repositories/attachments.py`, `backend/tests/api/test_attachments.py`, `backend/tests/services/test_cv_ingestion.py`, `backend/tests/fixtures/cv_pdfs/*`
 
-- [ ] (02C): Produce a normalized pending profile draft with one repair ceiling
+- [x] (02C): Produce a normalized pending profile draft with one repair ceiling
   - Source of Truth: `docs/plans/Plan_4.md` > `### 7.3 Processing pipeline`; `docs/plans/Plan_4.md` > `### 7.4 Tool behavior and authorization`; `docs/plans/Master_plan.md` > `### 10.2 Processing`; `docs/plans/Master_plan.md` > ``### 13.2 `propose_profile_from_cv```; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Run redacted text through locked `gpt-4o-mini` structured extraction, strict Pydantic validation, and at most one schema repair.

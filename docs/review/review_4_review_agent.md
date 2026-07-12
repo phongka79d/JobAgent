@@ -108,6 +108,10 @@ ACCEPTED
 ## Repair Instructions
 - None.
 
+---
+
+---
+
 ## Re-Review / Repair Verification Log
 
 ### 2026-07-12
@@ -115,6 +119,102 @@ ACCEPTED
 - repairs verified: Arbitrary nonempty evidence no longer authorizes precise skill or total-experience years; explicit date-range/duration evidence remains accepted; unknown years remain representable as `null`.
 - remaining issues: None blocking or major.
 - updated outcome: ACCEPTED (prior outcome: REJECTED).
+
+---
+
+# Task Review Report - 02A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch02 - Safe PDF Intake to Profile Draft
+- Task ID: 02A
+- Task title: Implement the fail-closed PDF text and deterministic PII boundary
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the six reported service/export/test/fixture paths and the execution report were classified as in scope.
+
+## Files Reviewed
+- `backend/app/services/pdf_text.py`: in scope - layout-only pypdf extraction, page ceiling, usable-character gate, and stable errors.
+- `backend/app/services/pii_redaction.py`: in scope - deterministic email/address handling and conservative 10-15 digit contiguous phone recognition are implemented.
+- `backend/app/services/__init__.py`: in scope - exports the internal boundary.
+- `backend/tests/services/test_pdf_text.py`: in scope - extraction/page/no-text/error coverage.
+- `backend/tests/services/test_pii_redaction.py`: in scope - includes formatted and contiguous phone regression cases plus false-positive boundaries.
+- `backend/tests/fixtures/cv_pdfs/__init__.py`: in scope test fixture package marker.
+
+## Validations Reviewed
+- Command/check: required focused pytest, Ruff, and mypy commands
+- Required: yes
+- Reported result: 26 passed; Ruff passed; mypy passed
+- Rerun result: 26 passed in 1.24s; Ruff passed; mypy passed
+- Status: passed
+- Notes: extraction, redaction, formatted/contiguous phone, privacy, and failure gates passed.
+
+- Command/check: targeted `redact_pii` probe for `5551234567`, `0901234567`, `02079460958`, `447911123456`, plus documented short-number false positives
+- Required: yes - verifies the prior rejected acceptance boundary
+- Reported result: passed
+- Rerun result: all phone sentinels removed; years, room numbers, and short level values retained
+- Status: passed
+- Notes: the repair addresses the root cause without broad numeric redaction.
+
+## Acceptance Review
+- Task acceptance: the PDF extraction and deterministic PII boundary now satisfies the task, including the previously missing contiguous local-phone forms.
+- Status: satisfied
+- Evidence: all required reruns and the targeted prior-failure probe passed; provider-blocking and sanitized error coverage remain green.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: Prior 02A rejection, repaired phone recognition, new contiguous-number regression, required validations, targeted prior-failure probes, git evidence, and 02A checkbox integrity.
+- repairs verified: Common contiguous local/international-without-plus phone numbers are removed while years, room numbers, short numeric codes, and technology labels remain intact.
+- remaining issues: None blocking or major.
+- updated outcome: ACCEPTED (prior outcome: REJECTED_WITH_WARNINGS).
 
 ---
 
@@ -130,7 +230,7 @@ docs/reports/report_4_execute_agent.md
 docs/review/review_4_review_agent.md
 
 ## Mode
-same_task_repair
+orchestrated
 
 ## Final Outcome
 ACCEPTED
@@ -247,7 +347,7 @@ docs/reports/report_4_execute_agent.md
 docs/review/review_4_review_agent.md
 
 ## Mode
-orchestrated
+same_task_repair
 
 ## Final Outcome
 ACCEPTED
@@ -326,6 +426,281 @@ ACCEPTED
 - Batch can be marked complete by A2: no
 - A3 can rerun: no
 - Next action: close_task
+
+## Repair Instructions
+- None.
+# Task Review Report - 02B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Mandatory Batch02 - Safe PDF Intake to Profile Draft
+
+## Task
+02B - Expose one streaming, deduplicating staged-CV upload boundary
+
+## Review Outcome
+ACCEPTED
+
+## Evidence Reviewed
+- Read root `README.md`, the complete 02B task entry, the matching A1 execution report block, and cited upload/API source sections in `Plan_4.md` and `Master_plan.md`.
+- Inspected `git status --short`, `git diff --stat`, `git diff`, every A1-reported file, the accepted attachment repository/storage boundaries, and all relevant callers/search results.
+- A1 status is `complete`; the selected report identity and reported changed-file scope match 02B.
+
+## Changed Files Review
+- `backend/pyproject.toml`: in scope; adds the exact `python-multipart==0.0.30` runtime dependency.
+- `backend/app/api/attachments.py`: in scope; exposes the single multipart CV upload route with sanitized errors and response schema.
+- `backend/app/main.py`: in scope; registers only the attachment router.
+- `backend/app/schemas/attachments.py`: in scope; exposes only the six permitted metadata fields.
+- `backend/app/services/cv_ingestion.py`: in scope; reuses chunked storage, canonical paths, hash lookup, repository writes, and cleanup operations.
+- `backend/tests/api/test_attachments.py`: in scope; covers the public success response and one stable MIME error.
+- `backend/tests/api/test_health.py`: in scope; updates the authorized route inventory.
+- `backend/tests/services/test_cv_ingestion.py`: in scope; now covers the complete prior A2 repair matrix.
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q tests/services/test_cv_ingestion.py tests/api/test_attachments.py tests/repositories/test_attachments.py tests/services/test_attachment_storage.py`
+- Required: yes
+- Reported result: 80 passed, 1 skipped
+- Rerun result: 86 passed, 1 skipped in 4.90s
+- Status: passed
+- Notes: existing focused and regression tests pass.
+
+- Command/check: `python -m ruff check app/api/attachments.py app/services/cv_ingestion.py app/repositories/attachments.py tests/api/test_attachments.py tests/services/test_cv_ingestion.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+
+- Command/check: `python -m mypy app/api/attachments.py app/services/cv_ingestion.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success, no issues found in 2 source files
+- Status: passed
+
+- Command/check: `python -m pytest -q tests/api/test_health.py`
+- Required: no
+- Reported result: 11 passed
+- Rerun result: 11 passed in 1.41s
+- Status: passed
+
+- Command/check: independent four-way concurrent identical-upload probe
+- Required: supports the racing-duplicate acceptance condition
+- Reported result: not separately reported as a probe
+- Rerun result: all four calls returned one attachment ID; one staged file and one metadata row remained
+- Status: passed
+
+## Acceptance Review
+- The production boundary is real, scoped, streamed to a configured 10 MiB ceiling, contained, deduplicating, and sanitized; no provider/profile/approval/active-replacement work was introduced.
+- The repaired tests now cover malformed PDF parsing, valid image-only page counting, four-way concurrent identical-upload races, cancellation during streaming, partial-stream failure cleanup, and the sanitized malformed-PDF API response.
+- Status: satisfied; every prior A2 repair instruction is covered by executable regression evidence and fresh required validations.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-12
+- what was re-checked: The five prior missing regression scenarios, sanitized malformed-PDF API behavior, exact required 02B pytest/Ruff/mypy commands, health tests, git evidence, and 02B checkbox integrity.
+- repairs verified: Malformed and failed/cancelled streams leave zero rows and staged/partial files; valid image-only PDFs retain page count; four concurrent identical uploads resolve to one ID, one row, and one contained staged object; malformed API responses expose only the stable code.
+- remaining issues: None blocking, major, or minor.
+- updated outcome: ACCEPTED (prior outcome: REJECTED_WITH_WARNINGS).
+
+---
+
+# Task Review Report - 02C
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch02 - Safe PDF Intake to Profile Draft
+- Task ID: 02C
+- Task title: Produce a normalized pending profile draft with one repair ceiling
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the 02C service, extraction boundary, service export, focused tests, and fake fixture were inspected; concurrent 02A/02B batch files were not reviewed as 02C implementation.
+
+## Files Reviewed
+- `backend/app/services/cv_ingestion.py`: in scope - keeps the authoritative attachment validation, layout extraction, deterministic redaction, one adapter call, and transactional pending-draft insert in one service method.
+- `backend/app/services/profile_extraction.py`: in scope - grounds nested CV facts in redacted evidence, rejects provider contact PII, normalizes skills, and builds the bounded preference-omitting draft.
+- `backend/app/services/__init__.py`: in scope - exports the new internal service boundaries only.
+- `backend/tests/services/test_profile_extraction.py`: in scope - covers success, one schema repair, provider/invalid/evidence failures, timeline evidence, exclusions, active inputs, preference omission, and contact-sentinel privacy checks.
+- `backend/tests/fakes/profile_extraction.py`: in scope - fake strict-schema provider records requests without network access.
+- `backend/app/services/shopaikey_chat.py`: inspected dependency, unchanged - its locked strict structured mode owns the sole schema-repair ceiling.
+
+## Validations Reviewed
+- Command/check: `python -m pytest -q tests/services/test_profile_extraction.py tests/services/test_cv_ingestion.py tests/repositories/test_profile_drafts.py tests/services/test_shopaikey_chat.py`
+- Required: yes
+- Reported result: 55 passed
+- Rerun result: 55 passed in 4.04s
+- Status: passed
+- Notes: focused extraction, privacy, repair, normalization, draft, and adapter tests passed.
+
+- Command/check: `python -m ruff check app/services/cv_ingestion.py app/services/profile_extraction.py app/services/shopaikey_chat.py tests/services/test_profile_extraction.py tests/services/test_cv_ingestion.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: All checks passed
+- Status: passed
+- Notes: focused lint passed.
+
+- Command/check: `python -m mypy app/services/cv_ingestion.py app/services/profile_extraction.py app/services/shopaikey_chat.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: Success: no issues found in 3 source files
+- Status: passed
+- Notes: focused type check passed.
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: only redacted text enters the sole `invoke_structured(CandidateProfile, ...)` call; extraction/redaction failure paths run before that call. The reused adapter enforces strict Pydantic output and exactly one schema repair. The post-provider boundary verifies evidence, rejects contact PII, applies shared skill normalization, omits preferences, and persists only a pending draft after attachment revalidation. No approved-profile, preference, or attachment-state writer is called.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - batch_scope
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+batch_scope_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch02 - Safe PDF Intake to Profile Draft
+- Task ID: batch_scope
+- Task title: Restore A3-identified historical documentation only
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from the repair: `docs/reports/report_4_execute_agent.md` and `docs/review/review_4_review_agent.md` only; the wider dirty tree is the existing Batch02 candidate.
+
+## Files Reviewed
+- `docs/reports/report_4_execute_agent.md`: in scope - the four A3-identified historical 01C byte substitutions are restored and the Batch02 report entries remain.
+- `docs/review/review_4_review_agent.md`: in scope - the A3-identified historical 01B mode is restored to `orchestrated`; no task checkbox was changed.
+- `docs/tasks/task_4.md`: inspected only - 02A, 02B, and 02C remain checked.
+
+## Validations Reviewed
+- Command/check: targeted historical report byte comparison, Batch02 checkbox inspection, and `git diff --check`
+- Required: yes
+- Reported result: passed
+- Rerun result: historical restoration verified through A1 evidence/current diff; 02A/02B/02C checked; no whitespace errors
+- Status: passed
+
+## Acceptance Review
+- Task acceptance: satisfied
+- Status: satisfied
+- Evidence: The repair is limited to A3's two historical documentation findings; it modifies no implementation, configuration, task tracking, or accepted Batch02 behavior.
+
+## Progress Tracking
+- Selected task checkbox before review: n/a
+- Checkbox updated by reviewer: no
+- Checkbox final state: n/a
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: no
+- Batch can be marked complete by A2: no
+- A3 can rerun: yes
+- Next action: rerun_a3
 
 ## Repair Instructions
 - None.

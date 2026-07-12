@@ -9,6 +9,7 @@ dependencies = [
     "pydantic==2.12.5",
     "pypdf==6.12.2",
     "python-dotenv==1.2.2",
+    "python-multipart==0.0.30",
     # Plan 2 foundation runtime (01A).
     "fastapi==0.139.0",
     "pydantic-settings==2.14.2",

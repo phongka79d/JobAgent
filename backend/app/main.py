@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
+from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.health import DEFAULT_PROBE_TIMEOUT_SECONDS
 from app.api.health import router as health_router
@@ -164,6 +165,7 @@ def create_app(
     )
     application.add_middleware(ExactOriginCORSMiddleware)
     application.include_router(health_router)
+    application.include_router(attachments_router)
     application.include_router(chat_router)
     return application
 
