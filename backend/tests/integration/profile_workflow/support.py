@@ -19,6 +19,7 @@ from app.main import create_app
 from app.services.attachment_storage import FilesystemAttachmentStorage
 from app.services.chat_service import ChatService
 from app.services.cv_ingestion import CvIngestionService
+from app.services.jd_ingestion import JDIngestionService
 from app.services.profile_service import ProfileCommitService
 from app.services.shopaikey_chat import ShopAIKeyChatAdapter
 from app.tools.candidate_context import (
@@ -30,7 +31,9 @@ from app.tools.profile_commit import (
     create_profile_commit_tool,
 )
 from app.tools.profile_draft import ProfileDraftToolService, create_profile_draft_tools
+from app.tools.query_jobs import QueryJobsToolService, create_query_jobs_tool
 from app.tools.registry import create_production_registry
+from app.tools.save_job import SaveJobToolService, create_save_job_tool
 from fastapi.testclient import TestClient
 from tests.fakes.agent_tools import ScriptedDecision
 from tests.fakes.profile_extraction import StructuredFactory
@@ -64,10 +67,12 @@ CV_BODY = "\n".join(
     ]
 )
 
+# Synthetic helpers and unimplemented match_jobs must not appear in production.
+# save_job / query_jobs are authorized production tools after Plan 5.
 PRODUCTION_FORBIDDEN_RE = re.compile(
     r"echo_label|make_echo_label_tool|tests\.fakes\.agent_tools|"
     r"\braw_cv\b|"
-    r"save_job\s*\(|query_jobs\s*\(|match_jobs\s*\("
+    r"name\s*=\s*[\"']match_jobs[\"']|def\s+create_match_jobs"
 )
 
 AUTHORIZED_APP_PATHS = frozenset(
@@ -312,7 +317,13 @@ def build_tools(
         ProfileCommitToolService(ProfileCommitService(manager, storage))
     )
     context_tool = create_candidate_context_tool(CandidateContextToolService(manager))
-    tools = [context_tool, *draft_tools, commit_tool]
+    # Job tools are required for the six-tool production registry (Plan 5).
+    # Profile workflow cases do not invoke them; they complete the valid set.
+    save_tool = create_save_job_tool(
+        SaveJobToolService(JDIngestionService(manager, chat_adapter=adapter))
+    )
+    query_tool = create_query_jobs_tool(QueryJobsToolService(manager))
+    tools = [context_tool, *draft_tools, commit_tool, save_tool, query_tool]
     create_production_registry(tools)
     return tools, factory
 

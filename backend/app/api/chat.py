@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Final, cast
+from typing import Any, Final, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -35,6 +35,7 @@ from app.schemas.chat import (
     ResumeRequest,
     TurnRequest,
 )
+from app.schemas.job_tools import try_parse_saved_job_card
 from app.schemas.sse import (
     ApprovalRequiredEvent,
     ApprovalRequiredPayload,
@@ -47,6 +48,7 @@ from app.schemas.sse import (
     RunFailedPayload,
     RunStartedEvent,
     RunStartedPayload,
+    SavedJobSSEPayload,
     SSEEvent,
     SSEEventOrderValidator,
     SSESchemaError,
@@ -77,6 +79,7 @@ _FRIENDLY_LABEL_RE: Final[re.Pattern[str]] = re.compile(
 )
 _ERROR_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 # Public tool outcome is fail-closed to short status tokens only.
+# Generic tools keep status synonyms; Job save outcomes are Plan 5 allowlisted.
 _ALLOWED_PUBLIC_TOOL_OUTCOMES: Final[frozenset[str]] = frozenset(
     {
         "completed",
@@ -84,8 +87,34 @@ _ALLOWED_PUBLIC_TOOL_OUTCOMES: Final[frozenset[str]] = frozenset(
         "ok",
         "success",
         "done",
+        # save_job display tokens (never raw JD / tool body)
+        "job_saved",
+        "exact_duplicate",
+        "ignored_duplicate",
+        "unscorable",
+        "force_new_authorized",
+        "save_failed",
+        "graph_pending",
+        "graph_sync_failed",
     }
 )
+
+# Friendly short outcome labels for ChatToolCalls (display only).
+_PUBLIC_TOOL_OUTCOME_LABELS: Final[dict[str, str]] = {
+    "completed": "completed",
+    "tool_completed": "completed",
+    "ok": "completed",
+    "success": "completed",
+    "done": "completed",
+    "job_saved": "Job saved",
+    "exact_duplicate": "Exact duplicate",
+    "ignored_duplicate": "Duplicate ignored",
+    "unscorable": "Unscorable",
+    "force_new_authorized": "Separate position saved",
+    "save_failed": "Save failed",
+    "graph_pending": "Job saved graph pending",
+    "graph_sync_failed": "Job saved graph failed",
+}
 
 
 def _chat_service(request: Request) -> ChatService:
@@ -142,12 +171,26 @@ def _safe_outcome(summary: str | None) -> str | None:
     cleaned = " ".join(str(summary).split())
     if not cleaned:
         return None
-    token = cleaned.lower()
+    token = cleaned.lower().replace("-", "_").replace(" ", "_")
     if token in _ALLOWED_PUBLIC_TOOL_OUTCOMES:
-        # Normalize synonyms to a single public status token.
-        return "completed"
+        return _PUBLIC_TOOL_OUTCOME_LABELS.get(token, "completed")
     # Unknown free text (including raw tool bodies) is never emitted.
     return "completed"
+
+
+def _saved_job_sse_payload(
+    structured: Mapping[str, Any] | dict[str, Any] | None,
+) -> SavedJobSSEPayload | None:
+    """Build a fail-closed saved-job SSE payload from durable structured data."""
+    card = try_parse_saved_job_card(
+        structured if isinstance(structured, dict) else None
+    )
+    if card is None:
+        return None
+    try:
+        return SavedJobSSEPayload.model_validate(card.model_dump(mode="json"))
+    except Exception:
+        return None
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -319,12 +362,14 @@ async def build_sse_events_for_result(
                     payload=TextDeltaPayload(delta=chunk),
                 )
             )
+        # Optional bounded saved-job card; malformed/unsafe payloads omit the field.
+        saved_job = _saved_job_sse_payload(result.structured_payload)
         raw.append(
             RunCompletedEvent(
                 event_id=_eid(),
                 run_id=run_id,
                 timestamp=ts,
-                payload=RunCompletedPayload(),
+                payload=RunCompletedPayload(saved_job=saved_job),
             )
         )
     else:

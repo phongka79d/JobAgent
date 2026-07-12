@@ -60,11 +60,11 @@ SENTINEL_URI = "bolt://full-transport-test.invalid:7687"
 # Unique raw tool-argument value that must never reach public/durable surfaces.
 RAW_ARG_SENTINEL = "RAW_ARG_SENTINEL_7f3a9c2e_UNIQUE_PING_xQ9m"
 
-# Production modules must not import synthetic helpers or later Job tools.
-# Plan 4 Candidate tools (including commit_profile_draft) are authorized.
+# Production modules must not import synthetic helpers or implement match_jobs.
+# Plan 5 production tools include four Candidate tools plus save_job/query_jobs.
 _PRODUCTION_FORBIDDEN_RE = re.compile(
     r"echo_label|make_echo_label_tool|tests\.fakes\.agent_tools|"
-    r"save_job\s*\(|query_jobs\s*\(|match_jobs\s*\("
+    r"name\s*=\s*[\"']match_jobs[\"']|def\s+create_match_jobs"
 )
 
 
@@ -803,10 +803,11 @@ async def test_full_path_disconnect_reconnect_no_replay(tmp_path: Path) -> None:
 
 
 def test_production_registry_seam_and_no_forbidden_tool_exposure() -> None:
-    # Empty default registry remains a valid injection base; Plan 4 production
-    # startup registers exactly the four Candidate tools via create_production_registry.
+    # Empty default registry remains a valid injection base; Plan 5 production
+    # startup registers exactly six tools via create_production_registry.
     from app.tools.registry import (
         CURRENT_PROFILE_TOOL_NAMES,
+        PRODUCTION_TOOL_NAMES,
         create_production_registry,
     )
     from langchain_core.tools import StructuredTool
@@ -822,16 +823,20 @@ def test_production_registry_seam_and_no_forbidden_tool_exposure() -> None:
             StructuredTool.from_function(
                 func=lambda: "ok", name=name, description=name
             )
-            for name in sorted(CURRENT_PROFILE_TOOL_NAMES)
+            for name in sorted(PRODUCTION_TOOL_NAMES)
         ]
     )
-    assert production.names() == CURRENT_PROFILE_TOOL_NAMES
+    assert production.names() == PRODUCTION_TOOL_NAMES
+    assert CURRENT_PROFILE_TOOL_NAMES < PRODUCTION_TOOL_NAMES
     assert production.names() == {
         "get_candidate_context",
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     }
+    assert "match_jobs" not in production
 
     # Synthetic helpers and later Job/matching tools must not appear in app code.
     hits: list[str] = []

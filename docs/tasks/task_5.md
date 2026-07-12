@@ -611,7 +611,7 @@ future hardening.
 
 ### Tasks
 
-- [ ] (06A): Render sanitized JD activity and one saved-Job chat card
+- [x] (06A): Render sanitized JD activity and one saved-Job chat card
   - Source of Truth: `docs/plans/Plan_5.md` > `## 4. Scope`; `docs/plans/Plan_5.md` > `### 7.7 Tool outputs`; `docs/plans/Master_plan.md` > `### 14.2 SSE contract`; `docs/plans/Master_plan.md` > `### 15.3 Chat components`; `docs/plans/Master_plan.md` > `### 15.4 Tool activity display`
   - Source Requirements:
     - Show sanitized Job tool labels/status/duration/outcome and a structured saved-Job card.
@@ -639,7 +639,7 @@ future hardening.
   - Blocked Condition: The pinned Astryx package lacks a documented component needed for the minimal card; report `BLOCKED_BY_ENVIRONMENT` with CLI output and use only another documented pinned Astryx component after review, never guessed props or raw layout.
   - Files: `backend/app/schemas/job_tools.py`, `backend/app/schemas/sse.py`, `backend/app/services/chat_service.py`, `backend/app/api/chat.py`, `backend/tests/integration/test_job_chat.py`, `frontend/src/features/jobs/contracts.ts`, `frontend/src/features/jobs/components/SavedJobCard.tsx`, `frontend/src/features/chat/contracts.ts`, `frontend/src/features/chat/reducer.ts`, `frontend/src/features/chat/components/ChatMessages.tsx`, focused tests
 
-- [ ] (06B): Prove Phase 4 and publish the stable Plan 6 handoff
+- [x] (06B): Prove Phase 4 and publish the stable Plan 6 handoff
   - Source of Truth: `docs/plans/Plan_5.md` > `## 9. Verification & Testing Plan`; `docs/plans/Plan_5.md` > `## 10. Handoff Notes for Plan 6 (Master Phase 5)`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy` through `## 24. Local Testing Strategy`; `docs/plans/Master_plan.md` > `### Phase 4 — JD ingestion, extraction, deduplication, and graph sync`
   - Source Requirements:
     - Prove raw failure retention, exact/no-reprocess and normalized/ignored duplicate rules, explicit override authorization, shared normalization, private/local URL blocking, and graph replay/rebuild parity.

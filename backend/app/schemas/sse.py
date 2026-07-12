@@ -593,10 +593,109 @@ class TextDeltaPayload(_PayloadBase):
         return value
 
 
-class RunCompletedPayload(_PayloadBase):
-    """Terminal success marker (no additional display secrets)."""
+class SavedJobSSEPayload(_PayloadBase):
+    """Bounded saved-Job card on ``run_completed`` (Plan 5).
 
-    pass
+    Same display fields as durable ``structured_payload`` kind ``saved_job``.
+    Never carries raw JD, tool arguments, secrets, stacks, or unsafe URLs.
+    """
+
+    kind: Literal["saved_job"] = "saved_job"
+    job_id: str
+    title: str | None = Field(default=None, max_length=_MAX_LABEL_LEN)
+    company: str | None = Field(default=None, max_length=_MAX_LABEL_LEN)
+    location: str | None = Field(default=None, max_length=_MAX_LABEL_LEN)
+    work_mode: str | None = Field(default=None, max_length=_MAX_ERROR_CODE_LEN)
+    employment_type: str | None = Field(default=None, max_length=_MAX_ERROR_CODE_LEN)
+    jd_quality: str | None = Field(default=None, max_length=_MAX_ERROR_CODE_LEN)
+    quality_reasons_preview: list[str] | None = Field(default=None, max_length=5)
+    processing_result: str = Field(max_length=_MAX_ERROR_CODE_LEN)
+    duplicate_outcome: str = Field(max_length=_MAX_ERROR_CODE_LEN)
+    graph_sync_status: str = Field(max_length=_MAX_ERROR_CODE_LEN)
+    source_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("job_id", mode="before")
+    @classmethod
+    def _check_job_id(cls, value: str | UUID) -> str:
+        return _validate_run_id(value)
+
+    @field_validator(
+        "title",
+        "company",
+        "location",
+        "work_mode",
+        "employment_type",
+        "jd_quality",
+    )
+    @classmethod
+    def _optional_display(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = _collapse_ws(value)
+        if not cleaned:
+            return None
+        return _reject_unsafe_text(cleaned, field="saved_job_display")
+
+    @field_validator("quality_reasons_preview")
+    @classmethod
+    def _check_reasons(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            piece = _collapse_ws(item)
+            if not piece:
+                continue
+            if len(piece) > _MAX_OUTCOME_LEN:
+                piece = piece[:_MAX_OUTCOME_LEN]
+            cleaned.append(_reject_unsafe_text(piece, field="quality_reason"))
+            if len(cleaned) >= 5:
+                break
+        return cleaned or None
+
+    @field_validator("processing_result", "duplicate_outcome", "graph_sync_status")
+    @classmethod
+    def _check_status_token(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("invalid status token")
+        cleaned = _collapse_ws(value).lower().replace("-", "_").replace(" ", "_")
+        if not cleaned or len(cleaned) > _MAX_ERROR_CODE_LEN:
+            raise ValueError("invalid status token")
+        return _reject_unsafe_text(cleaned, field="status_token")
+
+    @field_validator("source_url")
+    @classmethod
+    def _check_source_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("invalid source_url")
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 2048:
+            raise ValueError("source_url too large")
+        # Structural public URL only; reject credentials / non-http / paths.
+        lower = cleaned.lower()
+        if not (lower.startswith("http://") or lower.startswith("https://")):
+            raise ValueError("source_url must be public http(s)")
+        if "@" in cleaned.split("://", 1)[-1].split("/", 1)[0]:
+            raise ValueError("source_url credentials not permitted")
+        if _looks_like_secret_or_header(cleaned) or _looks_like_stack_trace(cleaned):
+            raise ValueError("source_url: prohibited content category")
+        return cleaned
+
+
+class RunCompletedPayload(_PayloadBase):
+    """Terminal success marker; optional bounded saved-Job card (Plan 5).
+
+    Empty payload remains valid. Malformed ``saved_job`` must fail closed at
+    parse time so producers omit the field rather than emitting secrets.
+    """
+
+    saved_job: SavedJobSSEPayload | None = None
 
 
 class RunFailedPayload(_PayloadBase):
@@ -758,14 +857,14 @@ def serialize_sse_event(event: SSEEvent | dict[str, Any]) -> dict[str, Any]:
         ),
     ):
         raise SSESchemaError("invalid event")
-    dumped: dict[str, Any] = model.model_dump(mode="json")
+    dumped: dict[str, Any] = model.model_dump(mode="json", exclude_none=True)
     # Canonical field order for wire stability.
     ordered: dict[str, Any] = {
         "event": dumped["event"],
         "event_id": dumped["event_id"],
         "run_id": dumped["run_id"],
         "timestamp": dumped["timestamp"],
-        "payload": dumped["payload"],
+        "payload": dumped.get("payload") or {},
     }
     _assert_no_prohibited_keys(ordered)
     return ordered
@@ -776,7 +875,7 @@ def serialize_sse_event_json(event: SSEEvent | dict[str, Any]) -> str:
     model = parse_sse_event(event) if isinstance(event, dict) else event
     ordered = serialize_sse_event(model)
     # Re-validate through model for stable separators via pydantic JSON.
-    return model.__class__.model_validate(ordered).model_dump_json()
+    return model.__class__.model_validate(ordered).model_dump_json(exclude_none=True)
 
 
 # ---------------------------------------------------------------------------

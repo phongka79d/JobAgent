@@ -11,6 +11,8 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
 
+import { SavedJobCard } from "../../jobs/components/SavedJobCard";
+import { parseSavedJobCardPayload } from "../../jobs/contracts";
 import type { HistoryMessage } from "../contracts";
 import type { ApprovalState, ChatPhase, ChatState, FailureState } from "../reducer";
 import { ChatApproval } from "./ChatApproval";
@@ -137,15 +139,29 @@ export function ChatMessages({
             </ChatSystemMessage>
           );
         }
+        const savedJob =
+          sender === "assistant"
+            ? parseSavedJobCardPayload(message.structured_payload ?? null)
+            : null;
         return (
           <ChatMessage key={messageKey(message, index)} sender={sender}>
-            <ChatMessageBubble
-              variant={sender === "assistant" ? "ghost" : "filled"}
-            >
-              <Text type="body" as="p">
-                {message.content}
-              </Text>
-            </ChatMessageBubble>
+            <VStack gap={2}>
+              {message.content.trim().length > 0 ? (
+                <ChatMessageBubble
+                  variant={sender === "assistant" ? "ghost" : "filled"}
+                >
+                  <Text type="body" as="p">
+                    {message.content}
+                  </Text>
+                </ChatMessageBubble>
+              ) : null}
+              {savedJob ? (
+                <SavedJobCard
+                  job={savedJob}
+                  data-testid={`saved-job-card-${String(index)}`}
+                />
+              ) : null}
+            </VStack>
           </ChatMessage>
         );
       })}

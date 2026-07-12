@@ -87,8 +87,13 @@ export interface TextDeltaPayload {
   readonly delta: string;
 }
 
+/**
+ * Terminal success payload. Empty object remains valid.
+ * Optional saved_job is the Plan 5 bounded Job card (same shape as history
+ * structured_payload kind saved_job). Malformed cards are ignored at parse.
+ */
 export interface RunCompletedPayload {
-  readonly [key: string]: never;
+  readonly saved_job?: Record<string, unknown> | null;
 }
 
 export interface RunFailedPayload {
@@ -298,8 +303,19 @@ export function parseChatSSEEvent(raw: unknown): ChatSSEEvent {
   switch (eventName as SSEEventType) {
     case "run_started":
       return { ...base, event: "run_started", payload: {} };
-    case "run_completed":
-      return { ...base, event: "run_completed", payload: {} };
+    case "run_completed": {
+      // Fail closed: only accept a plain saved_job object; ignore garbage.
+      let saved_job: Record<string, unknown> | null = null;
+      const rawSaved = payload.saved_job;
+      if (isPlainObject(rawSaved) && rawSaved.kind === "saved_job") {
+        saved_job = rawSaved;
+      }
+      return {
+        ...base,
+        event: "run_completed",
+        payload: saved_job ? { saved_job } : {},
+      };
+    }
     case "assistant_status": {
       const status = payload.status;
       if (typeof status !== "string" || !ASSISTANT_STATUSES.has(status as AssistantDisplayStatus)) {

@@ -119,6 +119,66 @@ describe("ChatMessages", () => {
     expect(document.body.textContent).not.toMatch(/draft_id|\/var\/|raw_cv/i);
   });
 
+  it("renders saved-job card from history structured_payload", () => {
+    renderMessages({
+      messages: [
+        {
+          role: "user",
+          content: "Save this JD",
+          created_at: "2026-01-01T00:00:00.000Z",
+          structured_payload: null,
+        },
+        {
+          role: "assistant",
+          content: "Saved the job.",
+          created_at: "2026-01-01T00:00:01.000Z",
+          structured_payload: {
+            kind: "saved_job",
+            job_id: "33333333-3333-4333-8333-333333333333",
+            title: "Platform Engineer",
+            company: "Orbit",
+            location: "Berlin",
+            work_mode: "hybrid",
+            employment_type: "full_time",
+            jd_quality: "full",
+            quality_reasons_preview: [],
+            processing_result: "processed",
+            duplicate_outcome: "none",
+            graph_sync_status: "pending",
+            source_url: "https://example.com/orbit",
+          },
+        },
+      ],
+      phase: "idle",
+    });
+
+    expect(screen.getByTestId("saved-job-card-1")).toBeInTheDocument();
+    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
+    expect(screen.getByText("Orbit")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(
+      /raw_content|raw_jd|api_key|traceback|stack_trace/i,
+    );
+  });
+
+  it("renders save-job tool activity with friendly label and outcome only", () => {
+    renderMessages({
+      phase: "active",
+      tools: [
+        {
+          toolCallId: "internal-save-id",
+          label: "Save job",
+          status: "complete",
+          durationMs: 120,
+          outcome: "Exact duplicate",
+        },
+      ],
+    });
+
+    expect(screen.getByText(/Save job/i)).toBeInTheDocument();
+    expect(screen.getByText(/Exact duplicate/i)).toBeInTheDocument();
+    expect(screen.queryByText("internal-save-id")).not.toBeInTheDocument();
+  });
+
   it("renders failure and disconnect system states", () => {
     const { rerender } = render(
       <ChatMessages

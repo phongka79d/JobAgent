@@ -443,6 +443,165 @@ describe("chatReducer", () => {
     expect(after.phase).toBe("completed");
   });
 
+  it("attaches validated saved_job card on run_completed and ignores malformed", () => {
+    const jobId = "11111111-1111-4111-8111-111111111111";
+    let state = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    state = reduceAll(state, [
+      evt({
+        event: "run_started",
+        event_id: "s",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {},
+      }),
+      evt({
+        event: "tool_started",
+        event_id: "t0",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          tool_call_id: "t1",
+          label: "Save job",
+          status: "running",
+        },
+      }),
+      evt({
+        event: "tool_completed",
+        event_id: "t1",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          tool_call_id: "t1",
+          label: "Save job",
+          status: "complete",
+          duration_ms: 40,
+          outcome: "Job saved",
+        },
+      }),
+      evt({
+        event: "text_delta",
+        event_id: "d1",
+        run_id: RUN,
+        timestamp: TS,
+        payload: { delta: "Saved." },
+      }),
+      evt({
+        event: "run_completed",
+        event_id: "c",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          saved_job: {
+            kind: "saved_job",
+            job_id: jobId,
+            title: "Engineer",
+            company: "Acme",
+            location: "Remote",
+            work_mode: "remote",
+            employment_type: "full_time",
+            jd_quality: "full",
+            quality_reasons_preview: [],
+            processing_result: "processed",
+            duplicate_outcome: "none",
+            graph_sync_status: "pending",
+            source_url: "https://example.com/j",
+          },
+        },
+      }),
+    ]);
+    expect(state.phase).toBe("completed");
+    expect(state.tools[0]?.outcome).toBe("Job saved");
+    const last = state.messages.at(-1);
+    expect(last?.content).toBe("Saved.");
+    expect(last?.structured_payload).toMatchObject({
+      kind: "saved_job",
+      job_id: jobId,
+      title: "Engineer",
+      company: "Acme",
+    });
+    expect(JSON.stringify(last?.structured_payload)).not.toMatch(
+      /raw_content|api_key|traceback/i,
+    );
+
+    // Malformed card fails closed to ordinary text message.
+    let bad = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
+    bad = reduceAll(bad, [
+      evt({
+        event: "run_started",
+        event_id: "s2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {},
+      }),
+      evt({
+        event: "text_delta",
+        event_id: "d2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: { delta: "Plain reply" },
+      }),
+      evt({
+        event: "run_completed",
+        event_id: "c2",
+        run_id: RUN,
+        timestamp: TS,
+        payload: {
+          saved_job: {
+            kind: "saved_job",
+            job_id: "not-uuid",
+            processing_result: "processed",
+            duplicate_outcome: "none",
+            graph_sync_status: "pending",
+            raw_content: "RAW_JD",
+          },
+        },
+      }),
+    ]);
+    expect(bad.messages.at(-1)?.content).toBe("Plain reply");
+    expect(bad.messages.at(-1)?.structured_payload).toBeNull();
+  });
+
+  it("hydrates saved_job card from durable history", () => {
+    const jobId = "22222222-2222-4222-8222-222222222222";
+    const state = chatReducer(createInitialChatState(), {
+      type: "HYDRATE_HISTORY",
+      messages: [
+        {
+          role: "user",
+          content: "save this job",
+          created_at: TS,
+          structured_payload: null,
+        },
+        {
+          role: "assistant",
+          content: "Saved.",
+          created_at: TS,
+          structured_payload: {
+            kind: "saved_job",
+            job_id: jobId,
+            title: "Hydrated Role",
+            company: "Hydra Inc",
+            location: null,
+            work_mode: null,
+            employment_type: null,
+            jd_quality: "partial",
+            quality_reasons_preview: ["missing salary"],
+            processing_result: "processed",
+            duplicate_outcome: "none",
+            graph_sync_status: "synced",
+            source_url: "https://example.com/hydrated",
+          },
+        },
+      ],
+    });
+    expect(state.phase).toBe("idle");
+    expect(state.messages[1]?.structured_payload).toMatchObject({
+      kind: "saved_job",
+      job_id: jobId,
+      title: "Hydrated Role",
+    });
+  });
+
   it("active phase disables send", () => {
     let state = chatReducer(createInitialChatState(), { type: "STREAM_OPEN" });
     expect(state.phase).toBe("active");

@@ -142,6 +142,73 @@ def test_supported_event_types_are_exactly_eight() -> None:
     assert {m.value for m in SSEEventType} == expected
 
 
+def test_run_completed_saved_job_payload_is_display_safe() -> None:
+    import json
+    from uuid import uuid4 as _uuid4
+
+    job_id = str(_uuid4())
+    event = parse_sse_event(
+        {
+            "event": "run_completed",
+            "event_id": f"evt-{uuid4().hex[:12]}",
+            "run_id": RUN_ID,
+            "timestamp": TS.isoformat().replace("+00:00", "Z"),
+            "payload": {
+                "saved_job": {
+                    "kind": "saved_job",
+                    "job_id": job_id,
+                    "title": "Engineer",
+                    "company": "Acme",
+                    "location": "Remote",
+                    "work_mode": "remote",
+                    "employment_type": "full_time",
+                    "jd_quality": "full",
+                    "quality_reasons_preview": ["optional note"],
+                    "processing_result": "processed",
+                    "duplicate_outcome": "none",
+                    "graph_sync_status": "pending",
+                    "source_url": "https://example.com/jobs/1",
+                }
+            },
+        }
+    )
+    serialized = serialize_sse_event(event)
+    assert serialized["event"] == "run_completed"
+    assert serialized["payload"]["saved_job"]["job_id"] == job_id
+    assert serialized["payload"]["saved_job"]["title"] == "Engineer"
+    blob = json.dumps(serialized)
+    assert "raw_content" not in blob
+    assert "cv_text" not in blob
+    assert "jd_text" not in blob
+    assert "stack_trace" not in blob
+    assert "api_key" not in blob
+
+
+def test_run_completed_rejects_saved_job_with_unsafe_url() -> None:
+    from uuid import uuid4 as _uuid4
+
+    job_id = str(_uuid4())
+    with pytest.raises(SSESchemaError):
+        parse_sse_event(
+            {
+                "event": "run_completed",
+                "event_id": f"evt-{uuid4().hex[:12]}",
+                "run_id": RUN_ID,
+                "timestamp": TS.isoformat().replace("+00:00", "Z"),
+                "payload": {
+                    "saved_job": {
+                        "kind": "saved_job",
+                        "job_id": job_id,
+                        "processing_result": "processed",
+                        "duplicate_outcome": "none",
+                        "graph_sync_status": "pending",
+                        "source_url": "http://user:pass@example.com/j",
+                    }
+                },
+            }
+        )
+
+
 def test_profile_approval_payload_extension_is_display_safe() -> None:
     import json
 
@@ -261,12 +328,14 @@ def test_explicit_empty_payload_accepted_only_for_empty_payload_models() -> None
     started = parse_sse_event(_base(event="run_started", payload={}))
     assert started.event == SSEEventType.RUN_STARTED
     assert started.payload is not None
-    assert started.payload.model_dump() == {}
+    assert started.payload.model_dump(exclude_none=True) == {}
 
     completed = parse_sse_event(_base(event="run_completed", payload={}))
     assert completed.event == SSEEventType.RUN_COMPLETED
     assert completed.payload is not None
-    assert completed.payload.model_dump() == {}
+    # Optional saved_job may exist as None on the model; wire omits nulls.
+    assert completed.payload.model_dump(exclude_none=True) == {}
+    assert getattr(completed.payload, "saved_job", None) is None
 
     # Non-empty payload models reject bare {}.
     for event_name in (

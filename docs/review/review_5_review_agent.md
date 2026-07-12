@@ -1243,3 +1243,293 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 06A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch06 - Chat Presentation and Phase 4 Exit
+- Task ID: 06A
+- Task title: Render sanitized JD activity and one saved-Job chat card
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git:
+  - `backend/app/schemas/job_tools.py` (modified: SavedJobCardPayload, builders/parsers, public outcome tokens)
+  - `backend/app/schemas/sse.py` (modified: SavedJobSSEPayload; RunCompletedPayload.saved_job; exclude_none serialize)
+  - `backend/app/services/chat_service.py` (modified: extract save_job card; durable structured_payload; ChatTurnResult surface)
+  - `backend/app/api/chat.py` (modified: allowlisted Job tool outcomes + friendly labels; attach saved_job on run_completed)
+  - `backend/tests/schemas/test_sse.py` (modified: saved_job / eight-event coverage)
+  - `backend/tests/integration/test_job_chat.py` (untracked: live/history/malformed/leak/outcome matrix)
+  - `frontend/src/features/jobs/` (untracked: contracts, SavedJobCard, focused tests)
+  - `frontend/src/features/chat/contracts.ts`, `reducer.ts`, `ChatMessages.tsx` + tests (thin integration)
+  - `frontend/src/test/job-workflow.integration.test.tsx` (untracked: live + hydrate flow)
+  - `docs/reports/report_5_execute_agent.md` (A1 evidence only)
+
+## Files Reviewed
+- `backend/app/schemas/job_tools.py`: in scope - shared card shape, safe public URL, parse/build, allowlisted outcomes
+- `backend/app/schemas/sse.py`: in scope - optional nested saved_job; eight SSE names unchanged
+- `backend/app/services/chat_service.py`: in scope - fail-closed card extract/persist; no tool body in durable surfaces
+- `backend/app/api/chat.py`: in scope - friendly Job labels; SSE attach; no new routes
+- `backend/tests/integration/test_job_chat.py`: in scope - processed/duplicate/unscorable/failed/graph, history, leaks
+- `frontend/src/features/jobs/contracts.ts` + `SavedJobCard.tsx`: in scope - fail-closed parser; Card/MetadataList/Badge/HStack/VStack/Text only
+- `frontend/src/features/chat/*` + `job-workflow.integration.test.tsx`: in scope - thin reducer/message/history integration
+
+## Source Requirements Checked
+- Plan_5 §4 Scope / §7.7 tool outputs: bounded display fields only; no raw JD/tool body
+- Master §14.2 SSE: exactly eight event names; optional payload on existing run_completed
+- Master §15.3 / §15.4: Astryx Job card + sanitized tool activity (label/status/duration/outcome)
+- frontend/AGENTS.md: documented components, no raw layout divs, AppShell untouched
+
+## Implementation Reality
+- Real shared `SavedJobCardPayload` on both live `run_completed` and durable assistant `structured_payload`.
+- Fail-closed parse on backend and frontend; unsafe/malformed cards drop to ordinary text/status.
+- Tool activity maps allowlisted save_job tokens to short friendly labels (never tool body/raw JD).
+- SavedJobCard uses only documented Astryx components; no hard-coded visual values or score/match UI.
+- Seven application routes retained; no Job CRUD route or ninth SSE event.
+
+## Hardcoding Review
+- No production hardcoding of fixture Job IDs or forced success.
+- Outcome tokens and private-host markers are explicit allowlists/policy, not test-answer overfitting.
+- Tests use injected fakes only (no live provider/public fetch).
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/schemas/test_sse.py tests/api/test_chat.py tests/integration/test_chat_transport.py tests/integration/test_job_chat.py`
+  - Required: yes
+  - Reported result: 78 passed
+  - Rerun result: 78 passed in ~7.71s
+  - Status: passed
+
+- Command/check: Astryx discovery (`npx astryx build ...` / component ChatToolCalls, Card, MetadataList)
+  - Required: yes (pre-edit discovery)
+  - Reported result: pinned 0.1.4 guidance captured; components used for card/tool activity
+  - Rerun result: not_rerun as pre-edit discovery; `npm run check:astryx` PASS (27 components, 0.1.4)
+  - Status: passed (A1 credible + post-edit compatibility gate)
+
+- Command/check: `cd frontend; npm run test -- --run src/features/jobs ... ChatToolActivity ... job-workflow.integration.test.tsx`
+  - Required: yes
+  - Reported result: 41 passed (6 files)
+  - Rerun result: 41 passed (6 files)
+  - Status: passed
+
+- Command/check: `cd frontend; npm run check:astryx; npm run lint; npm run typecheck; npm run build`
+  - Required: yes
+  - Reported result: all passed
+  - Rerun result: check:astryx PASS; eslint clean; tsc clean; vite build ok
+  - Status: passed
+
+- Command/check: focused ruff/mypy on backend 06A sources
+  - Required: no (A1 optional)
+  - Rerun result: ruff All checks passed; mypy Success on 4 source files
+  - Status: passed
+
+## Acceptance Review
+- Public SSE union still exactly eight names; no Job API route / second stream / parallel chat state: satisfied (`SSEEventType` eight members; OpenAPI/route inventory unchanged; job_chat eight-name test)
+- Successful save same card live + history hydration; duplicate/unscorable/graph-failed sanitized: satisfied (backend job_chat matrix + frontend integration live/hydrate)
+- Tool activity only friendly label, approved status, duration, short outcome; no raw/secret/stack leakage: satisfied (Save job labels + leak sentinels)
+- Astryx discovery / AppShell / component-token rules: satisfied (check:astryx; SavedJobCard composition; AppShell untouched)
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 06B left unchecked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- When tool rows already exist on partial re-finalize, card recovery relies on durable assistant `structured_payload` rather than re-parsing tool bodies (A1-noted; acceptable fail-closed design).
+- Card-only assistant rows may use a single-space content placeholder when stream text is empty so the message row is retained (UI still renders the card).
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+
+---
+
+# Task Review Report - 06B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch06 - Chat Presentation and Phase 4 Exit
+- Task ID: 06B
+- Task title: Prove Phase 4 and publish the stable Plan 6 handoff
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (06B-scoped among broader uncommitted Batch06 tree):
+  - ackend/tests/integration/test_full_job_workflow.py (untracked: Phase 4 exit suite)
+  - rontend/src/test/job-workflow.integration.test.tsx (untracked/extended: disconnect + history recovery)
+  - README.md (modified: Batch06 evidence, exit commands, Plan 6 handoff, limitations)
+  - ackend/tests/integration/profile_workflow/support.py (six-tool registry wiring for green suites)
+  - ackend/tests/integration/profile_workflow/exposure_cases.py (six tools + no match_jobs)
+  - ackend/tests/integration/test_full_profile_workflow.py (re-export renamed exposure case)
+  - ackend/tests/integration/test_full_chat_transport.py (six-tool production registry + forbidden regex)
+  - ackend/app/repositories/__init__.py (ruff import order only)
+
+## Files Reviewed
+- ackend/tests/integration/test_full_job_workflow.py: in scope - fake-backed full Phase 4 path (acquire/dedup/override/query/sync/rebuild/exposure/privacy)
+- rontend/src/test/job-workflow.integration.test.tsx: in scope - SSE→parser→reducer→card + disconnect/hydrate
+- README.md: in scope - truthful Plan 5 completion, commands, limitations, Plan 6 stable seams; optional live not claimed
+- profile_workflow/* + 	est_full_chat_transport.py + 	est_full_profile_workflow.py: in scope repair - suites green for six-tool production registry without match_jobs
+- ackend/app/repositories/__init__.py: in scope repair - isort-only reorder after full-suite lint
+
+## Source Requirements Checked
+- Plan_5.md §9 Verification: raw retention, exact/normalized duplicates, force_new auth, shared normalization, SSRF, graph replay/rebuild, privacy
+- Plan_5.md §10 Plan 6 handoff: only active scorable Jobs, Skills, vectors/graph identity, query/card seams; matching unimplemented
+- Master Phase 4 exit + §§20–24 local testing strategy
+- Task 06B acceptance: six tools, seven routes, no match_jobs/CRUD/ninth SSE; README truthful
+
+## Implementation Reality
+- Real integration exit suite reuses ScriptedAcquire/Extract, StatefulJobGraph, FakeDriver rebuild, existing JD fixtures — not a stubbed pass harness.
+- Exact hash no-reprocess (incl. force_new), normalized ignore, unauthorized zero-mutation, authorized force_new_authorized audit token, failure raw retention, rebuild ID/count parity with Candidate preservation all asserted in-process.
+- Profile/chat transport repairs only adapt production registry expectations to six tools; no match_jobs factory; Job tools unused by profile cases.
+- README Batch06 + Plan 6 handoff tables match repository seams; optional live Compose/ShopAIKey/Neo4j explicitly not claimed.
+
+## Hardcoding Review
+- No production hardcoding introduced (test-only fakes/sentinels).
+- Production exposure assertions scan app/tools + route decorators rather than hardcoding success.
+- Minor: one no-op assert (orce_b not in authorized or True) does not undermine other sanitization assertions.
+
+## Validations Reviewed
+- Command/check: cd backend; python -m ruff check app tests
+  - Required: yes
+  - Reported result: All checks passed
+  - Rerun result: All checks passed
+  - Status: passed
+
+- Command/check: cd backend; python -m mypy app
+  - Required: yes
+  - Reported result: Success: no issues found in 91 source files
+  - Rerun result: Success: no issues found in 91 source files
+  - Status: passed
+
+- Command/check: cd backend; python -m pytest -q
+  - Required: yes
+  - Reported result: 1093 passed, 2 skipped
+  - Rerun result: 1093 passed, 2 skipped in ~141.6s
+  - Status: passed
+
+- Command/check: cd backend; python -m pytest -q tests/integration/test_full_job_workflow.py
+  - Required: yes
+  - Reported result: 6 passed
+  - Rerun result: 6 passed in ~2.5s
+  - Status: passed
+
+- Command/check: frontend full gates (check:astryx, lint, typecheck, full test, focused job-workflow, build)
+  - Required: yes
+  - Reported result: 126 tests; focused 5; build ok
+  - Rerun result: Astryx PASS; eslint clean; tsc clean; 126 passed; 5 job-workflow passed; vite build ok
+  - Status: passed
+  - Notes: 
+pm ci --ignore-scripts not re-run by A2 (install avoided); existing lockfile install sufficient for gates
+
+- Command/check: docker compose --env-file .env.example -f infrastructure/docker-compose.yml config
+  - Required: yes
+  - Reported result: three-service config resolved
+  - Rerun result: frontend/backend/neo4j config resolved without real secrets
+  - Status: passed
+
+- Command/check: docker compose --env-file .env.example -f infrastructure/docker-compose.yml build
+  - Required: yes
+  - Reported result: jobagent-backend and jobagent-frontend built
+  - Rerun result: both images Built (layers largely cached)
+  - Status: passed
+
+- Command/check: privacy/domain/route inventory + git diff --check
+  - Required: yes
+  - Reported result: 7 routes; 6 tools; match_jobs absent; diff clean for task files
+  - Rerun result: exactly 7 API routes; PRODUCTION_TOOL_NAMES length 6; no create_match_jobs / name=match_jobs in app; no frontend match_jobs or /api/jobs; git diff --check only pre-existing blank-at-EOF note on review file (out of product scope)
+  - Status: passed
+
+- Command/check: optional live compose/ShopAIKey/Neo4j
+  - Required: no
+  - Reported result: not_run / not claimed
+  - Rerun result: not_run
+  - Status: not_run (allowed)
+
+## Acceptance Review
+- Full fake-backed backend/frontend flows pass with zero real provider/public-URL calls and zero raw/secret leakage: satisfied (full pytest + full_job_workflow + job-workflow FE; LEAK/RAW_JD sentinels)
+- Raw novel JD survives extraction failure; exact no-reprocess; normalized ignore without embed/graph; authorized override auditable: satisfied
+- Replayed online sync + complete rebuild matching active full/partial IDs/counts; no Candidate regression; ignored/unscorable absent: satisfied
+- Production exposure exactly six tools and seven routes; matching/ranking/Job CRUD/ninth SSE absent: satisfied
+- Root README truthfully records Plan 5 completion evidence, commands, limitations, Plan 6 ownership; optional live not claimed: satisfied
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 06A left checked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- 	est_full_job_workflow.py contains a no-op assertion (orce_b not in authorized or True); other sanitization assertions still enforce no RAW_JD/secret leakage.
+- HTML paste-required path is fixture/extractor-level in the exit suite (blank.html + JD_TEXT_REQUIRED code surface) rather than a full URL-acquire blank-HTML round-trip; prior Batch01 acquisition tests remain the detailed coverage.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

@@ -19,7 +19,7 @@ from app.repositories.profiles import ProfileRepository
 from app.schemas.profile_draft import ProfileDraftDocument, build_approval_summary
 from app.services.attachment_storage import iter_byte_chunks
 from app.services.profile_service import ProfileCommitService
-from app.tools.registry import CURRENT_PROFILE_TOOL_NAMES
+from app.tools.registry import CURRENT_PROFILE_TOOL_NAMES, PRODUCTION_TOOL_NAMES
 from fastapi.testclient import TestClient
 from tests.fakes.agent_tools import ScriptedDecision, decision_text
 from tests.integration.profile_workflow.support import (
@@ -37,13 +37,19 @@ from tests.integration.test_candidate_sync import StatefulCandidateGraph
 from tests.tools.profile_tool_helpers import profile
 
 
-def test_production_has_exactly_four_profile_tools_and_no_forbidden_exposure() -> None:
+def test_production_has_exactly_six_tools_and_no_forbidden_exposure() -> None:
     assert CURRENT_PROFILE_TOOL_NAMES == {
         "get_candidate_context",
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
     }
+    assert PRODUCTION_TOOL_NAMES == CURRENT_PROFILE_TOOL_NAMES | {
+        "save_job",
+        "query_jobs",
+    }
+    assert "match_jobs" not in PRODUCTION_TOOL_NAMES
+    assert len(PRODUCTION_TOOL_NAMES) == 6
     hits: list[str] = []
     for path in APP_SRC.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

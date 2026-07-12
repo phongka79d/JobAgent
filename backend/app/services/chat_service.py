@@ -55,6 +55,12 @@ from app.repositories.tool_executions import (
     ToolExecutionRepository,
     ToolExecutionValidationError,
 )
+from app.schemas.job_tools import (
+    build_saved_job_card,
+    parse_save_job_tool_body,
+    save_job_public_outcome,
+    try_parse_saved_job_card,
+)
 from app.services.chat_context import ChatContextAssembler, ChatContextError
 from app.tools.registry import ToolRegistry
 
@@ -112,6 +118,8 @@ class ChatTurnResult:
     pending_approval: dict[str, Any] | None
     replayed: bool
     checkpoints_deleted: bool
+    # Bounded display card (saved_job) for run_completed / history; never tool body.
+    structured_payload: dict[str, Any] | None = None
 
 
 def _validate_user_text(text: str) -> str:
@@ -688,8 +696,9 @@ class ChatService:
                     checkpoints_deleted=False,
                 )
 
+            saved_job_payload: dict[str, Any] | None = None
             if graph_result is not None:
-                await self._persist_tool_records(
+                saved_job_payload = await self._persist_tool_records(
                     tools_repo,
                     run_id=run_id,
                     graph_result=graph_result,
@@ -697,23 +706,36 @@ class ChatService:
 
             if outcome == "completed" and final_text is not None:
                 # Final validated assistant message BEFORE checkpoint cleanup.
+                # Optional bounded saved-job card only — never the tool body.
                 try:
                     assistant = await conv.append_message(
                         role=MessageRole.ASSISTANT,
                         content=final_text,
+                        structured_payload=saved_job_payload,
                     )
                     assistant_message_id = assistant.id
                 except (ConversationRepositoryError, ConversationMessageError):
-                    failed_run = await runs.mark_failed(
-                        run_id, error="assistant_persist_failed"
-                    )
-                    return await self._snapshot_result(
-                        session,
-                        failed_run,
-                        outcome="failed",
-                        replayed=False,
-                        checkpoints_deleted=False,
-                    )
+                    # Fail closed: retry without structured card rather than fail turn
+                    # when payload validation rejects; never drop the text answer.
+                    try:
+                        assistant = await conv.append_message(
+                            role=MessageRole.ASSISTANT,
+                            content=final_text,
+                            structured_payload=None,
+                        )
+                        assistant_message_id = assistant.id
+                        saved_job_payload = None
+                    except (ConversationRepositoryError, ConversationMessageError):
+                        failed_run = await runs.mark_failed(
+                            run_id, error="assistant_persist_failed"
+                        )
+                        return await self._snapshot_result(
+                            session,
+                            failed_run,
+                            outcome="failed",
+                            replayed=False,
+                            checkpoints_deleted=False,
+                        )
                 if run.state == AgentRunState.RUNNING.value:
                     run = await runs.mark_completed(run_id)
                 outcome = "completed"
@@ -737,6 +759,7 @@ class ChatService:
                 checkpoints_deleted=False,
                 assistant_message_id=assistant_message_id,
                 final_text=final_text,
+                structured_payload=saved_job_payload,
             )
 
         if outcome == "completed":
@@ -761,6 +784,7 @@ class ChatService:
                 pending_approval=snapshot.pending_approval,
                 replayed=False,
                 checkpoints_deleted=checkpoints_deleted,
+                structured_payload=snapshot.structured_payload,
             )
 
         return ChatTurnResult(
@@ -775,6 +799,7 @@ class ChatService:
             pending_approval=snapshot.pending_approval,
             replayed=False,
             checkpoints_deleted=False,
+            structured_payload=None,
         )
 
     async def _persist_tool_records(
@@ -783,25 +808,32 @@ class ChatService:
         *,
         run_id: UUID,
         graph_result: Mapping[str, Any],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Record sanitized tool observability from graph turn messages.
 
         Never stores ``ToolMessage`` / tool-result bodies, raw arguments, or
-        document text. Durable ``arguments_summary`` is restricted to a
-        generic allowlisted status token for public SSE mapping.
+        document text. Durable ``arguments_summary`` is restricted to
+        allowlisted status tokens for public SSE mapping.
+
+        Returns the last successful ``save_job`` card payload (if any) for the
+        final assistant ``structured_payload`` / ``run_completed`` surface.
         """
         messages = graph_result.get("messages_for_this_turn") or ()
         if not isinstance(messages, Sequence):
-            return
+            return None
 
         # Avoid duplicate tool rows on partial re-finalize: skip if any exist.
         existing = await tools_repo.list_for_run(run_id)
         if existing:
-            return
+            # Still recover card from durable assistant message if present later.
+            return None
+
+        saved_job_payload: dict[str, Any] | None = None
 
         for item in messages:
             name: str | None = None
             failed = False
+            text = ""
             if isinstance(item, ToolMessage):
                 name = str(item.name or "tool")
                 content = item.content
@@ -850,14 +882,25 @@ class ChatService:
                     )
                 else:
                     # Generic allowlisted status only — never result/argument body.
-                    # Authorized force_new records exactly one audit token.
                     summary = PUBLIC_TOOL_OUTCOME_COMPLETED
-                    if (
-                        safe_name == "save_job"
-                        and text
-                        and _FORCE_NEW_AUDIT_JSON_FRAGMENT in text
-                    ):
-                        summary = PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED
+                    if safe_name == "save_job" and text:
+                        parsed, audit = parse_save_job_tool_body(text)
+                        if parsed is not None:
+                            summary = save_job_public_outcome(
+                                parsed,
+                                force_new_authorized=audit is not None,
+                            )
+                            try:
+                                card = build_saved_job_card(parsed)
+                                saved_job_payload = card.model_dump(mode="json")
+                            except Exception:
+                                # Card construction must not fail observability.
+                                pass
+                        elif (
+                            text
+                            and _FORCE_NEW_AUDIT_JSON_FRAGMENT in text
+                        ):
+                            summary = PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED
                     await tools_repo.finish(
                         row.id,
                         duration_ms=0,
@@ -866,6 +909,8 @@ class ChatService:
             except (ToolExecutionValidationError, Exception):
                 # Observability must not fail the durable turn outcome.
                 continue
+
+        return saved_job_payload
 
     async def _snapshot_result(
         self,
@@ -878,18 +923,32 @@ class ChatService:
         pending_approval_override: dict[str, Any] | None = None,
         assistant_message_id: UUID | None = None,
         final_text: str | None = None,
+        structured_payload: dict[str, Any] | None = None,
     ) -> ChatTurnResult:
         if run is None:
             raise ChatServiceStateError("agent run not found")
 
         user_message_id = run.message_id
         # Latest assistant message after this user turn (if any).
-        if assistant_message_id is None or final_text is None:
-            assistant_message_id, final_text = await self._latest_assistant_after(
+        loaded_payload: dict[str, Any] | None = None
+        if assistant_message_id is None or final_text is None or structured_payload is None:
+            (
+                assistant_message_id,
+                final_text,
+                loaded_payload,
+            ) = await self._latest_assistant_after(
                 session,
                 user_message_id=user_message_id,
                 known_id=assistant_message_id,
                 known_text=final_text,
+            )
+        if structured_payload is None:
+            structured_payload = loaded_payload
+        # Fail closed: only accept validated saved-job card shape.
+        if structured_payload is not None:
+            card = try_parse_saved_job_card(structured_payload)
+            structured_payload = (
+                card.model_dump(mode="json") if card is not None else None
             )
 
         pending: dict[str, Any] | None = pending_approval_override
@@ -908,6 +967,7 @@ class ChatService:
             pending_approval=pending,
             replayed=replayed,
             checkpoints_deleted=checkpoints_deleted,
+            structured_payload=structured_payload,
         )
 
     async def _latest_assistant_after(
@@ -917,13 +977,19 @@ class ChatService:
         user_message_id: UUID,
         known_id: UUID | None,
         known_text: str | None,
-    ) -> tuple[UUID | None, str | None]:
+    ) -> tuple[UUID | None, str | None, dict[str, Any] | None]:
         if known_id is not None and known_text is not None:
-            return known_id, known_text
+            row = await session.get(ChatMessage, known_id)
+            payload = (
+                row.structured_payload
+                if row is not None and isinstance(row.structured_payload, dict)
+                else None
+            )
+            return known_id, known_text, payload
 
         user_msg = await session.get(ChatMessage, user_message_id)
         if user_msg is None:
-            return known_id, known_text
+            return known_id, known_text, None
 
         result = await session.execute(
             select(ChatMessage)
@@ -937,8 +1003,13 @@ class ChatService:
         )
         row = result.scalar_one_or_none()
         if row is None:
-            return known_id, known_text
-        return row.id, row.content
+            return known_id, known_text, None
+        payload = (
+            row.structured_payload
+            if isinstance(row.structured_payload, dict)
+            else None
+        )
+        return row.id, row.content, payload
 
 
 async def count_messages(session: AsyncSession) -> int:
