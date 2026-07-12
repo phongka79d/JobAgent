@@ -14,7 +14,7 @@ from typing import Final
 from langchain_core.tools import BaseTool
 
 # Master §13 seven domain tools — registration names reserved for later phases.
-# This phase must not implement or auto-register them in production.
+# ``match_jobs`` remains reserved only; production must not implement it here.
 LATER_PHASE_DOMAIN_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     {
         "get_candidate_context",
@@ -82,6 +82,7 @@ class ToolRegistry:
         self.register_many(tools)
 
 
+# Four accepted Candidate tools (Plan 4) retained as a named subset.
 CURRENT_PROFILE_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     {
         "get_candidate_context",
@@ -91,19 +92,35 @@ CURRENT_PROFILE_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Production Agent surface after Plan 5 Batch04: four Candidate + two Job tools.
+# ``match_jobs`` is intentionally absent (reserved only).
+PRODUCTION_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "get_candidate_context",
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+        "save_job",
+        "query_jobs",
+    }
+)
+
 
 def create_production_registry(tools: Iterable[BaseTool]) -> ToolRegistry:
-    """Register exactly the Plan 4 tools implemented at this boundary."""
+    """Register exactly the six production tools implemented at this boundary."""
     registry = ToolRegistry()
     registry.register_many(tools)
-    if registry.names() != CURRENT_PROFILE_TOOL_NAMES:
+    if registry.names() != PRODUCTION_TOOL_NAMES:
         raise ToolRegistryError("invalid production tool set")
+    if "match_jobs" in registry:
+        raise ToolRegistryError("match_jobs must not be registered")
     return registry
 
 
 __all__ = [
     "CURRENT_PROFILE_TOOL_NAMES",
     "LATER_PHASE_DOMAIN_TOOL_NAMES",
+    "PRODUCTION_TOOL_NAMES",
     "ToolRegistry",
     "ToolRegistryError",
     "create_production_registry",

@@ -736,3 +736,249 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch04 - Agent-Facing Job Workflow
+- Task ID: 04A
+- Task title: Orchestrate persistence-first JD ingestion and duplicate policy
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git:
+  - `backend/app/services/jd_ingestion.py` (untracked, created)
+  - `backend/app/schemas/job_tools.py` (untracked, created)
+  - `backend/tests/services/test_jd_ingestion.py` (untracked, created)
+  - `docs/reports/report_5_execute_agent.md` (modified: A1 04A execution block only)
+- job_posts.py / test_graph_outbox.py: no working-tree changes (A1 correctly reused existing repository/outbox primitives)
+
+## Files Reviewed
+- `backend/app/services/jd_ingestion.py`: in scope - `JDIngestionService` persistence-first state machine, duplicate policy, same-transaction identifier-only `upsert_job` outbox, sanitized `SaveJobResult` mapping
+- `backend/app/schemas/job_tools.py`: in scope - strict `SaveJobResult` / `JobDisplaySummary` / enums with extra=forbid; omits raw content/hash/vectors
+- `backend/tests/services/test_jd_ingestion.py`: in scope - call-order, failure retention, exact/normalized duplicate, force_new, unscorable eligibility, idempotency, sanitization
+- `backend/app/repositories/job_posts.py`: dependency (unchanged) - create_received / mark_processing / mark_processed(force_new) / mark_failed / set_embedding_identity / set_graph_sync_status reused correctly
+- `backend/app/repositories/graph_outbox.py`: dependency (unchanged) - generic `enqueue` with `requeue_existing`; Candidate semantics untouched
+- `docs/reports/report_5_execute_agent.md` (04A block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md ง7.3: received ? processing ? processed|failed; raw before LLM; stable failure codes; independent status fields
+- Plan_5.md ง7.4: exact hash no-op; normalized different-content ? ignored_duplicate/not_required; force_new is application-authorized separate position
+- Plan_5.md ง7.6: embed identity + enqueue only active full|partial; ignored/unscorable never Neo4j-bound
+- Master_plan.md ง13.5: save_job persists raw before extraction; dedupe + outbox; no approval
+- Master_plan.md ง21.1: same-transaction outbox with graph-derived change
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/services/test_jd_ingestion.py tests/repositories/test_job_posts.py tests/repositories/test_graph_outbox.py`
+  - Required: yes
+  - Reported result: passed (60 in ~11.3s)
+  - Rerun result: passed (60 in ~12.10s)
+  - Status: passed
+  - Notes: injected fakes only; no network/provider/Neo4j
+
+- Command/check: `cd backend; python -m ruff check app/services/jd_ingestion.py app/repositories/job_posts.py tests/services/test_jd_ingestion.py; python -m mypy app/services/jd_ingestion.py app/repositories/job_posts.py`
+  - Required: yes
+  - Reported result: ruff All checks passed; mypy Success (2 source files)
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 2 source files
+  - Status: passed
+
+## Acceptance Review
+- Task acceptance: One `JDIngestionService` implementing persistence-first save state machine and same-transaction Job outbox
+- Status: satisfied
+- Evidence:
+  - Novel path: TX1 `create_received` commits before extract; extract callback observes durable raw + received/processing status; TX3 stores embedding identity + pending graph status + `{"job_id": ...}` outbox
+  - Provider timeout/rate-limit/schema-invalid ? retained `failed` row with `JD_*` codes, zero outbox, raw content preserved
+  - Exact duplicate (including `force_new_authorized=True`) returns existing ID with zero new Job/extract/outbox work; repeated saves idempotent
+  - Normalized different-content default ? `ignored_duplicate` / `not_required` / no embedding identity; authorized force_new ? separate active + FORCE_NEW outcome without mutating earlier row
+  - Unscorable active ? no embedding identity / no outbox
+  - Result schema forbids `raw_content` and sanitizes banned secret/provider tokens
+
+## Implementation Reality
+- Real orchestration over existing acquire/extract/normalize/quality/repository/outbox modules; injectable `acquire_fn` / `extract_fn` for tests only
+- No second outbox; uses `GraphOutboxRepository.enqueue` with `JOB_UPSERT_OPERATION="upsert_job"`
+- Vectors not generated in 04A (correct); only locked model/dimension identity stored
+- `force_new_authorized` is service Boolean only; never overrides exact hash; never parsed from JD payload inside service
+- Hardcoding: none material; quality re-applied after skill normalization matches master order
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 04B left unchecked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Plan ง7.3 notes one provider timeout/rate-limit retry and one invalid-schema repair; ingestion retains failed after injected extract failure and correctly leaves retry/repair to the extraction collaborator (02A). Out of 04A ownership.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Mandatory Batch04 - Agent-Facing Job Workflow
+- Task ID: 04B
+- Task title: Expose bounded Job tools with application-owned override authorization
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04B-relevant working tree):
+  - `backend/app/tools/save_job.py` (untracked, created)
+  - `backend/app/tools/query_jobs.py` (untracked, created)
+  - `backend/app/tools/registry.py` (modified: PRODUCTION_TOOL_NAMES; six-tool factory)
+  - `backend/app/tools/__init__.py` (modified: export PRODUCTION_TOOL_NAMES)
+  - `backend/app/main.py` (modified: wire JDIngestionService + save_job/query_jobs)
+  - `backend/app/services/chat_service.py` (modified: force_new_authorized durable audit token only)
+  - `backend/tests/tools/test_save_job.py` (untracked, created)
+  - `backend/tests/tools/test_query_jobs.py` (untracked, created)
+  - `backend/tests/tools/test_registry.py` (modified: six-tool registry + no match_jobs)
+  - `docs/reports/report_5_execute_agent.md` (modified: A1 04B execution block)
+- Co-present uncommitted 04A artifacts (`jd_ingestion.py`, `job_tools.py`, `test_jd_ingestion.py`) left out of 04B scope judgment; already A2-accepted under 04A
+
+## Files Reviewed
+- `backend/app/tools/save_job.py`: in scope - strict one-of URL/raw input; InjectedState force_new auth after payload exclusion; FORCE_NEW_UNAUTHORIZED before mutation; allowlisted authorization_audit token
+- `backend/app/tools/query_jobs.py`: in scope - ID or filter mode; default 10 / max 50; compact views; existing score_cache only; no score computation
+- `backend/app/tools/registry.py`: in scope - PRODUCTION_TOOL_NAMES exact six tools; match_jobs reserved not registered
+- `backend/app/tools/__init__.py`: in scope - public export of PRODUCTION_TOOL_NAMES for registry package surface
+- `backend/app/main.py`: in scope - JDIngestionService + UrlFetcher wiring into create_production_registry
+- `backend/app/services/chat_service.py`: in scope (audit only) - durable arguments_summary force_new_authorized when save_job result contains allowlisted JSON fragment
+- `backend/tests/tools/test_save_job.py`: in scope - input xor, declaration exclusion, unauthorized zero-mutation, authorized audit token, tool wrapper
+- `backend/tests/tools/test_query_jobs.py`: in scope - compact privacy, defaults/caps, score_cache passthrough, filters
+- `backend/tests/tools/test_registry.py`: in scope - six production tools; reject profile-only and match_jobs set
+- `docs/reports/report_5_execute_agent.md` (04B block): A1 evidence only
+
+## Source Requirements Checked
+- Plan_5.md ยง7.7: save_job bounded result; query_jobs ID/filters compact fields; no raw/unbounded corpus
+- Plan_5.md ยง5 / task out of scope: no public Job CRUD, no match_jobs implementation
+- Master_plan.md ยง13.5: save_job one-of URL/raw + optional force_new; no approval; delegates business work
+- Master_plan.md ยง13.6: query_jobs read-only compact/score-when-present
+- Master_plan.md ยง13.8: save_job available without match_jobs; match_jobs later-phase only
+- Plan_5.md ยง7.4 / task Agent Work: force_new only from current-turn separate/distinct position outside JD payload; durable allowlisted audit
+
+## Validations Reviewed
+- Command/check: `cd backend; python -m pytest -q tests/tools/test_save_job.py tests/tools/test_query_jobs.py tests/tools/test_registry.py tests/agent/test_graph.py tests/agent/test_prompt.py tests/api/test_chat.py`
+  - Required: yes
+  - Reported result: passed (60 in ~7.9s)
+  - Rerun result: passed (60 in 4.60s)
+  - Status: passed
+  - Notes: no network/provider calls; existing Agent graph/prompt/chat API green with six-tool registry
+
+- Command/check: `cd backend; python -m ruff check app/tools app/tools/registry.py app/main.py tests/tools tests/agent/test_graph.py tests/agent/test_prompt.py`
+  - Required: yes
+  - Reported result: All checks passed
+  - Rerun result: All checks passed
+  - Status: passed
+
+- Command/check: `cd backend; python -m mypy app/tools app/main.py`
+  - Required: yes (task lists co-path `mypy app/tools app/tools/registry.py app/main.py`; A1 used non-duplicate path covering same modules)
+  - Reported result: Success: no issues found in 8 source files
+  - Rerun result: Success: no issues found in 8 source files
+  - Status: passed
+  - Notes: duplicate module path in task command would collide; coverage equivalent
+
+- Command/check: inventory `@(router|app).(get|post|put|patch|delete)` under `backend/app/api`
+  - Required: yes
+  - Reported result: exactly 7 authorized routes
+  - Rerun result: exactly 7 routes (health, attachments/cv, profile, profile/cv, chat/history, chat/turns, chat/runs/{run_id}/resume)
+  - Status: passed
+
+## Acceptance Review
+- Task acceptance: Two Agent-facing Job tools on existing LangGraph registry with application-owned force_new authorization and durable sanitized audit
+- Status: satisfied
+- Evidence:
+  - `SaveJobInput` rejects neither/both; tool returns SAVE_JOB_INVALID_INPUT with zero ingestion calls
+  - Unauthorized force_new (no declaration, declaration only inside JD payload, missing state) โ’ FORCE_NEW_UNAUTHORIZED and zero service mutation
+  - Explicit current-turn "separate position" / "distinct position" outside excluded URL/raw payload โ’ force_new_authorized=True + authorization_audit=force_new_authorized only
+  - chat_service records exactly that allowlisted token in durable arguments_summary for save_job when fragment present; never user turn/JD body
+  - query_jobs ID mode and filter mode; DEFAULT_LIST_LIMIT=10; MAX_LIST_LIMIT=50; omits raw/hash/error/embedding; surfaces score_cache only when stored
+  - PRODUCTION_TOOL_NAMES exactly six names including save_job/query_jobs; match_jobs reserved in LATER_PHASE only; no match_jobs.py or create_match_jobs
+  - main.py wires services into tools; tools call services/repositories directly; no new public routes
+
+## Implementation Reality
+- Thin wrappers over JDIngestionService / JobPostRepository; InjectedState pattern matches profile_commit (args_schema omitted for state injection)
+- force_new LLM Boolean alone never authorizes; declaration scan after payload exclusion is application-owned
+- Hardcoding: none material; audit token is a fixed allowlisted string by design
+- FakeImplementation: tests use recording fakes / temporary SQLite only; production path real
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Sibling 04A left checked; batch header not marked complete
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Task Validation co-lists `mypy app/tools app/tools/registry.py app/main.py`; mypy maps registry twice. A1/A2 used `mypy app/tools app/main.py` with equivalent coverage (8 source files).
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

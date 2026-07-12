@@ -571,26 +571,30 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one ordinary chat turn through the UI against the production adapter.
 ```
 
-## Current limitations (after Plan 5 Batch03)
+## Current limitations (after Plan 5 Batch04)
 
 - Phase 3 CV-to-approved-profile workflow is complete for local fake-backed
   proof: shared upload, redaction/extraction, draft-only proposal/correction,
   guarded approval, atomic replacement, Candidate graph sync, public profile
   reads, and the shared Astryx sidebar/composer experience.
-- Plan 5 Batch01–03 added **internal** JD acquisition, grounded Job extraction,
-  SQLite JobPost persistence/duplicate primitives, shared Candidate/Job skill
-  normalization, and a locked injectable Job embedding adapter only. They do
-  **not** expose Job tools, public job routes, `save_job` orchestration, Job
-  graph outbox/sync, retrieval/matching, or continuous embedding workers yet.
+- Plan 5 Batch01–04 added JD acquisition, grounded Job extraction, SQLite
+  JobPost persistence/duplicate primitives, shared Candidate/Job skill
+  normalization, locked Job embedding identity, persistence-first
+  `JDIngestionService` orchestration, and Agent-facing `save_job` /
+  `query_jobs` tools. They do **not** expose public job routes, Job graph
+  outbox processing/rebuild projection, retrieval/matching, continuous
+  embedding workers, or a saved-Job chat card yet.
 - Matching, ranking, evaluation UI, OCR/DOCX/image CVs, profile history, and a
   full profile editor remain out of scope.
 - No public profile/job CRUD mutations, authentication, continuous outbox
   worker, Qdrant, CI, or cloud deployment.
-- Production registers the four Plan 4 Candidate tools only; Job ingestion,
-  query, and matching tools remain reserved for later Plan 5 batches.
+- Production registers exactly six tools: the four Plan 4 Candidate tools plus
+  `save_job` and `query_jobs`. `match_jobs` remains reserved only (not
+  implemented or registered).
 - Graph rebuild loads the Candidate/Skill slice; Job, JobFamily, embedding
   projection, verification, and later data-load stages remain intentionally
-  incomplete.
+  incomplete. Identifier-only `upsert_job` outbox rows may be enqueued for
+  active full/partial Jobs; no Job graph processor ships yet.
 - Outbox repository is durable and replay-safe; no background poller ships yet.
 - Optional live ShopAIKey/Neo4j/Compose observation is not required for Phase 3
   acceptance and is not claimed here unless the user supplies ignored secrets
@@ -608,6 +612,7 @@ and transport fakes only — no public network fetches and no ShopAIKey calls.
 | Batch01 | DNS/redirect-aware URL policy, bounded HTTP retrieval, deterministic URL-or-paste JD text acquisition |
 | Batch02 | Grounded Job extraction, deterministic JD quality, persistence-first JobPost repository and duplicate primitives |
 | Batch03 | Shared Candidate/Job skill normalization + versioned Job text and locked ShopAIKey embeddings |
+| Batch04 | Persistence-first `JDIngestionService` + Agent-facing `save_job` / `query_jobs` (six production tools) |
 
 Batch01 establishes the controlled acquisition foundation only:
 
@@ -698,6 +703,45 @@ python -m ruff check app/services/skill_normalization.py app/services/embeddings
 python -m mypy app/services/skill_normalization.py app/services/embeddings.py
 ```
 
+## Plan 5 progress (Batch04) — Agent-facing Job workflow
+
+**Plan 5 Batch04 is evidence-backed.** Ingestion and tool tests use injected
+fakes / temporary SQLite only — no public network fetches and no ShopAIKey
+calls for acceptance.
+
+Batch04 composes acquisition, extraction, normalization, quality, and
+duplicate policy behind one service and two thin Agent tools:
+
+- `JDIngestionService` is persistence-first: novel raw content commits before
+  the first LLM call; exact-hash hits do zero new work; normalized duplicates
+  default to ignored/`not_required`; extraction failures retain sanitized
+  `failed` rows (`backend/app/services/jd_ingestion.py`).
+- Active full/partial Jobs store locked embedding model/dimension identity and
+  enqueue one identifier-only `upsert_job` outbox row in the same transaction;
+  ignored/unscorable records never do. Vectors and Job graph projection remain
+  later-batch work.
+- `save_job` validates exactly one URL/raw-text input plus optional `force_new`.
+  Override is authorized only from an explicit current-turn “separate position”
+  / “distinct position” declaration outside the JD payload; unauthorized
+  overrides fail before service mutation and emit no durable audit token
+  (`backend/app/tools/save_job.py`).
+- `query_jobs` supports one Job ID or bounded filters (default 10 / max 50)
+  over compact repository views; it never returns raw JD content and never
+  computes scores (`backend/app/tools/query_jobs.py`).
+- Production registry is exactly six tools; `match_jobs` stays reserved only.
+  Public application routes remain the seven authorized paths (no Job HTTP
+  endpoints).
+
+Focused Batch04 verification:
+
+```powershell
+cd backend
+python -m pytest -q tests/services/test_jd_ingestion.py tests/repositories/test_job_posts.py tests/repositories/test_graph_outbox.py
+python -m pytest -q tests/tools/test_save_job.py tests/tools/test_query_jobs.py tests/tools/test_registry.py tests/agent/test_graph.py tests/agent/test_prompt.py tests/api/test_chat.py
+python -m ruff check app/services/jd_ingestion.py app/tools app/main.py tests/services/test_jd_ingestion.py tests/tools
+python -m mypy app/services/jd_ingestion.py app/tools app/main.py
+```
+
 ## Plan 5 handoff (Master Phase 4) — stable seams only
 
 Plan 5 receives these **stable Phase 3 outputs** and must extend them rather
@@ -710,18 +754,20 @@ paths:
 | Skill normalization | Shared Candidate/Job provisional/verified rules + seed (`backend/app/services/skill_normalization.py`, `backend/app/data/skills_seed.yaml`) |
 | Job embeddings (Plan 5 Batch03) | Versioned Job text + locked ShopAIKey adapter (`backend/app/services/embeddings.py`; Phase 0 benchmark reuses shared primitives) |
 | Redaction / structured extraction | Deterministic PII redaction + locked ShopAIKey structured adapter (`backend/app/services/pii_redaction.py`, `profile_extraction.py`, `shopaikey_chat.py`) |
-| Tool authorization | Four Candidate tools only; application-state auth for commit (`backend/app/tools/`, `backend/app/tools/registry.py`) |
-| Outbox / Candidate graph sync | Identifier-only Candidate outbox + rebuildable projection (`backend/app/repositories/graph_outbox.py`, `backend/app/graph/candidate_sync.py`) |
+| Tool authorization | Six production tools (four Candidate + `save_job` + `query_jobs`); application-state auth for profile commit and `force_new` (`backend/app/tools/`, `backend/app/tools/registry.py`) |
+| Job ingestion orchestration | Persistence-first `JDIngestionService` + bounded tool contracts (`backend/app/services/jd_ingestion.py`, `backend/app/schemas/job_tools.py`) |
+| Outbox / Candidate graph sync | Identifier-only Candidate outbox + rebuildable projection; Job `upsert_job` enqueue only (no Job projector yet) (`backend/app/repositories/graph_outbox.py`, `backend/app/graph/candidate_sync.py`) |
 | Structured card / SSE seams | Eight-event SSE union + profile approval payload through `approval_required` (`backend/app/schemas/sse.py`; frontend `frontend/src/features/chat/`) |
 | Shared upload / shell | One multipart client for sidebar + composer (`frontend/src/features/profile/`); single `AppShell` chat experience |
 | Public application routes | Exactly the seven routes listed above |
 | Phase 2 transport primitives | One LangGraph, turn/resume idempotency, checkpoint lifecycle, Compose/config/health |
 
 Plan 5 owns JD acquisition/extraction/persistence, shared Job skill
-normalization, locked Job embeddings, and later Job graph synchronization. It
-must **not** alter profile approval semantics, create profile history, duplicate
-skill canonicalization, bypass the outbox, invent a second graph/SSE contract,
-add public profile mutations, or call tools back into FastAPI.
+normalization, locked Job embeddings, Agent-facing `save_job` / `query_jobs`,
+and later Job graph synchronization. It must **not** alter profile approval
+semantics, create profile history, duplicate skill canonicalization, bypass the
+outbox, invent a second graph/SSE contract, add public profile/job mutations, or
+call tools back into FastAPI.
 
 ## Plan 4 handoff consumed by Phase 3 (stable Phase 2 primitives)
 

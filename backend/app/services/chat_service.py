@@ -75,8 +75,14 @@ GraphRunner = Callable[
 
 _MAX_ASSISTANT_CONTENT: Final[int] = 32_768
 _DEFAULT_RECENT_LIMIT: Final[int] = 20
-# Allowlisted durable/public tool outcome token (never tool args/results/docs).
+# Allowlisted durable/public tool outcome tokens (never tool args/results/docs).
 PUBLIC_TOOL_OUTCOME_COMPLETED: Final[str] = "completed"
+# Application-owned save_job force_new override evidence (never user turn/JD).
+PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED: Final[str] = "force_new_authorized"
+# Compact JSON key/value written by the save_job tool on authorized override.
+_FORCE_NEW_AUDIT_JSON_FRAGMENT: Final[str] = (
+    f'"authorization_audit":"{PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED}"'
+)
 
 
 class ChatServiceError(Exception):
@@ -844,10 +850,18 @@ class ChatService:
                     )
                 else:
                     # Generic allowlisted status only — never result/argument body.
+                    # Authorized force_new records exactly one audit token.
+                    summary = PUBLIC_TOOL_OUTCOME_COMPLETED
+                    if (
+                        safe_name == "save_job"
+                        and text
+                        and _FORCE_NEW_AUDIT_JSON_FRAGMENT in text
+                    ):
+                        summary = PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED
                     await tools_repo.finish(
                         row.id,
                         duration_ms=0,
-                        arguments_summary=PUBLIC_TOOL_OUTCOME_COMPLETED,
+                        arguments_summary=summary,
                     )
             except (ToolExecutionValidationError, Exception):
                 # Observability must not fail the durable turn outcome.

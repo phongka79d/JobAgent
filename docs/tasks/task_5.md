@@ -461,7 +461,7 @@ implement matching/scoring.
 
 ### Tasks
 
-- [ ] (04A): Orchestrate persistence-first JD ingestion and duplicate policy
+- [x] (04A): Orchestrate persistence-first JD ingestion and duplicate policy
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.3 Persistence-first state machine`; `docs/plans/Plan_5.md` > `### 7.4 Duplicate policy`; `docs/plans/Plan_5.md` > `### 7.6 Embedding and graph synchronization`; `docs/plans/Master_plan.md` > `### 13.5 save_job`; `docs/plans/Master_plan.md` > `### 21.1 Outbox rule`
   - Source Requirements:
     - One service handles exactly one URL/text input, persists novel raw content before extraction, applies bounded extraction/normalization/quality, and retains failed records.
@@ -488,7 +488,7 @@ implement matching/scoring.
   - Blocked Condition: Same-transaction Job status/outbox creation cannot reuse the generic repository without changing accepted Candidate semantics; report `BLOCKED_BY_SOURCE_CONFLICT` rather than adding a second outbox.
   - Files: `backend/app/services/jd_ingestion.py`, `backend/app/schemas/job_tools.py`, `backend/app/repositories/job_posts.py`, `backend/tests/services/test_jd_ingestion.py`, `backend/tests/repositories/test_graph_outbox.py`
 
-- [ ] (04B): Expose bounded Job tools with application-owned override authorization
+- [x] (04B): Expose bounded Job tools with application-owned override authorization
   - Source of Truth: `docs/plans/Plan_5.md` > `### 7.7 Tool outputs`; `docs/plans/Plan_5.md` > `## 5. Out of Scope`; `docs/plans/Master_plan.md` > `### 13.5 save_job`; `docs/plans/Master_plan.md` > `### 13.6 query_jobs`; `docs/plans/Master_plan.md` > `### 13.8 Tool authorization matrix`
   - Source Requirements:
     - `save_job` validates exactly one URL/raw-text input plus optional `force_new` and delegates all business work to the ingestion service without approval.

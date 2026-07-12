@@ -28,8 +28,10 @@ from app.graph.schema import ensure_graph_schema
 from app.services.attachment_storage import FilesystemAttachmentStorage
 from app.services.chat_service import ChatService
 from app.services.cv_ingestion import CvIngestionService
+from app.services.jd_ingestion import JDIngestionService
 from app.services.profile_service import ProfileCommitService
 from app.services.shopaikey_chat import ShopAIKeyChatAdapter
+from app.services.url_fetcher import UrlFetcher
 from app.tools.candidate_context import (
     CandidateContextToolService,
     create_candidate_context_tool,
@@ -39,7 +41,9 @@ from app.tools.profile_commit import (
     create_profile_commit_tool,
 )
 from app.tools.profile_draft import ProfileDraftToolService, create_profile_draft_tools
+from app.tools.query_jobs import QueryJobsToolService, create_query_jobs_tool
 from app.tools.registry import create_production_registry
+from app.tools.save_job import SaveJobToolService, create_save_job_tool
 
 SettingsLoader = Callable[[], Settings]
 
@@ -137,11 +141,18 @@ def create_app(
             commit_tool = create_profile_commit_tool(
                 ProfileCommitToolService(ProfileCommitService(db, store))
             )
+            jd_ingestion = JDIngestionService(
+                db,
+                chat_adapter=decision,
+                url_fetcher=UrlFetcher.from_settings(cfg),
+            )
             registry = create_production_registry(
                 [
                     create_candidate_context_tool(CandidateContextToolService(db)),
                     *draft_tools,
                     commit_tool,
+                    create_save_job_tool(SaveJobToolService(jd_ingestion)),
+                    create_query_jobs_tool(QueryJobsToolService(db)),
                 ]
             )
             chat = ChatService(

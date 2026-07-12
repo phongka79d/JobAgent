@@ -747,3 +747,265 @@ complete
 - validations to rerun: the two required backend command groups in the task Validation section
 - risk areas: later graph/outbox stages should consume `JobEmbeddingService.embed_job(s)` and store model/dimension identity; do not reintroduce E5 prefixes or alternate dimensions
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch04 - Agent-Facing Job Workflow
+
+## Task
+04A - Orchestrate persistence-first JD ingestion and duplicate policy
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch04 - Agent-Facing Job Workflow
+- Task ID: 04A
+- Task title: Orchestrate persistence-first JD ingestion and duplicate policy
+- Files allowed / repair scope: `backend/app/services/jd_ingestion.py`, `backend/app/schemas/job_tools.py`, `backend/app/repositories/job_posts.py`, `backend/tests/services/test_jd_ingestion.py`, `backend/tests/repositories/test_graph_outbox.py`
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.3 Persistence-first state machine
+- docs/plans/Plan_5.md > ### 7.4 Duplicate policy
+- docs/plans/Plan_5.md > ### 7.6 Embedding and graph synchronization
+- docs/plans/Master_plan.md > ### 13.5 save_job
+- docs/plans/Master_plan.md > ### 21.1 Outbox rule
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md (### 7.3; ### 7.4; ### 7.6)
+- docs/plans/Master_plan.md (### 13.5 save_job; ### 21.1 Outbox rule)
+- docs/tasks/task_5.md (04A block)
+
+## Dependency and User Action Check
+- Dependencies: (01B) jd_source, (02A) schemas/quality, (02B) JobPostRepository, (03A) normalize_job_skill_lists, (03B) embedding identity constants, generic GraphOutboxRepository — all present
+- User Action: None during tests
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md (project context via task notes / prior Plan 5 evidence)
+- docs/tasks/task_5.md (04A)
+- docs/plans/Plan_5.md (§7.3, §7.4, §7.6)
+- docs/plans/Master_plan.md (§11.3–11.4, §13.5, §21.1)
+- backend/app/services/jd_source.py
+- backend/app/services/jd_extraction.py
+- backend/app/services/jd_quality.py
+- backend/app/services/skill_normalization.py
+- backend/app/services/embeddings.py (identity constants only)
+- backend/app/repositories/job_posts.py
+- backend/app/repositories/graph_outbox.py
+- backend/app/repositories/profiles.py (same-transaction outbox pattern)
+- backend/app/db/enums.py
+- backend/app/db/models/jobs.py
+- backend/app/schemas/job_post.py
+- backend/tests/repositories/test_job_posts.py
+- backend/tests/repositories/test_graph_outbox.py
+- backend/tests/services/test_jd_extraction.py
+
+## Completed Work
+- Searched Job/outbox/tool/transaction/idempotency callers; reused one service boundary (`JDIngestionService`) with injected acquire/extract collaborators; kept tool/HTTP logic out of the service.
+- Implemented exact order: acquire/canonicalize/hash → exact-hash return existing → commit novel `received` → mark `processing` → extract/normalize/re-classify quality → atomic `processed` plus either ignored/`not_required` or active embedding identity + identifier-only `upsert_job` enqueue via generic `GraphOutboxRepository` (Candidate semantics unchanged; no second outbox).
+- Extraction/provider failures retain the raw row as `failed` with domain-stable sanitized codes (`JD_PROVIDER_TIMEOUT`, `JD_PROVIDER_RATE_LIMIT`, `JD_SCHEMA_INVALID`, …); exact duplicates cause zero new Job/extract/embedding/outbox work even when `force_new_authorized=True`.
+- Normalized different-content duplicates default to `ignored_duplicate`/`not_required`; application-authorized `force_new_authorized` creates a separate active scorable record without mutating the earlier canonical row.
+- Only active `full|partial` records store locked embedding model/dimension identity and enqueue/requeue one `{"job_id": ...}` outbox row; unscorable/ignored never do.
+- Added strict `SaveJobResult` / `JobDisplaySummary` in `job_tools.py` and injected call-order/failure/duplicate/eligibility/idempotency tests.
+- `job_posts.py` and `test_graph_outbox.py` required no code changes; existing repository primitives and outbox suite remain the shared foundation.
+
+## Files Created or Modified
+- backend/app/services/jd_ingestion.py (created)
+- backend/app/schemas/job_tools.py (created)
+- backend/tests/services/test_jd_ingestion.py (created)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/services/test_jd_ingestion.py tests/repositories/test_job_posts.py tests/repositories/test_graph_outbox.py`
+- required: yes
+- result: passed
+- evidence or reason: 60 passed in ~11.3s; injected fakes only (no network/provider/Neo4j).
+
+- command/check: `cd backend; python -m ruff check app/services/jd_ingestion.py app/repositories/job_posts.py tests/services/test_jd_ingestion.py; python -m mypy app/services/jd_ingestion.py app/repositories/job_posts.py`
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 2 source files.
+
+## Acceptance Check
+- condition: Novel raw content commits before the first LLM call and remains after timeout/rate-limit/invalid-schema failure
+- status: satisfied
+- evidence: `test_novel_raw_commits_before_extract_and_enqueues_outbox` asserts ORM row + raw content before extract; `test_provider_failure_retains_raw_after_received_commit` retains raw + JD_* codes, zero outbox.
+
+- condition: Exact duplicates cause zero new Job, extraction, embedding, or outbox work even when override is requested
+- status: satisfied
+- evidence: `test_exact_duplicate_skips_extract_embedding_outbox_even_with_force_new`, `test_repeated_exact_save_is_idempotent`.
+
+- condition: Different-content normalized duplicates persist ignored/not_required by default; authorized override creates active separate record without changing earlier row
+- status: satisfied
+- evidence: `test_normalized_duplicate_ignored_by_default`, `test_authorized_force_new_creates_active_separate_record`.
+
+- condition: Only active full/partial records record locked embedding identity and enqueue one identifier-only Job operation; unscorable/ignored never do
+- status: satisfied
+- evidence: novel full/partial path stores model/dims + upsert_job payload `{"job_id": ...}`; unscorable and ignored tests assert no outbox and null embedding identity.
+
+- condition: Every failure/result is sanitized; no raw content, secret, unsafe URL details, or provider payload in outbox/summaries
+- status: satisfied
+- evidence: `_assert_result_sanitized`, outbox payload identity-only, SaveJobResult extra=forbid rejects raw_content.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Same-transaction Job outbox reuses generic `GraphOutboxRepository.enqueue` with `JOB_UPSERT_OPERATION="upsert_job"` and identifier-only payload (Candidate `sync_candidate` semantics untouched; no second outbox).
+- `force_new_authorized` is a service-level Boolean only; never overrides exact hash; FORCE_NEW outcome reported only when an older active peer shares the normalized key.
+- Embedding vectors are not generated in 04A; only locked model/dimension identity is stored for later graph processing.
+- Quality is re-applied after skill normalization to match master extract → normalize → classify order.
+
+## Notes for Review Agent
+- changed files: `jd_ingestion.py`, `job_tools.py`, `test_jd_ingestion.py` (job_posts/graph_outbox test modules unchanged)
+- validations to rerun: the two required backend command groups in the task Validation section
+- risk areas: 04B must derive `force_new_authorized` from current-turn state outside the JD payload; do not pass tool Boolean alone
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - 04B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Mandatory Batch04 - Agent-Facing Job Workflow
+
+## Task
+04B - Expose bounded Job tools with application-owned override authorization
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Mandatory Batch04 - Agent-Facing Job Workflow
+- Task ID: 04B
+- Task title: Expose bounded Job tools with application-owned override authorization
+- Files allowed / repair scope: `backend/app/tools/save_job.py`, `backend/app/tools/query_jobs.py`, `backend/app/tools/registry.py`, `backend/app/main.py`, `backend/app/services/chat_service.py` (allowlisted audit token only), `backend/tests/tools/test_save_job.py`, `backend/tests/tools/test_query_jobs.py`, `backend/tests/tools/test_registry.py`
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ### 7.7 Tool outputs
+- docs/plans/Plan_5.md > ## 5. Out of Scope
+- docs/plans/Master_plan.md > ### 13.5 save_job
+- docs/plans/Master_plan.md > ### 13.6 query_jobs
+- docs/plans/Master_plan.md > ### 13.8 Tool authorization matrix
+
+## Supplemental Documents Used
+- docs/plans/Plan_5.md (### 7.7; ## 5 Out of Scope)
+- docs/plans/Master_plan.md (### 13.5; ### 13.6; ### 13.8)
+- docs/tasks/task_5.md (04B block)
+- README.md (seven public routes; Plan 5 context)
+
+## Dependency and User Action Check
+- Dependencies: (04A) JDIngestionService/SaveJobResult present; InjectedState pattern (profile_commit); Agent registry/startup; durable tool-observability seam in chat_service — all present
+- User Action: None
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_5.md (04B)
+- docs/plans/Plan_5.md (§5, §7.7)
+- docs/plans/Master_plan.md (§13.5–13.8)
+- backend/app/tools/registry.py, candidate_context.py, profile_commit.py, profile_draft.py
+- backend/app/services/jd_ingestion.py, chat_service.py
+- backend/app/schemas/job_tools.py
+- backend/app/repositories/job_posts.py (list_filtered/get_by_id compact views)
+- backend/app/agent/state.py, graph.py (messages_for_this_turn / HumanMessage)
+- backend/app/main.py
+- backend/app/api/chat.py (public tool outcome mapping; seven routes unchanged)
+- backend/tests/tools/test_registry.py, test_profile_commit.py
+- backend/tests/services/test_jd_ingestion.py
+
+## Completed Work
+- Searched production tool factories, registry/startup, Agent state keys, tool-result parsing, and route exposure; kept wrappers thin and preserved exact Agent state keys (`messages_for_this_turn` only for force_new auth).
+- Implemented `save_job` with strict `SaveJobInput` (exactly one of url/raw_text + optional force_new). `force_new` authorization is derived from current-turn user text in InjectedState after excluding the exact URL/raw-JD payload; requires explicit "separate position" or "distinct position"; document/tool-arg-only claims rejected; unauthorized overrides return FORCE_NEW_UNAUTHORIZED with zero service mutation.
+- Authorized overrides attach one allowlisted `authorization_audit=force_new_authorized` token on the tool result; chat_service records that exact token in durable `arguments_summary` (never user turn/JD).
+- Implemented `query_jobs` ID mode or filter mode over JobPostRepository compact views; default limit 10, max 50; returns existing score_cache when present; never computes scores; excludes raw/hash/error/embedding/provider fields.
+- Expanded production registry to exactly six tools; wired JDIngestionService + tools in main.py; `match_jobs` remains reserved only (no implementation).
+- Added focused tool/registry tests; existing Agent graph/prompt and chat API tests remain green.
+
+## Files Created or Modified
+- backend/app/tools/save_job.py (created)
+- backend/app/tools/query_jobs.py (created)
+- backend/app/tools/registry.py (PRODUCTION_TOOL_NAMES; six-tool create_production_registry)
+- backend/app/tools/__init__.py (export PRODUCTION_TOOL_NAMES)
+- backend/app/main.py (wire save_job + query_jobs)
+- backend/app/services/chat_service.py (force_new_authorized durable audit token)
+- backend/tests/tools/test_save_job.py (created)
+- backend/tests/tools/test_query_jobs.py (created)
+- backend/tests/tools/test_registry.py (updated for six production tools)
+
+## Tests or Validations Run
+- command/check: `cd backend; python -m pytest -q tests/tools/test_save_job.py tests/tools/test_query_jobs.py tests/tools/test_registry.py tests/agent/test_graph.py tests/agent/test_prompt.py tests/api/test_chat.py`
+- required: yes
+- result: passed
+- evidence or reason: 60 passed in ~7.9s
+
+- command/check: `cd backend; python -m ruff check app/tools app/tools/registry.py app/main.py tests/tools tests/agent/test_graph.py tests/agent/test_prompt.py`
+- required: yes
+- result: passed
+- evidence or reason: All checks passed
+
+- command/check: `cd backend; python -m mypy app/tools app/main.py`
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 8 source files. Note: the task-listed co-invocation `mypy app/tools app/tools/registry.py app/main.py` collides on module path mapping (duplicate `app.tools.registry`); the same modules are covered by `mypy app/tools app/main.py`.
+
+- command/check: inventory of `@(router|app).(get|post|put|patch|delete)` under backend/app/api
+- required: yes
+- result: passed
+- evidence or reason: exactly 7 authorized application routes (health, attachments/cv, profile, profile/cv, chat/history, chat/turns, chat/runs/{run_id}/resume)
+
+## Acceptance Check
+- condition: save_job rejects neither/both input modes and unauthorized force_new with zero mutation; explicit current-turn declaration outside JD creates exactly one allowlisted audit token
+- status: satisfied
+- evidence: test_save_job_input_rejects_neither_and_both; test_unauthorized_force_new_zero_mutation; test_authorized_force_new_calls_service_and_emits_audit_token; declaration exclusion tests
+
+- condition: query_jobs supports one ID or bounded filters, defaults to 10, caps at 50, excludes raw content/hash/error/vector/provider/internal fields
+- status: satisfied
+- evidence: test_query_by_id_returns_compact_view; test_filter_mode_default_limit_and_cap; privacy assertions on raw/hash/error/embedding
+
+- condition: Production registry names are exactly the six listed tools; no match_jobs implementation
+- status: satisfied
+- evidence: test_production_registry_contains_exactly_six_tools; test_no_match_jobs_implementation_in_tools; match_jobs remains in LATER_PHASE only
+
+- condition: Tools call services directly, use existing graph/transport, preserve Candidate behavior, no public route or match_jobs
+- status: satisfied
+- evidence: main.py wires services into tools; no new API routes; route inventory still 7; Candidate tools still registered; agent/chat tests green
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- force_new authorization scans only `messages_for_this_turn` Human/user text after removing the exact tool payload (url/raw_text); LLM Boolean alone never authorizes.
+- Durable audit token is exactly `force_new_authorized`, written by save_job as `"authorization_audit":"force_new_authorized"` and mapped by chat_service into tool_executions.arguments_summary.
+- PRODUCTION_TOOL_NAMES (six) is the production set; CURRENT_PROFILE_TOOL_NAMES remains the four-tool Candidate subset; match_jobs stays reserved-only.
+
+## Notes for Review Agent
+- changed files: save_job.py, query_jobs.py, registry.py, tools/__init__.py, main.py, chat_service.py, test_save_job.py, test_query_jobs.py, test_registry.py
+- validations to rerun: required pytest list + ruff + mypy on app/tools and app/main.py + seven-route inventory
+- risk areas: broader integration suites that still construct create_production_registry with only four Candidate stubs will fail until they pass all six production tools; PRODUCTION_FORBIDDEN_RE in profile_workflow still bans `save_job(` call-site text (out of 04B file list)
+- next task readiness: can_review
