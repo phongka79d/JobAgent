@@ -13,8 +13,7 @@ from typing import Final
 
 from langchain_core.tools import BaseTool
 
-# Master §13 seven domain tools — registration names reserved for later phases.
-# ``match_jobs`` remains reserved only; production must not implement it here.
+# Master §13 seven domain tools — full production set after Plan 6 Batch03.
 LATER_PHASE_DOMAIN_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     {
         "get_candidate_context",
@@ -92,8 +91,7 @@ CURRENT_PROFILE_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Production Agent surface after Plan 5 Batch04: four Candidate + two Job tools.
-# ``match_jobs`` is intentionally absent (reserved only).
+# Production Agent surface after Plan 6 Batch03: four Candidate + three Job tools.
 PRODUCTION_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     {
         "get_candidate_context",
@@ -102,18 +100,19 @@ PRODUCTION_TOOL_NAMES: Final[frozenset[str]] = frozenset(
         "commit_profile_draft",
         "save_job",
         "query_jobs",
+        "match_jobs",
     }
 )
 
 
 def create_production_registry(tools: Iterable[BaseTool]) -> ToolRegistry:
-    """Register exactly the six production tools implemented at this boundary."""
+    """Register exactly the seven production tools implemented at this boundary."""
     registry = ToolRegistry()
     registry.register_many(tools)
     if registry.names() != PRODUCTION_TOOL_NAMES:
         raise ToolRegistryError("invalid production tool set")
-    if "match_jobs" in registry:
-        raise ToolRegistryError("match_jobs must not be registered")
+    if "match_jobs" not in registry:
+        raise ToolRegistryError("match_jobs must be registered")
     return registry
 
 

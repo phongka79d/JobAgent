@@ -25,6 +25,8 @@ from app.repositories.job_posts import (
     JobPostRepository,
 )
 from app.schemas.job_post import JobPostExtraction
+from app.schemas.matching import MATCH_RESULT_CONTRACT_VERSION, MatchResult
+from app.schemas.score_breakdown import COMPONENT_ORDER
 from app.services.jd_quality import apply_jd_quality
 from app.services.jd_source import hash_canonical_text
 from app.tools.query_jobs import (
@@ -33,6 +35,42 @@ from app.tools.query_jobs import (
     create_query_jobs_tool,
 )
 from pydantic import ValidationError
+
+
+def _valid_score_cache(job_id: object, *, score: float = 0.82) -> dict[str, Any]:
+    """Bounded versioned MatchResult payload suitable for score_cache."""
+    components = [
+        {
+            "name": name.value,
+            "available": True,
+            "value": 0.8,
+            "effective_weight": weight,
+        }
+        for name, weight in zip(
+            COMPONENT_ORDER,
+            (0.30, 0.40, 0.10, 0.10, 0.05, 0.05),
+            strict=True,
+        )
+    ]
+    return MatchResult.model_validate(
+        {
+            "job_id": str(job_id),
+            "title": "Staff Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "work_mode": "remote",
+            "final_score": score,
+            "quality": "full",
+            "components": components,
+            "matched_required_skills": [],
+            "related_skills": [],
+            "missing_required_skills": [],
+            "explanation_lines": ["Semantic similarity available"],
+            "source_url": None,
+            "seed_config_version": "hybrid_seed_v1",
+            "contract_version": MATCH_RESULT_CONTRACT_VERSION,
+        }
+    ).model_dump(mode="json")
 
 
 @asynccontextmanager
@@ -155,8 +193,11 @@ async def test_query_by_id_returns_compact_view(tmp_path: Path) -> None:
             database,
             raw="Unique raw JD content that must never appear in tool output.",
             title="Staff Engineer",
-            score_cache={"overall": 0.82, "components": {"skills": 0.9}},
+            score_cache=None,
         )
+        cache = _valid_score_cache(job_id, score=0.82)
+        async with database.session_scope() as session:
+            await JobPostRepository(session).set_score_cache(job_id, cache)
         service = QueryJobsToolService(database)
         result = await service.execute(job_id=job_id)
         data = json.loads(result)
@@ -166,7 +207,8 @@ async def test_query_by_id_returns_compact_view(tmp_path: Path) -> None:
         job = data["jobs"][0]
         assert job["job_id"] == str(job_id)
         assert job["display"]["title"] == "Staff Engineer"
-        assert job["score_cache"]["overall"] == 0.82
+        assert job["score_cache"]["final_score"] == 0.82
+        assert job["score_cache"]["contract_version"] == MATCH_RESULT_CONTRACT_VERSION
         blob = result.lower()
         assert "unique raw jd content" not in blob
         assert "raw_content" not in blob
@@ -252,6 +294,22 @@ async def test_score_cache_never_computed(tmp_path: Path) -> None:
             record = await JobPostRepository(session).get_by_id(job_id)
             assert record is not None
             assert record.score_cache is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_score_cache_not_exposed(tmp_path: Path) -> None:
+    """Malformed/stale score_cache is omitted; never returned unvalidated."""
+    async with temporary_db(tmp_path) as database:
+        job_id = await _seed_job(
+            database,
+            raw="Job with invalid score cache blob that must stay hidden.",
+            title="Cached Bad",
+            score_cache={"overall": 0.99, "raw_jd": "LEAK"},
+        )
+        service = QueryJobsToolService(database)
+        data = json.loads(await service.execute(job_id=job_id))
+        assert "score_cache" not in data["jobs"][0]
+        assert "LEAK" not in json.dumps(data)
 
 
 @pytest.mark.asyncio

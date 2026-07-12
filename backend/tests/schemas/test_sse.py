@@ -209,6 +209,135 @@ def test_run_completed_rejects_saved_job_with_unsafe_url() -> None:
         )
 
 
+def _match_result_item(job_id: str | None = None) -> dict[str, Any]:
+    from uuid import uuid4 as _uuid4
+
+    jid = job_id or str(_uuid4())
+    weights = {
+        "semantic_similarity": (0.9, 0.3),
+        "skill_score": (0.8, 0.4),
+        "seniority_score": (1.0, 0.1),
+        "experience_score": (1.0, 0.1),
+        "location_score": (1.0, 0.05),
+        "work_mode_score": (1.0, 0.05),
+    }
+    components = [
+        {
+            "name": name,
+            "available": True,
+            "value": value,
+            "effective_weight": weight,
+        }
+        for name, (value, weight) in weights.items()
+    ]
+    return {
+        "job_id": jid,
+        "title": "Engineer",
+        "company": "Acme",
+        "location": "Remote",
+        "work_mode": "remote",
+        "final_score": 0.85,
+        "quality": "full",
+        "components": components,
+        "matched_required_skills": [
+            {
+                "canonical_key": "python",
+                "display_name": "Python",
+                "match_kind": "direct",
+                "strength": 1.0,
+                "related_path": [],
+            }
+        ],
+        "related_skills": [],
+        "missing_required_skills": [],
+        "explanation_lines": ["Semantic similarity: 0.9"],
+        "source_url": "https://example.com/jobs/1",
+        "seed_config_version": "hybrid_seed_v1",
+        "contract_version": "match_result_v1",
+    }
+
+
+def test_run_completed_match_results_payload_is_display_safe() -> None:
+    import json
+    from uuid import uuid4 as _uuid4
+
+    job_id = str(_uuid4())
+    item = _match_result_item(job_id)
+    event = parse_sse_event(
+        {
+            "event": "run_completed",
+            "event_id": f"evt-{uuid4().hex[:12]}",
+            "run_id": RUN_ID,
+            "timestamp": TS.isoformat().replace("+00:00", "Z"),
+            "payload": {
+                "match_results": {
+                    "kind": "match_results",
+                    "contract_version": "match_result_v1",
+                    "seed_config_version": "hybrid_seed_v1",
+                    "count": 1,
+                    "results": [item],
+                }
+            },
+        }
+    )
+    serialized = serialize_sse_event(event)
+    assert serialized["event"] == "run_completed"
+    card = serialized["payload"]["match_results"]
+    assert card["kind"] == "match_results"
+    assert card["count"] == 1
+    assert card["results"][0]["job_id"] == job_id
+    assert card["results"][0]["title"] == "Engineer"
+    blob = json.dumps(serialized)
+    assert "raw_content" not in blob
+    assert "cv_text" not in blob
+    assert "vector" not in blob
+    assert "api_key" not in blob
+    assert "stack_trace" not in blob
+
+
+def test_run_completed_rejects_malformed_match_results() -> None:
+    with pytest.raises(SSESchemaError):
+        parse_sse_event(
+            {
+                "event": "run_completed",
+                "event_id": f"evt-{uuid4().hex[:12]}",
+                "run_id": RUN_ID,
+                "timestamp": TS.isoformat().replace("+00:00", "Z"),
+                "payload": {
+                    "match_results": {
+                        "kind": "match_results",
+                        "contract_version": "match_result_v1",
+                        "seed_config_version": "hybrid_seed_v1",
+                        "count": 1,
+                        "results": [{"job_id": "not-a-uuid", "final_score": 0.5}],
+                    }
+                },
+            }
+        )
+
+
+def test_run_completed_rejects_oversized_match_results() -> None:
+    items = [_match_result_item() for _ in range(11)]
+    with pytest.raises(SSESchemaError):
+        parse_sse_event(
+            {
+                "event": "run_completed",
+                "event_id": f"evt-{uuid4().hex[:12]}",
+                "run_id": RUN_ID,
+                "timestamp": TS.isoformat().replace("+00:00", "Z"),
+                "payload": {
+                    "match_results": {
+                        "kind": "match_results",
+                        "contract_version": "match_result_v1",
+                        "seed_config_version": "hybrid_seed_v1",
+                        "count": 11,
+                        "results": items,
+                    }
+                },
+            }
+        )
+
+
 def test_profile_approval_payload_extension_is_display_safe() -> None:
     import json
 

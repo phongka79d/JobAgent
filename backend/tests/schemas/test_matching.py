@@ -6,6 +6,11 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.schemas.matching import (
+    KIND_MATCH_RESULTS,
+    MATCH_JOBS_OUTCOME_MATCH_FAILED,
+    MATCH_JOBS_OUTCOME_MATCHES_FOUND,
+    MATCH_JOBS_OUTCOME_NO_MATCHES,
+    MATCH_JOBS_OUTCOME_PROFILE_REQUIRED,
     MATCH_RESULT_CONTRACT_VERSION,
     MAX_EXPLANATION_LINE_LEN,
     MAX_EXPLANATION_LINES,
@@ -13,7 +18,12 @@ from app.schemas.matching import (
     MatchComponentEntry,
     MatchResult,
     MatchResultCollection,
+    MatchResultsCardPayload,
     MatchSkillPath,
+    build_match_results_card,
+    match_jobs_public_outcome,
+    parse_match_jobs_tool_body,
+    try_parse_match_results_card,
 )
 from app.schemas.score_breakdown import COMPONENT_ORDER
 from pydantic import ValidationError
@@ -317,6 +327,107 @@ def test_score_out_of_range_rejected() -> None:
         _result(score=1.5)
     with pytest.raises(ValidationError):
         _result(score=-0.1)
+
+
+def test_match_results_card_from_collection_and_parse_roundtrip() -> None:
+    collection = MatchResultCollection(
+        results=[_result(), _result(score=0.7)],
+        seed_config_version="hybrid_seed_v1",
+    )
+    card = build_match_results_card(collection)
+    assert card.kind == KIND_MATCH_RESULTS
+    assert card.count == 2
+    dumped = card.model_dump(mode="json")
+    parsed = try_parse_match_results_card(dumped)
+    assert parsed is not None
+    assert parsed.model_dump(mode="json") == dumped
+    assert "raw_content" not in dumped
+    assert "vector" not in str(dumped).lower()
+
+
+def test_try_parse_match_results_card_fail_closed() -> None:
+    assert try_parse_match_results_card(None) is None
+    assert try_parse_match_results_card({"kind": "saved_job"}) is None
+    assert try_parse_match_results_card({"kind": "match_results"}) is None
+    oversized = {
+        "kind": "match_results",
+        "contract_version": MATCH_RESULT_CONTRACT_VERSION,
+        "seed_config_version": "hybrid_seed_v1",
+        "count": 11,
+        "results": [_result().model_dump(mode="json") for _ in range(11)],
+    }
+    assert try_parse_match_results_card(oversized) is None
+    bad_count = {
+        "kind": "match_results",
+        "contract_version": MATCH_RESULT_CONTRACT_VERSION,
+        "seed_config_version": "hybrid_seed_v1",
+        "count": 2,
+        "results": [_result().model_dump(mode="json")],
+    }
+    assert try_parse_match_results_card(bad_count) is None
+
+
+def test_parse_match_jobs_tool_body_success_and_failures() -> None:
+    collection = MatchResultCollection(
+        results=[_result()],
+        seed_config_version="hybrid_seed_v1",
+    )
+    body = {
+        "ok": True,
+        "status": "matched",
+        "count": 1,
+        "limit": 10,
+        "contract_version": collection.contract_version,
+        "seed_config_version": collection.seed_config_version,
+        "results": [collection.results[0].model_dump(mode="json")],
+    }
+    import json
+
+    parsed = parse_match_jobs_tool_body(json.dumps(body))
+    assert parsed is not None
+    assert len(parsed.results) == 1
+    assert parse_match_jobs_tool_body('ERROR:{"code":"X","ok":false}') is None
+    assert parse_match_jobs_tool_body(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "profile_required",
+                "results": [],
+                "contract_version": MATCH_RESULT_CONTRACT_VERSION,
+                "seed_config_version": "hybrid_seed_v1",
+            }
+        )
+    ) is None
+    assert parse_match_jobs_tool_body('{"ok":false,"status":"matched"}') is None
+    assert match_jobs_public_outcome(json.dumps(body)) == MATCH_JOBS_OUTCOME_MATCHES_FOUND
+    empty = dict(body)
+    empty["results"] = []
+    empty["count"] = 0
+    assert match_jobs_public_outcome(json.dumps(empty)) == MATCH_JOBS_OUTCOME_NO_MATCHES
+    assert (
+        match_jobs_public_outcome(
+            json.dumps({"ok": True, "status": "profile_required", "results": []})
+        )
+        == MATCH_JOBS_OUTCOME_PROFILE_REQUIRED
+    )
+    assert (
+        match_jobs_public_outcome('ERROR:{"code":"MATCH_JOBS_FAILED","ok":false}')
+        == MATCH_JOBS_OUTCOME_MATCH_FAILED
+    )
+
+
+def test_match_results_card_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        MatchResultsCardPayload.model_validate(
+            {
+                "kind": "match_results",
+                "contract_version": MATCH_RESULT_CONTRACT_VERSION,
+                "seed_config_version": "hybrid_seed_v1",
+                "count": 0,
+                "results": [],
+                "raw_tool_body": "secret",
+            }
+        )
 
 
 def test_json_roundtrip_stable() -> None:

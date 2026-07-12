@@ -840,9 +840,9 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -
 # Then one user-observed public-URL or raw-text save/query chat flow.
 ```
 
-## Plan 6 progress (Batches 01–02) — retrieval and deterministic matching
+## Plan 6 progress (Batches 01–03) — matching tool and bounded transport
 
-**Plan 6 Batches 01–02 are evidence-backed.** Normal validation uses injected
+**Plan 6 Batches 01–03 are evidence-backed.** Normal validation uses injected
 graph/database fakes and pure inputs only — no live Neo4j, ShopAIKey, or LLM
 call is required or claimed.
 
@@ -859,8 +859,14 @@ call is required or claimed.
   explanations, and only a validated public source URL. Ranking, explanations,
   and schemas make no model calls or Job mutations.
 - Production exposure remains exactly six tools and seven public application
-  routes. `match_jobs` transport/UI integration, evaluation datasets, and
-  tuning remain later Plan 6 batches.
+  routes. The seventh production tool, `match_jobs`, requires an approved
+  profile, bounds results to ten, retries pending graph work before retrieval,
+  and stores only validated derived score details for bounded `query_jobs`
+  reads.
+- Validated match-results cards reuse the existing eight-event SSE, final
+  assistant payload, and history seam; no route, event name, raw tool result,
+  or separate transport was added. Frontend presentation, evaluation datasets,
+  and tuning remain later Plan 6 batches.
 
 Focused Batch02 verification:
 

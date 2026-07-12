@@ -28,9 +28,36 @@ _MAX_HISTORY_LIMIT = 500
 _MAX_CONTEXT_LIMIT = 100
 _MAX_CONTENT_LEN = 32_768
 _MAX_PAYLOAD_DEPTH = 6
-_MAX_PAYLOAD_NODES = 200
+# Top-10 match-results cards carry full component/skill evidence; 200 nodes is
+# far too small. Cap still bounds pathological payloads (≈10 maxed results).
+_MAX_PAYLOAD_NODES = 12_000
 _MAX_STRING_LEN = 2048
 _MAX_COLLECTION_LEN = 100
+# Short tokens that collide with legitimate display keys (e.g. related_path).
+# Exact-key match only; longer secret/document tokens still use substring checks.
+_EXACT_ONLY_PROHIBITED_KEYS: frozenset[str] = frozenset(
+    {
+        "path",
+        "cv",
+        "pdf",
+        "blob",
+        "auth",
+        "token",
+        "secret",
+        "passwd",
+        "password",
+        "bearer",
+        "binary",
+        "document",
+        "resume",
+        "folder",
+        "directory",
+        "attachment",
+        "filename",
+        "transcript",
+        "transcription",
+    }
+)
 
 _ALLOWED_ROLES: frozenset[str] = frozenset(role.value for role in MessageRole)
 
@@ -123,7 +150,12 @@ def _key_is_prohibited(key: str) -> bool:
         return True
     if normalized in _PROHIBITED_KEY_TOKENS:
         return True
-    return any(token in normalized for token in _PROHIBITED_KEY_TOKENS)
+    for token in _PROHIBITED_KEY_TOKENS:
+        if token in _EXACT_ONLY_PROHIBITED_KEYS:
+            continue
+        if token in normalized:
+            return True
+    return False
 
 
 def _string_looks_like_path(value: str) -> bool:

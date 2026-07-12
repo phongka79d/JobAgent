@@ -61,6 +61,12 @@ from app.schemas.job_tools import (
     save_job_public_outcome,
     try_parse_saved_job_card,
 )
+from app.schemas.matching import (
+    build_match_results_card,
+    match_jobs_public_outcome,
+    parse_match_jobs_tool_body,
+    try_parse_match_results_card,
+)
 from app.services.chat_context import ChatContextAssembler, ChatContextError
 from app.tools.registry import ToolRegistry
 
@@ -118,7 +124,7 @@ class ChatTurnResult:
     pending_approval: dict[str, Any] | None
     replayed: bool
     checkpoints_deleted: bool
-    # Bounded display card (saved_job) for run_completed / history; never tool body.
+    # Bounded display card (saved_job | match_results) for run_completed / history.
     structured_payload: dict[str, Any] | None = None
 
 
@@ -696,9 +702,9 @@ class ChatService:
                     checkpoints_deleted=False,
                 )
 
-            saved_job_payload: dict[str, Any] | None = None
+            card_payload: dict[str, Any] | None = None
             if graph_result is not None:
-                saved_job_payload = await self._persist_tool_records(
+                card_payload = await self._persist_tool_records(
                     tools_repo,
                     run_id=run_id,
                     graph_result=graph_result,
@@ -706,12 +712,12 @@ class ChatService:
 
             if outcome == "completed" and final_text is not None:
                 # Final validated assistant message BEFORE checkpoint cleanup.
-                # Optional bounded saved-job card only — never the tool body.
+                # Optional bounded card only (saved_job | match_results) — never tool body.
                 try:
                     assistant = await conv.append_message(
                         role=MessageRole.ASSISTANT,
                         content=final_text,
-                        structured_payload=saved_job_payload,
+                        structured_payload=card_payload,
                     )
                     assistant_message_id = assistant.id
                 except (ConversationRepositoryError, ConversationMessageError):
@@ -724,7 +730,7 @@ class ChatService:
                             structured_payload=None,
                         )
                         assistant_message_id = assistant.id
-                        saved_job_payload = None
+                        card_payload = None
                     except (ConversationRepositoryError, ConversationMessageError):
                         failed_run = await runs.mark_failed(
                             run_id, error="assistant_persist_failed"
@@ -759,7 +765,7 @@ class ChatService:
                 checkpoints_deleted=False,
                 assistant_message_id=assistant_message_id,
                 final_text=final_text,
-                structured_payload=saved_job_payload,
+                structured_payload=card_payload,
             )
 
         if outcome == "completed":
@@ -815,8 +821,9 @@ class ChatService:
         document text. Durable ``arguments_summary`` is restricted to
         allowlisted status tokens for public SSE mapping.
 
-        Returns the last successful ``save_job`` card payload (if any) for the
-        final assistant ``structured_payload`` / ``run_completed`` surface.
+        Returns the last successful display card (``saved_job`` or
+        ``match_results``) for the final assistant ``structured_payload`` /
+        ``run_completed`` surface. Tool failures never yield a success card.
         """
         messages = graph_result.get("messages_for_this_turn") or ()
         if not isinstance(messages, Sequence):
@@ -828,7 +835,7 @@ class ChatService:
             # Still recover card from durable assistant message if present later.
             return None
 
-        saved_job_payload: dict[str, Any] | None = None
+        card_payload: dict[str, Any] | None = None
 
         for item in messages:
             name: str | None = None
@@ -891,8 +898,8 @@ class ChatService:
                                 force_new_authorized=audit is not None,
                             )
                             try:
-                                card = build_saved_job_card(parsed)
-                                saved_job_payload = card.model_dump(mode="json")
+                                saved_card = build_saved_job_card(parsed)
+                                card_payload = saved_card.model_dump(mode="json")
                             except Exception:
                                 # Card construction must not fail observability.
                                 pass
@@ -901,6 +908,15 @@ class ChatService:
                             and _FORCE_NEW_AUDIT_JSON_FRAGMENT in text
                         ):
                             summary = PUBLIC_TOOL_OUTCOME_FORCE_NEW_AUTHORIZED
+                    elif safe_name == "match_jobs" and text:
+                        summary = match_jobs_public_outcome(text)
+                        collection = parse_match_jobs_tool_body(text)
+                        if collection is not None:
+                            try:
+                                match_card = build_match_results_card(collection)
+                                card_payload = match_card.model_dump(mode="json")
+                            except Exception:
+                                pass
                     await tools_repo.finish(
                         row.id,
                         duration_ms=0,
@@ -910,7 +926,7 @@ class ChatService:
                 # Observability must not fail the durable turn outcome.
                 continue
 
-        return saved_job_payload
+        return card_payload
 
     async def _snapshot_result(
         self,
@@ -944,12 +960,16 @@ class ChatService:
             )
         if structured_payload is None:
             structured_payload = loaded_payload
-        # Fail closed: only accept validated saved-job card shape.
+        # Fail closed: only accept validated saved-job or match-results card shape.
         if structured_payload is not None:
-            card = try_parse_saved_job_card(structured_payload)
-            structured_payload = (
-                card.model_dump(mode="json") if card is not None else None
-            )
+            saved = try_parse_saved_job_card(structured_payload)
+            if saved is not None:
+                structured_payload = saved.model_dump(mode="json")
+            else:
+                matches = try_parse_match_results_card(structured_payload)
+                structured_payload = (
+                    matches.model_dump(mode="json") if matches is not None else None
+                )
 
         pending: dict[str, Any] | None = pending_approval_override
         if pending is None and run.pending_approval:

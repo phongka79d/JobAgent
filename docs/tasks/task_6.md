@@ -381,7 +381,7 @@ event, write approval, frontend component, evaluation tuning, or Job mutation.
 
 ### Tasks
 
-- [ ] (03A): Register match_jobs with profile, outbox, limit, and cache guards
+- [x] (03A): Register match_jobs with profile, outbox, limit, and cache guards
   - Source of Truth: `docs/plans/Plan_6.md` > `## 4. Scope`; `docs/plans/Plan_6.md` > `### 7.1 Retrieval representations`; `docs/plans/Master_plan.md` > `### 13.6 query_jobs`; `docs/plans/Master_plan.md` > `### 13.7 match_jobs`; `docs/plans/Master_plan.md` > `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Require an approved profile, default to and cap at 10 results, validate optional saved Job IDs, retry pending graph work before retrieval, and return sanitized guidance/failure states.
@@ -406,7 +406,7 @@ event, write approval, frontend component, evaluation tuning, or Job mutation.
   - Blocked Condition: Existing `score_cache` cannot safely store the bounded versioned result without a migration or the production composition root cannot inject the accepted graph/embedding services; report `BLOCKED_BY_SOURCE_CONFLICT` before changing persistence architecture.
   - Files: `backend/app/tools/match_jobs.py`, `backend/app/tools/query_jobs.py`, `backend/app/tools/registry.py`, `backend/app/main.py`, `backend/app/repositories/job_posts.py`, `backend/tests/tools/test_match_jobs.py`, `backend/tests/tools/test_query_jobs.py`, `backend/tests/tools/test_registry.py`
 
-- [ ] (03B): Carry one bounded match-results payload through existing chat transport
+- [x] (03B): Carry one bounded match-results payload through existing chat transport
   - Source of Truth: `docs/plans/Plan_6.md` > `### 7.5 Match result contract`; `docs/plans/Master_plan.md` > `### 14.2 SSE contract`; `docs/plans/Master_plan.md` > `### 15.5 Match result card`; `docs/plans/Master_plan.md` > `### 22.4 Logging`
   - Source Requirements:
     - Attach validated top results to final assistant `structured_payload`, `run_completed`, and history hydration without adding a ninth event.

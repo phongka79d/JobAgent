@@ -18,7 +18,7 @@ from langchain_core.tools import StructuredTool
 from tests.fakes.agent_tools import make_echo_label_tool
 
 
-def test_production_registry_contains_exactly_six_tools() -> None:
+def test_production_registry_contains_exactly_seven_tools() -> None:
     tools = [
         StructuredTool.from_function(func=lambda: "ok", name=name, description=name)
         for name in sorted(PRODUCTION_TOOL_NAMES)
@@ -32,13 +32,15 @@ def test_production_registry_contains_exactly_six_tools() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
+        "match_jobs",
     }
-    assert "match_jobs" not in registry
+    assert "match_jobs" in registry
+    assert len(registry) == 7
     # Profile subset is preserved as a named constant.
     assert CURRENT_PROFILE_TOOL_NAMES < PRODUCTION_TOOL_NAMES
 
 
-def test_production_registry_rejects_profile_only_or_match_jobs() -> None:
+def test_production_registry_rejects_profile_only_or_six_without_match() -> None:
     profile_only = [
         StructuredTool.from_function(func=lambda: "ok", name=name, description=name)
         for name in sorted(CURRENT_PROFILE_TOOL_NAMES)
@@ -46,13 +48,12 @@ def test_production_registry_rejects_profile_only_or_match_jobs() -> None:
     with pytest.raises(ToolRegistryError, match="invalid production tool set"):
         create_production_registry(profile_only)
 
-    with_match = [
+    without_match = [
         StructuredTool.from_function(func=lambda: "ok", name=name, description=name)
-        for name in sorted(PRODUCTION_TOOL_NAMES | {"match_jobs"})
+        for name in sorted(PRODUCTION_TOOL_NAMES - {"match_jobs"})
     ]
-    # Seven names including match_jobs is not the production set.
     with pytest.raises(ToolRegistryError, match="invalid production tool set"):
-        create_production_registry(with_match)
+        create_production_registry(without_match)
 
 
 def test_register_and_list_is_sorted_and_gettable() -> None:
@@ -96,7 +97,7 @@ def test_replace_all_and_clear_for_test_isolation() -> None:
     assert len(registry) == 0
 
 
-def test_later_phase_domain_tool_names_document_match_jobs_as_reserved() -> None:
+def test_later_phase_domain_tool_names_match_production_seven() -> None:
     expected = {
         "get_candidate_context",
         "propose_profile_from_cv",
@@ -107,8 +108,8 @@ def test_later_phase_domain_tool_names_document_match_jobs_as_reserved() -> None
         "match_jobs",
     }
     assert LATER_PHASE_DOMAIN_TOOL_NAMES == expected
-    assert "match_jobs" in LATER_PHASE_DOMAIN_TOOL_NAMES
-    assert "match_jobs" not in PRODUCTION_TOOL_NAMES
+    assert PRODUCTION_TOOL_NAMES == expected
+    assert "match_jobs" in PRODUCTION_TOOL_NAMES
 
 
 def test_synthetic_tool_not_imported_by_production_app_modules() -> None:
@@ -135,12 +136,10 @@ def test_production_tools_do_not_call_internal_http() -> None:
     assert hits == []
 
 
-def test_no_match_jobs_implementation_in_tools() -> None:
-    """match_jobs remains reserved only — no production implementation module."""
+def test_match_jobs_implementation_registered() -> None:
+    """match_jobs is the seventh production tool with a factory module."""
     tools_root = Path(__file__).resolve().parents[2] / "app" / "tools"
-    assert not (tools_root / "match_jobs.py").exists()
-    for path in tools_root.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        # Name may appear as a reserved string; must not define a callable tool.
-        assert "def create_match_jobs" not in text
-        assert 'name="match_jobs"' not in text
+    assert (tools_root / "match_jobs.py").exists()
+    text = (tools_root / "match_jobs.py").read_text(encoding="utf-8")
+    assert "def create_match_jobs_tool" in text
+    assert 'name="match_jobs"' in text

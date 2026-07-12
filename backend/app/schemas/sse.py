@@ -24,6 +24,7 @@ from pydantic import (
     Field,
     TypeAdapter,
     field_validator,
+    model_validator,
 )
 
 # ---------------------------------------------------------------------------
@@ -688,14 +689,55 @@ class SavedJobSSEPayload(_PayloadBase):
         return cleaned
 
 
-class RunCompletedPayload(_PayloadBase):
-    """Terminal success marker; optional bounded saved-Job card (Plan 5).
+class MatchResultsSSEPayload(_PayloadBase):
+    """Bounded match-results card on ``run_completed`` (Plan 6).
 
-    Empty payload remains valid. Malformed ``saved_job`` must fail closed at
-    parse time so producers omit the field rather than emitting secrets.
+    Same contract as durable ``structured_payload`` kind ``match_results``.
+    Full validation reuses ``MatchResultsCardPayload`` so live/history share
+    one fail-closed schema; producers omit the field on parse failure.
+    """
+
+    kind: Literal["match_results"] = "match_results"
+    contract_version: str = Field(..., min_length=1, max_length=64)
+    seed_config_version: str = Field(..., min_length=1, max_length=64)
+    count: int = Field(..., ge=0, le=10)
+    results: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _validate_card_contract(self) -> MatchResultsSSEPayload:
+        # Local import avoids circular schema package coupling at module load.
+        from app.schemas.matching_card import try_parse_match_results_card
+
+        card = try_parse_match_results_card(
+            {
+                "kind": self.kind,
+                "contract_version": self.contract_version,
+                "seed_config_version": self.seed_config_version,
+                "count": self.count,
+                "results": self.results,
+            }
+        )
+        if card is None:
+            raise ValueError("invalid match_results card")
+        # Normalize to card JSON (safe URLs, bounds, identity).
+        dumped = card.model_dump(mode="json")
+        self.contract_version = str(dumped["contract_version"])
+        self.seed_config_version = str(dumped["seed_config_version"])
+        self.count = int(dumped["count"])
+        self.results = list(dumped["results"])
+        return self
+
+
+class RunCompletedPayload(_PayloadBase):
+    """Terminal success marker; optional bounded saved-Job or match card.
+
+    Empty payload remains valid. Malformed ``saved_job`` / ``match_results``
+    must fail closed at parse time so producers omit the field rather than
+    emitting secrets. At most one card kind is expected per completed run.
     """
 
     saved_job: SavedJobSSEPayload | None = None
+    match_results: MatchResultsSSEPayload | None = None
 
 
 class RunFailedPayload(_PayloadBase):

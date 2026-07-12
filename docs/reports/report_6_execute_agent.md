@@ -744,3 +744,288 @@ complete
 - changes made: stripped extra trailing blank line at EOF from backend/tests/services/test_matching.py only
 - validations rerun: git diff --check exit 0; pytest Batch02 matching suite 50 passed
 - outcome: complete; pre-commit formatting finding resolved; ready for re-stage/commit by orchestrator
+
+---
+
+# Task Execution Report - 03A
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Agent Tool and Backend Match Payload
+
+## Task
+03A - Register match_jobs with profile, outbox, limit, and cache guards
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Agent Tool and Backend Match Payload
+- Task ID: 03A
+- Task title: Register match_jobs with profile, outbox, limit, and cache guards
+- Files allowed / repair scope: backend/app/tools/match_jobs.py plus focused companion module(s) and tests — split tool input/wrapper from matching pipeline orchestration so every newly created or modified production source module is 300 lines or fewer; preserve public tool API and shared retrieval/scoring/cache behavior without duplication
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ## 4. Scope
+- docs/plans/Plan_6.md > ### 7.1 Retrieval representations
+- docs/plans/Master_plan.md > ### 13.6 query_jobs
+- docs/plans/Master_plan.md > ### 13.7 match_jobs
+- docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy
+
+## Supplemental Documents Used
+- docs/plans/Plan_6.md
+- docs/plans/Master_plan.md
+- README.md
+- docs/tasks/task_6.md (03A block)
+- A2 REJECTED_WITH_WARNINGS modularity repair envelope
+
+## Dependency and User Action Check
+- Dependencies: (02C) stable matching service/result; existing database, graph, embedding, outbox, query_jobs, and registry seams (present; reused)
+- User Action: None required
+- Dependencies satisfied: yes
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_6.md
+- docs/reports/report_6_execute_agent.md (existing 03A block)
+- backend/app/tools/match_jobs.py (pre-repair monolith, 368 lines)
+- backend/app/tools/registry.py
+- backend/app/tools/query_jobs.py
+- backend/app/main.py
+- backend/app/services/matching.py (facade split pattern)
+- backend/tests/tools/test_match_jobs.py
+- backend/tests/tools/test_registry.py
+
+## Completed Work
+- Implemented thin `MatchJobsInput` (limit default/cap 10; optional saved Job IDs 1–50 unique) and `MatchJobsToolService` that loads approved profile/preferences, returns profile-required guidance with zero embed/graph/cache calls when no profile, embeds via existing `embed_candidate`, retrieves via `retrieve_top_job_candidates` (bounded outbox retry), scores via `compute_skill_component` + `score_job_components` + `rank_match_results`, and persists validated versioned `MatchResult` score caches through caller-owned transactions.
+- Added `JobPostRepository.set_score_cache` and validated score_cache read path (MatchResult + contract version + job_id match; invalid/stale omitted).
+- Updated `query_jobs` to re-validate and expose score details only for active processed full|partial Jobs with valid MatchResult caches.
+- Registered `match_jobs` as the seventh production tool (`PRODUCTION_TOOL_NAMES` and `create_production_registry`); wired composition root in `main.py` with `JobEmbeddingService` + Neo4j graph client injection.
+- Added/updated fake-backed tests for preconditions, limits, filters, Neo4j failure, cache exposure, registry seven-tool set, and route suite compatibility.
+- Same-task repair: split tool input/wrapper from pipeline orchestration — `match_jobs.py` keeps `MatchJobsInput` + `create_match_jobs_tool` and re-exports public API; new `match_jobs_pipeline.py` owns `MatchJobsToolService`, related-key collection, scoring assembly, payload helpers, and cache persistence without duplicating retrieval/scoring formulas.
+
+## Files Created or Modified
+- backend/app/tools/match_jobs.py (created; repair: slimmed to input/wrapper + public re-exports)
+- backend/app/tools/match_jobs_pipeline.py (created on repair)
+- backend/app/tools/query_jobs.py (modified)
+- backend/app/tools/registry.py (modified)
+- backend/app/main.py (modified)
+- backend/app/repositories/job_posts.py (modified)
+- backend/tests/tools/test_match_jobs.py (created)
+- backend/tests/tools/test_query_jobs.py (modified)
+- backend/tests/tools/test_registry.py (modified)
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pytest -q tests/tools/test_match_jobs.py tests/tools/test_query_jobs.py tests/tools/test_registry.py tests/agent/test_graph.py tests/api/test_chat.py
+- required: yes
+- result: passed
+- evidence or reason: 49 passed in 5.66s (repair re-run)
+
+- command/check: cd backend; python -m ruff check app/tools/match_jobs.py app/tools/match_jobs_pipeline.py app/tools/query_jobs.py app/tools/registry.py app/main.py app/repositories/job_posts.py tests/tools
+- required: yes
+- result: passed
+- evidence or reason: All checks passed! (includes repair companion module)
+
+- command/check: cd backend; python -m mypy app/tools/match_jobs.py app/tools/match_jobs_pipeline.py app/tools/query_jobs.py app/tools/registry.py app/main.py app/repositories/job_posts.py
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 6 source files
+
+- command/check: module line counts (match_jobs.py, match_jobs_pipeline.py) ≤ 300
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: match_jobs.py = 105 lines; match_jobs_pipeline.py = 296 lines
+
+- command/check: git diff --check
+- required: yes (A2 repair)
+- result: passed
+- evidence or reason: exit 0 (CRLF warnings only; no conflict markers or whitespace errors)
+
+## Acceptance Check
+- condition: No approved profile yields guidance with zero embed/graph/cache calls
+- status: satisfied
+- evidence: test_no_profile_guidance_zero_side_effects asserts PROFILE_REQUIRED guidance, empty results, embed_calls=0, graph_retrieve_calls=0, cache_write_calls=0, zero factory/client/graph queries
+
+- condition: Failures never claim matches; Neo4j failure sanitized
+- status: satisfied
+- evidence: test_neo4j_failure_no_matches returns ERROR payload with ok:false and zero cache writes
+
+- condition: Result limit max 10 and saved IDs max 50
+- status: satisfied
+- evidence: MatchJobsInput Field ge=1 le=10; max_length=50 on saved_job_ids; test_match_jobs_input_limits and test_result_limit_cap_and_saved_id_filter
+
+- condition: Registry is exactly previous six plus match_jobs; routes remain seven
+- status: satisfied
+- evidence: PRODUCTION_TOOL_NAMES has seven names including match_jobs; test_production_registry_contains_exactly_seven_tools; tests/api/test_chat.py APPROVED_PATHS still seven routes and suite passed
+
+- condition: query_jobs reads validated existing score details only
+- status: satisfied
+- evidence: test_query_by_id_returns_compact_view with MatchResult cache; test_invalid_score_cache_not_exposed; test_score_cache_never_computed; match success path asserts query_jobs surfaces cached final_score without raw content
+
+- condition: Production modules modified/created for match_jobs are ≤ 300 lines; public tool API preserved
+- status: satisfied
+- evidence: match_jobs.py 105 lines (input + wrapper + re-exports); match_jobs_pipeline.py 296 lines (orchestration only); main/tests still import MatchJobsToolService/create_match_jobs_tool/MatchJobsInput from app.tools.match_jobs; 49 pytest passed
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Key Implementation Decisions
+- Score cache stores full validated MatchResult JSON (contract_version match_result_v1); no schema migration required — existing JSON column is sufficient.
+- Related-edge graph read reuses query_verified_related_edges after retrieval; scoring/explanation formulas remain in services only.
+- Cache write failures after ranking return MATCH_JOBS_CACHE_FAILED rather than a success payload with unpersisted cache (fail closed on cache path).
+- Avoided importing is_graph_eligible from job_sync into job_posts to prevent circular imports; scorable gate inlined for set_score_cache.
+- Modularity: pipeline companion mirrors services/matching.py facade pattern — stable imports stay on match_jobs; no formula duplication.
+
+## Risks or Open Issues
+- Broader integration exposure suites (test_full_job_workflow, test_full_chat_transport, profile exposure_cases) still assert six tools / no match_jobs implementation; out of 03A required file and validation scope — expected to update when those suites are next run or in later batch tasks.
+- 03B (chat structured_payload transport) not started.
+
+## Notes for Review Agent
+- changed files this repair: backend/app/tools/match_jobs.py, backend/app/tools/match_jobs_pipeline.py; prior 03A files unchanged by this repair
+- validations to rerun: required 03A pytest/ruff/mypy (include match_jobs_pipeline.py), line counts, git diff --check
+- risk areas: public re-exports must remain on match_jobs; pipeline must not reimplement scoring formulas
+- next task readiness: can_review
+
+## Repair Log
+
+### 2026-07-13T00:23:17+07:00
+- reason for repair: A2 REJECTED_WITH_WARNINGS — match_jobs.py exceeded 300-line focused-module ceiling; split tool input/wrapper from matching pipeline orchestration required
+- changes made: extracted MatchJobsToolService, scoring assembly helpers, and tool payload helpers into backend/app/tools/match_jobs_pipeline.py; left MatchJobsInput + create_match_jobs_tool on match_jobs.py with re-exports of DEFAULT_MATCH_LIMIT, PROFILE_REQUIRED_GUIDANCE, MatchJobsToolService so public imports and behavior are unchanged
+- validations rerun: required 03A pytest (49 passed), ruff + mypy including companion module (pass), module line counts (105 / 296), git diff --check (pass)
+- outcome: complete — modularity finding fixed; acceptance preserved
+
+---
+
+# Task Execution Report - 03B
+
+## Source Task File
+docs/tasks/task_6.md
+
+## Report File
+docs/reports/report_6_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch03 - Agent Tool and Backend Match Payload
+
+## Task
+03B - Carry one bounded match-results payload through existing chat transport
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Agent Tool and Backend Match Payload
+- Task ID: 03B
+- Task title: Carry one bounded match-results payload through existing chat transport
+- Files allowed / repair scope: matching schemas + SSE/chat transport seams listed in task Files; conversations payload ceilings required for durable top-10 cards
+
+## Source of Truth Used
+- docs/plans/Plan_6.md > ### 7.5 Match result contract
+- docs/plans/Master_plan.md > ### 14.2 SSE contract
+- docs/plans/Master_plan.md > ### 15.5 Match result card
+- docs/plans/Master_plan.md > ### 22.4 Logging
+
+## Dependency and User Action Check
+- Dependencies: 03A match_jobs tool payload and 02C MatchResult schemas available; saved_job structured_payload seam reused
+- User Action: None
+- dependenciesSatisfied: true
+- userActionsSatisfied: true
+
+## Files Inspected Before Editing
+- backend/app/schemas/job_tools.py (saved_job card pattern)
+- backend/app/schemas/matching.py / matching_result.py
+- backend/app/schemas/sse.py (RunCompletedPayload, SavedJobSSEPayload)
+- backend/app/services/chat_service.py (_persist_tool_records, snapshot validation)
+- backend/app/api/chat.py (SSE build, public tool outcomes)
+- backend/app/repositories/conversations.py (validate_structured_payload bounds/keys)
+- backend/tests/integration/test_job_chat.py (saved_job live/history pattern)
+- docs/tasks/task_6.md (03B envelope)
+- README.md (project context)
+
+## Completed Work
+- Added bounded `match_results` card schema (kind discriminator) with fail-closed builder/parser and match_jobs tool-body parse/outcome helpers in `matching_card.py`, re-exported via `matching.py`.
+- Extended `RunCompletedPayload` with optional `match_results`; SSE payload validates through the same card contract as durable history.
+- Wired chat finalization to parse successful `match_jobs` tool output into one structured card; tool ERROR / profile_required / malformed bodies never emit a success card.
+- Sanitized `match_jobs` tool activity via allowlisted outcome tokens (matches_found, no_matches, profile_required, match_failed) and friendly SSE labels.
+- Snapshot/history path fail-closed validates saved_job OR match_results tagged union; malformed/oversized drops card but keeps assistant text.
+- Raised durable structured-payload node ceiling and fixed exact-only short prohibited keys so `related_path` and top-10 evidence cards persist without inventing a new transport.
+- Added schema, SSE, API, and matching-chat integration tests for live/history equivalence, failures, malformed payloads, idempotency, eight event names, and sentinel absence.
+
+## Files Created or Modified
+- backend/app/schemas/matching_card.py (created)
+- backend/app/schemas/matching.py
+- backend/app/schemas/sse.py
+- backend/app/services/chat_service.py
+- backend/app/api/chat.py
+- backend/app/repositories/conversations.py
+- backend/tests/schemas/test_matching.py
+- backend/tests/schemas/test_sse.py
+- backend/tests/integration/test_matching_chat.py (created)
+- docs/reports/report_6_execute_agent.md (this report)
+
+## Tests or Validations Run
+- command/check: cd backend; python -m pytest -q tests/schemas/test_matching.py tests/schemas/test_sse.py tests/integration/test_matching_chat.py tests/api/test_chat.py tests/integration/test_job_chat.py
+- required: yes
+- result: passed
+- evidence or reason: 104 passed in 7.67s
+
+- command/check: cd backend; python -m ruff check app/schemas/matching.py app/schemas/matching_card.py app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py app/api/chat.py app/repositories/conversations.py tests/schemas tests/integration/test_matching_chat.py tests/api/test_chat.py
+- required: yes
+- result: passed
+- evidence or reason: All checks passed! (includes companion matching_card + conversations payload seam)
+
+- command/check: cd backend; python -m mypy app/schemas/matching.py app/schemas/matching_card.py app/schemas/sse.py app/schemas/chat.py app/services/chat_service.py app/api/chat.py
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 6 source files
+
+## Acceptance Check
+- condition: SSE event-name union remains exactly eight; run_completed carries at most one bounded match payload; saved_job remains compatible
+- status: satisfied
+- evidence: SUPPORTED_SSE_EVENT_TYPES length 8 in tests; RunCompletedPayload has optional saved_job and match_results; live match tests assert match_results without saved_job; job_chat saved_job suite still green
+
+- condition: Live and hydrated match payloads validate to the same safe contract; malformed/oversized fails closed without breaking assistant message
+- status: satisfied
+- evidence: test_match_results_live_and_history_equivalence; test_malformed_match_payload_fails_closed_keeps_message; try_parse_match_results_card fail-closed unit tests
+
+- condition: Tool failures never emit a success card; privacy sentinels absent from SSE/history/logs surfaces covered by tests
+- status: satisfied
+- evidence: test_match_jobs_failure_never_emits_card (run_failed, no match_results kind); profile_required guidance no card; _assert_no_leaks on wire and history
+
+- condition: No public route, alternate transport, raw tool result, or second conversation payload store
+- status: satisfied
+- evidence: reuses structured_payload + run_completed only; openapi path checks in matching-chat eight-event test; no new routes added
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode forbids checkbox and batch status updates; A2 is the acceptance gate
+
+## Key Implementation Decisions
+- Card lives as tagged-union structured_payload kind `match_results` parallel to `saved_job` (not a ninth SSE event).
+- Full validated `MatchResult` inventory is carried so 04A can render breakdowns without a second store.
+- conversations.py node ceiling raised to 12_000 and short prohibited keys (e.g. `path`) are exact-match only so `related_path` and top-10 cards persist; longer secret/document tokens still use substring checks.
+- match_jobs ERROR convention still fails the agent run (existing graph policy); no success card is emitted.
+
+## Risks or Open Issues
+- Broader Plan 5 exposure suites that still assert six tools / no match_jobs remain out of 03B required validation scope (same note as 03A).
+- Frontend 04A still unchecked; backend contract is ready for live/history hydration.
+
+## Notes for Review Agent
+- changed files: matching_card.py (new), matching.py, sse.py, chat_service.py, api/chat.py, conversations.py, schema/integration tests, this report
+- validations to rerun: required 03B pytest/ruff/mypy commands above
+- risk areas: conversations payload key/node policy change is shared; confirm saved_job and other cards still accept/reject as before (job_chat + conversations tests green in required set / related suites)
+- next task readiness: can_review

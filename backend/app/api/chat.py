@@ -36,12 +36,14 @@ from app.schemas.chat import (
     TurnRequest,
 )
 from app.schemas.job_tools import try_parse_saved_job_card
+from app.schemas.matching import try_parse_match_results_card
 from app.schemas.sse import (
     ApprovalRequiredEvent,
     ApprovalRequiredPayload,
     AssistantDisplayStatus,
     AssistantStatusEvent,
     AssistantStatusPayload,
+    MatchResultsSSEPayload,
     RunCompletedEvent,
     RunCompletedPayload,
     RunFailedEvent,
@@ -96,6 +98,11 @@ _ALLOWED_PUBLIC_TOOL_OUTCOMES: Final[frozenset[str]] = frozenset(
         "save_failed",
         "graph_pending",
         "graph_sync_failed",
+        # match_jobs display tokens (never raw scores tool body)
+        "matches_found",
+        "no_matches",
+        "profile_required",
+        "match_failed",
     }
 )
 
@@ -114,6 +121,10 @@ _PUBLIC_TOOL_OUTCOME_LABELS: Final[dict[str, str]] = {
     "save_failed": "Save failed",
     "graph_pending": "Job saved graph pending",
     "graph_sync_failed": "Job saved graph failed",
+    "matches_found": "Matches found",
+    "no_matches": "No matches",
+    "profile_required": "Profile required",
+    "match_failed": "Match failed",
 }
 
 
@@ -189,6 +200,21 @@ def _saved_job_sse_payload(
         return None
     try:
         return SavedJobSSEPayload.model_validate(card.model_dump(mode="json"))
+    except Exception:
+        return None
+
+
+def _match_results_sse_payload(
+    structured: Mapping[str, Any] | dict[str, Any] | None,
+) -> MatchResultsSSEPayload | None:
+    """Build a fail-closed match-results SSE payload from durable structured data."""
+    card = try_parse_match_results_card(
+        structured if isinstance(structured, dict) else None
+    )
+    if card is None:
+        return None
+    try:
+        return MatchResultsSSEPayload.model_validate(card.model_dump(mode="json"))
     except Exception:
         return None
 
@@ -362,14 +388,19 @@ async def build_sse_events_for_result(
                     payload=TextDeltaPayload(delta=chunk),
                 )
             )
-        # Optional bounded saved-job card; malformed/unsafe payloads omit the field.
+        # Optional bounded card; malformed/unsafe payloads omit the field.
+        # Tagged union: at most one of saved_job / match_results from kind.
         saved_job = _saved_job_sse_payload(result.structured_payload)
+        match_results = _match_results_sse_payload(result.structured_payload)
         raw.append(
             RunCompletedEvent(
                 event_id=_eid(),
                 run_id=run_id,
                 timestamp=ts,
-                payload=RunCompletedPayload(saved_job=saved_job),
+                payload=RunCompletedPayload(
+                    saved_job=saved_job,
+                    match_results=match_results,
+                ),
             )
         )
     else:

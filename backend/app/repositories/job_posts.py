@@ -32,7 +32,19 @@ from app.db.enums import (
 )
 from app.db.models.jobs import JobPost
 from app.schemas.job_post import JobPostExtraction
+from app.schemas.matching import (
+    MATCH_RESULT_CONTRACT_VERSION,
+    MatchResult,
+)
 from app.services.jd_source import hash_canonical_text
+
+# Scorable qualities for derived score-cache writes (aligned with graph eligibility).
+_SCORABLE_JD_QUALITIES: Final[frozenset[str]] = frozenset(
+    {
+        JdQuality.FULL.value,
+        JdQuality.PARTIAL.value,
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Bounds and identity
@@ -377,12 +389,30 @@ def _optional_status_filter(
     return normalized
 
 
-def _score_cache_view(value: Any) -> dict[str, Any] | None:
+def _score_cache_view(
+    value: Any,
+    *,
+    job_id: UUID | None = None,
+) -> dict[str, Any] | None:
+    """Return a validated versioned match-score cache, or ``None`` if unsafe.
+
+    Accepts only bounded ``MatchResult`` JSON with the locked contract version.
+    Invalid, stale-version, or job-id-mismatched payloads are omitted (never
+    raised to callers of compact reads) so tools never trust corrupt cache.
+    """
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise JobPostValidationError("invalid score_cache")
-    return dict(value)
+        return None
+    try:
+        parsed = MatchResult.model_validate(value)
+    except (ValidationError, ValueError, TypeError):
+        return None
+    if parsed.contract_version != MATCH_RESULT_CONTRACT_VERSION:
+        return None
+    if job_id is not None and parsed.job_id != job_id:
+        return None
+    return parsed.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +442,7 @@ class JobPostRepository:
         if row.extracted_json is not None:
             extraction = _validate_extraction(row.extracted_json)
         reasons = _validate_quality_reasons(row.quality_reasons)
-        score = _score_cache_view(row.score_cache)
+        score = _score_cache_view(row.score_cache, job_id=row.id)
         return JobPostRecord(
             id=row.id,
             source_type=row.source_type,
@@ -849,6 +879,57 @@ class JobPostRepository:
             dims = None
         row.embedding_model = model
         row.embedding_dimensions = dims
+        row.updated_at = utc_now()
+        await self._session.flush()
+        return self._to_record(row)
+
+    async def set_score_cache(
+        self,
+        job_id: UUID,
+        score_cache: dict[str, Any] | MatchResult | None,
+    ) -> JobPostRecord:
+        """Persist or clear a validated derived match-score cache. Does not commit.
+
+        Only active processed ``full|partial`` Jobs may store a cache. Payload
+        must validate as the locked ``MatchResult`` contract and match
+        ``job_id``. Vectors, raw JD/CV, and provider payloads are rejected by
+        the MatchResult surface (no free-form dump).
+        """
+        job_id = _validate_uuid(job_id, name="job_id")
+        row = await self._get_row(job_id)
+        if row is None:
+            raise JobPostNotFoundError("job post not found")
+        if score_cache is None:
+            row.score_cache = None
+            row.updated_at = utc_now()
+            await self._session.flush()
+            return self._to_record(row)
+
+        # Same scorable gate as graph eligibility (active processed full|partial).
+        if (
+            row.processing_status != ProcessingStatus.PROCESSED.value
+            or row.record_status != RecordStatus.ACTIVE.value
+            or row.jd_quality not in _SCORABLE_JD_QUALITIES
+            or row.extracted_json is None
+        ):
+            raise JobPostStateError("score cache only for scorable active jobs")
+
+        if isinstance(score_cache, MatchResult):
+            parsed = score_cache
+        else:
+            if not isinstance(score_cache, dict):
+                raise JobPostValidationError("invalid score_cache")
+            try:
+                parsed = MatchResult.model_validate(score_cache)
+            except (ValidationError, ValueError, TypeError) as exc:
+                raise JobPostValidationError("invalid score_cache") from exc
+
+        if parsed.job_id != job_id:
+            raise JobPostValidationError("score_cache job_id mismatch")
+        if parsed.contract_version != MATCH_RESULT_CONTRACT_VERSION:
+            raise JobPostValidationError("invalid score_cache contract_version")
+
+        row.score_cache = parsed.model_dump(mode="json")
         row.updated_at = utc_now()
         await self._session.flush()
         return self._to_record(row)

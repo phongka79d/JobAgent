@@ -38,6 +38,7 @@ from app.tools.candidate_context import (
     CandidateContextToolService,
     create_candidate_context_tool,
 )
+from app.tools.match_jobs import MatchJobsToolService, create_match_jobs_tool
 from app.tools.profile_commit import (
     ProfileCommitToolService,
     create_profile_commit_tool,
@@ -148,6 +149,7 @@ def create_app(
                 chat_adapter=decision,
                 url_fetcher=UrlFetcher.from_settings(cfg),
             )
+            job_embeddings = JobEmbeddingService.from_settings(cfg)
             registry = create_production_registry(
                 [
                     create_candidate_context_tool(CandidateContextToolService(db)),
@@ -155,6 +157,13 @@ def create_app(
                     commit_tool,
                     create_save_job_tool(SaveJobToolService(jd_ingestion)),
                     create_query_jobs_tool(QueryJobsToolService(db)),
+                    create_match_jobs_tool(
+                        MatchJobsToolService(
+                            db,
+                            graph,
+                            job_embeddings,
+                        )
+                    ),
                 ]
             )
             chat = ChatService(

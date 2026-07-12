@@ -17,6 +17,7 @@ from uuid import UUID
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.db.enums import ProcessingStatus, RecordStatus
 from app.db.session import DatabaseSessionManager
 from app.repositories.job_posts import (
     DEFAULT_LIST_LIMIT,
@@ -27,6 +28,7 @@ from app.repositories.job_posts import (
     JobPostValidationError,
 )
 from app.schemas.job_tools import JobDisplaySummary
+from app.schemas.matching import MATCH_RESULT_CONTRACT_VERSION, MatchResult
 
 
 class QueryJobsInput(BaseModel):
@@ -75,12 +77,37 @@ def _iso(value: datetime) -> str:
     return value.isoformat()
 
 
+def _validated_score_details(record: JobPostRecord) -> dict[str, Any] | None:
+    """Expose only validated versioned score details for eligible Jobs.
+
+    Never computes scores. Omits cache for ignored/unscorable rows and for
+    payloads that fail MatchResult re-validation or version checks.
+    """
+    if record.score_cache is None:
+        return None
+    if record.record_status != RecordStatus.ACTIVE.value:
+        return None
+    if record.processing_status != ProcessingStatus.PROCESSED.value:
+        return None
+    if record.jd_quality not in {"full", "partial"}:
+        return None
+    try:
+        parsed = MatchResult.model_validate(record.score_cache)
+    except (ValidationError, ValueError, TypeError):
+        return None
+    if parsed.contract_version != MATCH_RESULT_CONTRACT_VERSION:
+        return None
+    if parsed.job_id != record.id:
+        return None
+    return parsed.model_dump(mode="json")
+
+
 def _compact_job(record: JobPostRecord) -> dict[str, Any]:
     """Map a repository compact view to a tool-safe payload.
 
     Excludes raw content, hashes, error fields, embedding identity, and
     provider/internal material. Includes ``score_cache`` only when already
-    present on the row (never computed here).
+    present, validated, and eligible (never computed here).
     """
     extraction = record.extraction
     display = JobDisplaySummary(
@@ -117,9 +144,10 @@ def _compact_job(record: JobPostRecord) -> dict[str, Any]:
         "created_at": _iso(record.created_at),
         "updated_at": _iso(record.updated_at),
     }
-    # Score details only when already stored — never compute scores here.
-    if record.score_cache is not None:
-        payload["score_cache"] = dict(record.score_cache)
+    # Score details only when already stored and validated — never compute here.
+    score = _validated_score_details(record)
+    if score is not None:
+        payload["score_cache"] = score
     return payload
 
 

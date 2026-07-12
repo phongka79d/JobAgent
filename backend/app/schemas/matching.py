@@ -15,6 +15,18 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from app.schemas.matching_card import (
+    KIND_MATCH_RESULTS,
+    MATCH_JOBS_OUTCOME_MATCH_FAILED,
+    MATCH_JOBS_OUTCOME_MATCHES_FOUND,
+    MATCH_JOBS_OUTCOME_NO_MATCHES,
+    MATCH_JOBS_OUTCOME_PROFILE_REQUIRED,
+    MatchResultsCardPayload,
+    build_match_results_card,
+    match_jobs_public_outcome,
+    parse_match_jobs_tool_body,
+    try_parse_match_results_card,
+)
 from app.schemas.matching_result import (
     MATCH_RESULT_CONTRACT_VERSION,
     MAX_COMPONENT_ENTRIES,
@@ -132,6 +144,11 @@ class CandidateEmbeddingResult:
 
 __all__ = [
     "CANDIDATE_TEXT_REPRESENTATION_VERSION",
+    "KIND_MATCH_RESULTS",
+    "MATCH_JOBS_OUTCOME_MATCH_FAILED",
+    "MATCH_JOBS_OUTCOME_MATCHES_FOUND",
+    "MATCH_JOBS_OUTCOME_NO_MATCHES",
+    "MATCH_JOBS_OUTCOME_PROFILE_REQUIRED",
     "MATCH_RESULT_CONTRACT_VERSION",
     "MAX_COMPONENT_ENTRIES",
     "MAX_EXPLANATION_LINE_LEN",
@@ -147,7 +164,12 @@ __all__ = [
     "MatchComponentEntry",
     "MatchResult",
     "MatchResultCollection",
+    "MatchResultsCardPayload",
     "MatchSkillPath",
     "MatchingSchemaBase",
     "VisibleMatchKind",
+    "build_match_results_card",
+    "match_jobs_public_outcome",
+    "parse_match_jobs_tool_body",
+    "try_parse_match_results_card",
 ]
