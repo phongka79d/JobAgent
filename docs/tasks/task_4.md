@@ -576,7 +576,7 @@ write CRUD, JD/Job graph behavior, embeddings, rebuild completion, or matching.
 
 ### Tasks
 
-- [ ] (03A): Implement the constraint-safe approval transaction and idempotent Candidate/Skill synchronization
+- [x] (03A): Implement the constraint-safe approval transaction and idempotent Candidate/Skill synchronization
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.6 Approval decisions and atomic commit`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.7 Candidate graph synchronization`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.4 Transaction boundaries`; `docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.4 Approved replacement`; `docs/plans/Master_plan.md > ## 21. Direct SQLite-to-Neo4j Synchronization`
   - Source Requirements:
     - Before opening the transaction, validate the complete draft, staged source
@@ -632,7 +632,7 @@ write CRUD, JD/Job graph behavior, embeddings, rebuild completion, or matching.
     credentials/connectivity blocks only the optional probe.
   - Files: `backend/app/services/profile_approval.py`, `backend/app/graph/sync_candidate.py`, `backend/tests/integration/test_profile_approval.py`, `backend/tests/integration/test_candidate_sync.py`
 
-- [ ] (03B): Integrate interrupt-guarded `commit_profile_draft` with the existing replay/resume runtime
+- [x] (03B): Integrate interrupt-guarded `commit_profile_draft` with the existing replay/resume runtime
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.5 Tool contracts and authorization`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.6 Approval decisions and atomic commit`; `docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.3 Chat approval`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.2 Per-turn runs`; `docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.3 commit_profile_draft`; `docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.7 Tool authorization matrix`
   - Source Requirements:
     - `commit_profile_draft('current')` validates authorization/draft and calls
@@ -698,7 +698,7 @@ write CRUD, JD/Job graph behavior, embeddings, rebuild completion, or matching.
     rather than adding another graph, executor, result row, or idempotency key.
   - Files: `backend/app/tools/profile.py`, `backend/app/tools/registry.py`, `backend/app/services/tool_execution.py`, `backend/app/services/chat_turns.py`, `backend/app/agent/graph.py`, `backend/app/agent/runner.py`, `backend/app/api/dependencies.py`, `backend/tests/integration/test_profile_approval.py`, `backend/tests/integration/test_interrupt_resume.py`, `backend/tests/integration/test_tool_replay.py`, `backend/tests/integration/test_agent_runner.py`, `backend/tests/integration/test_chat_api.py`
 
-- [ ] (03C): Load compact approved candidate context and expose profile/CV reads
+- [x] (03C): Load compact approved candidate context and expose profile/CV reads
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.4 PDF/profile extraction`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.8 API and frontend behavior`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.3 Agent state`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.4 Memory policy`; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary`
   - Source Requirements:
     - Load a compact projection of the current approved Candidate Profile and

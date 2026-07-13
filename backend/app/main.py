@@ -1,4 +1,4 @@
-"""FastAPI application entry: lifespan, health, chat, and CV upload routes.
+"""FastAPI application entry: lifespan and exact seven public routes.
 
 Startup opens shared resources once. The singleton-seed safeguard runs only
 after a successful SQLite availability check. Graph base-schema init runs
@@ -6,8 +6,10 @@ only when Neo4j connectivity succeeds. Filesystem root creation is not
 eager at startup; the health probe owns create/access checks. Startup never
 runs Alembic migrations or SQLAlchemy metadata schema creation. Cleanup
 closes any opened Neo4j driver and disposes the SQLite engine on every exit
-path, including partial startup failures. Public functional routes are
-health, Plan 3 chat history/turn/resume, and Plan 4 CV upload.
+path, including partial startup failures.
+
+Public functional surface (Master §14): health, CV upload, profile/profile-CV
+reads, and the three Plan 3 chat endpoints. No profile write CRUD.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from sqlalchemy import text
 from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.profile import router as profile_router
 from app.core.settings import Settings, get_settings
 from app.db.seed import ensure_singleton_seeds
 from app.db.session import dispose_engine, get_engine, session_scope
@@ -88,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    """Build the FastAPI application with CORS, health, chat, and CV upload."""
+    """Build the FastAPI application with the exact seven public routes."""
     settings = get_settings()
     application = FastAPI(
         title="JobAgent",
@@ -104,6 +107,7 @@ def create_app() -> FastAPI:
     )
     application.include_router(health_router, prefix="/api")
     application.include_router(attachments_router, prefix="/api")
+    application.include_router(profile_router, prefix="/api")
     application.include_router(chat_router, prefix="/api")
     return application
 

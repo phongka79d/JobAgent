@@ -97,11 +97,18 @@ def _bundle(
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_is_empty() -> None:
+def test_production_registry_has_exactly_three_profile_tools() -> None:
+    """Plan 4 production registry owns the three profile tools (not empty)."""
     reg = production_registry()
-    assert reg.is_empty()
-    assert reg.list_tools() == []
-    assert reg.tool_names() == []
+    assert not reg.is_empty()
+    names = reg.tool_names()
+    assert names == [
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    ]
+    assert "match_jobs" not in names
+    assert "synthetic_interrupt" not in names
 
 
 def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:
@@ -212,8 +219,8 @@ def test_injected_tools_without_changing_graph_construction() -> None:
             _ai_text("done"),
         ]
     )
-    # Same factory; only registry content differs from production empty.
-    empty = build_agent_graph(
+    # Same factory; only registry content differs (production vs test tools).
+    production = build_agent_graph(
         model=FakeChatModel(responses=[_ai_text("direct")]),
         registry=production_registry(),
     )
@@ -221,11 +228,15 @@ def test_injected_tools_without_changing_graph_construction() -> None:
         model=model,
         registry=ToolRegistry([echo_tool]),
     )
-    assert empty.decision_node_name == injected.decision_node_name
-    assert empty.tools_node_name == injected.tools_node_name
-    assert isinstance(empty.tool_node, ToolNode)
+    assert production.decision_node_name == injected.decision_node_name
+    assert production.tools_node_name == injected.tools_node_name
+    assert isinstance(production.tool_node, ToolNode)
     assert isinstance(injected.tool_node, ToolNode)
-    assert empty.registry.is_empty()
+    assert production.registry.tool_names() == [
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    ]
     assert not injected.registry.is_empty()
     assert injected.registry.tool_names() == ["echo_tool"]
 
@@ -316,7 +327,7 @@ def test_graph_and_registry_source_has_no_transport_or_persistence() -> None:
     assert "from fastapi" not in combined
     assert "import fastapi" not in combined
 
-    # No session/persistence in graph or registry (durable work is services).
+    # Graph nodes remain free of SQLAlchemy sessions and tool persistence.
     for banned in (
         "AsyncSession",
         "session_scope",
@@ -325,14 +336,20 @@ def test_graph_and_registry_source_has_no_transport_or_persistence() -> None:
         "execute_tool",
     ):
         assert banned not in graph_text
-        assert banned not in registry_text
 
-    # Production registry ships no test-only or domain tool registration.
+    # Registry may type-hint injected session_factory deps but must not open
+    # sessions, run SQL, or register later-phase job tools.
+    for banned in (
+        "session_scope",
+        "create_engine",
+        "execute_tool",
+        "match_jobs",
+        "synthetic_interrupt",
+    ):
+        assert banned not in registry_text
     assert "production_registry" in registry_text
-    assert "ToolRegistry()" in registry_text
-    # Ensure list_tools default is empty construction, not a preloaded catalog.
-    assert "propose_profile" not in registry_text
-    assert "match_jobs" not in registry_text
+    assert "build_production_profile_tools" in registry_text
+    assert "ToolRegistry" in registry_text
 
 
 def test_single_stategraph_and_toolnode_in_graph_module() -> None:
@@ -365,15 +382,19 @@ def test_single_stategraph_and_toolnode_in_graph_module() -> None:
 
 
 def test_graph_nodes_do_not_import_db_or_api() -> None:
-    """Import graph and confirm it does not pull FastAPI/SQLAlchemy sessions."""
+    """Import graph and confirm it does not pull FastAPI routers."""
     import app.agent.graph as graph_mod
     import app.tools.registry as reg_mod
 
-    for mod in (graph_mod, reg_mod):
-        names = set(dir(mod))
-        assert "AsyncSession" not in names
-        assert "APIRouter" not in names
-        assert "include_router" not in names
+    # Graph must not surface session/router symbols.
+    graph_names = set(dir(graph_mod))
+    assert "AsyncSession" not in graph_names
+    assert "APIRouter" not in graph_names
+    assert "include_router" not in graph_names
+    # Registry may type-hint AsyncSession for injected deps; still no FastAPI.
+    reg_names = set(dir(reg_mod))
+    assert "APIRouter" not in reg_names
+    assert "include_router" not in reg_names
 
 
 # ---------------------------------------------------------------------------
@@ -383,10 +404,21 @@ def test_graph_nodes_do_not_import_db_or_api() -> None:
 
 def test_empty_registry_model_prompt_has_no_tools() -> None:
     model = FakeChatModel(responses=[_ai_text("ok")])
-    bundle = build_agent_graph(model=model, registry=production_registry())
+    bundle = build_agent_graph(model=model, registry=ToolRegistry())
     bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="hi"))
     assert model.invoke_count == 1
     system = model.call_log[0][0]
     assert "Registered JobAgent tools: none" in str(system.content)
     assert "echo_tool" not in str(system.content)
     assert "synthetic" not in str(system.content).lower()
+
+
+def test_production_registry_model_prompt_lists_three_profile_tools() -> None:
+    model = FakeChatModel(responses=[_ai_text("ok")])
+    bundle = build_agent_graph(model=model, registry=production_registry())
+    bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="hi"))
+    system = str(model.call_log[0][0].content)
+    assert "propose_profile_from_cv" in system
+    assert "propose_profile_update" in system
+    assert "commit_profile_draft" in system
+    assert "match_jobs" not in system

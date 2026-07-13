@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from app.schemas.attachments import AttachmentPublic
 from app.schemas.common import StrictModelConfig
 from app.schemas.skills import SkillRef
 from pydantic import BaseModel, Field
@@ -148,3 +149,35 @@ def parse_job_preferences(payload: Any) -> JobPreferences:
 def parse_profile_draft_payload(payload: Any) -> ProfileDraftPayload:
     """Parse and validate a full ``ProfileDraftPayload`` before ``draft_json`` write."""
     return ProfileDraftPayload.model_validate(payload)
+
+
+# ---------------------------------------------------------------------------
+# Public profile read contracts (GET /api/profile) — no PDF bytes / paths
+# ---------------------------------------------------------------------------
+
+
+class ProfileReadResponse(BaseModel):
+    """``GET /api/profile`` body: active profile state or explicit empty.
+
+    When ``present`` is false, profile/preferences/attachment are all null and
+    the client must not invent an approved CV. When true, all three nested
+    objects are validated and populated. Never carries PDF bytes or
+    ``storage_path``.
+    """
+
+    model_config = StrictModelConfig
+
+    present: bool
+    profile: CandidateProfile | None = None
+    preferences: JobPreferences | None = None
+    active_attachment: AttachmentPublic | None = None
+
+
+def empty_profile_read_response() -> ProfileReadResponse:
+    """Explicit empty public profile state (no approved CV/profile)."""
+    return ProfileReadResponse(
+        present=False,
+        profile=None,
+        preferences=None,
+        active_attachment=None,
+    )

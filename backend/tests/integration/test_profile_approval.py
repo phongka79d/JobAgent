@@ -1182,6 +1182,1443 @@ def test_propose_update_tool_compact_and_no_preference_tool() -> None:
     assert "propose_preferences" not in src
     assert "update_preferences" not in src
     assert "preference_tool" not in src
-    assert production_registry().is_empty()
     names = production_registry().tool_names()
-    assert "propose_profile_update" not in names
+    assert names == [
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    ]
+    assert "match_jobs" not in names
+    assert "propose_profile_update" in names
+
+# ---------------------------------------------------------------------------
+# 03A: constraint-safe approval transaction + post-commit sync
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSyncDriver:
+    """Minimal async driver stand-in; records whether sync ran."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.runs = 0
+        self.queries: list[str] = []
+
+    def session(self, **config: object) -> _RecordingSession:
+        del config
+        return _RecordingSession(self)
+
+
+class _RecordingSession:
+    def __init__(self, driver: _RecordingSyncDriver) -> None:
+        self._driver = driver
+
+    async def __aenter__(self) -> _RecordingSession:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def run(
+        self, query: str, parameters: object = None, **kwargs: object
+    ) -> _EmptyResult:
+        del parameters, kwargs
+        self._driver.runs += 1
+        self._driver.queries.append(query)
+        if self._driver.fail:
+            raise OSError("neo4j fail")
+        return _EmptyResult()
+
+
+class _EmptyResult:
+    async def consume(self) -> None:
+        return None
+
+
+def _approval_valid_profile_json(
+    *, exclude_python: bool = False
+) -> dict[str, Any]:
+    skills: list[dict[str, Any]] = [
+        {
+            "skill": {
+                "canonical_key": "python",
+                "display_name": "Python",
+                "aliases": ["python3"],
+                "category": "language",
+            },
+            "confidence": 0.9,
+            "proficiency": "advanced",
+            "years": 4.0,
+            "source": "cv" if not exclude_python else "user_correction",
+            "excluded": exclude_python,
+            "evidence": ["Python backend"],
+        },
+        {
+            "skill": {
+                "canonical_key": "fastapi",
+                "display_name": "FastAPI",
+                "aliases": ["fast api"],
+                "category": "framework",
+            },
+            "confidence": 0.85,
+            "proficiency": "advanced",
+            "years": 3.0,
+            "source": "cv",
+            "excluded": False,
+            "evidence": ["FastAPI services"],
+        },
+    ]
+    return {
+        "summary": "Backend engineer",
+        "current_title": "Backend Engineer",
+        "total_experience_years": 4.0,
+        "skills": skills,
+        "experiences": [
+            {
+                "title": "Engineer",
+                "company": "Co",
+                "start_date_text": "2020",
+                "end_date_text": "present",
+                "summary": "APIs",
+            }
+        ],
+        "education": [
+            {
+                "institution": "U",
+                "degree": "BSc",
+                "field": "CS",
+                "graduation_year": 2019,
+            }
+        ],
+        "languages": [{"name": "English", "proficiency": "fluent"}],
+        "extraction_confidence": 0.8,
+    }
+
+
+def _approval_draft_json(
+    *,
+    prefs: dict[str, Any] | None = None,
+    exclude_python: bool = False,
+) -> dict[str, Any]:
+    from app.db.models.profiles import JOB_PREFERENCE_KEYS
+
+    return {
+        "candidate_profile": _approval_valid_profile_json(
+            exclude_python=exclude_python
+        ),
+        "job_preferences": prefs
+        if prefs is not None
+        else {k: [] for k in JOB_PREFERENCE_KEYS},
+    }
+
+
+def _write_pdf(storage: Any, attachment_id: str) -> str:
+    # Minimal non-empty PDF-ish bytes; storage only cares about presence.
+    return storage.write_bytes(attachment_id, b"%PDF-1.4 approval-test\n%%EOF\n")
+
+
+def test_first_approval_commits_active_profile_no_draft(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """First approval: one active attachment, profile, prefs, no draft."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            prefs = {
+                "target_roles": ["Backend Engineer"],
+                "preferred_locations": ["Berlin"],
+                "acceptable_work_modes": ["remote"],
+                "target_seniority": ["senior"],
+            }
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="first-appr",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(prefs=prefs),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is True
+            assert result.sqlite_committed is True
+            assert result.sync_ok is True
+            assert result.cleanup_ok is True
+            assert result.active_attachment_id == att_id
+            assert result.previous_attachment_id is None
+            assert result.preferences_updated is True
+            assert result.code is None
+            assert driver.runs >= 1
+
+            async with factory() as session:
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.id == CANDIDATE_PROFILE_ID
+                assert profile.active_attachment_id == att_id
+                assert profile.profile_json["summary"] == "Backend engineer"
+                assert await prof_repo.get_current_draft(session) is None
+                att = await att_repo.get_by_id(session, att_id)
+                assert att is not None
+                assert att.state == ATTACHMENT_STATE_ACTIVE
+                assert await att_repo.get_active(session) is not None
+                jp = await prof_repo.get_job_preferences(session)
+                assert jp is not None
+                assert jp.preferences_json["target_roles"] == ["Backend Engineer"]
+                # Exactly one attachment row.
+                n = (
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM attachments")
+                    )
+                ).scalar_one()
+                assert int(n) == 1
+            assert storage.exists(rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_replacement_removes_old_attachment_row_and_file(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Replacement: old attachment row gone, old PDF cleaned, new active."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            old_id = new_uuid()
+            new_id = new_uuid()
+            old_rel = _write_pdf(storage, old_id)
+            new_rel = _write_pdf(storage, new_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="old-appr",
+                    original_name="old.pdf",
+                    size_bytes=40,
+                    storage_path=old_rel,
+                    page_count=1,
+                    attachment_id=old_id,
+                )
+                await att_repo.mark_active(session, old_id)
+                await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=old_id,
+                    profile_json=_approval_valid_profile_json(),
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="new-appr",
+                    original_name="new.pdf",
+                    size_bytes=40,
+                    storage_path=new_rel,
+                    page_count=1,
+                    attachment_id=new_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=new_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is True
+            assert result.sqlite_committed is True
+            assert result.previous_attachment_id == old_id
+            assert result.active_attachment_id == new_id
+            assert result.cleanup_ok is True
+
+            async with factory() as session:
+                assert await att_repo.get_by_id(session, old_id) is None
+                new_att = await att_repo.get_by_id(session, new_id)
+                assert new_att is not None
+                assert new_att.state == ATTACHMENT_STATE_ACTIVE
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == new_id
+                assert await prof_repo.get_current_draft(session) is None
+                n = (
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM attachments")
+                    )
+                ).scalar_one()
+                assert int(n) == 1
+            assert not storage.exists(old_rel)
+            assert storage.exists(new_rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_preflight_missing_file_leaves_prior_truth(
+    db_path: Path, tmp_path: Path
+) -> None:
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import (
+        ERROR_ATTACHMENT_FILE_MISSING,
+        commit_approved_draft,
+    )
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            old_id = new_uuid()
+            new_id = new_uuid()
+            old_rel = _write_pdf(storage, old_id)
+            # Row points at a path that was never written.
+            missing_rel = new_id  # uuid path without file
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="old-miss",
+                    original_name="old.pdf",
+                    size_bytes=40,
+                    storage_path=old_rel,
+                    page_count=1,
+                    attachment_id=old_id,
+                )
+                await att_repo.mark_active(session, old_id)
+                await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=old_id,
+                    profile_json=_approval_valid_profile_json(),
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="new-miss",
+                    original_name="new.pdf",
+                    size_bytes=40,
+                    storage_path=missing_rel,
+                    page_count=1,
+                    attachment_id=new_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=new_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is False
+            assert result.sqlite_committed is False
+            assert result.code == ERROR_ATTACHMENT_FILE_MISSING
+            assert driver.runs == 0
+
+            async with factory() as session:
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == old_id
+                old = await att_repo.get_by_id(session, old_id)
+                assert old is not None
+                assert old.state == ATTACHMENT_STATE_ACTIVE
+                new = await att_repo.get_by_id(session, new_id)
+                assert new is not None
+                assert new.state == "staged"
+                assert await prof_repo.get_current_draft(session) is not None
+            assert storage.exists(old_rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_transaction_failpoint_rolls_back_preserves_staged(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """before_commit failpoint: prior active intact; new stays staged; no Neo4j."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import (
+        ERROR_APPROVAL_TRANSACTION_FAILED,
+        commit_approved_draft,
+    )
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            old_id = new_uuid()
+            new_id = new_uuid()
+            old_rel = _write_pdf(storage, old_id)
+            new_rel = _write_pdf(storage, new_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="fp-old",
+                    original_name="old.pdf",
+                    size_bytes=40,
+                    storage_path=old_rel,
+                    page_count=1,
+                    attachment_id=old_id,
+                )
+                await att_repo.mark_active(session, old_id)
+                await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=old_id,
+                    profile_json=_approval_valid_profile_json(),
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="fp-new",
+                    original_name="new.pdf",
+                    size_bytes=40,
+                    storage_path=new_rel,
+                    page_count=1,
+                    attachment_id=new_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=new_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+                failpoint="before_commit",
+            )
+            assert result.ok is False
+            assert result.sqlite_committed is False
+            assert result.code == ERROR_APPROVAL_TRANSACTION_FAILED
+            assert driver.runs == 0
+
+            async with factory() as session:
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == old_id
+                old = await att_repo.get_by_id(session, old_id)
+                assert old is not None
+                assert old.state == ATTACHMENT_STATE_ACTIVE
+                new = await att_repo.get_by_id(session, new_id)
+                assert new is not None
+                assert new.state == "staged"
+                draft = await prof_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.source_attachment_id == new_id
+            assert storage.exists(old_rel)
+            assert storage.exists(new_rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_sync_failure_after_commit_keeps_sqlite_truth(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Neo4j failure returns NEO4J_SYNC_FAILED; SQLite remains committed."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.graph.sync_candidate import NEO4J_SYNC_FAILED
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver(fail=True)
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="sync-fail",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(exclude_python=True),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is False
+            assert result.sqlite_committed is True
+            assert result.sync_ok is False
+            assert result.code == NEO4J_SYNC_FAILED
+            assert "rebuild" in (result.summary or "").lower() or (
+                "rebuild_instruction" in result.data
+            )
+            assert result.data.get("sqlite_committed") is True
+
+            async with factory() as session:
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == att_id
+                # Exclusion preserved in SQLite approved JSON.
+                skills = profile.profile_json["skills"]
+                py = next(
+                    s for s in skills if s["skill"]["canonical_key"] == "python"
+                )
+                assert py["excluded"] is True
+                assert await prof_repo.get_current_draft(session) is None
+                att = await att_repo.get_by_id(session, att_id)
+                assert att is not None
+                assert att.state == ATTACHMENT_STATE_ACTIVE
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_cleanup_failure_reported_sqlite_valid(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Cleanup failpoint: committed SQLite ok; cleanup_ok False; sync may pass."""
+    from app.core.ids import new_uuid
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            old_id = new_uuid()
+            new_id = new_uuid()
+            old_rel = _write_pdf(storage, old_id)
+            new_rel = _write_pdf(storage, new_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="cl-old",
+                    original_name="old.pdf",
+                    size_bytes=40,
+                    storage_path=old_rel,
+                    page_count=1,
+                    attachment_id=old_id,
+                )
+                await att_repo.mark_active(session, old_id)
+                await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=old_id,
+                    profile_json=_approval_valid_profile_json(),
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="cl-new",
+                    original_name="new.pdf",
+                    size_bytes=40,
+                    storage_path=new_rel,
+                    page_count=1,
+                    attachment_id=new_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=new_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+                failpoint="cleanup",
+            )
+            assert result.sqlite_committed is True
+            assert result.cleanup_ok is False
+            assert result.sync_ok is True
+            assert result.ok is True  # sync ok; cleanup failure is reported
+            assert result.active_attachment_id == new_id
+
+            async with factory() as session:
+                assert await att_repo.get_by_id(session, old_id) is None
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == new_id
+            # File may still exist because cleanup was skipped by failpoint.
+            assert storage.exists(old_rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_preference_only_approval_keeps_attachment(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Draft without source CV updates profile/prefs; attachment unchanged."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            prefs = {
+                "target_roles": ["Platform Engineer"],
+                "preferred_locations": [],
+                "acceptable_work_modes": ["remote"],
+                "target_seniority": ["mid"],
+            }
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="pref-only",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await att_repo.mark_active(session, att_id)
+                await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=att_id,
+                    profile_json=_approval_valid_profile_json(),
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(prefs=prefs),
+                    source_attachment_id=None,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is True
+            assert result.sqlite_committed is True
+            assert result.active_attachment_id == att_id
+            assert result.previous_attachment_id is None
+            assert result.preferences_updated is True
+
+            async with factory() as session:
+                att = await att_repo.get_by_id(session, att_id)
+                assert att is not None
+                assert att.state == ATTACHMENT_STATE_ACTIVE
+                jp = await prof_repo.get_job_preferences(session)
+                assert jp is not None
+                assert jp.preferences_json["target_roles"] == [
+                    "Platform Engineer"
+                ]
+                assert await prof_repo.get_current_draft(session) is None
+            assert storage.exists(rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_missing_draft_preflight_no_neo4j(
+    db_path: Path, tmp_path: Path
+) -> None:
+    from app.services.profile_approval import (
+        ERROR_DRAFT_NOT_FOUND,
+        commit_approved_draft,
+    )
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is False
+            assert result.code == ERROR_DRAFT_NOT_FOUND
+            assert result.sqlite_committed is False
+            assert driver.runs == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_approval_module_boundaries_static() -> None:
+    """No open transaction spans filesystem/Neo4j; stable codes reviewable."""
+    import inspect
+
+    from app.services import profile_approval as appr
+
+    src = inspect.getsource(appr)
+    assert "NEO4J_SYNC_FAILED" in src
+    assert "commit" in src
+    assert "rollback" in src
+    assert "delete(" in src or "storage.delete" in src
+    # Sync and storage cleanup happen after commit return path.
+    assert "sqlite_committed" in src
+    # No raw CV extraction in approval.
+    assert "extract_text" not in src
+    assert "raw_cv" not in src
+    assert "PdfReader" not in src
+
+# ---------------------------------------------------------------------------
+# 03B: interrupt-guarded commit_profile_draft full path
+# ---------------------------------------------------------------------------
+
+
+def test_commit_profile_draft_missing_draft_fails_before_interrupt(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Missing draft terminalizes failed with no interrupt/side effects."""
+    from app.agent.graph import build_agent_graph
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_COMPLETED,
+        TOOL_EXECUTION_STATUS_FAILED,
+    )
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import tool_executions as tool_repo
+    from app.services.chat_turns import stream_chat_turn
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        ERROR_DRAFT_NOT_FOUND,
+        build_commit_profile_draft_tool,
+    )
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+    from tests.support.db_migration import run_async
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    side_effects: list[str] = []
+
+    async def _fake_commit(**kwargs: object) -> object:
+        side_effects.append("commit")
+        raise AssertionError("commit must not run without draft")
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            tool = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                commit_fn=_fake_commit,  # type: ignore[arg-type]
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "call-commit-missing",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Could not commit: no draft."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([tool]),
+            )
+            events = []
+            async for event in stream_chat_turn(
+                message="please commit my profile draft",
+                graph_bundle=bundle,
+                session_factory=factory,
+                sqlite_path=db_path,
+            ):
+                events.append(event)
+            names = [e.event for e in events]
+            assert "approval_required" not in names
+            assert "run_completed" in names
+            assert side_effects == []
+
+            run_id = events[0].run_id
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_FAILED
+                assert tools[0].error_code == ERROR_DRAFT_NOT_FOUND
+                assert tools[0].tool_call_id == "call-commit-missing"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_commit_profile_draft_request_changes_preserves_draft(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """request_changes: one running row, draft kept, checkpoint cleaned, new turn ok."""
+    from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
+    from app.agent.graph import build_agent_graph
+    from app.core.ids import new_uuid
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_COMPLETED,
+        AGENT_RUN_STATE_INTERRUPTED,
+        TOOL_EXECUTION_STATUS_COMPLETED,
+        TOOL_EXECUTION_STATUS_RUNNING,
+    )
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import tool_executions as tool_repo
+    from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        PROFILE_COMMIT_ACTIONS,
+        PROFILE_COMMIT_KIND,
+        build_commit_profile_draft_tool,
+    )
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+    from tests.support.db_migration import run_async
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    commits: list[str] = []
+
+    async def _fake_commit(**kwargs: object) -> object:
+        commits.append("save")
+        raise AssertionError("save_profile must not run on request_changes")
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="req-changes",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            tool = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                commit_fn=_fake_commit,  # type: ignore[arg-type]
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "call-commit-rc",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting for approval."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([tool]),
+            )
+            events = [e async for e in stream_chat_turn(
+                message="commit draft please",
+                graph_bundle=bundle,
+                session_factory=factory,
+                sqlite_path=db_path,
+            )]
+            names = [e.event for e in events]
+            assert names[-1] == "approval_required"
+            assert "run_completed" not in names
+            approval = events[-1]
+            assert approval.payload.kind == PROFILE_COMMIT_KIND
+            assert list(approval.payload.allowed_actions) == list(
+                PROFILE_COMMIT_ACTIONS
+            )
+            run_id = approval.run_id
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_INTERRUPTED
+                proj = run.pending_approval_json
+                assert proj is not None
+                assert proj["kind"] == PROFILE_COMMIT_KIND
+                assert proj["draft_id"] == PROFILE_DRAFT_ID
+                assert proj["allowed_actions"] == list(PROFILE_COMMIT_ACTIONS)
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
+                assert tools[0].result_json is None
+                draft = await prof_repo.get_current_draft(session)
+                assert draft is not None
+
+            async with open_checkpointer(db_path) as saver:
+                assert await thread_has_checkpoints(saver, run_id) is True
+
+            # Resume on new request boundary with fresh tool/model instances.
+            tool2 = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                commit_fn=_fake_commit,  # type: ignore[arg-type]
+            )
+            model2 = FakeChatModel(
+                responses=[AIMessage(content="Understood; send your changes.")]
+            )
+            bundle2 = build_agent_graph(
+                model=model2,
+                registry=ToolRegistry([tool2]),
+            )
+            resume_events = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="request_changes",
+                    graph_bundle=bundle2,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            rnames = [e.event for e in resume_events]
+            assert "run_completed" in rnames
+            assert "approval_required" not in rnames
+            assert commits == []
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                assert run.pending_approval_json is None
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                assert tools[0].tool_call_id == "call-commit-rc"
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is True
+                assert stored.data is not None
+                assert stored.data.get("committed") is False
+                draft = await prof_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.id == PROFILE_DRAFT_ID
+
+            async with open_checkpointer(db_path) as saver:
+                assert await thread_has_checkpoints(saver, run_id) is False
+
+            # Exact identity replay: no second side effect / row.
+            replay = await execute_tool_replay(
+                factory=factory,
+                run_id=run_id,
+                tool_call_id="call-commit-rc",
+            )
+            assert replay is not None
+            assert replay.ok is True
+            assert replay.data is not None
+            assert replay.data.get("committed") is False
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+async def execute_tool_replay(
+    *,
+    factory: object,
+    run_id: str,
+    tool_call_id: str,
+) -> Any:
+    from app.services.tool_execution import get_replay_result
+
+    return await get_replay_result(
+        run_id=run_id,
+        tool_call_id=tool_call_id,
+        session_factory=factory,  # type: ignore[arg-type]
+    )
+
+
+def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """save_profile uses (03A); Neo4j fail after commit is truthful ToolResult."""
+    from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
+    from app.agent.graph import build_agent_graph
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_COMPLETED,
+        AGENT_RUN_STATE_INTERRUPTED,
+        TOOL_EXECUTION_STATUS_FAILED,
+        TOOL_EXECUTION_STATUS_RUNNING,
+    )
+    from app.graph.sync_candidate import NEO4J_SYNC_FAILED
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import tool_executions as tool_repo
+    from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        build_commit_profile_draft_tool,
+    )
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+    from tests.support.db_migration import run_async
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="save-sync-fail",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            driver = _RecordingSyncDriver(fail=True)
+            tool = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "call-commit-save",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Awaiting save."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([tool]),
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message="save my profile",
+                    graph_bundle=bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert events[-1].event == "approval_required"
+            run_id = events[-1].run_id
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_INTERRUPTED
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
+                # No active profile yet � interrupt before side effects.
+                assert await prof_repo.get_active_profile(session) is None
+
+            tool2 = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            model2 = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="Profile saved in SQLite; graph sync failed."
+                    )
+                ]
+            )
+            bundle2 = build_agent_graph(
+                model=model2,
+                registry=ToolRegistry([tool2]),
+            )
+            resume_events = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="save_profile",
+                    graph_bundle=bundle2,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert "run_completed" in [e.event for e in resume_events]
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_FAILED
+                assert tools[0].error_code == NEO4J_SYNC_FAILED
+                assert tools[0].tool_call_id == "call-commit-save"
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is False
+                assert stored.data is not None
+                assert stored.data.get("sqlite_committed") is True
+                assert stored.data.get("committed") is True
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.active_attachment_id == att_id
+                assert await prof_repo.get_current_draft(session) is None
+                att = await att_repo.get_by_id(session, att_id)
+                assert att is not None
+                assert att.state == ATTACHMENT_STATE_ACTIVE
+
+            async with open_checkpointer(db_path) as saver:
+                assert await thread_has_checkpoints(saver, run_id) is False
+
+            # Replay never repeats SQLite/file/Neo4j side effects.
+            runs_before = driver.runs
+            replay = await execute_tool_replay(
+                factory=factory,
+                run_id=run_id,
+                tool_call_id="call-commit-save",
+            )
+            assert replay is not None
+            assert replay.ok is False
+            assert replay.code == NEO4J_SYNC_FAILED
+            assert driver.runs == runs_before
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_commit_profile_draft_save_profile_success_and_terminal_noop(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """save_profile success completes tool; terminal resume is no-op stream."""
+    from app.agent.graph import build_agent_graph
+    from app.core.ids import new_uuid
+    from app.db.models.chat import (
+        TOOL_EXECUTION_STATUS_COMPLETED,
+    )
+    from app.repositories import tool_executions as tool_repo
+    from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        build_commit_profile_draft_tool,
+    )
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+    from tests.support.db_migration import run_async
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="save-ok",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(
+                        prefs={
+                            "target_roles": ["Backend"],
+                            "preferred_locations": [],
+                            "acceptable_work_modes": ["remote"],
+                            "target_seniority": [],
+                        }
+                    ),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            tool = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "call-commit-ok",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Awaiting."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model, registry=ToolRegistry([tool])
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message="approve profile",
+                    graph_bundle=bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            run_id = events[-1].run_id
+
+            tool2 = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            model2 = FakeChatModel(
+                responses=[AIMessage(content="Profile saved successfully.")]
+            )
+            bundle2 = build_agent_graph(
+                model=model2, registry=ToolRegistry([tool2])
+            )
+            resume_events = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="save_profile",
+                    graph_bundle=bundle2,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert resume_events[-1].event == "run_completed"
+            assert driver.runs >= 1
+
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is True
+                assert stored.data is not None
+                assert stored.data.get("committed") is True
+                assert await prof_repo.get_active_profile(session) is not None
+                assert await prof_repo.get_current_draft(session) is None
+
+            # Terminal no-op resume.
+            noop = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="save_profile",
+                    graph_bundle=bundle2,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            noop_names = [e.event for e in noop]
+            assert noop_names[0] == "run_started"
+            assert noop_names[-1] == "run_completed"
+            assert "text_delta" not in noop_names
+            assert "approval_required" not in noop_names
+            runs_after = driver.runs
+            # No second commit/sync from terminal no-op.
+            assert driver.runs == runs_after
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_production_registry_exactly_three_profile_tools_static() -> None:
+    """Production registry is the three profile tools; no match_jobs/synthetic."""
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        PROPOSE_PROFILE_FROM_CV_NAME,
+        PROPOSE_PROFILE_UPDATE_NAME,
+    )
+    from app.tools.registry import production_registry
+
+    names = production_registry().tool_names()
+    assert names == [
+        PROPOSE_PROFILE_FROM_CV_NAME,
+        PROPOSE_PROFILE_UPDATE_NAME,
+        COMMIT_PROFILE_DRAFT_NAME,
+    ]
+    assert "match_jobs" not in names
+    assert "synthetic_interrupt" not in names
+
+    reg_src = (
+        Path(__file__).resolve().parents[2] / "app" / "tools" / "registry.py"
+    ).read_text(encoding="utf-8")
+    assert "match_jobs" not in reg_src
+    assert "build_synthetic" not in reg_src
+    profile_src = (
+        Path(__file__).resolve().parents[2] / "app" / "tools" / "profile.py"
+    ).read_text(encoding="utf-8")
+    assert "interrupt(" in profile_src
+    assert "allow_running_reentry" in profile_src
+    assert "execute_tool" in profile_src
+    assert "save_profile" in profile_src
+    assert "request_changes" in profile_src

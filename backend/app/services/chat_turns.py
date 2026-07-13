@@ -19,6 +19,7 @@ from langchain_core.runnables import Runnable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agent.context import load_candidate_context, load_recent_context
 from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
 from app.core.ids import new_uuid
@@ -91,7 +92,11 @@ def _sse(event: str, run_id: str, payload: dict[str, Any]) -> SseEvent:
 
 
 def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
-    """Validate compact approval projection shape for durable storage/SSE."""
+    """Validate compact approval projection shape for durable storage/SSE.
+
+    Preserves optional ``draft_id`` when present (domain tools may include it).
+    Does not interpret action names — callers supply allowed actions.
+    """
     kind = raw.get("kind")
     actions = raw.get("allowed_actions")
     if not isinstance(kind, str) or kind.strip() == "":
@@ -120,7 +125,15 @@ def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
             ERROR_RUN_NOT_RESUMABLE,
             "interrupt projection card must be an object",
         )
-    return {"kind": kind, "allowed_actions": cleaned, "card": card}
+    projection: dict[str, Any] = {
+        "kind": kind,
+        "allowed_actions": cleaned,
+        "card": card,
+    }
+    draft_id = raw.get("draft_id")
+    if isinstance(draft_id, str) and draft_id.strip() != "":
+        projection["draft_id"] = draft_id
+    return projection
 
 
 async def get_interrupted_run(
@@ -374,6 +387,18 @@ async def stream_chat_turn(
     turn = await create_user_turn(message=message, session_factory=factory)
     interrupt_holder: dict[str, Any] = {}
 
+    # Load bounded recent + approved candidate memory before graph execution.
+    # Short read session only — never held open across provider/graph work.
+    # Candidate context is the approved profile only (not pending drafts).
+    async with factory() as session:
+        recent_loaded = await load_recent_context(
+            session,
+            exclude_ids=frozenset({turn.user_message_id}),
+        )
+        candidate_context = await load_candidate_context(session)
+    # Graph state uses list[dict] channels; ContextMessage is a TypedDict.
+    recent_context: list[dict[str, Any]] = [dict(m) for m in recent_loaded]
+
     async def on_terminal(outcome: TerminalOutcome) -> bool:
         return await _on_durable_terminal(
             outcome,
@@ -384,6 +409,8 @@ async def stream_chat_turn(
     async for event in stream_agent_run(
         run_id=turn.run_id,
         user_text=turn.content,
+        recent_context=recent_context,
+        candidate_context=candidate_context,
         attachment_ids=attachment_ids,
         model=model,
         registry=registry,

@@ -11,7 +11,7 @@ beyond ``TOOL_LOOP_LIMIT`` (default six) ends with a stable controlled failure.
 
 Graph nodes perform no SQLAlchemy writes, HTTP transport, hidden transactions, or
 provider construction. The factory may bind an injected model/tools; production
-registry is empty.
+defaults to the three profile tools via :func:`production_registry`.
 """
 
 from __future__ import annotations
@@ -179,12 +179,44 @@ def _coerce_message(item: Any) -> BaseMessage:
     raise TypeError(f"Unsupported message type for agent graph: {type(item)!r}")
 
 
+def _format_candidate_context_block(
+    candidate_context: Sequence[dict[str, Any]] | None,
+) -> str | None:
+    """Serialize compact approved candidate cards for the system prompt.
+
+    Returns ``None`` when empty so the model is not fed a placeholder block.
+    Never includes raw CV bytes or storage paths (caller responsibility).
+    """
+    cards = list(candidate_context or ())
+    if not cards:
+        return None
+    # json is stdlib; keep import local to avoid module-level cost for graphs
+    # that never carry candidate context in pure unit tests.
+    import json
+
+    try:
+        payload = json.dumps(cards, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return None
+    return (
+        "Approved candidate memory (structured profile and preferences only; "
+        "never invent a different approved profile; unapproved drafts are not "
+        "included):\n"
+        f"{payload}"
+    )
+
+
 def _build_model_messages(
     state: AgentGraphState,
     system_prompt: str,
 ) -> list[BaseMessage]:
-    """Assemble system + recent_context + turn messages for the decision model."""
+    """Assemble system + candidate_context + recent_context + turn messages."""
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+    candidate_block = _format_candidate_context_block(
+        state.get("candidate_context")
+    )
+    if candidate_block is not None:
+        messages.append(SystemMessage(content=candidate_block))
     for ctx_item in state.get("recent_context") or []:
         messages.append(_coerce_message(ctx_item))
     for turn_item in state.get("messages_for_this_turn") or []:
@@ -234,7 +266,7 @@ def build_agent_graph(
         Chat model used by the decision node. When omitted, constructed via the
         ShopAIKey adapter (not inside a graph node). Tests inject fakes.
     registry:
-        Tool registry. Defaults to the empty production registry.
+        Tool registry. Defaults to :func:`production_registry` (three profile tools).
     tool_loop_limit:
         Max ToolNode passes per turn (default ``Settings.TOOL_LOOP_LIMIT`` = 6).
     settings:
@@ -327,6 +359,7 @@ def initial_graph_state(
     run_id: str,
     user_text: str,
     recent_context: Sequence[dict[str, Any]] | None = None,
+    candidate_context: Sequence[dict[str, Any]] | None = None,
     attachment_ids: Sequence[str] | None = None,
     tool_iteration_count: int = 0,
     error: str | None = None,
@@ -339,7 +372,7 @@ def initial_graph_state(
         "run_id": run_id,
         "messages_for_this_turn": [HumanMessage(content=user_text)],
         "recent_context": list(recent_context or ()),
-        "candidate_context": [],
+        "candidate_context": list(candidate_context or ()),
         "attachment_ids": list(attachment_ids or ()),
         "pending_approval": None,
         "tool_iteration_count": tool_iteration_count,

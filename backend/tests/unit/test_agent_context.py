@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, get_type_hints
 
 import pytest
@@ -89,7 +90,7 @@ def test_build_initial_state_rejects_empty_run_id() -> None:
         build_initial_agent_state(run_id="   ")
 
 
-def test_build_initial_state_candidate_context_always_empty() -> None:
+def test_build_initial_state_candidate_context_defaults_empty() -> None:
     state = build_initial_agent_state(
         run_id="22222222-2222-4222-8222-222222222222",
         recent_context=[
@@ -99,9 +100,18 @@ def test_build_initial_state_candidate_context_always_empty() -> None:
     )
     assert state["candidate_context"] == []
     assert empty_candidate_context() == []
-    # Cannot inject candidate rows through the builder — field is forced empty.
     assert state["candidate_context"] is not None
     assert len(state["candidate_context"]) == 0
+
+
+def test_build_initial_state_accepts_compact_candidate_context() -> None:
+    cards = [{"kind": "approved_profile", "summary": "Engineer"}]
+    state = build_initial_agent_state(
+        run_id="22222222-2222-4222-8222-222222222223",
+        candidate_context=cards,
+    )
+    assert state["candidate_context"] == cards
+    assert set(state) == AGENT_STATE_FIELDS
 
 
 def test_build_initial_state_attachment_ids_only_no_document_bodies() -> None:
@@ -299,7 +309,7 @@ def test_recent_context_roles_preserved_without_tool_role_invention() -> None:
     assert all(m["role"] != "tool" for m in selected)
 
 
-def test_state_with_recent_context_keeps_candidate_empty() -> None:
+def test_state_with_recent_context_keeps_candidate_empty_by_default() -> None:
     # Newest-first repository order: message-2 is newer than message-1.
     rows = [_msg(2, content="prev"), _msg(1, content="older")]
     recent = apply_recent_context_budget(rows, max_messages=10, char_budget=1000)
@@ -318,3 +328,241 @@ def test_state_with_recent_context_keeps_candidate_empty() -> None:
     # Current turn is separate from recent_context in this assembly.
     recent_ids = {m["id"] for m in state["recent_context"]}
     assert turn[0]["id"] not in recent_ids
+
+
+# ---------------------------------------------------------------------------
+# Compact approved candidate_context (Plan 4 / 03C)
+# ---------------------------------------------------------------------------
+
+
+def _valid_profile_dict(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "summary": "Backend engineer focused on APIs",
+        "current_title": "Senior Engineer",
+        "total_experience_years": 6.5,
+        "skills": [
+            {
+                "skill": {
+                    "canonical_key": "python",
+                    "display_name": "Python",
+                    "aliases": ["python3", "py"],
+                    "category": "language",
+                },
+                "confidence": 0.9,
+                "proficiency": "advanced",
+                "years": 5.0,
+                "source": "cv",
+                "excluded": False,
+                "evidence": ["5 years Python backend development"],
+            },
+            {
+                "skill": {
+                    "canonical_key": "cobol",
+                    "display_name": "COBOL",
+                    "aliases": [],
+                    "category": None,
+                },
+                "confidence": 0.2,
+                "proficiency": "unknown",
+                "years": None,
+                "source": "user_correction",
+                "excluded": True,
+                "evidence": ["user excluded"],
+            },
+        ],
+        "experiences": [
+            {
+                "title": "Engineer",
+                "company": "Acme",
+                "start_date_text": "2019",
+                "end_date_text": "present",
+                "summary": "APIs",
+            }
+        ],
+        "education": [
+            {
+                "institution": "State U",
+                "degree": "BSc",
+                "field": "CS",
+                "graduation_year": 2018,
+            }
+        ],
+        "languages": [{"name": "English", "proficiency": "fluent"}],
+        "extraction_confidence": 0.88,
+    }
+    base.update(overrides)
+    return base
+
+
+def _valid_prefs_dict(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "target_roles": ["Backend Engineer"],
+        "preferred_locations": ["Berlin"],
+        "acceptable_work_modes": ["remote"],
+        "target_seniority": ["senior"],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_project_candidate_context_empty_without_profile() -> None:
+    from app.agent.context import project_candidate_context
+    from app.schemas.profile import parse_job_preferences
+
+    prefs = parse_job_preferences(_valid_prefs_dict())
+    assert project_candidate_context(profile=None, preferences=prefs) == []
+    assert project_candidate_context(profile=None, preferences=None) == []
+
+
+def test_project_candidate_context_compact_and_excludes_raw_fields() -> None:
+    from app.agent.context import (
+        CANDIDATE_CONTEXT_KIND_PREFERENCES,
+        CANDIDATE_CONTEXT_KIND_PROFILE,
+        project_candidate_context,
+    )
+    from app.schemas.profile import parse_candidate_profile, parse_job_preferences
+
+    profile = parse_candidate_profile(_valid_profile_dict())
+    prefs = parse_job_preferences(_valid_prefs_dict())
+    cards = project_candidate_context(profile=profile, preferences=prefs)
+    assert len(cards) == 2
+    assert cards[0]["kind"] == CANDIDATE_CONTEXT_KIND_PROFILE
+    assert cards[1]["kind"] == CANDIDATE_CONTEXT_KIND_PREFERENCES
+    assert cards[0]["current_title"] == "Senior Engineer"
+    assert cards[0]["summary"] == "Backend engineer focused on APIs"
+    skills = cards[0]["skills"]
+    assert len(skills) == 2
+    # Aliases omitted from compact cards; excluded skills still present.
+    assert "aliases" not in skills[0]
+    assert skills[1]["excluded"] is True
+    assert skills[1]["canonical_key"] == "cobol"
+    assert cards[1]["target_roles"] == ["Backend Engineer"]
+
+    serialized = str(cards)
+    for forbidden in (
+        "storage_path",
+        "raw_cv",
+        "raw_pdf",
+        "raw_text",
+        "raw_content",
+        "%PDF",
+        "FILES_DIR",
+        "draft_json",
+        "python3",  # alias must not appear
+    ):
+        assert forbidden not in serialized
+
+
+def test_load_candidate_context_uses_approved_not_draft(
+    migrated_sqlite: Path,
+) -> None:
+    """Pending draft must not replace approved context (replacement pending)."""
+    from app.agent.context import (
+        CANDIDATE_CONTEXT_KIND_PROFILE,
+        load_candidate_context,
+    )
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import (
+        ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_STAGED,
+    )
+    from app.db.session import build_async_engine
+    from app.repositories import attachments as att_repo
+    from app.repositories import profiles as profile_repo
+
+    from tests.support.db_migration import run_async, session_factory
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            active_id = new_uuid()
+            staged_id = new_uuid()
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="hash-active-ctx",
+                    original_name="active.pdf",
+                    size_bytes=10,
+                    storage_path=active_id,
+                    page_count=1,
+                    attachment_id=active_id,
+                )
+                await att_repo.mark_active(session, active_id, page_count=1)
+                await profile_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=active_id,
+                    profile_json=_valid_profile_dict(
+                        summary="APPROVED_SUMMARY",
+                        current_title="Approved Title",
+                    ),
+                )
+                await profile_repo.upsert_job_preferences(
+                    session,
+                    preferences_json=_valid_prefs_dict(
+                        target_roles=["Approved Role"]
+                    ),
+                )
+                staged = await att_repo.create_staged(
+                    session,
+                    file_hash="hash-staged-ctx",
+                    original_name="draft.pdf",
+                    size_bytes=10,
+                    storage_path=staged_id,
+                    page_count=1,
+                    attachment_id=staged_id,
+                )
+                await profile_repo.upsert_current_draft(
+                    session,
+                    source_attachment_id=staged.id,
+                    draft_json={
+                        "candidate_profile": _valid_profile_dict(
+                            summary="DRAFT_ONLY_SUMMARY",
+                            current_title="Draft Title",
+                        ),
+                        "job_preferences": _valid_prefs_dict(
+                            target_roles=["Draft Role"]
+                        ),
+                    },
+                )
+                await session.commit()
+
+            async with factory() as session:
+                cards = await load_candidate_context(session)
+            assert cards
+            assert cards[0]["kind"] == CANDIDATE_CONTEXT_KIND_PROFILE
+            assert cards[0]["summary"] == "APPROVED_SUMMARY"
+            assert cards[0]["current_title"] == "Approved Title"
+            assert cards[1]["target_roles"] == ["Approved Role"]
+            blob = str(cards)
+            assert "DRAFT_ONLY_SUMMARY" not in blob
+            assert "Draft Title" not in blob
+            assert "Draft Role" not in blob
+            assert "storage_path" not in blob
+            assert "raw_cv" not in blob
+            _ = (ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_ACTIVE)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_load_candidate_context_empty_when_no_profile(
+    migrated_sqlite: Path,
+) -> None:
+    from app.agent.context import load_candidate_context
+    from app.db.session import build_async_engine
+
+    from tests.support.db_migration import run_async, session_factory
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                cards = await load_candidate_context(session)
+            assert cards == []
+        finally:
+            await engine.dispose()
+
+    run_async(_body())

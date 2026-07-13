@@ -3,26 +3,29 @@
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
 foundation work, Plan 3 / Master Phase 2 (persistent conversation over the
 React–FastAPI–LangGraph–SSE path), Plan 4 / Master Phase 3 Batch01 (profile
-domain and extraction foundations), and Plan 4 Batch02 (staged CV upload and
-profile proposal pipeline). The repository contains a pinned backend core
-(including Phase 2 LangGraph/LangChain pins), the complete SQLite/Alembic
-source-of-truth schema, validated chat/ToolResult/SSE contracts, message/run/tool
-repositories, tool replay and history-hydration services, bounded Agent
-state/context, a verified ShopAIKey ChatOpenAI adapter and conversation-first
-prompt, one injected-registry decision/ToolNode graph with a six-pass loop
-guard, request-scoped `AsyncSqliteSaver` checkpoints and Agent runner streaming,
-atomic chat-turn/interrupt/resume services, thin public history/turn/resume SSE
+domain and extraction foundations), Plan 4 Batch02 (staged CV upload and
+profile proposal pipeline), and Plan 4 Batch03 (approved profile truth, Candidate
+sync, production profile tools, and profile/CV reads). The repository contains a
+pinned backend core (including Phase 2 LangGraph/LangChain pins), the complete
+SQLite/Alembic source-of-truth schema, validated chat/ToolResult/SSE contracts,
+message/run/tool repositories, tool replay and history-hydration services,
+bounded Agent state/context with compact approved candidate memory, a verified
+ShopAIKey ChatOpenAI adapter and conversation-first prompt, one injected-registry
+decision/ToolNode graph with a six-pass loop guard, request-scoped
+`AsyncSqliteSaver` checkpoints and Agent runner streaming, atomic
+chat-turn/interrupt/resume services, thin public history/turn/resume SSE
 endpoints, a typed React/Astryx conversation client (SSE parser, single streaming
 reducer, history/load-older, concise tool activity, failure states), UUID-rooted
 attachment storage with bounded multipart CV staging, Neo4j foundation
-primitives, exact Candidate Profile / skill / preference / draft Pydantic
-contracts, the sole skill taxonomy loader and normalizer, focused attachment and
-profile repositories over the existing schema, a single production pypdf
-extraction and meaningful-text owner, structured CV extraction and draft
-proposal tools (not production-registered), one health API, and a three-service
-local Docker Compose runtime. Profile approval/commit, Neo4j Candidate sync,
-profile reads, job/matching tools, and domain UI remain later Plan 4 batches and
-later plans.
+primitives plus idempotent Candidate/Skill graph sync, exact Candidate Profile /
+skill / preference / draft Pydantic contracts, the sole skill taxonomy loader and
+normalizer, focused attachment and profile repositories over the existing schema,
+a single production pypdf extraction and meaningful-text owner, structured CV
+extraction/draft proposal and interrupt-guarded commit tools (three production
+profile tools registered), constraint-safe SQLite-first approval, thin profile
+and active-CV read APIs, one health API, and a three-service local Docker Compose
+runtime. Job/matching tools and profile UI remain later Plan 4 batches and later
+plans.
 
 ## Repository layout
 
@@ -32,16 +35,19 @@ later plans.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage
-  (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup,
-  `GET /api/health`, Phase 2 chat/tool/SSE Pydantic contracts, Plan 4
-  profile/skill/draft and attachment response contracts under `app/schemas/`,
-  focused chat/run/tool and attachment/profile repositories, history/tool
-  services, skill normalizer, pypdf extraction, CV upload, profile extraction,
-  and draft proposal owners under `app/services/`, Agent state/context loader,
-  ShopAIKey chat adapter/prompt, empty production tool registry with unregistered
-  profile tool factories under `app/tools/profile.py`, one StateGraph factory,
-  request-scoped checkpoint/runner lifecycle, chat-turn/resume orchestration,
-  thin public chat history/turn/resume routes, and `POST /api/attachments/cv`.
+  (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup and
+  Candidate/Skill sync under `app/graph/`, `GET /api/health`, Phase 2
+  chat/tool/SSE Pydantic contracts, Plan 4 profile/skill/draft and attachment
+  response contracts under `app/schemas/`, focused chat/run/tool and
+  attachment/profile repositories, history/tool services, skill normalizer,
+  pypdf extraction, CV upload, profile extraction, draft proposal, and SQLite-
+  first profile approval owners under `app/services/`, Agent state/context
+  loader (compact approved candidate memory), ShopAIKey chat adapter/prompt,
+  production registry of exactly three profile tools under `app/tools/`, one
+  StateGraph factory, request-scoped checkpoint/runner lifecycle, chat-turn/
+  resume orchestration with interrupt-guarded commit, thin public chat history/
+  turn/resume routes, `POST /api/attachments/cv`, and `GET /api/profile` plus
+  `GET /api/profile/cv`.
 - `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, retained
   local feasibility scripts, and the approved Neo4j skills taxonomy seed
   (`neo4j/skills_seed.yaml`).
@@ -101,10 +107,11 @@ Attachment paths are UUID-derived and confined beneath `FILES_DIR`; complete
 writes become visible through atomic replacement. Neo4j setup owns only three
 idempotent uniqueness constraints and one 1536-dimensional cosine vector index.
 `GET /api/health` reports `available | unavailable` for SQLite, filesystem, and
-Neo4j without exposing connection details. Public functional routes are health,
-Plan 3 chat history/turn/resume, and Plan 4 `POST /api/attachments/cv`. Live
-Neo4j/Compose integration tests skip when the stack or process credentials are
-unavailable.
+Neo4j without exposing connection details. Public functional routes are exactly
+the seven Master endpoints: health, Plan 4 `POST /api/attachments/cv`,
+`GET /api/profile`, `GET /api/profile/cv`, and Plan 3 chat history/turn/resume.
+Live Neo4j/Compose integration tests skip when the stack or process credentials
+are unavailable.
 
 ## Astryx and conversation client verification
 
@@ -249,11 +256,17 @@ structured CV extraction via locked ShopAIKey `with_structured_output` (fake-
 testable, at most one schema repair and one timeout/rate retry) under
 `app/services/profile_extraction.py`; singleton draft proposal orchestration
 under `app/services/profile_drafts.py` (`propose_profile_from_cv` and correction-
-preserving `propose_profile_update`); compact unregistered tool factories under
+preserving `propose_profile_update`); compact tool factories under
 `app/tools/profile.py`; and `python-multipart==0.0.30` as a direct backend pin.
-Production registry remains empty. Later Plan 4 batches own approval/commit,
-Neo4j Candidate/Skill sync, production tool registration, profile reads, and
-profile UI.
+
+Plan 4 Batch03 is complete: constraint-safe SQLite-first approval under
+`app/services/profile_approval.py` with post-commit best-effort old-PDF cleanup
+and parameterized Candidate/Skill/seed sync under `app/graph/sync_candidate.py`;
+interrupt-guarded `commit_profile_draft` over the existing replay/resume path
+with production registration of exactly three profile tools; compact approved
+`candidate_context` loaded into new chat turns; and thin
+`GET /api/profile` / `GET /api/profile/cv` reads (no profile write CRUD). Later
+Plan 4 batches own profile UI and job/matching tools.
 
 ## Plan 3 progress and constraints
 
@@ -331,10 +344,32 @@ Plan 3 interrupt/chat primitives without duplicating them:
   `profile_drafts('current')` only; raw CV text is transient; failed extraction
   marks the same attachment `failed` and retains its file for retry.
 - Tools: `propose_profile_from_cv` and `propose_profile_update` factories live
-  under `app/tools/profile.py` and are not registered in
-  `production_registry()` (registration is Batch03).
+  under `app/tools/profile.py` and were registered in Batch03.
 - Out of scope for Batch02: approval/commit, Neo4j Candidate sync, profile read
   routes, production tool registration, and frontend upload/approval UI.
+
+## Plan 4 Batch03 progress and constraints
+
+Plan 4 Batch03 reuses Batch02 upload/proposal primitives and Plan 3
+interrupt/replay/chat transport without duplicating them:
+
+- Approval: `app/services/profile_approval.py` validates draft/attachment/file
+  outside the write unit, then commits one short SQLite transaction (active
+  profile, preferences when changed, replacement ordering, draft delete, one-
+  active invariant). Cleanup and Neo4j sync run only after commit; sync failure
+  returns `NEO4J_SYNC_FAILED` with `sqlite_committed=true` and never rolls SQLite
+  back.
+- Graph sync: `app/graph/sync_candidate.py` MERGE Candidate `id='active'`, rebuilds
+  this Candidate's `HAS_SKILL` for non-excluded skills only, loads approved seed
+  `RELATED_TO`, and never receives raw CV text.
+- Commit tool: `commit_profile_draft` interrupts before side effects; resume
+  continues the same `(run_id, tool_call_id)` with `save_profile|request_changes`.
+  Production registry is exactly the three profile tools (no `match_jobs`).
+- Reads/memory: short-session load of compact approved profile/preferences into
+  existing `candidate_context`; `app/api/profile.py` exposes metadata and active
+  PDF stream only. Public surface is exactly the seven Master endpoints.
+- Out of scope for Batch03: frontend upload/approval UI, profile write CRUD,
+  JD/Job graph behavior, embeddings, rebuild completion, and matching tools.
 
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 
@@ -368,7 +403,25 @@ python -m mypy app
 
 These upload and proposal tests use the temporary migrated SQLite harness and
 fake structured-profile invokers. They do not require a live ShopAIKey call for
-Batch02 acceptance. Production tool registration remains empty until Batch03.
+Batch02 acceptance.
+
+## Approved profile truth, sync, and read verification (Plan 4 Batch03)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/integration/test_profile_approval.py tests/integration/test_candidate_sync.py -q
+python -m pytest tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py -q
+python -m pytest tests/unit/test_agent_context.py tests/integration/test_cv_api.py -q
+python -m ruff check app/services/profile_approval.py app/graph/sync_candidate.py app/tools/profile.py app/tools/registry.py app/services/tool_execution.py app/services/chat_turns.py app/agent/context.py app/agent/graph.py app/agent/runner.py app/api/profile.py app/main.py
+python -m mypy app
+```
+
+These tests use temporary migrated SQLite, fakes, and injected Neo4j drivers.
+Live Neo4j is optional and does not block Batch03 acceptance. Public surface is
+exactly health, CV upload, profile/profile-CV reads, and the three Plan 3 chat
+endpoints; production registry contains exactly three profile tools.
 
 ## Durable chat contract verification (Batch01)
 

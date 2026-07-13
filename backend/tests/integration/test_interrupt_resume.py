@@ -563,16 +563,26 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_empty_and_synthetic_is_test_only() -> None:
+def test_production_registry_three_profile_tools_and_synthetic_is_test_only() -> None:
     reg = production_registry()
-    assert reg.is_empty()
-    assert SYNTHETIC_TOOL_NAME not in reg.tool_names()
+    names = reg.tool_names()
+    assert names == [
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    ]
+    assert SYNTHETIC_TOOL_NAME not in names
+    assert "match_jobs" not in names
+    assert "save_job" not in names
+    assert "query_jobs" not in names
 
     prod_registry = (BACKEND_ROOT / "app" / "tools" / "registry.py").read_text(
         encoding="utf-8"
     )
-    assert "synthetic" not in prod_registry.lower()
+    # Exclude docstring mentions of banned helpers by checking code tokens only.
+    assert "build_synthetic" not in prod_registry
     assert "interrupt(" not in prod_registry
+    assert "match_jobs" not in prod_registry
 
     synth_path = BACKEND_ROOT / "tests" / "fakes" / "synthetic_tool.py"
     assert synth_path.is_file()
@@ -587,11 +597,13 @@ def test_production_registry_empty_and_synthetic_is_test_only() -> None:
     ).read_text(encoding="utf-8")
     assert "APPROVAL_ACTION_REQUIRED" in chat_turns_src
     assert "pending_approval" in chat_turns_src
-    # Generic interruption — no domain profile/CV workflow.
+    # Generic interruption — no domain profile/CV action names hard-coded.
     assert "commit_profile" not in chat_turns_src
     assert "save_profile" not in chat_turns_src
     assert "request_changes" not in chat_turns_src
     assert "propose_profile" not in chat_turns_src
+    # Optional draft_id passthrough remains domain-agnostic.
+    assert "draft_id" in chat_turns_src
 
 
 def test_sse_events_validate() -> None:

@@ -189,6 +189,7 @@ async def stream_agent_run(
     resumed: bool = False,
     resume_value: Any | None = None,
     recent_context: Sequence[dict[str, Any]] | None = None,
+    candidate_context: Sequence[dict[str, Any]] | None = None,
     attachment_ids: Sequence[str] | None = None,
     input_state: AgentGraphState | None = None,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
@@ -272,6 +273,7 @@ async def stream_agent_run(
                 run_id=run_id,
                 user_text=user_text,
                 recent_context=recent_context,
+                candidate_context=candidate_context,
                 attachment_ids=attachment_ids,
             )
 

@@ -1,24 +1,37 @@
-"""Profile-domain Agent tools (Plan 4 §7.5) — boundaries without registration.
+"""Profile-domain Agent tools (Plan 4 §7.5) — first production tool set.
 
-``propose_profile_from_cv`` and ``propose_profile_update`` are defined here for
-later production registration (03B). This module does **not** register tools
-into :func:`app.tools.registry.production_registry`.
+Registers via :func:`build_production_profile_tools` / ``production_registry``:
+
+* ``propose_profile_from_cv``
+* ``propose_profile_update``
+* ``commit_profile_draft`` (interrupt-guarded)
 
 Tool results are compact :class:`~app.schemas.tools.ToolResult` objects. Raw CV
 text never appears in arguments summaries, ToolResult data, or logs.
 There is no separate preference tool; ``propose_profile_update`` covers both
 Candidate Profile facts and Job Preferences and never writes active singletons.
+
+``commit_profile_draft`` reuses Plan 3 ``(run_id, tool_call_id)`` replay via
+:func:`~app.services.tool_execution.execute_tool` with running re-entry so one
+tool_executions row stays ``running`` across interrupt and terminalizes once.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Annotated, Any
 
-from langchain_core.tools import tool
+from langchain_core.tools import InjectedToolCallId, tool
+from langgraph.prebuilt import InjectedState
+from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.db.session import get_session_factory
+from app.graph.sync_candidate import AsyncGraphDriver
+from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
+from app.services.profile_approval import ApprovalCommitResult, commit_approved_draft
 from app.services.profile_drafts import (
     arguments_summary_for_propose_cv,
     arguments_summary_for_propose_update,
@@ -27,24 +40,58 @@ from app.services.profile_drafts import (
 )
 from app.services.profile_extraction import StructuredProfileInvoker
 from app.services.skill_normalization import SkillNormalizer
+from app.services.tool_execution import execute_tool
 from app.storage.attachments import AttachmentStorage
 
 PROPOSE_PROFILE_FROM_CV_NAME: str = "propose_profile_from_cv"
 PROPOSE_PROFILE_UPDATE_NAME: str = "propose_profile_update"
+COMMIT_PROFILE_DRAFT_NAME: str = "commit_profile_draft"
+
+# Durable interrupt projection (Master §10.3 / Plan 4 §7.5–7.6).
+PROFILE_COMMIT_KIND: str = "profile_commit"
+PROFILE_COMMIT_ACTIONS: tuple[str, str] = ("save_profile", "request_changes")
+
+ERROR_INVALID_DRAFT_ID: str = "INVALID_DRAFT_ID"
+ERROR_DRAFT_NOT_FOUND: str = "DRAFT_NOT_FOUND"
+ERROR_MISSING_RUN_ID: str = "MISSING_RUN_ID"
+ERROR_INVALID_APPROVAL_ACTION: str = "INVALID_APPROVAL_ACTION"
+
+CommitApprovedFn = Callable[..., Awaitable[ApprovalCommitResult]]
+
+
+def build_profile_commit_projection(
+    *,
+    tool_call_id: str,
+    draft_id: str = PROFILE_DRAFT_ID,
+    card: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compact ``pending_approval`` / ``approval_required`` projection."""
+    return {
+        "kind": PROFILE_COMMIT_KIND,
+        "draft_id": draft_id,
+        "allowed_actions": list(PROFILE_COMMIT_ACTIONS),
+        "card": {
+            "tool_name": COMMIT_PROFILE_DRAFT_NAME,
+            "tool_call_id": tool_call_id,
+            "draft_id": draft_id,
+            **(card or {}),
+        },
+    }
 
 
 def build_propose_profile_from_cv_tool(
     *,
-    session_factory: async_sessionmaker[AsyncSession],
-    storage: AttachmentStorage,
-    invoker: StructuredProfileInvoker,
-    normalizer: SkillNormalizer,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    storage: AttachmentStorage | None = None,
+    invoker: StructuredProfileInvoker | None = None,
+    normalizer: SkillNormalizer | None = None,
     extract_text_fn: Callable[[Any], Any] | None = None,
 ) -> Any:
     """Build the compact ``propose_profile_from_cv`` LangChain tool.
 
-    Dependencies are closed over (injected) so they never appear in the
-    LLM-visible tool schema. Not registered for production in Plan 4 Batch02.
+    Dependencies are closed over (injected) so they do not appear in the
+    LLM-visible tool schema. Resolve process defaults only at invoke time when
+    omitted so registry construction stays free of eager provider/IO work.
     """
 
     @tool(PROPOSE_PROFILE_FROM_CV_NAME)
@@ -56,15 +103,30 @@ def build_propose_profile_from_cv_tool(
         reused; other staged attachments run extraction into
         ``profile_drafts('current')``. Never commits active profile/preferences.
         """
-        # arguments_summary_json contract (for later tool_execution rows): IDs only.
+        from app.core.settings import get_settings
+        from app.services.profile_extraction import ShopAIKeyStructuredProfileInvoker
+
+        factory = (
+            session_factory
+            if session_factory is not None
+            else get_session_factory()
+        )
+        store = (
+            storage
+            if storage is not None
+            else AttachmentStorage(get_settings().FILES_DIR)
+        )
+        inv = invoker if invoker is not None else ShopAIKeyStructuredProfileInvoker()
+        norm = normalizer if normalizer is not None else SkillNormalizer.production()
+
         _ = arguments_summary_for_propose_cv(attachment_id)
 
         result = await propose_profile_from_cv(
             attachment_id=attachment_id,
-            session_factory=session_factory,
-            storage=storage,
-            invoker=invoker,
-            normalizer=normalizer,
+            session_factory=factory,
+            storage=store,
+            invoker=inv,
+            normalizer=norm,
             extract_text_fn=extract_text_fn,
         )
         tool_result: ToolResult = result.tool_result
@@ -75,14 +137,14 @@ def build_propose_profile_from_cv_tool(
 
 def build_propose_profile_update_tool(
     *,
-    session_factory: async_sessionmaker[AsyncSession],
-    normalizer: SkillNormalizer,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    normalizer: SkillNormalizer | None = None,
 ) -> Any:
     """Build the compact ``propose_profile_update`` LangChain tool.
 
     Covers profile facts and Job Preferences in one tool. Dependencies are
     injected and absent from the LLM-visible schema. Never writes active
-    profile/preferences. Not registered for production in Plan 4 Batch02.
+    profile/preferences.
     """
 
     @tool(PROPOSE_PROFILE_UPDATE_NAME)
@@ -98,6 +160,13 @@ def build_propose_profile_update_tool(
         ``profile_drafts('current')``. Does not write active profile or
         preferences.
         """
+        factory = (
+            session_factory
+            if session_factory is not None
+            else get_session_factory()
+        )
+        norm = normalizer if normalizer is not None else SkillNormalizer.production()
+
         profile_map: Mapping[str, Any] | None = profile_changes
         prefs_map: Mapping[str, Any] | None = preference_changes
         skills_seq: Sequence[Mapping[str, Any]] | None = skill_corrections
@@ -109,8 +178,8 @@ def build_propose_profile_update_tool(
         )
 
         result = await propose_profile_update(
-            session_factory=session_factory,
-            normalizer=normalizer,
+            session_factory=factory,
+            normalizer=norm,
             profile_changes=profile_map,
             preference_changes=prefs_map,
             skill_corrections=skills_seq,
@@ -121,9 +190,248 @@ def build_propose_profile_update_tool(
     return propose_profile_update_tool
 
 
+def build_commit_profile_draft_tool(
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    storage: AttachmentStorage | None = None,
+    normalizer: SkillNormalizer | None = None,
+    driver: AsyncGraphDriver | None = None,
+    sync_fn: Callable[..., Awaitable[None]] | None = None,
+    commit_fn: CommitApprovedFn | None = None,
+) -> Any:
+    """Build interrupt-guarded ``commit_profile_draft`` LangChain tool.
+
+    Validates authorization/draft, claims durable ``(run_id, tool_call_id)``,
+    calls ``interrupt()`` before any active profile/preference side effect, and
+    on resume applies ``save_profile`` or ``request_changes`` under the same
+    identity. Hidden injected args never appear in the LLM-visible schema.
+    """
+
+    @tool(COMMIT_PROFILE_DRAFT_NAME)
+    async def commit_profile_draft_tool(
+        tool_call_id: Annotated[str, InjectedToolCallId],
+        state: Annotated[dict[str, Any], InjectedState],
+        draft_id: str = PROFILE_DRAFT_ID,
+    ) -> dict[str, Any]:
+        """Request approval to commit ``profile_drafts('current')``.
+
+        Pauses for ``save_profile`` or ``request_changes`` before any active
+        profile write. Input is only ``draft_id`` (must be ``current``).
+        """
+        from app.core.settings import get_settings
+
+        factory = (
+            session_factory
+            if session_factory is not None
+            else get_session_factory()
+        )
+        run_id = state.get("run_id") if isinstance(state, dict) else None
+        if not isinstance(run_id, str) or run_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="commit_profile_draft requires run_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
+
+        if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="commit_profile_draft requires tool_call_id",
+                data=None,
+            ).model_dump(mode="json")
+
+        async def _invoke() -> ToolResult:
+            if draft_id != PROFILE_DRAFT_ID:
+                return ToolResult(
+                    ok=False,
+                    code=ERROR_INVALID_DRAFT_ID,
+                    summary=(
+                        f"draft_id must be {PROFILE_DRAFT_ID!r}; "
+                        f"got {draft_id!r}"
+                    ),
+                    data={"draft_id": draft_id},
+                )
+
+            # Validate draft exists before interrupt (no active-side effects).
+            async with factory() as session:
+                draft_row = await profile_repo.get_current_draft(session)
+            if draft_row is None:
+                return ToolResult(
+                    ok=False,
+                    code=ERROR_DRAFT_NOT_FOUND,
+                    summary="No current profile draft to commit",
+                    data={"draft_id": PROFILE_DRAFT_ID},
+                )
+
+            # Pause before any active profile/preference side effect.
+            decision = interrupt(
+                build_profile_commit_projection(
+                    tool_call_id=tool_call_id,
+                    draft_id=PROFILE_DRAFT_ID,
+                )
+            )
+            action = decision if isinstance(decision, str) else str(decision)
+
+            if action == "request_changes":
+                return ToolResult(
+                    ok=True,
+                    code=None,
+                    summary=(
+                        "Changes requested; draft preserved for a new "
+                        "correction turn"
+                    ),
+                    data={
+                        "committed": False,
+                        "draft_id": PROFILE_DRAFT_ID,
+                        "action": "request_changes",
+                    },
+                )
+
+            if action != "save_profile":
+                return ToolResult(
+                    ok=False,
+                    code=ERROR_INVALID_APPROVAL_ACTION,
+                    summary=f"unsupported approval action {action!r}",
+                    data={"action": action},
+                )
+
+            store = (
+                storage
+                if storage is not None
+                else AttachmentStorage(get_settings().FILES_DIR)
+            )
+            norm = (
+                normalizer
+                if normalizer is not None
+                else SkillNormalizer.production()
+            )
+            do_commit: CommitApprovedFn = (
+                commit_fn if commit_fn is not None else commit_approved_draft
+            )
+            outcome = await do_commit(
+                session_factory=factory,
+                storage=store,
+                normalizer=norm,
+                driver=driver,
+                sync_fn=sync_fn,
+            )
+
+            data: dict[str, Any] = {
+                "committed": bool(outcome.sqlite_committed),
+                "draft_id": PROFILE_DRAFT_ID,
+                "action": "save_profile",
+                "sqlite_committed": outcome.sqlite_committed,
+                "cleanup_ok": outcome.cleanup_ok,
+                "sync_ok": outcome.sync_ok,
+            }
+            if outcome.data:
+                # Compact IDs/flags only; never raw CV text.
+                for key in (
+                    "active_attachment_id",
+                    "previous_attachment_id",
+                    "preferences_updated",
+                    "profile_updated_at",
+                    "rebuild_instruction",
+                    "code",
+                ):
+                    if key in outcome.data:
+                        data[key] = outcome.data[key]
+
+            if outcome.ok:
+                return ToolResult(
+                    ok=True,
+                    code=None,
+                    summary=outcome.summary,
+                    data=data,
+                )
+
+            # Pre-commit failure vs committed-SQLite/failed-derived-sync.
+            if outcome.sqlite_committed:
+                summary = outcome.summary
+                if not summary:
+                    summary = (
+                        "Profile committed to SQLite but derived Candidate "
+                        "sync failed"
+                    )
+                return ToolResult(
+                    ok=False,
+                    code=outcome.code,
+                    summary=summary,
+                    data=data,
+                )
+
+            return ToolResult(
+                ok=False,
+                code=outcome.code,
+                summary=outcome.summary
+                or "Profile commit failed before SQLite approval",
+                data=data,
+            )
+
+        result = await execute_tool(
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+            tool_name=COMMIT_PROFILE_DRAFT_NAME,
+            invoke=_invoke,
+            arguments_summary_json={"draft_id": draft_id},
+            session_factory=factory,
+            allow_running_reentry=True,
+        )
+        return result.model_dump(mode="json")
+
+    return commit_profile_draft_tool
+
+
+def build_production_profile_tools(
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    storage: AttachmentStorage | None = None,
+    invoker: StructuredProfileInvoker | None = None,
+    normalizer: SkillNormalizer | None = None,
+    driver: AsyncGraphDriver | None = None,
+    extract_text_fn: Callable[[Any], Any] | None = None,
+    sync_fn: Callable[..., Awaitable[None]] | None = None,
+    commit_fn: CommitApprovedFn | None = None,
+) -> list[Any]:
+    """Build exactly the three Plan 4 production profile tools (no match_jobs)."""
+    return [
+        build_propose_profile_from_cv_tool(
+            session_factory=session_factory,
+            storage=storage,
+            invoker=invoker,
+            normalizer=normalizer,
+            extract_text_fn=extract_text_fn,
+        ),
+        build_propose_profile_update_tool(
+            session_factory=session_factory,
+            normalizer=normalizer,
+        ),
+        build_commit_profile_draft_tool(
+            session_factory=session_factory,
+            storage=storage,
+            normalizer=normalizer,
+            driver=driver,
+            sync_fn=sync_fn,
+            commit_fn=commit_fn,
+        ),
+    ]
+
+
 __all__ = [
+    "COMMIT_PROFILE_DRAFT_NAME",
+    "ERROR_DRAFT_NOT_FOUND",
+    "ERROR_INVALID_APPROVAL_ACTION",
+    "ERROR_INVALID_DRAFT_ID",
+    "ERROR_MISSING_RUN_ID",
+    "PROFILE_COMMIT_ACTIONS",
+    "PROFILE_COMMIT_KIND",
     "PROPOSE_PROFILE_FROM_CV_NAME",
     "PROPOSE_PROFILE_UPDATE_NAME",
+    "build_commit_profile_draft_tool",
+    "build_production_profile_tools",
+    "build_profile_commit_projection",
     "build_propose_profile_from_cv_tool",
     "build_propose_profile_update_tool",
 ]

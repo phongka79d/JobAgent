@@ -1,21 +1,30 @@
-"""Injected tool registry for the single-Agent graph (Plan 3 §7.5).
+"""Injected tool registry for the single-Agent graph (Plan 3 §7.5 / Plan 4 §7.5).
 
-Production Phase 2 ships an empty registry — no domain tools and no test-only
-helpers. Tests inject side-effect-free fakes through the same interface without
-changing graph construction.
+Production registers exactly the three profile tools from
+:func:`app.tools.profile.build_production_profile_tools`. Tests inject
+side-effect-free fakes through the same :class:`ToolRegistry` interface without
+changing graph construction. Later-phase job tools and test-only interrupt
+helpers are never registered here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.graph.sync_candidate import AsyncGraphDriver
+from app.services.profile_extraction import StructuredProfileInvoker
+from app.services.skill_normalization import SkillNormalizer
+from app.storage.attachments import AttachmentStorage
 
 
 class ToolRegistry:
     """Minimal injectable registry of LangChain tools / callables.
 
     Does not persist, call HTTP routes, or open database sessions. Callers
-    (graph factory, later runner) inject the list; production uses
+    (graph factory, runner, chat deps) inject the list; production uses
     :func:`production_registry`.
     """
 
@@ -40,14 +49,39 @@ class ToolRegistry:
         return names
 
     def is_empty(self) -> bool:
-        """True when no tools are registered (production Phase 2 default)."""
+        """True when no tools are registered."""
         return not self._tools
 
 
-def production_registry() -> ToolRegistry:
-    """Return the shipped production registry: zero tools.
+def production_registry(
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    storage: AttachmentStorage | None = None,
+    invoker: StructuredProfileInvoker | None = None,
+    normalizer: SkillNormalizer | None = None,
+    driver: AsyncGraphDriver | None = None,
+    extract_text_fn: Callable[[Any], Any] | None = None,
+    sync_fn: Callable[..., Awaitable[None]] | None = None,
+    commit_fn: Callable[..., Awaitable[Any]] | None = None,
+) -> ToolRegistry:
+    """Return the production registry: exactly three profile tools.
 
-    Domain or test-only tools must never be registered here. Tests construct
-    :class:`ToolRegistry` with injected fakes only.
+    Optional dependencies are closed over by the tools (or resolved at invoke
+    time when omitted). Never registers later job tools, preference-only tools,
+    or test-only interrupt helpers.
     """
-    return ToolRegistry()
+    # Local import keeps this module free of eager profile service construction
+    # and avoids circular import at package load.
+    from app.tools.profile import build_production_profile_tools
+
+    tools = build_production_profile_tools(
+        session_factory=session_factory,
+        storage=storage,
+        invoker=invoker,
+        normalizer=normalizer,
+        driver=driver,
+        extract_text_fn=extract_text_fn,
+        sync_fn=sync_fn,
+        commit_fn=commit_fn,
+    )
+    return ToolRegistry(tools)

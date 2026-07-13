@@ -891,3 +891,398 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Approved Profile Truth, Sync, and Read Integration
+- Task ID: 03A
+- Task title: Implement the constraint-safe approval transaction and idempotent Candidate/Skill synchronization
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git:
+  - `?? backend/app/services/profile_approval.py` (created)
+  - `?? backend/app/graph/sync_candidate.py` (created)
+  - `M backend/tests/integration/test_profile_approval.py` (extended with 03A cases)
+  - `?? backend/tests/integration/test_candidate_sync.py` (created)
+  - `M docs/reports/report_4_execute_agent.md` (execution report only)
+- recent commits: HEAD is P4B2 complete; 03A implementation is uncommitted working-tree change matching A1 file list (plus execution report)
+
+## Files Reviewed
+- `backend/app/services/profile_approval.py`: in scope - preflight validates draft/attachment/file; one short SQLite transaction (DB-only, check_files=False re-validate); constraint-safe order (profile repoint, prefs when changed, old attachment delete, mark active, delete draft, invariant); post-commit storage.delete then sync_candidate; NEO4J_SYNC_FAILED with sqlite_committed=true and rebuild instruction; failpoints test-only
+- `backend/app/graph/sync_candidate.py`: in scope - parameterized MERGE Candidate{id=active} + source_updated_at; clear/rebuild HAS_SKILL for non-excluded skills only; MERGE Skill; seed RELATED_TO; CandidateSyncError(NEO4J_SYNC_FAILED); no raw CV text
+- `backend/tests/integration/test_profile_approval.py`: in scope - first approval, replacement, missing file, transaction failpoint rollback, cleanup failure, sync failure after commit, preference-only, missing draft, static boundary checks
+- `backend/tests/integration/test_candidate_sync.py`: in scope - fake-driver MERGE/HAS_SKILL/RELATED_TO, exclusions, idempotent repeat, failure+rebuild, static parameter/no-raw-CV evidence
+- `docs/plans/Plan_4.md` Â§7.6â€“7.7, `docs/plans/Master_plan.md` Â§6.4, Â§10.4, Â§21: source requirements cross-checked
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_profile_approval.py tests/integration/test_candidate_sync.py -q`
+- Required: yes
+- Reported result: passed (35 tests)
+- Rerun result: passed (35 passed, exit 0)
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `Set-Location backend; python -m ruff check app/services/profile_approval.py app/graph/sync_candidate.py tests/integration/test_profile_approval.py tests/integration/test_candidate_sync.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: ruff All checks passed; mypy Success: no issues found in 62 source files
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: search begin|commit|rollback|delete(|NEO4J_SYNC_FAILED|MERGE|HAS_SKILL|RELATED_TO|source_updated_at|raw.*(cv|pdf|text) under listed paths
+- Required: yes
+- Reported result: passed
+- Rerun result: verified via rg on profile_approval.py and sync_candidate.py
+- Status: passed
+- Notes: SQLite commit/rollback only inside short transaction; storage.delete and Neo4j after commit; parameterized Cypher; no raw_cv/extract_text paths
+
+## Acceptance Review
+- Task acceptance: all source requirements for 03A
+- Status: satisfied
+- Evidence:
+  - Successful first/replacement approval: one active attachment, profile pointer, prefs, no draft, old row/file removed (integration tests)
+  - Pre-commit/transaction failure preserves prior active + staged replacement; no Neo4j write (missing file + before_commit failpoint)
+  - Cleanup failure leaves committed SQLite; sync failure returns NEO4J_SYNC_FAILED + rebuild with sqlite_committed=true
+  - Exclusions remain SQLite-only; repeated sync identical parameterized Cypher; no FS/Neo4j inside SQLite write unit
+  - Cypher uses parameters; no secrets/raw CV text
+
+## Architecture Alignment
+- SQLite is source of truth; Neo4j derived post-commit only
+- No open transaction spans filesystem or Neo4j
+- Reuses repositories, AttachmentStorage, SkillNormalizer, injected async driver
+- Interrupt/resume tool wiring intentionally out of scope (03B)
+
+## Implementation Reality
+- Real async SQLAlchemy transaction + repository writes
+- Real parameterized Cypher templates and skill filtering
+- Fake Neo4j drivers only in tests; production path uses injected driver + sync_candidate
+- Failpoints are explicit test hooks only
+
+## Hardcoding Review
+- No hardcoded success for approvals; fail paths return stable codes
+- No fixture-ID overfitting in production modules
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Failpoints `after_profile_upsert` / `after_old_attachment_delete` are defined but not each given a dedicated integration test; `before_commit` plus exception rollback path still covers required transaction-failure acceptance.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- Scope limited to the four allowed files; execution report modification is A1 evidence only
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Approved Profile Truth, Sync, and Read Integration
+- Task ID: 03B
+- Task title: Integrate interrupt-guarded commit_profile_draft with the existing replay/resume runtime
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03B scope):
+  - `M backend/app/tools/profile.py` — commit tool + production tool builders
+  - `M backend/app/tools/registry.py` — production_registry builds three profile tools
+  - `M backend/app/services/tool_execution.py` — allow_running_reentry for same (run_id, tool_call_id)
+  - `M backend/app/services/chat_turns.py` — optional draft_id projection passthrough
+  - `M backend/app/agent/graph.py` — docstring only (production registry default)
+  - `M backend/app/api/dependencies.py` — wire production profile tools + lifespan deps
+  - `M backend/tests/integration/test_profile_approval.py` — full-path commit/interrupt cases
+  - `M backend/tests/integration/test_interrupt_resume.py` — production registry ownership
+  - `M backend/tests/integration/test_tool_replay.py` — running re-entry coverage
+  - `M docs/reports/report_4_execute_agent.md` — A1 execution report only
+- runner.py: no code change (existing Command(resume=) path reused) — confirmed empty git diff
+- Pre-existing Batch03 working-tree artifacts (03A): `?? profile_approval.py`, `?? sync_candidate.py`, `?? test_candidate_sync.py` — dependency inputs, not 03B edits
+- recent commits: HEAD is P4B2; 03A/03B work remains uncommitted working-tree change
+
+## Files Reviewed
+- `backend/app/tools/profile.py`: in scope — interrupt-guarded commit_profile_draft; draft validation before interrupt(); projection kind=profile_commit, draft_id=current, allowed_actions save_profile|request_changes; execute_tool(..., allow_running_reentry=True); request_changes ToolResult(ok=true, committed=false); save_profile calls commit_approved_draft (03A) with pre-commit vs sqlite_committed/sync-failed ToolResult semantics; build_production_profile_tools returns exactly three tools
+- `backend/app/tools/registry.py`: in scope — production_registry closes over deps and registers three profile tools only; no match_jobs/synthetic
+- `backend/app/services/tool_execution.py`: in scope — single identity path; running + allow_running_reentry re-enters same row; terminal exact-replay; concurrent running without re-entry still raises ToolExecutionInProgressError
+- `backend/app/services/chat_turns.py`: in scope — domain-agnostic draft_id passthrough; no save_profile/request_changes hardcoding
+- `backend/app/agent/graph.py`: in scope — docstring only; still defaults to production_registry()
+- `backend/app/api/dependencies.py`: in scope — get_chat_agent_deps injects session_factory, storage, neo4j driver into production_registry
+- `backend/app/agent/runner.py`: inspected; no modification required
+- Integration tests listed above: in scope — missing draft before interrupt, request_changes preserve draft + checkpoint cleanup + identity, save success + terminal no-op, Neo4j failure after SQLite commit, re-entry, registry ownership, no second idempotency key
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py -q`
+- Required: yes
+- Reported result: passed (74 tests)
+- Rerun result: passed (74 dots / exit 0)
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `Set-Location backend; python -m ruff check app/tools/profile.py app/tools/registry.py app/services/tool_execution.py app/services/chat_turns.py app/agent/graph.py app/agent/runner.py app/api/dependencies.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: ruff All checks passed; mypy Success: no issues found in 62 source files
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: search propose_profile_from_cv|propose_profile_update|commit_profile_draft|interrupt\(|draft_id|allowed_actions|execute_tool|tool_call_id|production_registry|match_jobs|request_changes|save_profile under backend/app backend/tests
+- Required: yes
+- Reported result: passed (343 matching lines claimed)
+- Rerun result: pattern evidence verified via file reads and Select-String counts on production modules + integration tests (commit/interrupt/reentry/registry/actions present; match_jobs not registered in registry.py)
+- Status: passed
+- Notes: shell `rg` unavailable on PATH; content verified via repository search tools and file inspection
+
+## Acceptance Review
+- Task acceptance: all source requirements for 03B
+- Status: satisfied
+- Evidence:
+  - Missing draft / invalid draft_id fail before interrupt; no active profile/preference side effects while interrupted
+  - One tool_executions row stays running across interrupt and becomes exactly one terminal completed/failed after action; same tool_call_id; Plan 3 statuses only
+  - request_changes: committed=false, draft preserved, checkpoint deleted, run completed
+  - save_profile: calls (03A) commit_approved_draft; Neo4j failure after SQLite commit returns failed ToolResult with sqlite_committed=true; terminal resume is no-op without re-side-effects
+  - Production registry exactly three profile tools; no match_jobs/synthetic/second idempotency path; InjectedToolCallId/InjectedState hidden from LLM schema (draft_id only)
+
+## Architecture Alignment
+- Single Agent graph, one ToolNode, one execute_tool identity (run_id, tool_call_id)
+- No second executor, second result row mechanism, or domain-specific chat_turns hardcoding
+- Reuses Plan 3 interrupt/checkpoint/resume/SSE path
+- Production deps inject storage + Neo4j driver from lifespan; model construction remains deferred
+
+## Implementation Reality
+- Real LangGraph interrupt() before commit side effects
+- Real execute_tool running re-entry; durable pending_approval projection with draft_id
+- Fake model/commit/Neo4j only in tests; production path uses commit_approved_draft + injected driver
+
+## Hardcoding Review
+- No fixed success values; action validation rejects unsupported actions
+- chat_turns remains domain-agnostic (no save_profile/request_changes literals)
+- No second idempotency key
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Stale Plan 3 unit test `tests/unit/test_agent_graph.py::test_production_registry_is_empty` still expects an empty production registry and fails when run; outside required 03B validation suite and intentionally wrong relative to Plan 4 three-tool registration. Disclosed by A1. Follow-up should rename/assert three profile tools (not blocking 03B acceptance).
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- runner.py correctly reported as inspected with no code change
+- Scope limited to allowed 03B files; 03A dependency modules pre-exist in working tree
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 03C
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Approved Profile Truth, Sync, and Read Integration
+- Task ID: 03C
+- Task title: Load compact approved candidate context and expose profile/CV reads
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03C scope):
+  - `M backend/app/agent/context.py` — compact approved candidate loader + projectors
+  - `M backend/app/agent/state.py` — candidate_context passthrough on initial state (still nine fields)
+  - `M backend/app/agent/graph.py` — format/inject candidate_context system block; initial_graph_state accepts cards
+  - `M backend/app/agent/runner.py` — pass candidate_context into initial_graph_state
+  - `M backend/app/services/chat_turns.py` — load recent + approved candidate context before graph (short session)
+  - `M backend/app/schemas/profile.py` — ProfileReadResponse + empty_profile_read_response
+  - `?? backend/app/api/profile.py` — GET /api/profile and GET /api/profile/cv only
+  - `M backend/app/main.py` — register profile router; seven public endpoints
+  - `M backend/tests/unit/test_agent_context.py` — compact context / approved-not-draft cases
+  - `M backend/tests/unit/test_agent_graph.py` — minimal production-registry expectation fix (03B three tools)
+  - `M backend/tests/integration/test_cv_api.py` — profile empty/active/CV stream/route thinness
+  - `M backend/tests/integration/test_chat_api.py` — seven-route inventory + turn injects approved context
+  - `M docs/reports/report_4_execute_agent.md` — A1 execution report only
+- Pre-existing Batch03 artifacts not claimed as 03C ownership: tools/profile.py, registry, tool_execution, dependencies, profile_approval, sync_candidate, interrupt/tool_replay/profile_approval tests (03A/03B)
+- recent commits: HEAD is P4B2; Batch03 work remains uncommitted working-tree change
+
+## Files Reviewed
+- `backend/app/agent/context.py`: in scope — load_candidate_context/project_candidate_context from active profile + preferences only; bounds evidence; omits aliases/storage_path/raw fields; empty without profile
+- `backend/app/agent/state.py`: in scope (supporting) — still exactly nine AgentState fields; build_initial_agent_state accepts optional candidate_context default empty
+- `backend/app/agent/graph.py`: in scope — _format_candidate_context_block injects approved memory as SystemMessage; initial_graph_state threads candidate_context
+- `backend/app/agent/runner.py`: in scope — stream_agent_run accepts and forwards candidate_context
+- `backend/app/services/chat_turns.py`: in scope — short session loads load_recent_context + load_candidate_context before stream_agent_run; session closed before provider/graph; draft_id passthrough remains from 03B
+- `backend/app/schemas/profile.py`: in scope — ProfileReadResponse with present/profile/preferences/active_attachment (AttachmentPublic); no PDF/storage_path
+- `backend/app/api/profile.py`: in scope — thin GET-only reads; Content-Disposition sanitization; streams via storage.open; no write CRUD/provider/graph
+- `backend/app/main.py`: in scope — include profile_router once with health/attachments/chat
+- Unit/integration tests above: in scope — empty/active reads, missing file safety, seven routes, approved-not-draft context injection
+- `backend/tests/unit/test_agent_graph.py`: in scope (minimal justified fix) — production_registry asserts three profile tools; empty-prompt case uses ToolRegistry()
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_agent_context.py tests/integration/test_cv_api.py tests/integration/test_chat_api.py tests/integration/test_profile_approval.py -q`
+- Required: yes
+- Reported result: passed (105 tests)
+- Rerun result: passed (105 dots / exit 0)
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `Set-Location backend; python -m ruff check app/agent/context.py app/agent/graph.py app/agent/runner.py app/services/chat_turns.py app/schemas/profile.py app/api/profile.py app/main.py tests/unit/test_agent_context.py tests/integration/test_cv_api.py tests/integration/test_chat_api.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: ruff All checks passed; mypy Success: no issues found in 63 source files
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: search candidate_context|raw_(cv|pdf|text|content)|storage_path|Content-Disposition|@router.(get|post|put|patch|delete)|include_router under backend/app backend/tests
+- Required: yes
+- Reported result: passed
+- Rerun result: verified via repository search + file reads — load_candidate_context ownership; profile.py two GET routes + Content-Disposition; main four include_router; app/api only seven public GET/POST endpoints (health, attachments POST, profile x2, chat history/turns/resume); no profile PUT/PATCH/DELETE; AttachmentPublic excludes storage_path
+- Status: passed
+- Notes: shell rg unavailable on PATH; content verified via search tools and inspection
+
+## Acceptance Review
+- Task acceptance: all source requirements for 03C
+- Status: satisfied
+- Evidence:
+  - New turns load approved compact profile/preferences into candidate_context before graph; pending draft ignored (unit + chat integration)
+  - Nine-field AgentState retained; no raw CV/path/secret/draft in projected cards or model prompt
+  - GET /api/profile empty and active shapes validate; GET /api/profile/cv streams active PDF with safe disposition; no storage_path in responses
+  - Public surface is exactly seven Master endpoints; no profile write CRUD
+
+## Architecture Alignment
+- Reuses existing candidate_context slot and context/runner/graph path; no new state/memory table
+- Profile routes are transport-thin over repositories + AttachmentStorage
+- Context load uses short session closed before graph/provider work
+- AttachmentPublic reused for metadata; no second profile contract
+
+## Implementation Reality
+- Real SQLite repository reads and validated Pydantic parse for context and profile responses
+- Real PDF stream via storage.open with missing-file and path-escape handling
+- Fake model/driver only in tests; production path loads durable approved truth
+
+## Hardcoding Review
+- No fixed success profile payloads in production code
+- Compact cards derived from validated models; empty on missing/invalid profile
+- Tests use fixture JSON for assertions, not runtime hardcoding
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `test_get_profile_active_and_cv_stream_safe_disposition` contains a tautological assertion on disposition containing `Injected` (always true); does not undermine safe header coverage elsewhere (CR/LF, `../`, storage id absence).
+- A1 notes `test_health.py` may still document an older public route count outside the required suite; seven-route contract is enforced by chat/cv integration tests.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- state.py and test_agent_graph.py disclosed and justified
+- Pre-existing 03A/03B working-tree files correctly not claimed as 03C primary ownership
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

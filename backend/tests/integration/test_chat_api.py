@@ -153,20 +153,27 @@ def _client_with_fake(
 # ---------------------------------------------------------------------------
 
 
-def test_public_routes_are_health_chat_and_cv_upload(
+def test_public_routes_are_exactly_seven_master_endpoints(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
+    """Master §14: health, CV upload, profile/CV reads, three chat routes."""
     with health_client() as client:
         routes = sorted(public_api_routes(client.app))
     assert routes == sorted(
         [
             ("GET", "/api/health"),
             ("POST", "/api/attachments/cv"),
+            ("GET", "/api/profile"),
+            ("GET", "/api/profile/cv"),
             ("GET", "/api/chat/history"),
             ("POST", "/api/chat/turns"),
             ("POST", "/api/chat/runs/{run_id}/resume"),
         ]
     )
+    # No profile write CRUD.
+    for method, path in routes:
+        if path.startswith("/api/profile"):
+            assert method == "GET"
 
 
 def test_route_handlers_are_transport_thin() -> None:
@@ -228,6 +235,145 @@ def test_history_malformed_cursor_returns_422(
         assert bad_limit.status_code == 422
         bad_limit2 = client.get("/api/chat/history", params={"limit": 101})
         assert bad_limit2.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Approved candidate_context injection on new turns
+# ---------------------------------------------------------------------------
+
+
+def test_turn_injects_approved_candidate_context_not_draft(
+    chat_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    """New turns load approved compact profile; pending draft is ignored."""
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.repositories import attachments as att_repo
+    from app.repositories import profiles as profile_repo
+    from app.storage.attachments import AttachmentStorage
+
+    db_path, files_dir, _fake = chat_env
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+
+    profile_json = {
+        "summary": "APPROVED_CTX_SUMMARY",
+        "current_title": "Approved Engineer",
+        "total_experience_years": 4.0,
+        "skills": [
+            {
+                "skill": {
+                    "canonical_key": "python",
+                    "display_name": "Python",
+                    "aliases": ["python3"],
+                    "category": "language",
+                },
+                "confidence": 0.9,
+                "proficiency": "advanced",
+                "years": 4.0,
+                "source": "cv",
+                "excluded": False,
+                "evidence": ["Python backend"],
+            }
+        ],
+        "experiences": [
+            {
+                "title": "Engineer",
+                "company": "Co",
+                "start_date_text": "2020",
+                "end_date_text": "present",
+                "summary": "APIs",
+            }
+        ],
+        "education": [],
+        "languages": [],
+        "extraction_confidence": 0.8,
+    }
+    prefs_json = {
+        "target_roles": ["Backend Engineer"],
+        "preferred_locations": ["Remote"],
+        "acceptable_work_modes": ["remote"],
+        "target_seniority": ["mid"],
+    }
+    draft_json = {
+        "candidate_profile": {
+            **profile_json,
+            "summary": "DRAFT_CTX_SUMMARY_SHOULD_NOT_APPEAR",
+            "current_title": "Draft Only Title",
+        },
+        "job_preferences": {
+            **prefs_json,
+            "target_roles": ["Draft Role Only"],
+        },
+    }
+
+    async def _seed() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            att_id = new_uuid()
+            storage.write_bytes(att_id, b"%PDF-1.4 chat-ctx\n%%EOF\n")
+            await att_repo.create_staged(
+                session,
+                file_hash="ctx-active-hash",
+                original_name="approved.pdf",
+                size_bytes=20,
+                storage_path=att_id,
+                page_count=1,
+                attachment_id=att_id,
+            )
+            await att_repo.mark_active(session, att_id, page_count=1)
+            await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=att_id,
+                profile_json=profile_json,
+            )
+            await profile_repo.upsert_job_preferences(
+                session, preferences_json=prefs_json
+            )
+            staged_id = new_uuid()
+            storage.write_bytes(staged_id, b"%PDF-1.4 draft-ctx\n%%EOF\n")
+            staged = await att_repo.create_staged(
+                session,
+                file_hash="ctx-staged-hash",
+                original_name="draft.pdf",
+                size_bytes=20,
+                storage_path=staged_id,
+                page_count=1,
+                attachment_id=staged_id,
+            )
+            await profile_repo.upsert_current_draft(
+                session,
+                source_attachment_id=staged.id,
+                draft_json=draft_json,
+            )
+            await session.commit()
+            assert ATTACHMENT_STATE_ACTIVE == "active"
+
+    run_async(_seed())
+
+    model = _direct_model("I see your approved profile.")
+    with _client_with_fake(db_path, model) as client:
+        response = client.post(
+            "/api/chat/turns",
+            json={"message": "what is my title?", "attachment_ids": []},
+        )
+        assert response.status_code == 200
+        events = _parse_sse(response.text)
+        assert events[-1]["event"] == "run_completed"
+
+    assert model.invoke_count >= 1
+    joined = "\n".join(
+        str(m.content) for call in model.call_log for m in call
+    )
+    assert "APPROVED_CTX_SUMMARY" in joined
+    assert "Approved Engineer" in joined
+    assert "Backend Engineer" in joined
+    assert "DRAFT_CTX_SUMMARY_SHOULD_NOT_APPEAR" not in joined
+    assert "Draft Only Title" not in joined
+    assert "Draft Role Only" not in joined
+    assert "storage_path" not in joined
+    assert "raw_cv" not in joined
+    assert "%PDF" not in joined
 
 
 # ---------------------------------------------------------------------------

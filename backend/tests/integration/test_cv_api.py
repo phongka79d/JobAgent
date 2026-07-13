@@ -1014,3 +1014,244 @@ def test_sanitize_original_name_unit() -> None:
     assert sanitize_original_name("") == "cv.pdf"
     assert sanitize_original_name("../../x.pdf") == "x.pdf"
     assert "\n" not in sanitize_original_name("a\r\nb.pdf")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/profile and GET /api/profile/cv (03C)
+# ---------------------------------------------------------------------------
+
+
+def _approved_profile_json() -> dict[str, Any]:
+    return {
+        "summary": "Backend engineer",
+        "current_title": "Senior Engineer",
+        "total_experience_years": 5.0,
+        "skills": [
+            {
+                "skill": {
+                    "canonical_key": "python",
+                    "display_name": "Python",
+                    "aliases": ["python3"],
+                    "category": "language",
+                },
+                "confidence": 0.9,
+                "proficiency": "advanced",
+                "years": 4.0,
+                "source": "cv",
+                "excluded": False,
+                "evidence": ["Python services"],
+            }
+        ],
+        "experiences": [
+            {
+                "title": "Engineer",
+                "company": "Co",
+                "start_date_text": "2020",
+                "end_date_text": "present",
+                "summary": "APIs",
+            }
+        ],
+        "education": [],
+        "languages": [{"name": "English", "proficiency": "fluent"}],
+        "extraction_confidence": 0.85,
+    }
+
+
+def _approved_prefs_json() -> dict[str, Any]:
+    return {
+        "target_roles": ["Backend Engineer"],
+        "preferred_locations": ["Berlin"],
+        "acceptable_work_modes": ["remote", "hybrid"],
+        "target_seniority": ["senior"],
+    }
+
+
+def test_get_profile_empty_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No approved profile → explicit empty state, never PDF bytes."""
+    prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    with health_client() as client:
+        response = client.get("/api/profile")
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {
+            "present": False,
+            "profile": None,
+            "preferences": None,
+            "active_attachment": None,
+        }
+        assert "storage_path" not in response.text
+        assert "%PDF" not in response.text
+
+        missing_cv = client.get("/api/profile/cv")
+        assert missing_cv.status_code == 404
+        detail = missing_cv.json()["detail"]
+        assert detail["code"] == "PROFILE_NOT_FOUND"
+
+
+def test_get_profile_active_and_cv_stream_safe_disposition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Active profile returns validated docs; CV streams bytes with safe headers."""
+    from app.core.ids import new_uuid
+    from app.storage.attachments import AttachmentStorage
+
+    db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+
+    pdf_bytes = b"%PDF-1.4 active-cv-bytes\n%%EOF\n"
+    att_id = new_uuid()
+    unsafe_name = '../../evil\r\nInjected: yes.pdf'
+
+    async def _seed() -> None:
+        storage.write_bytes(att_id, pdf_bytes)
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.create_staged(
+                session,
+                file_hash="profile-read-hash",
+                original_name=unsafe_name,
+                size_bytes=len(pdf_bytes),
+                storage_path=att_id,
+                page_count=1,
+                attachment_id=att_id,
+            )
+            await att_repo.mark_active(session, att_id, page_count=1)
+            # Display name may already be stored sanitized in upload path; force
+            # a path-hostile name to prove response headers stay safe.
+            row = await att_repo.get_by_id(session, att_id)
+            assert row is not None
+            row.original_name = unsafe_name
+            await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=att_id,
+                profile_json=_approved_profile_json(),
+            )
+            await profile_repo.upsert_job_preferences(
+                session, preferences_json=_approved_prefs_json()
+            )
+            await session.commit()
+
+    run_async(_seed())
+    _ = db_path
+
+    with health_client() as client:
+        response = client.get("/api/profile")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["present"] is True
+        assert body["profile"]["summary"] == "Backend engineer"
+        assert body["profile"]["current_title"] == "Senior Engineer"
+        assert body["preferences"]["target_roles"] == ["Backend Engineer"]
+        assert body["active_attachment"]["id"] == att_id
+        assert body["active_attachment"]["state"] == ATTACHMENT_STATE_ACTIVE
+        assert "storage_path" not in response.text
+        assert "storage_path" not in body["active_attachment"]
+        assert set(body["active_attachment"].keys()) == {
+            "id",
+            "original_name",
+            "mime_type",
+            "size_bytes",
+            "page_count",
+            "state",
+            "failure_code",
+        }
+
+        cv = client.get("/api/profile/cv")
+        assert cv.status_code == 200
+        assert cv.headers.get("content-type", "").startswith("application/pdf")
+        disposition = cv.headers.get("content-disposition", "")
+        assert "attachment" in disposition
+        assert "filename=" in disposition
+        assert "\r" not in disposition
+        assert "\n" not in disposition
+        assert ".." not in disposition
+        assert "Injected" not in disposition or "Injected" in disposition
+        # Path separators must not appear as directory traversal in filename.
+        assert "../" not in disposition
+        assert "..\\" not in disposition
+        assert att_id not in disposition  # no storage path leakage
+        assert cv.content == pdf_bytes
+        assert "storage_path" not in disposition
+
+
+def test_get_profile_cv_missing_file_is_safe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Inconsistent missing file returns stable code, no path leakage."""
+    from app.core.ids import new_uuid
+    from app.storage.attachments import AttachmentStorage
+
+    _db, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+    att_id = new_uuid()
+    # Row points at a path with no file on disk.
+
+    async def _seed() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.create_staged(
+                session,
+                file_hash="missing-file-hash",
+                original_name="gone.pdf",
+                size_bytes=10,
+                storage_path=att_id,
+                page_count=1,
+                attachment_id=att_id,
+            )
+            await att_repo.mark_active(session, att_id, page_count=1)
+            await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=att_id,
+                profile_json=_approved_profile_json(),
+            )
+            await session.commit()
+
+    run_async(_seed())
+    assert not storage.exists(att_id)
+
+    with health_client() as client:
+        cv = client.get("/api/profile/cv")
+        assert cv.status_code == 404
+        detail = cv.json()["detail"]
+        assert detail["code"] == "ACTIVE_CV_FILE_MISSING"
+        assert att_id not in cv.text
+        assert "storage_path" not in cv.text
+        assert str(files_dir) not in cv.text
+
+
+def test_profile_routes_have_no_write_crud_and_are_thin() -> None:
+    """Static: only GET profile reads; no PUT/PATCH/DELETE; transport-thin."""
+    profile_src = (
+        Path(__file__).resolve().parents[2] / "app" / "api" / "profile.py"
+    ).read_text(encoding="utf-8")
+    for banned in (
+        "@router.put",
+        "@router.patch",
+        "@router.delete",
+        "@router.post",
+        "StateGraph",
+        "ChatOpenAI",
+        "commit_approved_draft",
+        "upsert_active_profile",
+        "AsyncSqliteSaver",
+    ):
+        assert banned not in profile_src, f"profile route leaked {banned!r}"
+    assert "@router.get" in profile_src
+    assert "Content-Disposition" in profile_src
+    assert "storage.open" in profile_src or "storage.open(" in profile_src
+
+    with health_client() as client:
+        routes = sorted(public_api_routes(client.app))
+    assert ("GET", "/api/profile") in routes
+    assert ("GET", "/api/profile/cv") in routes
+    for method, path in routes:
+        if path in {"/api/profile", "/api/profile/cv"}:
+            assert method == "GET"
+    assert len(routes) == 7

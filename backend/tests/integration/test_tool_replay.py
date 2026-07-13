@@ -33,7 +33,10 @@ from app.repositories.tool_executions import (
     serialize_result,
 )
 from app.schemas.tools import ToolResult
-from app.services.tool_execution import execute_tool
+from app.services.tool_execution import (
+    ToolExecutionInProgressError,
+    execute_tool,
+)
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,6 +165,106 @@ def test_success_replay_one_row_one_invocation(db_path: Path) -> None:
                     )
                 ).scalar_one()
                 assert int(tool_msgs) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_running_reentry_allowed_for_interrupt_tools(db_path: Path) -> None:
+    """allow_running_reentry reuses the same running identity (no second row)."""
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                run_id = await _seed_run(session, "reentry path")
+                await session.commit()
+
+            gate = {"pass": 0}
+
+            async def first_invoke() -> ToolResult:
+                gate["pass"] += 1
+                if gate["pass"] == 1:
+                    # Simulate interrupt: leave running without terminalizing.
+                    raise RuntimeError("simulated_interrupt_control")
+                return ToolResult(
+                    ok=True,
+                    code=None,
+                    summary="resumed once",
+                    data={"n": gate["pass"]},
+                )
+
+            with pytest.raises(RuntimeError, match="simulated_interrupt_control"):
+                await execute_tool(
+                    run_id=run_id,
+                    tool_call_id="call_reentry",
+                    tool_name=TOOL_NAME,
+                    invoke=first_invoke,
+                    session_factory=factory,
+                    allow_running_reentry=True,
+                )
+
+            async with factory() as session:
+                row = await tool_repo.get_by_identity(
+                    session, run_id=run_id, tool_call_id="call_reentry"
+                )
+                assert row is not None
+                assert row.status == TOOL_EXECUTION_STATUS_RUNNING
+                assert (
+                    await _count_tool_rows(
+                        session, run_id=run_id, tool_call_id="call_reentry"
+                    )
+                    == 1
+                )
+
+            # Without reentry flag, running identity is rejected.
+            async def noop() -> ToolResult:
+                return ToolResult(ok=True, summary="should not run")
+
+            with pytest.raises(ToolExecutionInProgressError):
+                await execute_tool(
+                    run_id=run_id,
+                    tool_call_id="call_reentry",
+                    tool_name=TOOL_NAME,
+                    invoke=noop,
+                    session_factory=factory,
+                    allow_running_reentry=False,
+                )
+
+            async def second_invoke() -> ToolResult:
+                gate["pass"] += 1
+                return ToolResult(
+                    ok=True,
+                    code=None,
+                    summary="resumed once",
+                    data={"n": gate["pass"]},
+                )
+
+            result = await execute_tool(
+                run_id=run_id,
+                tool_call_id="call_reentry",
+                tool_name=TOOL_NAME,
+                invoke=second_invoke,
+                session_factory=factory,
+                allow_running_reentry=True,
+            )
+            assert result.ok is True
+            assert result.data == {"n": 2}
+
+            async with factory() as session:
+                assert (
+                    await _count_tool_rows(
+                        session, run_id=run_id, tool_call_id="call_reentry"
+                    )
+                    == 1
+                )
+                row = await tool_repo.get_by_identity(
+                    session, run_id=run_id, tool_call_id="call_reentry"
+                )
+                assert row is not None
+                assert row.status == TOOL_EXECUTION_STATUS_COMPLETED
         finally:
             await engine.dispose()
 

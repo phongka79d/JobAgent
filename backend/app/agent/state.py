@@ -49,7 +49,8 @@ class AgentState(TypedDict):
     - ``run_id`` is the durable agent-run id and future LangGraph ``thread_id``.
     - ``messages_for_this_turn`` is the current turn only (not prior history).
     - ``recent_context`` is a budget-bounded prior window (see ``context``).
-    - ``candidate_context`` is empty in Phase 2 (Plan 4 fills a compact projection).
+    - ``candidate_context`` is a compact approved profile/preferences projection
+      (empty when no active profile; never raw CV text or drafts).
     - ``attachment_ids`` are UUID references only — never raw file contents.
     - ``pending_approval`` is the compact interruption projection or null.
     - ``tool_iteration_count`` tracks ToolNode passes (limit owned by settings).
@@ -77,6 +78,7 @@ def build_initial_agent_state(
     run_id: str,
     messages_for_this_turn: list[ContextMessage] | None = None,
     recent_context: list[ContextMessage] | None = None,
+    candidate_context: list[dict[str, Any]] | None = None,
     attachment_ids: list[str] | None = None,
     pending_approval: dict[str, Any] | None = None,
     tool_iteration_count: int = 0,
@@ -84,8 +86,9 @@ def build_initial_agent_state(
 ) -> AgentState:
     """Construct a valid initial ``AgentState`` with singleton conversation.
 
-    Always sets ``conversation_id`` to ``main`` and ``candidate_context`` to an
-    empty list. Does not accept raw document bodies or extra state keys.
+    Always sets ``conversation_id`` to ``main``. ``candidate_context`` defaults
+    to empty and must be a compact list of dict cards (never raw document
+    bodies). Does not accept extra state keys.
     """
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
@@ -97,7 +100,7 @@ def build_initial_agent_state(
         "run_id": run_id,
         "messages_for_this_turn": list(messages_for_this_turn or ()),
         "recent_context": list(recent_context or ()),
-        "candidate_context": [],
+        "candidate_context": list(candidate_context or ()),
         "attachment_ids": list(attachment_ids or ()),
         "pending_approval": pending_approval,
         "tool_iteration_count": tool_iteration_count,

@@ -4,6 +4,10 @@ Commits short status transitions outside the invoker side effect. Replay by
 ``(run_id, tool_call_id)`` returns the exact stored validated ``ToolResult``
 without invoking the side effect or inserting another row. No second
 idempotency-key mechanism is used.
+
+Interrupt-aware tools may re-enter the same ``running`` row under the same
+identity (``allow_running_reentry=True``) so LangGraph resume continues one
+tool invocation without a second execution row.
 """
 
 from __future__ import annotations
@@ -69,6 +73,7 @@ async def execute_tool(
     invoke: ToolInvoker,
     arguments_summary_json: dict[str, Any] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    allow_running_reentry: bool = False,
 ) -> ToolResult:
     """Run one tool call with durable get-or-create and exact identity replay.
 
@@ -77,8 +82,14 @@ async def execute_tool(
        row is already terminal, return the stored validated result without
        calling *invoke*.
     2. If ``pending``, transition to ``running`` and commit.
-    3. Invoke the side effect **outside** any open transaction.
-    4. Short transaction: store terminal ``completed`` or ``failed`` with
+    3. If ``running`` and *allow_running_reentry* is True (interrupt resume of
+       the same invocation), keep the same row and re-enter *invoke*.
+    4. If ``running`` and re-entry is not allowed, raise
+       :class:`ToolExecutionInProgressError`.
+    5. Invoke the side effect **outside** any open transaction. An interrupting
+       invoker may raise LangGraph's interrupt control exception before
+       returning; the row stays ``running`` until a later re-entry terminalizes.
+    6. Short transaction: store terminal ``completed`` or ``failed`` with
        validated ``result_json``, ``duration_ms``, and coupled ``error_code``.
 
     Parameters
@@ -86,6 +97,10 @@ async def execute_tool(
     session_factory:
         Optional async session factory. Defaults to the process-wide factory
         from :func:`app.db.session.get_session_factory`.
+    allow_running_reentry:
+        When True, a non-terminal ``running`` row is re-entered under the same
+        identity (required for interrupt-guarded tools). Default False preserves
+        the original concurrent-running rejection for non-interrupt tools.
     """
     factory = session_factory if session_factory is not None else get_session_factory()
 
@@ -100,16 +115,19 @@ async def execute_tool(
         if row.status in _TERMINAL:
             return load_stored_result(row)
         if row.status == TOOL_EXECUTION_STATUS_RUNNING:
-            raise ToolExecutionInProgressError(
-                f"tool execution already running for "
-                f"({run_id!r}, {tool_call_id!r})"
-            )
-        if row.status != TOOL_EXECUTION_STATUS_PENDING:
+            if not allow_running_reentry:
+                raise ToolExecutionInProgressError(
+                    f"tool execution already running for "
+                    f"({run_id!r}, {tool_call_id!r})"
+                )
+            execution_id = row.id
+        elif row.status == TOOL_EXECUTION_STATUS_PENDING:
+            row = await tool_repo.mark_running(session, row.id)
+            execution_id = row.id
+        else:
             raise ToolExecutionServiceError(
                 f"unexpected tool status {row.status!r} before claim"
             )
-        row = await tool_repo.mark_running(session, row.id)
-        execution_id = row.id
 
     started = perf_counter()
     result = await invoke()
@@ -120,6 +138,10 @@ async def execute_tool(
     duration_ms = max(0, int((perf_counter() - started) * 1000))
 
     async with _short_transaction(factory) as session:
+        # Re-check identity for exact terminal replay if another path finished.
+        live = await tool_repo.get_by_id(session, execution_id)
+        if live is not None and live.status in _TERMINAL:
+            return load_stored_result(live)
         if result.ok:
             await tool_repo.complete_execution(
                 session,
