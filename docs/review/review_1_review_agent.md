@@ -449,3 +449,117 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Reproducible ShopAIKey Compatibility Evidence
+- Task ID: 03A
+- Task title: Build and pass the ShopAIKey chat and embedding gate
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `backend/pyproject.toml`, `infrastructure/scripts/diagnose_shopaikey.py`, `docs/feasibility/phase_0_report.md`, and `docs/reports/report_1_execute_agent.md`
+
+## Files Reviewed
+- `backend/pyproject.toml`: in scope - adds only pinned `httpx==0.28.1` and `pydantic==2.12.5` alongside pypdf
+- `infrastructure/scripts/diagnose_shopaikey.py`: in scope - repaired to a 24-line public entrypoint preserving the required command
+- `infrastructure/scripts/shopaikey_diag/`: in scope - focused settings/HTTP, chat, tool/schema, streaming, embedding, and runner modules; every file is below 300 lines and shared rules remain centralized
+- `docs/feasibility/phase_0_report.md`: in scope - live evidence and the repaired streaming, ordering, failure-output, and module-layout contracts match repository behavior
+- `docs/reports/report_1_execute_agent.md`: in scope - matching 03A block was updated in place with the rejection history, repair deltas, complete module list, local counterexamples, and one live repair rerun
+
+## Validations Reviewed
+- Command/check: required live `python infrastructure/scripts/diagnose_shopaikey.py`
+- Required: yes
+- Reported result: passed once after repair; seven rows PASS, exact ordered stream plus terminal evidence, strict schema selected, list-order-validated scalar/batch embeddings finite at 1536 dimensions, sanitized output, final PASS marker
+- Rerun result: not rerun by A2 because A1 already performed the single authorized repair live validation
+- Status: passed as live evidence
+- Notes: deterministic local checks now prove the validators reject the prior counterexamples
+
+- Command/check: missing-key behavior with root `.env` loading disabled in memory
+- Required: yes
+- Reported result: exit 1 with the variable name, `failed_capability=config`, and final FAIL marker; no secret/header
+- Rerun result: passed using a monkeypatched settings loader that did not read root `.env` or call the provider
+- Status: passed
+- Notes: the common formatter names only `SHOPAIKEY_API_KEY`, identifies the capability, and leaves the FAIL marker last
+
+- Command/check: read-only valid/invalid stream suite
+- Required: yes for ordered/terminal streaming behavior
+- Reported result: arbitrary, malformed, reversed, missing-finish, and missing-DONE cases fail; valid multi-delta stream passes
+- Rerun result: passed; all five invalid cases raised `STREAM_FAIL`/`MALFORMED_RESPONSE`, while the valid case returned exact `1 2 3 4 5`, `finish_reason=stop`, and `done=yes`
+- Status: passed
+- Notes: malformed data is no longer silently skipped
+
+- Command/check: read-only reversed and ordered fake batch embedding responses
+- Required: yes for stable input ordering and ordering-mismatch failure
+- Reported result: reversed response raises `ORDERING_MISMATCH`; ordered distinct vectors pass
+- Rerun result: passed; reversed `[1,0]` raised `expected_index=0 got=1`; ordered response produced two distinct finite vectors of length 1536
+- Status: passed
+- Notes: validation operates on returned list order without sorting
+
+- Command/check: compile the entrypoint/all focused modules and `git diff --check`
+- Required: supporting checks
+- Reported result: passed
+- Rerun result: passed
+- Status: passed
+- Notes: syntax/diff hygiene is not the failing area
+
+## Acceptance Review
+- Task acceptance: seven real capability groups with truthful ordered-streaming, terminal-response, stable batch-order, and normalized failure assertions
+- Status: satisfied
+- Evidence: one repaired live run passed 7/7 on the locked provider/models/dimensions, and A2 independently reproduced the missing-key, stream-terminal/content, malformed-response, and embedding-list-order assertions without external calls
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `docs/feasibility/phase_0_report.md` uses `<name>` as explanatory failure-output notation. Batch04's mandatory placeholder scan must replace that notation before the final report gate.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13T13:12:00+07:00
+- what was re-checked: all diagnostic modules and line counts, missing-key formatting without `.env`, valid/invalid stream cases, reversed/ordered embedding cases, compilation, git diff, sanitized A1 evidence, and the one repaired live run
+- repairs verified: truthful stream ordering/terminal gate, raw list-order embedding validation, common config failure formatter, and modular split with one unchanged command
+- remaining issues: one final-report notation item assigned to Batch04's explicit placeholder-cleanup gate
+- updated outcome: ACCEPTED

@@ -47,9 +47,23 @@ The diagnostic runs pypdf normal and layout extraction, requires at least four o
 five digital fixtures to contain meaningful CV text, and requires the raster-only
 fixture to return `NO_EXTRACTABLE_TEXT`. OCR is intentionally unsupported.
 
+## ShopAIKey verification
+
+Place a valid `SHOPAIKEY_API_KEY` only in the ignored root `.env`, keep the locked
+model and dimension values from `.env.example`, and run from the repository root:
+
+```powershell
+python infrastructure/scripts/diagnose_shopaikey.py
+```
+
+This command calls the real provider. It checks model discovery, chat, function
+calling, the tool-result round trip, structured schema output, ordered terminal
+streaming, and scalar/batch 1536-dimensional embeddings. Output is sanitized and
+must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contract.
+
 ## Phase status
 
-Batches 01 and 02 establish the scaffold, environment contract, pinned Astryx
-lockfile, minimal render, public component evidence, synthetic PDF fixtures, and the
-pypdf compatibility gate. ShopAIKey and final dependency-lock decisions remain owned
-by the later Phase 0 batches in `docs/tasks/task_1.md`.
+Batches 01 through 03 establish the scaffold, environment contract, pinned Astryx
+lockfile, public component evidence, synthetic PDF/pypdf gate, and the seven-group
+ShopAIKey compatibility gate. The clean-environment reproduction and final
+dependency decision remain owned by Batch04 in `docs/tasks/task_1.md`.

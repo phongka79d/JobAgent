@@ -502,3 +502,172 @@ complete
 - changes made: created root `.gitattributes` with `*.pdf binary` only
 - validations rerun: git check-attr (text/diff unset); verify_pdf_extraction.py PASS; git diff --check clean
 - outcome: complete; PDF fixtures protected from text normalization without rewriting valid PDF internals
+
+---
+
+# Task Execution Report - 03A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Reproducible ShopAIKey Compatibility Evidence
+
+## Task
+03A - Build and pass the ShopAIKey chat and embedding gate
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Reproducible ShopAIKey Compatibility Evidence
+- Task ID: 03A
+- Task title: Build and pass the ShopAIKey chat and embedding gate
+- Files allowed / repair scope: A2 REJECTED items only — streaming assertions, embedding list-order validation, missing-key failure formatter, modular diagnostic split; public command remains `python infrastructure/scripts/diagnose_shopaikey.py`
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ## 7. Technical Specifications > ### 7.2 ShopAIKey diagnostic contract
+- docs/plans/Master_plan.md > ## 16. ShopAIKey Integration > ### 16.1 Configuration and ### 16.2 Startup/diagnostic compatibility checks
+- docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.1 Locked embedding contract and ### 17.2 Provider compatibility gate
+
+## Supplemental Documents Used
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- docs/review/review_1_review_agent.md (A2 REJECTED repair instructions for 03A)
+
+## Dependency and User Action Check
+- Dependencies: (01A) root environment contract; (02A) shared `backend/pyproject.toml` and Phase 0 report — satisfied
+- User action: valid `SHOPAIKEY_API_KEY` present only in ignored root `.env` (value never printed, copied, or committed). Provider network used only for the authorized live repair validation run.
+
+## Files Inspected Before Editing
+- README.md (project context)
+- infrastructure/scripts/diagnose_shopaikey.py (pre-repair god-file implementation)
+- docs/review/review_1_review_agent.md (A2 blocking issues and repair targets)
+- docs/feasibility/phase_0_report.md (ShopAIKey gate section to update without changing provider/model/dimensions)
+- backend/pyproject.toml (pins unchanged for repair)
+- docs/tasks/task_1.md (03A acceptance; no checkbox updates in repair mode)
+- docs/plans/Plan_1.md section 7.2; Master_plan.md sections 16–17
+
+## Completed Work
+- Initial delivery (prior orchestrated run): implemented ShopAIKey diagnostic, pinned `httpx==0.28.1` and `pydantic==2.12.5`, live 7/7 PASS evidence recorded.
+- Same-task repair after A2 REJECTED:
+  1. **Streaming**: require sequential non-empty deltas to normalize to exactly `1 2 3 4 5`, non-empty finish reason, and `[DONE]`; malformed JSON/shapes fail (not skipped).
+  2. **Embeddings**: validate provider `data` items in returned list order against expected indices; no sort-before-assert; reversed `[index=1,index=0]` → `ORDERING_MISMATCH`.
+  3. **Missing key / config**: route through common `emit_failure` formatter → names `SHOPAIKEY_API_KEY`, `failed_capability=config`, non-zero exit, `SHOPAIKEY_COMPATIBILITY=FAIL`.
+  4. **Structure**: thin `diagnose_shopaikey.py` entrypoint + focused `shopaikey_diag` modules (all under 300 lines).
+- Updated Phase 0 ShopAIKey evidence for repaired assertions and module list; provider/model IDs/dimensions/task scope unchanged.
+- Did not update checkboxes, batch status, stage, or commit; did not open/print/copy root `.env`.
+
+## Files Created or Modified
+- `infrastructure/scripts/diagnose_shopaikey.py` (thin public entrypoint)
+- `infrastructure/scripts/shopaikey_diag/__init__.py`
+- `infrastructure/scripts/shopaikey_diag/common.py` (settings/HTTP/redaction/failure formatter)
+- `infrastructure/scripts/shopaikey_diag/chat_checks.py` (model discovery + basic chat)
+- `infrastructure/scripts/shopaikey_diag/tools_schema.py` (function calling + tool-result round trip)
+- `infrastructure/scripts/shopaikey_diag/schema_checks.py` (structured schema strategies)
+- `infrastructure/scripts/shopaikey_diag/streaming.py` (ordered stream + pure SSE fakes)
+- `infrastructure/scripts/shopaikey_diag/embeddings.py` (scalar/batch list-order validation)
+- `infrastructure/scripts/shopaikey_diag/runner.py` (orchestration + main)
+- `docs/feasibility/phase_0_report.md` (ShopAIKey gate evidence updated for repair)
+- `docs/reports/report_1_execute_agent.md` (this report; in-place update)
+- `backend/pyproject.toml` (unchanged in repair; still pins httpx/pydantic from initial 03A)
+
+## Key Implementation Decisions
+- Used `httpx` + `pydantic` minimum surface; locked `gpt-4o-mini` / `text-embedding-3-small` / 1536 float dims.
+- Schema strategy remains live-selected: **strict_json_schema** observed on repair live run.
+- Streaming contract is exact normalized sequence + terminal evidence (not mere concatenation).
+- Embedding ordering is list-position vs `index` without reordering the provider array.
+- Modules prefer <300 lines; public command path unchanged.
+
+## Tests or Validations Run
+- command/check: local fake stream suite (arbitrary content, malformed JSON, reversed/missing sequence, missing finish reason, missing `[DONE]`, valid multi-delta + finish + `[DONE]`)
+  - required: yes (A2 repair)
+  - result: passed
+  - evidence or reason: invalid cases raise `STREAM_FAIL`/`MALFORMED_RESPONSE`; valid stream returns PASS with `joined='1 2 3 4 5' finish_reason=stop done=yes`
+
+- command/check: local fake embedding ordering (reversed `[index=1,index=0]` vs ordered two 1536-d distinct vectors)
+  - required: yes (A2 repair)
+  - result: passed
+  - evidence or reason: reversed raises `ORDERING_MISMATCH:expected_index=0 got=1`; ordered returns two distinct length-1536 finite vectors
+
+- command/check: missing-key path with root env loading disabled in memory
+  - required: yes (A2 repair)
+  - result: passed
+  - evidence or reason: exit 1; stderr `MISSING_VARIABLE=SHOPAIKEY_API_KEY` + `ERROR=MISSING_KEY:SHOPAIKEY_API_KEY`; stdout `failed_capability=config` + `SHOPAIKEY_COMPATIBILITY=FAIL`; no Bearer/key value in captured output
+
+- command/check: `python -m py_compile` on entrypoint and all `shopaikey_diag` modules
+  - required: yes (A2 repair structure)
+  - result: passed
+  - evidence or reason: all modules compile; line counts under 300 each
+
+- command/check: `python infrastructure/scripts/diagnose_shopaikey.py` (live provider; one successful repair validation run)
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; seven-row table all PASS; ends `SHOPAIKEY_COMPATIBILITY=PASS`. Sanitized summary:
+    - model_discovery | PASS | chat=gpt-4o-mini embed=text-embedding-3-small listed
+    - basic_chat | PASS | model=gpt-4o-mini content_len=4
+    - function_calling | PASS | tool=synthetic_add call_id_present=True a=17 b=25
+    - tool_result_round_trip | PASS | tool_result_sum=42 final_len=27
+    - structured_schema | PASS | strategy=strict_json_schema label=alpha value=7
+    - ordered_text_streaming | PASS | delta_count=9 joined='1 2 3 4 5' finish_reason=stop done=yes ordered=yes
+    - scalar_batch_embeddings | PASS | scalar_dim=1536 batch_n=2 batch_dim=1536 finite=yes ordered=yes
+  - No API key, Authorization header, or Bearer secret in captured stdout/stderr.
+
+- command/check: `git diff --check` / secret hygiene on captured output
+  - required: yes
+  - result: passed
+  - evidence or reason: no whitespace errors beyond LF/CRLF warnings; no secrets observed in diagnostic output or report text
+
+## Acceptance Check
+- condition: Missing-key behavior names only `SHOPAIKEY_API_KEY`, includes failed capability, exits non-zero, ends FAIL; no key/Authorization printed
+  - status: satisfied
+  - evidence: in-memory missing-key path + common formatter; captured stdout/stderr clean of secrets
+- condition: Model discovery verifies both configured IDs; no silent equivalent substitution
+  - status: satisfied
+  - evidence: live table row; locked model enforcement retained
+- condition: Chat, function calling, tool-result continuation, selected schema validation, ordered streaming (exact `1 2 3 4 5` + finish + DONE) pass
+  - status: satisfied
+  - evidence: live 7/7; fakes prove streaming counterexamples fail
+- condition: Scalar and >=2-input batch embeddings return list-order-validated 1536 finite float vectors
+  - status: satisfied
+  - evidence: live PASS; reversed fake batch raises ORDERING_MISMATCH
+- condition: Success exits 0 with `SHOPAIKEY_COMPATIBILITY=PASS`; failures non-zero with FAIL + capability
+  - status: satisfied
+  - evidence: live exit 0 PASS; missing-key exit 1 with failed_capability
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: mode=same_task_repair; A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files: diagnostic modules under `infrastructure/scripts/shopaikey_diag/`, thin `diagnose_shopaikey.py`, `docs/feasibility/phase_0_report.md`, this report
+- validations to rerun: optional re-confirm of fake stream/embed/missing-key probes; live diagnostic already run once for repair (avoid extra live calls unless needed)
+- risk areas: provider stream flakiness/timeouts; root `.env` must remain ignored/untracked
+- next task readiness: ready for A2 re-review after repair
+
+## Workflow Integrity Check
+- single task only: 03A (same_task_repair)
+- no sibling/future batch work
+- no commit or stage
+- no checkbox or batch status update
+- no `.env` open/print/copy/commit of secret values
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED)
+- reason for repair: A2 rejected 03A — streaming could false-PASS, embedding sort masked ORDERING_MISMATCH, missing-key omitted failed_capability, 852-line god file
+- changes made:
+  - streaming requires exact normalized `1 2 3 4 5` + non-empty finish reason + `[DONE]`; malformed payloads fail
+  - embeddings validate list order without sorting
+  - config failures use shared `emit_failure` (name key, failed_capability, FAIL marker)
+  - split into focused modules under `shopaikey_diag/` (all <300 lines); keep one public entrypoint
+  - updated Phase 0 + this A1 report with repair evidence
+- validations rerun: local stream/embed/missing-key fakes PASS; py_compile all modules PASS; live diagnostic once PASS (7/7, `SHOPAIKEY_COMPATIBILITY=PASS`)
+- outcome: repair complete; ready for A2 re-review

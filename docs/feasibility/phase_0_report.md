@@ -138,4 +138,71 @@ All five digital fixtures use synthetic identities only (no real personal data).
 
 ---
 
-Later Phase 0 gates (ShopAIKey, full dependency decision record) are intentionally omitted until their owning tasks complete.
+## ShopAIKey chat and embedding gate
+
+| Fact | Value |
+|---|---|
+| Diagnostic command | `python infrastructure/scripts/diagnose_shopaikey.py` |
+| Module layout | thin entrypoint + `infrastructure/scripts/shopaikey_diag/` (`common`, `chat_checks`, `tools_schema`, `schema_checks`, `streaming`, `embeddings`, `runner`) |
+| HTTP client | `httpx==0.28.1` (pinned in `backend/pyproject.toml`) |
+| Schema validation | `pydantic==2.12.5` (pinned in `backend/pyproject.toml`) |
+| Provider base host | `api.shopaikey.com` (from `SHOPAIKEY_BASE_URL`; secret path omitted) |
+| Requested chat model | `gpt-4o-mini` |
+| Observed chat model | `gpt-4o-mini` |
+| Requested embedding model | `text-embedding-3-small` |
+| Observed embedding model | `text-embedding-3-small` (scalar and batch) |
+| Requested embedding dimensions | `1536` |
+| Encoding | `float` |
+| Silent model/dimension substitution | **none** (locked IDs enforced; no equivalent ID used) |
+| Selected production schema strategy | **`strict_json_schema`** (`response_format.type=json_schema` with `strict=true`; validated with Pydantic `SyntheticCard`) |
+| Alternate strategies probed only if strict fails | ordinary function schema + Pydantic; JSON mode + Pydantic with at most one repair |
+
+### Configuration load contract
+
+The diagnostic loads only `SHOPAIKEY_BASE_URL`, `SHOPAIKEY_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, and `EMBEDDING_DIMENSIONS` through a minimal root `.env` + process-environment loader. Missing or invalid configuration is routed through the common failure formatter: names `SHOPAIKEY_API_KEY` without its value, prints `failed_capability=config`, exits non-zero, and ends with `SHOPAIKEY_COMPATIBILITY=FAIL`. No success or failure path prints the key, an `Authorization` header, or full secret configuration.
+
+### Seven capability results
+
+| Capability | Status | Evidence (sanitized) |
+|---|---|---|
+| model_discovery | PASS | `/v1/models` listed both `gpt-4o-mini` and `text-embedding-3-small` |
+| basic_chat | PASS | Chat completion via `gpt-4o-mini`; non-empty assistant content (`content_len=4`) |
+| function_calling | PASS | Forced `synthetic_add` tool call; validated args `a=17`, `b=25` |
+| tool_result_round_trip | PASS | Tool result `sum=42` continued to non-empty final assistant text containing `42` |
+| structured_schema | PASS | Strict JSON schema returned `label=alpha`, `value=7`; strategy=`strict_json_schema` |
+| ordered_text_streaming | PASS | Sequential non-empty deltas normalize to exactly `1 2 3 4 5`; `finish_reason=stop`; terminal `[DONE]` observed (`delta_count=9`, `done=yes`, `ordered=yes`) |
+| scalar_batch_embeddings | PASS | Scalar 1×1536 finite floats; batch 2 distinct inputs → 2 list-order-validated 1536-d finite vectors (`index` checked without sorting) |
+
+### Streaming assertion contract
+
+Ordered streaming requires: (1) joined non-empty content deltas normalize to exactly `1 2 3 4 5`; (2) a non-empty finish reason; (3) terminal `[DONE]`. Malformed JSON payloads and invalid chunk shapes fail with `MALFORMED_RESPONSE` / `STREAM_FAIL` rather than being skipped. Local fake streams for arbitrary content, malformed JSON, reversed/missing sequence, missing finish reason, and missing `[DONE]` all fail; a valid multi-delta stream with finish reason plus `[DONE]` passes.
+
+### Embedding contract evidence
+
+| Check | Result |
+|---|---|
+| Scalar input | 1 output vector |
+| Batch inputs | 2 distinct strings → 2 vectors |
+| Dimensions | exactly **1536** per vector (scalar and batch) |
+| Finiteness | all values `math.isfinite` |
+| Ordering | response items validated in **returned list order** against expected indices (no pre-sort); reversed `[index=1, index=0]` raises `ORDERING_MISMATCH`; batch vectors not identical |
+| Encoding | `encoding_format=float` |
+
+### Error normalization (implemented)
+
+Timeout, HTTP 429 rate-limit, malformed JSON/shape, model absence, dimension mismatch, and ordering mismatch map to concise non-zero codes (`TIMEOUT`, `RATE_LIMIT`, `MALFORMED_RESPONSE`, `MODEL_ABSENCE`, `DIMENSION_MISMATCH`, `ORDERING_MISMATCH`, plus capability-specific `SCHEMA_FAIL` / `STREAM_FAIL` / `TOOL_FAIL` / `HTTP_ERROR` / `MISSING_KEY`). Failures print `failed_capability=<name>` and end with `SHOPAIKEY_COMPATIBILITY=FAIL`. Exception paths redact any accidental secret substring before printing.
+
+### Gate result
+
+| Metric | Value |
+|---|---|
+| Capability PASS count | **7/7** |
+| Diagnostic exit code | `0` |
+| Final marker | `SHOPAIKEY_COMPATIBILITY=PASS` |
+| Live provider calls (repair validation) | one successful full diagnostic run after A2 repair; deterministic counterexamples exercised only with local fakes |
+
+**SHOPAIKEY_COMPATIBILITY=PASS**
+
+---
+
+Later Phase 0 gates (full dependency decision record for Phase 1 pins beyond diagnostic-proven packages) remain under the owning Batch04 task.

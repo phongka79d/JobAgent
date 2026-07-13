@@ -334,7 +334,7 @@ retrieval, provider fallback, benchmark, or real business tool.
 
 ### Tasks
 
-- [ ] (03A): Build and pass the ShopAIKey chat and embedding gate
+- [x] (03A): Build and pass the ShopAIKey chat and embedding gate
   - Source of Truth: `docs/plans/Plan_1.md` > `## 7. Technical Specifications` >
     `### 7.2 ShopAIKey diagnostic contract`; `docs/plans/Master_plan.md` >
     `## 16. ShopAIKey Integration` > `### 16.1 Configuration` and
