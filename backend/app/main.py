@@ -4,9 +4,10 @@ Startup opens shared resources once. The singleton-seed safeguard runs only
 after a successful SQLite availability check. Graph base-schema init runs
 only when Neo4j connectivity succeeds. Filesystem root creation is not
 eager at startup; the health probe owns create/access checks. Startup never
-runs Alembic migrations or ``create_all()``. Cleanup closes any opened Neo4j
-driver and disposes the SQLite engine on every exit path, including partial
-startup failures. Health reporting lives in ``app.api.health``.
+runs Alembic migrations or SQLAlchemy metadata schema creation. Cleanup
+closes any opened Neo4j driver and disposes the SQLite engine on every exit
+path, including partial startup failures. Health reporting lives in
+``app.api.health``.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ async def _try_singleton_seeds_if_sqlite_ready() -> None:
     """Run idempotent singleton seeds only after SQLite answers a trivial query.
 
     SQLite unavailability must not terminate application startup; health will
-    report the component state. Does not run migrations or ``create_all()``.
+    report the component state. Does not run migrations or metadata schema creation.
     """
     try:
         async with session_scope() as session:
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine_acquired = False
 
     try:
-        # Process-wide async engine (PRAGMAs on connect). No create_all().
+        # Process-wide async engine (PRAGMAs on connect). No metadata schema creation.
         get_engine()
         engine_acquired = True
 

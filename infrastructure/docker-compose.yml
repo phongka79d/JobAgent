@@ -1,0 +1,105 @@
+# JobAgent local runtime: exactly frontend, backend, neo4j.
+# Load secrets and values via: docker compose --env-file .env -f infrastructure/docker-compose.yml ...
+# Do not mount root .env, nested env files, or the source tree into containers.
+
+services:
+  neo4j:
+    image: neo4j:5.26.4-community
+    environment:
+      # Only NEO4J_AUTH is a valid Neo4j image setting; do not pass NEO4J_USER /
+      # NEO4J_PASSWORD as process env (Neo4j treats NEO4J_* as config and rejects them).
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      # Prove Bolt/query readiness with authenticated cypher-shell (not HTTP-only).
+      # Split NEO4J_AUTH at first '/' at container runtime; never hard-code secrets.
+      # Do not pass NEO4J_USER/NEO4J_PASSWORD as Neo4j process env (invalid config keys).
+      test:
+        [
+          "CMD-SHELL",
+          "u=\"$${NEO4J_AUTH%%/*}\"; p=\"$${NEO4J_AUTH#*/}\"; cypher-shell -a bolt://127.0.0.1:7687 -u \"$$u\" -p \"$$p\" --format plain \"RETURN 1 AS ok\" || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  backend:
+    image: jobagent-backend:0.1.0
+    build:
+      context: ../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      SQLITE_PATH: ${SQLITE_PATH}
+      FILES_DIR: ${FILES_DIR}
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      SHOPAIKEY_BASE_URL: ${SHOPAIKEY_BASE_URL}
+      SHOPAIKEY_API_KEY: ${SHOPAIKEY_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS}
+      MAX_PDF_SIZE_MB: ${MAX_PDF_SIZE_MB}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES}
+      URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS}
+      URL_MAX_RESPONSE_MB: ${URL_MAX_RESPONSE_MB}
+      TOOL_LOOP_LIMIT: ${TOOL_LOOP_LIMIT}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app_data:/data
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      # HTTP 200 alone is insufficient: /api/health returns 200 when overall=unavailable.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health')); raise SystemExit(0 if d.get('overall')=='available' else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    image: jobagent-frontend:0.1.0
+    build:
+      context: ../frontend
+      dockerfile: ../infrastructure/docker/frontend.Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    ports:
+      - "127.0.0.1:5173:5173"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://127.0.0.1:5173/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  neo4j_data:
+  neo4j_logs:

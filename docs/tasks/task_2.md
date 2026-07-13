@@ -662,7 +662,7 @@ silently broaden its diff into CV/JD/chat/Agent behavior.
 
 ### Tasks
 
-- [ ] (04A): Build the exact three-service Docker Compose topology
+- [x] (04A): Build the exact three-service Docker Compose topology
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.8 Docker Compose contract`; `docs/plans/Plan_2.md > ## 9. Verification & Testing Plan > ### Automated commands`; `docs/plans/Master_plan.md > ## 22. Local Demo Safeguards`; `docs/plans/Master_plan.md > ## 23. Environment Configuration`
   - Source Requirements:
     - Build backend/frontend Dockerfiles and one Compose file containing exactly
@@ -720,7 +720,7 @@ silently broaden its diff into CV/JD/chat/Agent behavior.
     service/provider.
   - Files: `infrastructure/docker/backend.Dockerfile`, `infrastructure/docker/frontend.Dockerfile`, `infrastructure/docker-compose.yml`, `frontend/vite.config.ts` only if required for container host binding, root `.env.example` only if an approved variable is missing
 
-- [ ] (04B): Prove the Phase 1 exit gate and publish the Plan 3 local handoff
+- [x] (04B): Prove the Phase 1 exit gate and publish the Plan 3 local handoff
   - Source of Truth: `docs/plans/Plan_2.md > ## 9. Verification & Testing Plan`; `docs/plans/Plan_2.md > ## 10. Handoff Notes for Plan 3 / Master Phase 2`; `docs/plans/Master_plan.md > ## 24. Local Testing Strategy > ### 24.5 Local verification commands`; `docs/plans/Master_plan.md > ## 25. Implementation Phases > ### Phase 1 — Foundation, Docker, and source-of-truth data`
   - Source Requirements:
     - Prove frontend, backend, and Neo4j become healthy on empty isolated volumes

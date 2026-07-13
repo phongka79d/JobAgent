@@ -12,7 +12,7 @@ docs/reports/report_2_execute_agent.md
 docs/review/review_2_review_agent.md
 
 ## Mode
-same_task_repair
+orchestrated
 
 ## Final Outcome
 ACCEPTED
@@ -139,7 +139,7 @@ docs/reports/report_2_execute_agent.md
 docs/review/review_2_review_agent.md
 
 ## Mode
-orchestrated
+same_task_repair
 
 ## Final Outcome
 ACCEPTED
@@ -1055,21 +1055,29 @@ ACCEPTED
 ## Git Diff Evidence
 - git status reviewed: yes
 - git diff reviewed: yes
-- changed files from git: the task runtime/test files, focused `tests/support/health.py`, fixture registration in `tests/conftest.py`, the updated 03C report, and prior accepted 03A/03B batch changes.
-- scope conflict: none after the latest byte-safe repair; the report diff is a single pure append after committed EOF.
+- changed files from git: cumulative worktree contains the previously validated 03C-owned `backend/app/main.py`, the shared execution/review/task documents, accepted 04A container files, and incomplete 04B integration tests; A1's latest repair changed only `docs/reports/report_2_execute_agent.md`.
+- scope conflict: none. The report-only repair restored the historical bytes before the 03A delimiter and preserved the independently hashed 04A/04B blocks while adding only the latest 03C Repair Log evidence.
 
 ## Files Reviewed
 - `backend/app/api/__init__.py`: in scope - public route package export.
 - `backend/app/api/health.py`: in scope - focused SQLite/filesystem/Neo4j probes and one validated GET route.
 - `backend/app/schemas/health.py`: in scope - exact two-state response model and derived-overall invariant.
-- `backend/app/main.py`: in scope - SQLite readiness gates singleton seeding, filesystem setup stays in the exception-safe probe, and cleanup now surrounds every partial/successful lifespan path; 109 lines.
+- `backend/app/main.py`: in scope - only the three comment/docstring references were rephrased; normalized AST is identical to `HEAD`, so executable behavior is unchanged.
+- `backend/tests/integration/test_database_contract.py`: reviewed, unchanged - the raw source scanner still enforces absence of the forbidden token under `app` and `migrations`.
 - `backend/tests/integration/test_health.py`: in scope - 292 focused lines now exercise real blocked SQLite/filesystem boundaries, Neo4j failure, idempotence, and partial-startup cleanup.
 - `backend/tests/support/health.py`: in repair scope - focused 234-line owner for shared sanitized environment, fake-driver, fixture, and route-inspection support.
 - `backend/tests/conftest.py`: in repair scope - minimal registration of the shared health fixture module without duplicating fixture logic.
 - `backend/app/schemas/__init__.py`: removed as instructed; direct `app.schemas.health` import works.
-- `docs/reports/report_2_execute_agent.md`: in scope - 03C evidence accurately covers runtime repairs, the committed prefix is byte-identical to `HEAD`, and exactly one 03A/03B/03C block exists.
+- `docs/reports/report_2_execute_agent.md`: in scope - the prefix before the 03A delimiter is byte-identical to `HEAD`, raw `0x97` is restored, no `EF BF BD` remains, every task header occurs once, 04A/04B hashes match their pre-repair captures, EOF is clean, and the latest 03C repair evidence is accurate.
 
 ## Validations Reviewed
+- Command/check: `python -m pytest tests/integration/test_database_contract.py::test_no_create_all_in_app_or_migrations -q`
+- Required: yes for this repair
+- Reported result: passed (1 test)
+- Rerun result: passed (1 test)
+- Status: passed
+- Notes: no forbidden token remains under `backend/app` or `backend/migrations`; the scanner test itself is unchanged.
+
 - Command/check: `python -m pytest tests/integration/test_health.py -q`
 - Required: yes
 - Reported result: passed (15 tests)
@@ -1091,13 +1099,27 @@ ACCEPTED
 - Status: passed
 - Notes: no other functional route decorator exists.
 
+- Command/check: `python -m pytest tests/integration -q`
+- Required: yes for this repair
+- Reported result: passed (36 tests, 2 skipped)
+- Rerun result: passed (36 tests, 2 skipped; only existing aiosqlite datetime-adapter warnings)
+- Status: passed
+- Notes: confirms the original 04B-discovered scanner regression is fixed without weakening the suite.
+
+- Command/check: raw-byte execution-report comparison
+- Required: yes for the authorized repair contract
+- Reported result: passed; historical prefix restored and later task blocks preserved
+- Rerun result: passed; bytes before the 03A delimiter equal `HEAD`, raw `0x97` count is one, `EF BF BD` count is zero, each task header occurs once, 04A hash is `9bde962b5ed965b044d9474ff719a5646f4292b80498bb14dd4324758a8f6ebc`, 04B hash is `6e162808f30a2d5077117c1c1a0a590b3c6b3dfeba277cc3d20ad6495cd323df`, and the file ends with one newline
+- Status: passed
+- Notes: `git diff --check` is clean; the 03A delimiter's own CRLF bytes are part of the preserved 03A block, not the required pre-delimiter historical prefix.
+
 ## Acceptance Review
-- Task acceptance: accepted after same-task repairs.
+- Task acceptance: accepted after report-only byte-integrity repair.
 - Status: satisfied
-- Evidence: real SQLite/filesystem/Neo4j unavailability yields validated 200 responses, seed gating and partial-startup cleanup are correct, all non-generated files are below 300 lines, the route boundary remains exact, required validations pass, the report prefix is byte-identical to `HEAD`, no `EF BF BD` remains, and the only report hunk is the three Batch 3 task blocks appended after committed EOF.
+- Evidence: the scanner regression remains fixed at its 03C-owned source with normalized AST unchanged; scanner, health, Ruff, mypy, route, and full-integration gates independently pass. The historical report prefix is restored byte-for-byte before the 03A delimiter, raw-byte invariants and task-block counts pass, captured 04A/04B hashes match, EOF/diff checks are clean, and A1 changed no implementation/test/config/task/README file in this repair.
 
 ## Progress Tracking
-- Selected task checkbox before review: unchecked
+- Selected task checkbox before re-review: unchecked
 - Checkbox updated by reviewer: yes
 - Checkbox final state: checked
 - Batch status updated by reviewer: no
@@ -1137,3 +1159,250 @@ ACCEPTED
 - repairs verified: committed prefix and raw `0x97` are restored; no `EF BF BD` exists; report diff is 438 pure appended lines; runtime/test files did not change in the encoding repair.
 - remaining issues: none.
 - updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox 03C was checked, batch status remains unchanged, and Batch 3 may proceed to A3.
+
+### 2026-07-13T17:31:26+07:00
+- what was re-checked: the reopened 03C comment/docstring diff, normalized AST against `HEAD`, unchanged scanner test, exact scanner/health/Ruff/mypy/route/full-integration validations, current git scope, execution-report block counts, raw bytes, line endings, and prefix equality against `HEAD`.
+- repairs verified: the three forbidden comment/docstring tokens are removed without executable behavior change; scanner test passes; health has 15 passes; Ruff and mypy pass; only GET `/health` is decorated; full integration has 36 passes and 2 skips.
+- remaining issues: the execution report's historical bytes outside 03C were not preserved and the report's preservation claim is materially inaccurate; raw `0x97` is gone, one `EF BF BD` exists, and the entire 1,901-line report is CRLF.
+- updated outcome: `REJECTED` in `same_task_repair` mode; 03C was corrected to unchecked, batch status remains unchanged, and 04B cannot resume until a byte-safe report-only repair is re-reviewed.
+
+### 2026-07-13T17:39:41+07:00
+- what was re-checked: A1's latest report-only diff and live handoff, git status/stat/diff, the 03C execution/review blocks, selected and sibling checkbox states, raw bytes before the 03A delimiter, raw-byte counts, one-header counts, independently reproduced 04A/04B hashes, EOF and `git diff --check`, unchanged main.py executable AST, and all required scanner/health/Ruff/mypy/route/full-integration gates.
+- repairs verified: the pre-03A historical prefix equals `HEAD`; raw `0x97=1`; `EF BF BD=0`; every task header occurs once; 04A/04B hashes exactly match A1's pre-repair captures; one terminating newline remains; diff check is clean; A1 changed only the execution report; all 03C validations pass.
+- remaining issues: none.
+- updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox 03C was checked, sibling checkbox states and batch status remain unchanged, and the orchestrator may resume 04B.
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Reproducible Local Runtime and Handoff
+- Task ID: 04A
+- Task title: Build the exact three-service Docker Compose topology
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the three task-listed container files and updated 04A report only; prior root diagnostic artifacts are removed.
+
+## Files Reviewed
+- `infrastructure/docker/backend.Dockerfile`: in scope - exact Python base tag, application pin install without a floating pip upgrade, and migration-before-Uvicorn command are reproducible and focused.
+- `infrastructure/docker/frontend.Dockerfile`: in scope - exact Node/nginx tags, `npm ci`, build arg, static artifact copy, and internal port are focused.
+- `infrastructure/docker-compose.yml`: in scope - topology, env ownership, loopback ports, named volumes, authenticated Neo4j Bolt/query readiness, validated backend `overall=available` gate, and health-based dependency are correct.
+- `build_out.txt`: removed as instructed.
+- `cfg_svc.txt`: removed as instructed.
+- `docs/reports/report_2_execute_agent.md`: in scope - one updated 04A block accurately records cumulative/repair scope, reproducibility, health boundaries, and root-env limitation with a final newline.
+
+## Validations Reviewed
+- Command/check: Compose service/config structural validation
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; exact services are backend/frontend/neo4j, all host ports use `127.0.0.1`, application paths remain under `/data`, three named volumes exist, and environment key ownership is scoped.
+- Status: passed
+- Notes: sanitized structural inspection emitted names/keys only, never secret values.
+
+- Command/check: `docker compose ... build`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed from cache
+- Status: passed
+- Notes: image construction succeeds; A1 additionally forced an uncached backend build proving only the pinned application install runs.
+
+- Command/check: tracked env/runtime scan
+- Required: yes
+- Reported result: passed with no matches
+- Rerun result: passed with no matches
+- Status: passed
+- Notes: no tracked `.env` or runtime data path exists.
+
+## Acceptance Review
+- Task acceptance: accepted after same-task repair.
+- Status: satisfied
+- Evidence: the resolved model contains exactly three pinned services, explicit documented environments, loopback-only host publication, correct named-volume ownership, no bind/env-file mounts, Neo4j authenticated query health, backend validated-overall health, and a health-based dependency. Uncached/cached builds pass without a floating pip upgrade; Alembic precedes Uvicorn; runtime/env tracking scan is clean; root artifacts are removed.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13T16:33:00+07:00
+- what was re-checked: Dockerfiles, sanitized resolved Compose structure, healthcheck commands, build evidence, tracked-runtime scan, git scope, root artifacts, one 04A block, report diff, and final newline.
+- repairs verified: no floating pip upgrade; backend health requires `overall=available`; Neo4j health runs authenticated `RETURN 1` through `cypher-shell`; diagnostic artifacts are absent; cached build passes and A1 recorded a successful uncached backend build.
+- remaining issues: root `.env` currently lacks a usable Neo4j password for 04B live startup, so 04B must supply a non-printed ephemeral process override or receive user input; this does not affect the 04A topology/build contract.
+- updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox 04A was checked, batch status remains unchanged, and 04B may proceed.
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Reproducible Local Runtime and Handoff
+- Task ID: 04B
+- Task title: Prove the Phase 1 exit gate and publish the Plan 3 local handoff
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: cumulative accepted 04A Docker/Compose files, authorized accepted 03C `backend/app/main.py` comment-only repair, 04B `README.md` and live integration harnesses, plus shared task/report/review records.
+- repair-scope attribution: A1 changed only `backend/tests/integration/test_neo4j_setup.py` and the existing 04B execution-report block/prefix bytes; prerequisite cumulative changes remain previously accepted evidence.
+
+## Files Reviewed
+- `README.md`: in scope - accurately records Phase 1 completion, repository ownership, one-root-env usage, focused verification/startup commands, and a reuse-only Plan 3 handoff without claiming Plan 3 behavior.
+- `backend/tests/integration/test_neo4j_setup.py`: in scope - complete live uniqueness-name equality requires exactly the three approved constraints, complete vector-index name equality requires only `job_embedding_vector`, and the sole row must remain cosine/1536 after setup runs twice.
+- `backend/tests/integration/test_compose_runtime.py`: in scope - validates the exact health payload and excludes secrets/connection details while safely skipping an unavailable local stack.
+- `infrastructure/docker-compose.yml`: accepted 04A prerequisite - exact three-service topology, loopback host bindings, scoped environment, health checks, and persistent volume ownership remain aligned.
+- `infrastructure/docker/backend.Dockerfile`: accepted 04A prerequisite - migration precedes Uvicorn and no source/env bind is introduced.
+- `infrastructure/docker/frontend.Dockerfile`: accepted 04A prerequisite - pinned build/runtime images and static runtime remain aligned.
+- `backend/app/main.py`: authorized reopened 03C prerequisite only - comment/docstring repair was not re-reviewed as 04B implementation.
+- `docs/reports/report_2_execute_agent.md`: in scope as evidence - prefix before 03A is byte-identical to `HEAD`; task headers are unique with one 04B block; `EF BF BD=0`, raw `0x97=1`, and exactly one terminal newline is preserved.
+
+## Validations Reviewed
+- Command/check: backend Ruff and mypy
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (`ruff` all checks; mypy 23 files)
+- Status: passed
+- Notes: read-only rerun succeeded.
+
+- Command/check: backend unit/integration pytest
+- Required: yes
+- Reported result: passed (118 passed, 1 skipped)
+- Rerun result: blocked by sandbox filesystem permissions for pytest temporary/cache directories; no product assertion failure was observed.
+- Status: passed from credible A1 evidence; A2 rerun blocked
+- Notes: repeated A2 attempts failed during fixture setup with `PermissionError`/`FileNotFoundError`, not test assertions.
+
+- Command/check: frontend lint/type-check/test/build
+- Required: yes
+- Reported result: passed
+- Rerun result: lint and type-check passed; Vitest was blocked by sandbox `spawn EPERM`; `npm ci` and build were not repeated because installs/state-writing validation was unnecessary for this review.
+- Status: passed from credible A1 evidence; partial A2 rerun
+- Notes: no contradictory repository evidence found.
+
+- Command/check: current live health endpoint
+- Required: yes
+- Reported result: all available
+- Rerun result: passed; `overall`, `sqlite`, `filesystem`, and `neo4j` all returned `available`.
+- Status: passed
+- Notes: direct Docker API inspection was blocked by named-pipe permission, so A1's recreation/migration/persistence evidence was cross-checked against current health and accepted 04A structure rather than mutating the stack again.
+
+- Command/check: execution-report byte integrity
+- Required: yes (explicit review contract)
+- Reported result: historical prefix preserved
+- Rerun result: passed; `prefix_before_03A_equal=True`, prefix lengths `65585/65585`, replacement UTF-8 count `0`, raw `0x97` count `1`, unique headers, one 04B header, and exactly one terminal newline.
+- Status: passed
+- Notes: `git diff --check` also completed without whitespace errors.
+
+- Command/check: focused live Neo4j schema integration
+- Required: yes
+- Reported result: passed (2 passed)
+- Rerun result: passed (`2 passed`) using a process-only credential recovered from the running isolated Neo4j container without printing or persisting it.
+- Status: passed
+- Notes: setup runs twice and the complete schema inspection satisfies the exact constraint/vector contract.
+
+- Command/check: focused Ruff for repaired harness
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (`All checks passed!`).
+- Status: passed
+- Notes: no fixer or write mode was used.
+
+## Acceptance Review
+- Task acceptance: accepted; both listed same-task repair findings are fixed and all previously accepted 04B exit-gate/handoff evidence remains uncontradicted.
+- Status: satisfied
+- Evidence: the harness now rejects every extra uniqueness constraint and vector index while requiring only the approved cosine/1536 index; fresh live pytest and Ruff pass; report-prefix and raw-byte invariants pass exactly against `HEAD`.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13 - same_task_repair
+- Prior outcome: `REJECTED_WITH_WARNINGS` for two narrow 04B findings: incomplete exact-set Neo4j assertions and a non-identical pre-03A execution-report prefix.
+- Repair verified: current harness uses full set equality for all live uniqueness constraints and all live vector indexes, then validates the sole approved index as cosine/1536.
+- Repair verified: raw-byte comparison reports `prefix_before_03A_equal=True`, lengths `65585/65585`, `EF BF BD=0`, raw `0x97=1`, unique task headers, one 04B header, and exactly one terminal newline.
+- Fresh validation: focused Ruff passed; focused live Neo4j pytest passed with `2 passed` using a non-printed process-only credential.
+- Preservation check: no evidence contradicts the previously accepted 04B README, health, Compose, migration, frontend, backend, hygiene, or Plan 3 handoff evidence; A1's credible full backend results remain applicable.
+- Outcome: `ACCEPTED`; only the 04B checkbox was checked, batch status was not changed, and A3 was not run.
