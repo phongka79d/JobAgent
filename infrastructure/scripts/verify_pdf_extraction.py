@@ -2,68 +2,41 @@
 """Phase 0 pypdf extraction gate for synthetic CV fixtures.
 
 Single-purpose diagnostic: iterate committed fixtures, run pypdf normal and
-layout extraction, apply the owned meaningful-text rule, and exit non-zero
-when the aggregate threshold fails or the image-only fixture is accepted.
+layout extraction via the production owner, apply the shared meaningful-text
+rule, and exit non-zero when the aggregate threshold fails or the image-only
+fixture is accepted.
 
 No OCR imports, subprocess OCR tools, remote OCR services, or alternate
-parsers are used or permitted.
+parsers are used or permitted. Quality constants and extraction live only in
+``app.services.pdf_extraction``.
 """
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
+# Ensure the installable backend package is importable when the diagnostic is
+# run from a checkout without relying on a pre-activated editable install.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_ROOT = _REPO_ROOT / "backend"
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
 try:
     import pypdf
-    from pypdf import PdfReader
+    from app.services.pdf_extraction import (
+        MEANINGFUL_TEXT_RULE,
+        NO_EXTRACTABLE_TEXT,
+        PdfMalformedError,
+        extract_modes,
+        is_meaningful_text,
+        measure,
+    )
 except ImportError as exc:  # pragma: no cover - environment setup
     print("PYPDF_COMPATIBILITY=FAIL", file=sys.stderr)
-    print(f"ERROR=import_pypdf:{exc}", file=sys.stderr)
+    print(f"ERROR=import_pypdf_or_owner:{exc}", file=sys.stderr)
     raise SystemExit(2) from exc
-
-# --- Owned feasibility rule (single location; reuse in production later) ---
-
-MIN_NON_WHITESPACE_CHARS = 80
-
-# Case-insensitive markers proving identity / experience / skills presence.
-IDENTITY_MARKERS = (
-    "email",
-    "phone",
-    "@",
-    "name",
-)
-EXPERIENCE_MARKERS = (
-    "experience",
-    "engineer",
-    "developer",
-    "analyst",
-    "worked",
-    "senior",
-    "staff",
-    "platform",
-)
-SKILLS_MARKERS = (
-    "skills",
-    "python",
-    "typescript",
-    "sql",
-    "react",
-    "docker",
-    "fastapi",
-)
-
-MEANINGFUL_TEXT_RULE = (
-    "After whitespace normalization (collapse runs of whitespace, strip), text is "
-    "meaningful when (1) non-whitespace character count >= "
-    f"{MIN_NON_WHITESPACE_CHARS}, and (2) the lowercased text contains at least one "
-    "identity marker "
-    f"({', '.join(IDENTITY_MARKERS)}), one experience marker "
-    f"({', '.join(EXPERIENCE_MARKERS)}), and one skills marker "
-    f"({', '.join(SKILLS_MARKERS)}). Image-only / empty digital text maps to "
-    "NO_EXTRACTABLE_TEXT. OCR is never used."
-)
 
 DIGITAL_FIXTURES = (
     "digital_cv_01.pdf",
@@ -77,59 +50,31 @@ REQUIRED_DIGITAL_PASSES = 4
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return _REPO_ROOT
 
 
 def fixture_dir() -> Path:
     return repo_root() / "backend" / "tests" / "fixtures" / "cv"
 
 
-def normalize_whitespace(text: str) -> str:
-    """Normalize whitespace only for measurement and rule evaluation."""
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
-def non_whitespace_count(text: str) -> int:
-    return sum(1 for ch in text if not ch.isspace())
-
-
-def has_marker(text_lower: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in text_lower for marker in markers)
-
-
-def is_meaningful_text(text: str) -> bool:
-    """Apply the owned minimum-text/quality rule for extractable CV text."""
-    normalized = normalize_whitespace(text)
-    if non_whitespace_count(normalized) < MIN_NON_WHITESPACE_CHARS:
-        return False
-    lower = normalized.lower()
-    return (
-        has_marker(lower, IDENTITY_MARKERS)
-        and has_marker(lower, EXPERIENCE_MARKERS)
-        and has_marker(lower, SKILLS_MARKERS)
-    )
-
-
-def extract_modes(path: Path) -> tuple[str, str, int]:
-    """Return (normal_text, layout_text, page_count) using pypdf only."""
-    reader = PdfReader(str(path))
-    page_count = len(reader.pages)
-    normal_parts: list[str] = []
-    layout_parts: list[str] = []
-    for page in reader.pages:
-        normal_parts.append(page.extract_text() or "")
-        layout_parts.append(page.extract_text(extraction_mode="layout") or "")
-    return "\n".join(normal_parts), "\n".join(layout_parts), page_count
-
-
-def measure(text: str) -> tuple[int, int]:
-    """Return (raw_char_len_after_ws_normalize, non_whitespace_count)."""
-    normalized = normalize_whitespace(text)
-    return len(normalized), non_whitespace_count(normalized)
-
-
 def evaluate_digital(path: Path) -> dict:
-    normal, layout, pages = extract_modes(path)
+    try:
+        normal, layout, pages = extract_modes(path)
+    except PdfMalformedError as exc:
+        return {
+            "name": path.name,
+            "kind": "digital",
+            "pages": 0,
+            "normal_non_ws": 0,
+            "layout_non_ws": 0,
+            "normal_norm_len": 0,
+            "layout_norm_len": 0,
+            "normal_ok": False,
+            "layout_ok": False,
+            "success": False,
+            "status": "FAIL",
+            "error": str(exc),
+        }
     n_len, n_non_ws = measure(normal)
     l_len, l_non_ws = measure(layout)
     normal_ok = is_meaningful_text(normal)
@@ -152,7 +97,23 @@ def evaluate_digital(path: Path) -> dict:
 
 
 def evaluate_image_only(path: Path) -> dict:
-    normal, layout, pages = extract_modes(path)
+    try:
+        normal, layout, pages = extract_modes(path)
+    except PdfMalformedError as exc:
+        return {
+            "name": path.name,
+            "kind": "image_only",
+            "pages": 0,
+            "normal_non_ws": 0,
+            "layout_non_ws": 0,
+            "normal_norm_len": 0,
+            "layout_norm_len": 0,
+            "normal_ok": False,
+            "layout_ok": False,
+            "accepted": False,
+            "status": NO_EXTRACTABLE_TEXT,
+            "error": str(exc),
+        }
     n_len, n_non_ws = measure(normal)
     l_len, l_non_ws = measure(layout)
     normal_ok = is_meaningful_text(normal)
@@ -171,7 +132,7 @@ def evaluate_image_only(path: Path) -> dict:
         "normal_ok": normal_ok,
         "layout_ok": layout_ok,
         "accepted": accepted,
-        "status": "NO_EXTRACTABLE_TEXT" if no_text else "UNEXPECTED_TEXT",
+        "status": NO_EXTRACTABLE_TEXT if no_text else "UNEXPECTED_TEXT",
     }
 
 
@@ -222,7 +183,7 @@ def main() -> int:
     allowed_failures = [
         row["name"] for row in digital_rows if not row["success"]
     ]
-    image_ok = image_row["status"] == "NO_EXTRACTABLE_TEXT"
+    image_ok = image_row["status"] == NO_EXTRACTABLE_TEXT
 
     print(
         f"aggregate: digital_pass={digital_passes}/{digital_total} "

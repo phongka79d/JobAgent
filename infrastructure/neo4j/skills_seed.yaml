@@ -1,0 +1,143 @@
+# Production skill taxonomy — user-approved (01B option 1, as proposed).
+# Sole production source: infrastructure/neo4j/skills_seed.yaml
+# Format: JSON-compatible YAML (full-line # comments stripped, then json.loads).
+# ponytail: ceiling is this small approved taxonomy; upgrade path is a direct
+# pinned YAML parser only when richer YAML syntax is actually required.
+{
+  "skills": [
+    {
+      "canonical_key": "python",
+      "display_name": "Python",
+      "aliases": ["python3", "py"],
+      "category": "language"
+    },
+    {
+      "canonical_key": "typescript",
+      "display_name": "TypeScript",
+      "aliases": ["ts"],
+      "category": "language"
+    },
+    {
+      "canonical_key": "sql",
+      "display_name": "SQL",
+      "aliases": [],
+      "category": "data"
+    },
+    {
+      "canonical_key": "react",
+      "display_name": "React",
+      "aliases": ["reactjs", "react.js"],
+      "category": "framework"
+    },
+    {
+      "canonical_key": "docker",
+      "display_name": "Docker",
+      "aliases": [],
+      "category": "devops"
+    },
+    {
+      "canonical_key": "postgresql",
+      "display_name": "PostgreSQL",
+      "aliases": ["postgres"],
+      "category": "data"
+    },
+    {
+      "canonical_key": "fastapi",
+      "display_name": "FastAPI",
+      "aliases": ["fast api"],
+      "category": "framework"
+    },
+    {
+      "canonical_key": "neo4j",
+      "display_name": "Neo4j",
+      "aliases": [],
+      "category": "data"
+    },
+    {
+      "canonical_key": "pytest",
+      "display_name": "pytest",
+      "aliases": [],
+      "category": "testing"
+    },
+    {
+      "canonical_key": "kubernetes",
+      "display_name": "Kubernetes",
+      "aliases": ["k8s"],
+      "category": "devops"
+    },
+    {
+      "canonical_key": "terraform",
+      "display_name": "Terraform",
+      "aliases": [],
+      "category": "devops"
+    },
+    {
+      "canonical_key": "aws",
+      "display_name": "AWS",
+      "aliases": ["amazon web services"],
+      "category": "cloud"
+    },
+    {
+      "canonical_key": "spark",
+      "display_name": "Apache Spark",
+      "aliases": ["pyspark"],
+      "category": "data"
+    },
+    {
+      "canonical_key": "airflow",
+      "display_name": "Apache Airflow",
+      "aliases": [],
+      "category": "data"
+    },
+    {
+      "canonical_key": "dbt",
+      "display_name": "dbt",
+      "aliases": [],
+      "category": "data"
+    },
+    {
+      "canonical_key": "css",
+      "display_name": "CSS",
+      "aliases": [],
+      "category": "frontend"
+    },
+    {
+      "canonical_key": "jest",
+      "display_name": "Jest",
+      "aliases": [],
+      "category": "testing"
+    },
+    {
+      "canonical_key": "graphql",
+      "display_name": "GraphQL",
+      "aliases": [],
+      "category": "api"
+    }
+  ],
+  "relationships": [
+    {
+      "from": "python",
+      "to": "fastapi",
+      "weight": 0.6,
+      "source": "seed"
+    },
+    {
+      "from": "typescript",
+      "to": "react",
+      "weight": 0.6,
+      "source": "seed"
+    },
+    {
+      "from": "sql",
+      "to": "postgresql",
+      "weight": 0.6,
+      "source": "seed"
+    },
+    {
+      "from": "docker",
+      "to": "kubernetes",
+      "weight": 0.6,
+      "source": "seed"
+    }
+  ]
+}

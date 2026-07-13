@@ -1,9 +1,10 @@
 # JobAgent
 
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
-foundation work, and Plan 3 / Master Phase 2 (persistent conversation over the
-React–FastAPI–LangGraph–SSE path). The repository contains a pinned backend core
-(including Phase 2 LangGraph/LangChain pins), the complete SQLite/Alembic
+foundation work, Plan 3 / Master Phase 2 (persistent conversation over the
+React–FastAPI–LangGraph–SSE path), and Plan 4 / Master Phase 3 Batch01 (profile
+domain and extraction foundations). The repository contains a pinned backend
+core (including Phase 2 LangGraph/LangChain pins), the complete SQLite/Alembic
 source-of-truth schema, validated chat/ToolResult/SSE contracts, message/run/tool
 repositories, tool replay and history-hydration services, bounded Agent
 state/context, a verified ShopAIKey ChatOpenAI adapter and conversation-first
@@ -12,9 +13,13 @@ guard, request-scoped `AsyncSqliteSaver` checkpoints and Agent runner streaming,
 atomic chat-turn/interrupt/resume services, thin public history/turn/resume SSE
 endpoints, a typed React/Astryx conversation client (SSE parser, single streaming
 reducer, history/load-older, concise tool activity, failure states), UUID-rooted
-attachment storage, Neo4j foundation primitives, one health API, and a
-three-service local Docker Compose runtime. Production CV/job/matching tools and
-later domain UI remain later plans.
+attachment storage, Neo4j foundation primitives, exact Candidate Profile / skill /
+preference / draft Pydantic contracts, the sole skill taxonomy loader and
+normalizer, focused attachment and profile repositories over the existing
+schema, a single production pypdf extraction and meaningful-text owner, one
+health API, and a three-service local Docker Compose runtime. Production CV
+upload/proposal tools, profile approval, job/matching tools, and domain UI remain
+later Plan 4 batches and later plans.
 
 ## Repository layout
 
@@ -25,13 +30,16 @@ later domain UI remain later plans.
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage,
   Neo4j lifecycle/schema setup, `GET /api/health`, Phase 2 chat/tool/SSE
-  Pydantic contracts, focused chat/run/tool repositories, history/tool services,
+  Pydantic contracts, Plan 4 profile/skill/draft contracts under `app/schemas/`,
+  focused chat/run/tool and attachment/profile repositories, history/tool
+  services, skill normalizer and pypdf extraction owners under `app/services/`,
   Agent state/context loader, ShopAIKey chat adapter/prompt, empty production
   tool registry, one StateGraph factory, request-scoped checkpoint/runner
   lifecycle, chat-turn/resume orchestration, and thin public chat
   history/turn/resume routes with validated SSE framing.
-- `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, and retained
-  local feasibility scripts.
+- `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, retained
+  local feasibility scripts, and the approved Neo4j skills taxonomy seed
+  (`neo4j/skills_seed.yaml`).
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
 
 ## Configuration
@@ -145,16 +153,26 @@ source tree or root `.env` into containers.
 
 ## PDF extraction verification
 
-The repository includes five synthetic digital CVs and one full-page raster-only
+Production pypdf digital-text extraction, layout mode, page-count parsing, and
+the meaningful-text rule live only in `backend/app/services/pdf_extraction.py`.
+The Phase 0 diagnostic reuses that owner (no local threshold/marker copy). The
+repository includes five synthetic digital CVs and one full-page raster-only
 synthetic CV under `backend/tests/fixtures/cv/`. From the repository root:
 
 ```powershell
 python infrastructure/scripts/verify_pdf_extraction.py
 ```
 
-The diagnostic runs pypdf normal and layout extraction, requires at least four of
-five digital fixtures to contain meaningful CV text, and requires the raster-only
-fixture to return `NO_EXTRACTABLE_TEXT`. OCR is intentionally unsupported.
+From `backend/` after editable install:
+
+```powershell
+python -m pytest tests/unit/test_pdf_extraction.py -q
+```
+
+The diagnostic runs pypdf normal and layout extraction via the production owner,
+requires at least four of five digital fixtures to contain meaningful CV text,
+and requires the raster-only fixture to return `NO_EXTRACTABLE_TEXT`. OCR is
+intentionally unsupported.
 
 ## ShopAIKey verification
 
@@ -207,8 +225,18 @@ streaming reducer (`frontend/src/features/chat/`, `frontend/src/lib/api/`,
 `frontend/src/lib/sse/`); base Astryx chat page under `AppShell` with history
 pagination, ordered streamed text, in-flight composer lock, concise tool
 activity (exact JobAgent status text), and visible failed/disconnected/interrupted
-states. Plan 3 / Master Phase 2 is complete. Later plans own production domain
-tools and profile/JD/match UI.
+states. Plan 3 / Master Phase 2 is complete.
+
+Plan 4 / Master Phase 3 Batch01 is complete: exact `SkillRef`, `CandidateSkill`,
+experience/education/language, `CandidateProfile`, `JobPreferences`, and
+`ProfileDraftPayload` contracts under `app/schemas/`; user-approved production
+taxonomy at `infrastructure/neo4j/skills_seed.yaml` with one deterministic
+normalizer under `app/services/skill_normalization.py`; focused attachment and
+singleton profile/draft/preferences repositories (no schema migration); and one
+production pypdf extraction/meaningful-text owner under
+`app/services/pdf_extraction.py` shared with the Phase 0 diagnostic. Later Plan 4
+batches own CV upload/staging, structured extraction, draft proposal tools,
+approval/commit, Neo4j Candidate/Skill sync, profile reads, and profile UI.
 
 ## Plan 3 progress and constraints
 
@@ -248,6 +276,47 @@ Plan 3 reuses Plan 2 foundation primitives without duplicating them:
 Plan 3 must not call `create_all()`, alter status vocabulary, add independent
 graph IDs, or introduce production CV/JD/matching tools without a later plan.
 Schema changes require an explicit migration and Master alignment.
+
+## Plan 4 Batch01 progress and constraints
+
+Plan 4 Batch01 reuses Plan 2/3 primitives without duplicating them:
+
+- Profile contracts: `app/schemas/skills.py` and `app/schemas/profile.py` own
+  exact field sets, enums, confidence `[0, 1]`, and strict `extra="forbid"`.
+  Later services must validate these models before any `profile_json`,
+  `draft_json`, or `preferences_json` write.
+- Skill taxonomy: production seed is only
+  `infrastructure/neo4j/skills_seed.yaml`; tests may inject the smaller fixture
+  through the same parser. One normalizer owns Unicode/whitespace/case/
+  punctuation/alias resolution and unknown `canonical_key` derivation; the LLM
+  never supplies aliases or relationships.
+- Repositories: `app/repositories/attachments.py` and
+  `app/repositories/profiles.py` are flush-only, session-caller-owned, and do
+  not commit, touch filesystem/providers/Neo4j, or re-validate JSON shape.
+- PDF extraction: sole quality rule and pypdf `PdfReader` usage live in
+  `app/services/pdf_extraction.py`; raw extracted text remains transient
+  service data (not a public API contract).
+- Public surface is unchanged: health plus Plan 3 chat history/turn/resume.
+  No CV upload route, proposal tools, active-profile write path, or profile UI
+  in Batch01.
+
+## Profile domain and extraction foundations verification (Plan 4 Batch01)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/unit/test_profile_schemas.py tests/unit/test_skill_normalization.py tests/unit/test_pdf_extraction.py -q
+python -m pytest tests/integration/test_cv_api.py tests/integration/test_profile_approval.py -q
+python -m ruff check app/schemas/profile.py app/schemas/skills.py app/services/skill_normalization.py app/services/pdf_extraction.py app/repositories/attachments.py app/repositories/profiles.py
+python -m mypy app
+```
+
+Also reconfirm the retained Phase 0 diagnostic from the repository root:
+
+```powershell
+python infrastructure/scripts/verify_pdf_extraction.py
+```
 
 ## Durable chat contract verification (Batch01)
 

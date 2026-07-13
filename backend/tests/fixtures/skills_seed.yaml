@@ -1,0 +1,53 @@
+# Test-only synthetic taxonomy for skill_normalization unit tests.
+# No external user approval is required for this fixture.
+# Format: JSON-compatible YAML (full-line # comments stripped, then json.loads).
+# ponytail: ceiling is this small fixture taxonomy; upgrade path is a direct
+# pinned YAML parser only when richer YAML syntax is actually required.
+{
+  "skills": [
+    {
+      "canonical_key": "python",
+      "display_name": "Python",
+      "aliases": ["python3", "py"],
+      "category": "language"
+    },
+    {
+      "canonical_key": "typescript",
+      "display_name": "TypeScript",
+      "aliases": ["ts", "type script"],
+      "category": "language"
+    },
+    {
+      "canonical_key": "react",
+      "display_name": "React",
+      "aliases": ["reactjs", "react.js"],
+      "category": "framework"
+    },
+    {
+      "canonical_key": "fastapi",
+      "display_name": "FastAPI",
+      "aliases": ["fast api"],
+      "category": "framework"
+    },
+    {
+      "canonical_key": "sql",
+      "display_name": "SQL",
+      "aliases": [],
+      "category": "data"
+    }
+  ],
+  "relationships": [
+    {
+      "from": "python",
+      "to": "fastapi",
+      "weight": 0.6,
+      "source": "seed"
+    },
+    {
+      "from": "typescript",
+      "to": "react",
+      "weight": 0.7,
+      "source": "seed"
+    }
+  ]
+}

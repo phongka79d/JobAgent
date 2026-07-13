@@ -201,7 +201,7 @@ register production tools, synchronize Neo4j data, or build frontend UI.
 
 ### Tasks
 
-- [ ] (01A): Define the exact Candidate Profile, Skill, Preference, and Draft contracts
+- [x] (01A): Define the exact Candidate Profile, Skill, Preference, and Draft contracts
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.1 Profile and skill schemas`; `docs/plans/Master_plan.md > ## 7. Pydantic Data Contracts > ### 7.1 Shared skill contract`; `docs/plans/Master_plan.md > ## 7. Pydantic Data Contracts > ### 7.2 Candidate Profile`; `docs/plans/Master_plan.md > ## 7. Pydantic Data Contracts > ### 7.3 Job Preferences`
   - Source Requirements:
     - Implement exact `SkillRef`, `CandidateSkill`, `ExperienceItem`,
@@ -242,7 +242,7 @@ register production tools, synchronize Neo4j data, or build frontend UI.
   - Blocked Condition: None.
   - Files: `backend/app/schemas/profile.py`, `backend/app/schemas/skills.py`, `backend/tests/unit/test_profile_schemas.py`
 
-- [ ] (01B): Create the authoritative approved taxonomy and sole deterministic skill normalizer
+- [x] (01B): Create the authoritative approved taxonomy and sole deterministic skill normalizer
   - Source of Truth: `docs/plans/Plan_4.md > ## 6. Target Directory Structure`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.2 Skill normalization ownership`; `docs/plans/Master_plan.md > ## 8. Neo4j Derived Model > ### 8.4 Graph safety rules`; `docs/plans/Master_plan.md > ## 9. Skill Normalization`
   - Source Requirements:
     - One production taxonomy defines canonical display names, aliases,
@@ -295,7 +295,7 @@ register production tools, synchronize Neo4j data, or build frontend UI.
     the source-required seed relationships.
   - Files: `infrastructure/neo4j/skills_seed.yaml`, `backend/tests/fixtures/skills_seed.yaml`, `backend/app/services/skill_normalization.py`, `backend/tests/unit/test_skill_normalization.py`
 
-- [ ] (01C): Implement focused attachment and profile repositories over the existing schema
+- [x] (01C): Implement focused attachment and profile repositories over the existing schema
   - Source of Truth: `docs/plans/Plan_4.md > ## 6. Target Directory Structure`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.3 Upload validation and exact-hash state handling`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.6 Approval decisions and atomic commit`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.2 Application table schemas`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.3 Foreign-key and deletion rules`
   - Source Requirements:
     - Reuse existing `Attachment`, `CandidateProfile`, `ProfileDraft`, and
@@ -337,7 +337,7 @@ register production tools, synchronize Neo4j data, or build frontend UI.
   - Blocked Condition: None.
   - Files: `backend/app/repositories/attachments.py`, `backend/app/repositories/profiles.py`, `backend/tests/integration/test_cv_api.py`, `backend/tests/integration/test_profile_approval.py`
 
-- [ ] (01D): Promote the proven pypdf extraction and meaningful-text rule into one production owner
+- [x] (01D): Promote the proven pypdf extraction and meaningful-text rule into one production owner
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.3 Upload validation and exact-hash state handling`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.4 PDF/profile extraction`; `docs/plans/Plan_4.md > ## 9. Verification & Testing Plan`; `docs/feasibility/phase_0_report.md > ## pypdf extraction gate`
   - Source Requirements:
     - Use only pinned pypdf digital-text extraction, including layout mode, and
