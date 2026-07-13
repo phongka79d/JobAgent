@@ -1,11 +1,15 @@
 # JobAgent
 
-JobAgent has completed Phase 0 feasibility validation and Plan 2 / Master Phase 1
-foundation work. The repository now contains a pinned backend core, the complete
-SQLite/Alembic source-of-truth schema, UUID-rooted attachment storage, Neo4j
+JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
+foundation work, and Plan 3 / Master Phase 2 Batch01 (durable chat contracts and
+persistence). The repository contains a pinned backend core (including Phase 2
+LangGraph/LangChain pins), the complete SQLite/Alembic source-of-truth schema,
+validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
+replay and history-hydration services, UUID-rooted attachment storage, Neo4j
 foundation primitives, one health API, a minimal Astryx application shell, and a
-three-service local Docker Compose runtime. Production CV, job, chat, Agent,
-approval, and matching workflows remain out of scope for Plan 3 and later.
+three-service local Docker Compose runtime. Public chat/Agent routes, the Agent
+graph, frontend chat UI, and production CV/job/matching tools remain later Plan 3
+batches or later plans.
 
 ## Repository layout
 
@@ -14,7 +18,9 @@ approval, and matching workflows remain out of scope for Plan 3 and later.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage,
-  Neo4j lifecycle/schema setup, and `GET /api/health`.
+  Neo4j lifecycle/schema setup, `GET /api/health`, Phase 2 chat/tool/SSE
+  Pydantic contracts, focused chat/run/tool repositories, and history/tool
+  services (no public chat routes yet).
 - `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, and retained
   local feasibility scripts.
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
@@ -157,10 +163,17 @@ attachment storage, Neo4j lifecycle/base schema, three-component health boundary
 and the loopback-bound three-service Compose runtime. Phase 0 evidence remains
 recorded in `docs/feasibility/phase_0_report.md` and is not repeated.
 
-## Plan 3 handoff
+Plan 3 / Master Phase 2 Batch01 is complete: exact Phase 2 runtime pins
+(`langgraph`, `langchain`, `langchain-core`, `langchain-openai`,
+`langgraph-checkpoint-sqlite`), validated chat/history/resume, `ToolResult`, and
+seven-event SSE contracts; message and agent-run repositories; durable tool
+transitions with exact `(run_id, tool_call_id)` replay; opaque cursor history
+pagination and durable tool hydration. Remaining Plan 3 batches own the Agent
+graph/adapter, SSE turn/resume endpoints, and Astryx chat client.
 
-Plan 3 / Master Phase 2 must reuse these foundation primitives without
-duplicating them:
+## Plan 3 progress and constraints
+
+Plan 3 reuses Plan 2 foundation primitives without duplicating them:
 
 - Settings: one cached Pydantic settings object from the root `.env` only.
 - Database: async SQLAlchemy sessions, Alembic-owned schema at
@@ -169,9 +182,25 @@ duplicating them:
 - Storage: UUID-relative paths under `FILES_DIR` with atomic write support.
 - Graph: Neo4j driver lifecycle plus idempotent uniqueness constraints and the
   cosine/1536 vector index (no domain sync yet).
-- API status: only `GET /api/health` with `available | unavailable` components.
+- API status: only `GET /api/health` with `available | unavailable` components
+  until later Plan 3 batches add transport routes.
 - Runtime: Compose services `frontend`, `backend`, and `neo4j` on loopback ports.
+- Chat persistence (Batch01): contracts under `app/schemas/`, repositories under
+  `app/repositories/`, and history/tool services under `app/services/` on the
+  existing conversation/run/tool tables (no schema migration).
 
 Plan 3 must not call `create_all()`, alter status vocabulary, add independent
-graph IDs, or introduce production CV/JD/chat/Agent public behavior without a
-later plan. Schema changes require an explicit migration and Master alignment.
+graph IDs, or introduce production CV/JD/matching tools without a later plan.
+Schema changes require an explicit migration and Master alignment.
+
+## Durable chat contract verification (Batch01)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/unit/test_tool_result.py tests/unit/test_sse_contract.py -q
+python -m pytest tests/integration/test_chat_persistence.py tests/integration/test_tool_replay.py tests/integration/test_chat_history.py -q
+python -m ruff check app/schemas app/repositories app/services
+python -m mypy app
+```

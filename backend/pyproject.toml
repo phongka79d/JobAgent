@@ -20,6 +20,13 @@ dependencies = [
     "aiosqlite==0.22.1",
     "alembic==1.18.5",
     "neo4j==6.2.0",
+    # Phase 2 / Plan 3 runtime (Phase 0 intended versions + SQLite checkpointer pin)
+    "langgraph==1.2.9",
+    "langchain==1.3.13",
+    "langchain-core==1.4.9",
+    "langchain-openai==1.3.5",
+    # Compatibility-checked against langgraph 1.2.9 (requires langgraph-checkpoint>=4.1.0,<5)
+    "langgraph-checkpoint-sqlite==3.1.0",
     # Local quality tools (Phase 0 intended versions)
     "ruff==0.15.21",
     "mypy==1.18.2",
