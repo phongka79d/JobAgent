@@ -119,7 +119,7 @@ provider/PDF gate.
 
 ### Tasks
 
-- [ ] (01A): Create the minimal scaffold and one-root configuration contract
+- [x] (01A): Create the minimal scaffold and one-root configuration contract
   - Source of Truth: `docs/plans/Plan_1.md` > `## 6. Target Directory Structure`;
     `docs/plans/Plan_1.md` > `## 7. Technical Specifications` >
     `### 7.1 Scaffold and dependency lock`; `docs/plans/Master_plan.md` >
@@ -169,7 +169,7 @@ provider/PDF gate.
     `backend/app/__init__.py`, `frontend/`, `backend/tests/fixtures/cv/`,
     `infrastructure/docker/`, `infrastructure/neo4j/`, `infrastructure/scripts/`
 
-- [ ] (01B): Pin Astryx and prove every required public component path
+- [x] (01B): Pin Astryx and prove every required public component path
   - Source of Truth: `docs/plans/Plan_1.md` > `## 4. Scope`;
     `docs/plans/Plan_1.md` > `## 7. Technical Specifications` >
     `### 7.1 Scaffold and dependency lock` and `### 7.4 Astryx evidence contract`;
