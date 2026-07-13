@@ -1,0 +1,76 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1038 >>
+stream
+BT
+/F1 18.0 Tf
+1 0 0 1 50.0 750.0 Tm
+(Noah DemoCandidate) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 735.0 Tm
+(Email: noah.demo@example.test  Phone: +1-555-0102) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 720.0 Tm
+(Location: Synthetic City, ST) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 690.0 Tm
+(Professional Experience) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 675.0 Tm
+(Data Engineer  Fabrikam Analytics  2020-Present) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 660.0 Tm
+(Owned ETL for job matching metrics and skill graphs.) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 645.0 Tm
+(Analyst  Adventure Works  2017-2020) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 630.0 Tm
+(Produced dashboards for recruiting funnel quality.) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 600.0 Tm
+(Skills) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 585.0 Tm
+(Python, SQL, dbt, Spark, TypeScript, Airflow, AWS) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 555.0 Tm
+(Projects) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 540.0 Tm
+(Synthetic resume parser prototype using pypdf layout mode.) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 510.0 Tm
+(Education) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 495.0 Tm
+(M.S. Information Systems  Demo University) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001337 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1407
+%%EOF

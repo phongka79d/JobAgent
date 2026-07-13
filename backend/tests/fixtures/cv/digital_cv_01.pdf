@@ -1,0 +1,73 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 996 >>
+stream
+BT
+/F1 18.0 Tf
+1 0 0 1 50.0 750.0 Tm
+(Ava Synthetic) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 734.0 Tm
+(Email: ava.synthetic@example.test  Phone: +1-555-0101) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 702.0 Tm
+(Summary) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 686.0 Tm
+(Backend engineer focused on APIs and reliable data pipelines.) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 654.0 Tm
+(Experience) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 638.0 Tm
+(Senior Software Engineer  Northwind Labs  2021-2025) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 622.0 Tm
+(Built FastAPI services, improved extraction latency, mentored team.) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 606.0 Tm
+(Software Engineer  Contoso Systems  2018-2021) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 590.0 Tm
+(Delivered Python microservices and CI quality gates.) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 558.0 Tm
+(Skills) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 542.0 Tm
+(Python, TypeScript, SQL, React, Docker, PostgreSQL) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 510.0 Tm
+(Education) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 494.0 Tm
+(B.S. Computer Science  Example State University) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001294 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1364
+%%EOF

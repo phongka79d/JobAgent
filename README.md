@@ -34,8 +34,22 @@ npx astryx --help
 The exact public-component documentation commands and observed props/imports are
 recorded in `docs/feasibility/phase_0_report.md`.
 
+## PDF extraction verification
+
+The repository includes five synthetic digital CVs and one full-page raster-only
+synthetic CV under `backend/tests/fixtures/cv/`. From the repository root:
+
+```powershell
+python infrastructure/scripts/verify_pdf_extraction.py
+```
+
+The diagnostic runs pypdf normal and layout extraction, requires at least four of
+five digital fixtures to contain meaningful CV text, and requires the raster-only
+fixture to return `NO_EXTRACTABLE_TEXT`. OCR is intentionally unsupported.
+
 ## Phase status
 
-Batch 01 establishes the scaffold, environment contract, pinned Astryx lockfile,
-minimal render, and public component evidence. PDF and ShopAIKey compatibility gates
-remain owned by the later Phase 0 batches in `docs/tasks/task_1.md`.
+Batches 01 and 02 establish the scaffold, environment contract, pinned Astryx
+lockfile, minimal render, public component evidence, synthetic PDF fixtures, and the
+pypdf compatibility gate. ShopAIKey and final dependency-lock decisions remain owned
+by the later Phase 0 batches in `docs/tasks/task_1.md`.

@@ -1,0 +1,67 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 830 >>
+stream
+BT
+/F1 18.0 Tf
+1 0 0 1 50.0 750.0 Tm
+(Zoe PlaceholderCV) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 734.0 Tm
+(Email: zoe.placeholder@example.test  Phone: +1-555-0105) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 702.0 Tm
+(Skills) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 686.0 Tm
+(Python  SQL  TypeScript  React  Kubernetes  Terraform) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 654.0 Tm
+(Experience) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 638.0 Tm
+(Platform Engineer  Cloud Quill  2021-Present) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 622.0 Tm
+(Automated deploy gates and synthetic CV fixture pipelines.) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 606.0 Tm
+(SRE  Metric Meadow  2018-2021) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 590.0 Tm
+(Owned on-call for document ingestion services.) Tj
+/F1 14.0 Tf
+1 0 0 1 50.0 558.0 Tm
+(Summary) Tj
+/F1 11.0 Tf
+1 0 0 1 50.0 542.0 Tm
+(Synthetic identity used only for JobAgent pypdf feasibility.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001128 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1198
+%%EOF

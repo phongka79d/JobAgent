@@ -248,7 +248,7 @@ own upload validation, storage, profile extraction, OCR, or a production parser.
 
 ### Tasks
 
-- [ ] (02A): Build and pass the synthetic pypdf extraction gate
+- [x] (02A): Build and pass the synthetic pypdf extraction gate
   - Source of Truth: `docs/plans/Plan_1.md` > `## 7. Technical Specifications` >
     `### 7.3 PDF feasibility contract`; `docs/plans/Plan_1.md` >
     `## 9. Verification & Testing Plan` > `### Automated/local commands`;

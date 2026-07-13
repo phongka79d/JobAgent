@@ -88,4 +88,54 @@ No component required a cross-package or undocumented composition. Every matrix 
 
 ---
 
-Later Phase 0 gates (pypdf, ShopAIKey, full dependency decision record) are intentionally omitted until their owning tasks complete. Do not treat omitted sections as placeholders for unfinished Astryx work.
+## pypdf extraction gate
+
+| Fact | Value |
+|---|---|
+| Exact pypdf version | `6.14.2` (pinned in `backend/pyproject.toml` as `pypdf==6.14.2`) |
+| Diagnostic command | `python infrastructure/scripts/verify_pdf_extraction.py` |
+| Fixture directory | `backend/tests/fixtures/cv/` |
+| Aggregate threshold | At least **4 of 5** digital fixtures must pass the meaningful-text rule |
+| Allowed digital failures | **none** (observed **5/5** digital PASS) |
+| Image-only expectation | Must be classified `NO_EXTRACTABLE_TEXT` (must not be accepted) |
+| OCR | **Never** imported, subprocessed, or called; pypdf digital text only |
+
+### Meaningful-text rule (owned by `infrastructure/scripts/verify_pdf_extraction.py`)
+
+After whitespace normalization (collapse runs of whitespace, strip), text is **meaningful** when:
+
+1. Non-whitespace character count is **>= 80**, and
+2. The lowercased text contains at least one **identity** marker (`email`, `phone`, `@`, `name`), one **experience** marker (`experience`, `engineer`, `developer`, `analyst`, `worked`, `senior`, `staff`, `platform`), and one **skills** marker (`skills`, `python`, `typescript`, `sql`, `react`, `docker`, `fastapi`).
+
+A digital fixture **PASS**es when **either** pypdf normal or layout extraction yields meaningful text. Text that fails the rule is treated as non-extractable. The image-only fixture must fail the rule in both modes and is reported as `NO_EXTRACTABLE_TEXT`. No OCR fallback is permitted.
+
+### Per-fixture outcomes
+
+Measurements: page count; non-whitespace character count after whitespace-only normalization for **normal** and **layout** extraction modes.
+
+| Fixture | Kind | Pages | Normal non-ws | Layout non-ws | Normal meaningful | Layout meaningful | Result |
+|---|---|---:|---:|---:|---|---|---|
+| `digital_cv_01.pdf` | digital (classic single-column) | 1 | 421 | 421 | yes | yes | PASS |
+| `digital_cv_02.pdf` | digital (data/product hybrid) | 1 | 422 | 422 | yes | yes | PASS |
+| `digital_cv_03.pdf` | digital (split header / compact body) | 1 | 330 | 330 | yes | yes | PASS |
+| `digital_cv_04.pdf` | digital (multi-role bullets) | 1 | 534 | 534 | yes | yes | PASS |
+| `digital_cv_05.pdf` | digital (skills-first) | 1 | 340 | 340 | yes | yes | PASS |
+| `image_only_cv.pdf` | image-only (full-page RGB JPEG XObject 1240×1754, no text layer) | 1 | 0 | 0 | no | no | `NO_EXTRACTABLE_TEXT` |
+
+All five digital fixtures use synthetic identities only (no real personal data). The image-only fixture is a single letter-size page (`MediaBox [0 0 612 792]`) whose content stream only paints `/Im0 Do` (no `BT`/`Tj`/`TJ` text operators). The embedded DeviceRGB JPEG is a **visibly representative synthetic CV page** (1240×1754 px at generation time): dark header with synthetic name/contact, SUMMARY / EXPERIENCE / SKILLS / EDUCATION sections drawn as pixels only (`Jordan SampleCandidate`, placeholder roles and skills). pypdf extracts empty text in both modes. No real personal data; no OCR path.
+
+### Aggregate and gate result
+
+| Metric | Value |
+|---|---|
+| Digital successes | **5/5** (threshold >= 4/5) |
+| Allowed digital failure named | none |
+| Image-only | `NO_EXTRACTABLE_TEXT` (rejected as required) |
+| Diagnostic exit code | `0` |
+| Final marker | `PYPDF_COMPATIBILITY=PASS` |
+
+**PYPDF_COMPATIBILITY=PASS**
+
+---
+
+Later Phase 0 gates (ShopAIKey, full dependency decision record) are intentionally omitted until their owning tasks complete.

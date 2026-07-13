@@ -278,3 +278,227 @@ complete
   - nine exact `npx astryx component` commands → ALL_COMPONENT_DOCS=PASS
   - `rg -n '(?i)\b(TODO|TBD)\b|<[^>]+>' docs/feasibility/phase_0_report.md` → PLACEHOLDER_SCAN=PASS (no matches)
 - outcome: complete; both A2 blocking repair items fixed and revalidated
+---
+
+# Task Execution Report - 02A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch02 - Reproducible pypdf Compatibility Evidence
+
+## Task
+02A - Build and pass the synthetic pypdf extraction gate
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Reproducible pypdf Compatibility Evidence
+- Task ID: 02A
+- Task title: Build and pass the synthetic pypdf extraction gate
+- Files allowed / repair scope (A2 same_task): `backend/tests/fixtures/cv/image_only_cv.pdf`; `docs/feasibility/phase_0_report.md`; existing 02A execution report block (include `.gitkeep` deletion in complete changed-file evidence)
+- Original task files (unchanged this repair except image-only fixture + reports): `backend/pyproject.toml`, five `digital_cv_*.pdf`, `infrastructure/scripts/verify_pdf_extraction.py`
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ## 7. Technical Specifications > ### 7.3 PDF feasibility contract
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan > ### Automated/local commands
+- docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.2 Processing
+
+## Supplemental Documents Used
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+- docs/review/review_1_review_agent.md (02A REJECTED_WITH_WARNINGS repair instructions)
+
+## Dependency and User Action Check
+- Dependencies: (01A) backend/pyproject.toml and fixture path present; (01B) docs/feasibility/phase_0_report.md present
+- User action: none
+
+## Files Inspected Before Editing
+- backend/tests/fixtures/cv/image_only_cv.pdf (pre-repair: 1×1 DeviceGray JPEG XObject; no text layer)
+- docs/feasibility/phase_0_report.md (pypdf section; 1×1 description)
+- docs/reports/report_1_execute_agent.md (existing 02A block)
+- docs/review/review_1_review_agent.md (02A blocking items)
+- infrastructure/scripts/verify_pdf_extraction.py (confirm no OCR; no script changes in repair)
+- Repository grep for OCR tools in infrastructure/scripts: only denial documentation strings
+
+## Completed Work
+- Original (prior A1): six synthetic fixtures, pinned `pypdf==6.14.2`, `verify_pdf_extraction.py`, Phase 0 pypdf evidence; digital 5/5 PASS; prior image-only was a 1×1 grayscale JPEG (A2 rejected as non-representative).
+- Repair (this run): replaced `image_only_cv.pdf` with a letter-size PDF whose sole content paints a full-page DeviceRGB JPEG (1240×1754) rendering a **visibly representative synthetic CV page** (header name/contact, SUMMARY, EXPERIENCE, SKILLS, EDUCATION) as pixels only. Synthetic identity only (`Jordan SampleCandidate`). Content stream is `q … /Im0 Do Q` only — no PDF text layer / no `BT`/`Tj`/`TJ`.
+- Regenerated via already-installed Pillow + stdlib PDF assembly (one-shot; not left in tree; no new runtime dependency, no OCR, no alternate parser).
+- Updated `docs/feasibility/phase_0_report.md` image-only row/description with dimensions and construction evidence.
+- Revalidated: diagnostic digital_pass=5/5; image_only `NO_EXTRACTABLE_TEXT` (normal_non_ws=0, layout_non_ws=0); `PYPDF_COMPATIBILITY=PASS`; exit 0.
+- Confirmed `.gitkeep` deletion remains part of complete changed-file evidence for 02A scope.
+
+## Files Created or Modified
+- `backend/pyproject.toml` (added pinned `pypdf==6.14.2` — original 02A)
+- `backend/tests/fixtures/cv/digital_cv_01.pdf` (created — original)
+- `backend/tests/fixtures/cv/digital_cv_02.pdf` (created — original)
+- `backend/tests/fixtures/cv/digital_cv_03.pdf` (created — original)
+- `backend/tests/fixtures/cv/digital_cv_04.pdf` (created — original)
+- `backend/tests/fixtures/cv/digital_cv_05.pdf` (created — original)
+- `backend/tests/fixtures/cv/image_only_cv.pdf` (created original; **repaired** to full-page representative raster CV)
+- `backend/tests/fixtures/cv/.gitkeep` (**deleted** — directory now holds real fixtures; include in complete changed-file evidence)
+- `infrastructure/scripts/verify_pdf_extraction.py` (created — original; unchanged in this repair)
+- `docs/feasibility/phase_0_report.md` (pypdf gate evidence; **updated** image-only construction/dimensions)
+- `docs/reports/report_1_execute_agent.md` (this 02A block updated in place)
+
+## Key Implementation Decisions
+- Meaningful-text rule lives only in `verify_pdf_extraction.py` constants + `is_meaningful_text()` for later production reuse.
+- Digital fixture success = either normal or layout mode yields meaningful text.
+- Image-only fixture is a full-page raster synthetic CV (not a 1×1 placeholder); still draws only `/Im0 Do` so pypdf reports 0 non-ws chars.
+- Digital PDFs remain pure PDF 1.4 + Helvetica Type1; image-only repair used local Pillow for rasterization only (fixture generation, not a Phase 0 runtime dep).
+
+## Tests or Validations Run
+- command/check: `python infrastructure/scripts/verify_pdf_extraction.py`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0; digital_pass=5/5; image_only pages=1 normal_non_ws=0 layout_non_ws=0 result=NO_EXTRACTABLE_TEXT; ends with `PYPDF_COMPATIBILITY=PASS`; pypdf_version=6.14.2
+
+- command/check: `git diff --check`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0 (CRLF line-ending warnings only; no whitespace errors)
+
+- command/check: inspect repaired image_only_cv.pdf image dimensions/content and no text layer
+  - required: yes (A2 repair validation)
+  - result: passed
+  - evidence or reason: XObject /Im0 Width=1240 Height=1754 ColorSpace=/DeviceRGB Filter=/DCTDecode; decoded JPEG 1240×1754 RGB; MediaBox letter; content stream has /Im0 Do and no BT/Tj/TJ; extract_text normal+layout empty; non-white sampled pixels confirm visible layout (header navy, body text)
+
+- command/check: OCR / alternate-parser caller inspection
+  - required: yes (Agent Work step 5 / A2 repair validation)
+  - result: passed
+  - evidence or reason: only pypdf PdfReader.extract_text / extract_text(extraction_mode="layout"); no OCR imports or subprocess paths; infrastructure/scripts grep for ocr/tesseract/easyocr/paddleocr matches denial docs only
+
+## Acceptance Check
+- condition: All six named PDFs are valid and synthetic; five digital contain extractable representative CV text; image-only has no text layer and is a visibly representative synthetic CV raster
+  - status: satisfied
+  - evidence: digital non-ws 330–534; image_only non_ws=0 both modes; embedded image 1240×1754 with CV layout pixels
+- condition: Script evaluates both modes, reports measurements, non-zero below threshold or if image-only accepted, never uses OCR
+  - status: satisfied
+  - evidence: diagnostic output + source inspection
+- condition: At least 4/5 digital pass meaningful-text rule; image-only is NO_EXTRACTABLE_TEXT; final PYPDF_COMPATIBILITY=PASS
+  - status: satisfied
+  - evidence: digital_pass=5/5; image_only=NO_EXTRACTABLE_TEXT; PYPDF_COMPATIBILITY=PASS
+- condition: Phase 0 report contains complete reproducible per-fixture and aggregate evidence with no placeholder/hidden failure; image-only description matches repaired fixture
+  - status: satisfied
+  - evidence: docs/feasibility/phase_0_report.md pypdf section updated for 1240×1754 RGB JPEG construction
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: mode=same_task_repair; A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files (complete 02A scope evidence): `backend/pyproject.toml`; deletion of `backend/tests/fixtures/cv/.gitkeep`; six CV fixtures including repaired `image_only_cv.pdf`; `infrastructure/scripts/verify_pdf_extraction.py`; `docs/feasibility/phase_0_report.md`; this report
+- repair-delta this run: `image_only_cv.pdf`, `docs/feasibility/phase_0_report.md`, this 02A report block
+- validations to rerun: `python infrastructure/scripts/verify_pdf_extraction.py`; `git diff --check`; inspect image_only XObject 1240×1754 / no text layer
+- risk areas: meaningful-text markers are keyword-based (owned constants); production Plan 4 should import/reuse the same rule rather than redefining
+- next task readiness: ready for A2 re-review of 02A only
+- OCR evidence: no OCR path in script or callers
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED_WITH_WARNINGS)
+- reason for repair: A2 found `image_only_cv.pdf` used a 1×1 grayscale JPEG, which is not a representative image-only synthetic CV; Phase 0 / A1 reports overstated image-only-CV evidence; JSON filesChanged had omitted `.gitkeep` deletion
+- changes made:
+  - Rebuilt `backend/tests/fixtures/cv/image_only_cv.pdf` as full-page RGB JPEG (1240×1754) of a synthetic CV page; no PDF text layer; no real personal data
+  - Updated `docs/feasibility/phase_0_report.md` image-only row and construction notes
+  - Updated this 02A execution report in place; listed `.gitkeep` deletion in complete files evidence
+- validations rerun:
+  - PDF image inspect: Width=1240 Height=1754 DeviceRGB DCTDecode; extract_text empty both modes; no BT/Tj/TJ
+  - `python infrastructure/scripts/verify_pdf_extraction.py` → exit 0; 5/5 digital; image_only=NO_EXTRACTABLE_TEXT; `PYPDF_COMPATIBILITY=PASS`
+  - `git diff --check` → no whitespace errors
+  - OCR/alternate-parser inspection → none present
+- outcome: complete; both A2 blocking repair items fixed and revalidated
+
+---
+
+# Task Execution Report - batch_scope
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+batch_scope_repair
+
+## Batch
+Batch02 - Reproducible pypdf Compatibility Evidence
+
+## Task
+batch_scope - PDF fixture Git attributes (orchestrator pre-commit)
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch02 - Reproducible pypdf Compatibility Evidence
+- Task ID: batch_scope
+- Task title: PDF fixture Git attributes for binary integrity
+- Files allowed / repair scope: minimum root `.gitattributes` rule marking `*.pdf` as binary only; do not rewrite PDF internals; do not stage or commit
+
+## Completed Work
+- Searched repository for existing root/nested `.gitattributes` and PDF binary rules; none at project root (only unrelated node_modules attribute file).
+- Added root `.gitattributes` with the single rule `*.pdf binary` so Git treats PDF fixtures as binary (`-text -diff` via the binary macro), preventing LF/CRLF text conversion that can corrupt PDF xref offsets and silencing false trailing-whitespace diagnostics on binary xref tables.
+- Did not modify PDF fixture bytes or unrelated ignore/attribute rules.
+- Did not stage or commit.
+
+## Files Created or Modified
+- `.gitattributes` (created)
+
+## Tests or Validations Run
+- command/check: `git check-attr text diff -- backend/tests/fixtures/cv/digital_cv_01.pdf backend/tests/fixtures/cv/image_only_cv.pdf`
+- required: yes
+- result: passed
+- evidence or reason: both files report `text: unset` and `diff: unset` (binary macro behavior)
+
+- command/check: `python infrastructure/scripts/verify_pdf_extraction.py`
+- required: yes
+- result: passed
+- evidence or reason: exit 0; digital_pass=5/5; image_only=NO_EXTRACTABLE_TEXT; `PYPDF_COMPATIBILITY=PASS`; pypdf_version=6.14.2
+
+- command/check: `git diff --check`
+- required: yes
+- result: passed
+- evidence or reason: exit 0; no trailing-whitespace or conflict-marker diagnostics on tracked text changes
+
+## Acceptance Check
+- condition: Minimum root `.gitattributes` marks `*.pdf` as binary so PDF fixtures are immune to text normalization and text diff checks; pypdf diagnostic still passes; no staging/commit
+- status: satisfied
+- evidence: `.gitattributes` contains `*.pdf binary`; check-attr shows text/diff unset on sample fixtures; verify_pdf_extraction.py PASS; git diff --check clean; `.gitattributes` remains untracked (`??`)
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: mode=batch_scope_repair; A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files: `.gitattributes`
+- validations to rerun: `git check-attr text diff -- <pdf fixtures>`; `python infrastructure/scripts/verify_pdf_extraction.py`; `git diff --check` (and pre-commit stage when orchestrator stages)
+- risk areas: only `*.pdf` is covered; other binary asset types are out of this repair scope
+- next task readiness: ready for A3 re-audit / orchestrator pre-commit recheck of Batch02 with `.gitattributes` included in the batch file list
+
+## Files Inspected Before Editing
+- repository root for `.gitattributes` (absent)
+- recursive search for `.gitattributes` (only frontend/node_modules unrelated file)
+- `.gitignore` (no PDF binary rule)
+- `README.md` (project context)
+- `docs/reports/report_1_execute_agent.md` (no prior batch_scope block)
+
+## Repair Log
+
+### 2026-07-13T12:55:54+07:00
+- reason for repair: Orchestrator pre-commit invalidated A3 PASS; `git diff --cached --check` reported trailing whitespace in five ASCII digital PDF xref tables and warned LF→CRLF conversion; no `.gitattributes` PDF binary rule existed
+- changes made: created root `.gitattributes` with `*.pdf binary` only
+- validations rerun: git check-attr (text/diff unset); verify_pdf_extraction.py PASS; git diff --check clean
+- outcome: complete; PDF fixtures protected from text normalization without rewriting valid PDF internals

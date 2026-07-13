@@ -1,0 +1,2 @@
+# PDF fixtures must stay binary: xref offsets break under text EOL conversion.
+*.pdf binary
