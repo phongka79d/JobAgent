@@ -675,7 +675,7 @@ second client state store.
 
 ### Tasks
 
-- [ ] (04A): Implement typed chat API/SSE parsing and the single streaming reducer
+- [x] (04A): Implement typed chat API/SSE parsing and the single streaming reducer
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.7 SSE contract and ordering`; `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.9 Frontend reducer and UI`; `docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Frontend commands`
   - Source Requirements:
     - Client types mirror exact backend event/run/tool/history contracts and
@@ -720,7 +720,7 @@ second client state store.
     client aliases or permissive unknown-status handling.
   - Files: `frontend/src/features/chat/types.ts`, `frontend/src/features/chat/history.ts`, `frontend/src/features/chat/reducer.ts`, `frontend/src/lib/api/chat.ts`, `frontend/src/lib/sse/parser.ts`, `frontend/src/lib/sse/stream.ts`, `frontend/src/test/sse-reducer.test.ts`
 
-- [ ] (04B): Build the base Astryx chat page with history, concise tool activity, and failure states
+- [x] (04B): Build the base Astryx chat page with history, concise tool activity, and failure states
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.9 Frontend reducer and UI`; `docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Frontend commands`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.1 Layout`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.3 Chat components`; `docs/feasibility/phase_0_report.md > ## Astryx component matrix`
   - Source Requirements:
     - Extend the existing `AppShell` with pinned public `ChatLayout`,

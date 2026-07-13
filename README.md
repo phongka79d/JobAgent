@@ -1,25 +1,26 @@
 # JobAgent
 
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
-foundation work, Plan 3 / Master Phase 2 Batch01 (durable chat contracts and
-persistence), Plan 3 Batch02 (controlled single-Agent runtime), and Plan 3
-Batch03 (durable turn/resume lifecycle and typed SSE transport). The repository
-contains a pinned backend core (including Phase 2 LangGraph/LangChain pins), the
-complete SQLite/Alembic source-of-truth schema, validated chat/ToolResult/SSE
-contracts, message/run/tool repositories, tool replay and history-hydration
-services, bounded Agent state/context, a verified ShopAIKey ChatOpenAI adapter
-and conversation-first prompt, one injected-registry decision/ToolNode graph
-with a six-pass loop guard, request-scoped `AsyncSqliteSaver` checkpoints and
-Agent runner streaming, atomic chat-turn/interrupt/resume services, thin public
-history/turn/resume SSE endpoints, UUID-rooted attachment storage, Neo4j
-foundation primitives, one health API, a minimal Astryx application shell, and a
-three-service local Docker Compose runtime. The Astryx conversation client and
-production CV/job/matching tools remain later Plan 3 Batch04 or later plans.
+foundation work, and Plan 3 / Master Phase 2 (persistent conversation over the
+React–FastAPI–LangGraph–SSE path). The repository contains a pinned backend core
+(including Phase 2 LangGraph/LangChain pins), the complete SQLite/Alembic
+source-of-truth schema, validated chat/ToolResult/SSE contracts, message/run/tool
+repositories, tool replay and history-hydration services, bounded Agent
+state/context, a verified ShopAIKey ChatOpenAI adapter and conversation-first
+prompt, one injected-registry decision/ToolNode graph with a six-pass loop
+guard, request-scoped `AsyncSqliteSaver` checkpoints and Agent runner streaming,
+atomic chat-turn/interrupt/resume services, thin public history/turn/resume SSE
+endpoints, a typed React/Astryx conversation client (SSE parser, single streaming
+reducer, history/load-older, concise tool activity, failure states), UUID-rooted
+attachment storage, Neo4j foundation primitives, one health API, and a
+three-service local Docker Compose runtime. Production CV/job/matching tools and
+later domain UI remain later plans.
 
 ## Repository layout
 
-- `frontend/` - minimal React, TypeScript, Vite, and Astryx 0.1.4 application
-  shell with lint, type-check, render-test, and build commands.
+- `frontend/` - React, TypeScript, Vite, and Astryx 0.1.4 application with the
+  Plan 3 conversation client (chat page, SSE/API client, reducer, UI tests),
+  lint, type-check, test, and build commands.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage,
@@ -91,7 +92,7 @@ Neo4j without exposing connection details. Public functional routes are health
 plus Plan 3 chat history/turn/resume only. Live Neo4j/Compose integration tests
 skip when the stack or process credentials are unavailable.
 
-## Astryx verification
+## Astryx and conversation client verification
 
 From `frontend/`:
 
@@ -103,10 +104,18 @@ npm test -- --run
 npm run build
 npm run dev -- --host 127.0.0.1
 npx astryx component AppShell
+npx astryx component ChatLayout
+npx astryx component ChatMessage
+npx astryx component ChatComposer
+npx astryx component ChatToolCalls
 ```
 
-The exact public-component documentation commands and observed props/imports are
-recorded in `docs/feasibility/phase_0_report.md`.
+The frontend talks only to FastAPI via `VITE_API_BASE_URL`, keeps streaming state
+in one reducer with `event_id` deduplication, hydrates durable history as truth,
+and uses pinned public Astryx chat APIs. Application run/tool statuses remain
+`running|interrupted|completed|failed` and `pending|running|completed|failed`
+(no `complete`/`error` aliases in client state). Phase 0 public-component matrix
+evidence remains in `docs/feasibility/phase_0_report.md`.
 
 ## Local Docker Compose
 
@@ -191,8 +200,15 @@ events and terminal per-run checkpoint cleanup; atomic chat-turn create and
 terminal success/failure/interrupt services; generic interrupt/resume with
 test-only synthetic tool; thin FastAPI routes `GET /api/chat/history`,
 `POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume` with CORS
-restricted to `FRONTEND_ORIGIN` for `GET`/`POST`. Remaining Plan 3 Batch04 owns
-the Astryx conversation client.
+restricted to `FRONTEND_ORIGIN` for `GET`/`POST`.
+
+Plan 3 Batch04 is complete: typed client SSE/history contracts and single
+streaming reducer (`frontend/src/features/chat/`, `frontend/src/lib/api/`,
+`frontend/src/lib/sse/`); base Astryx chat page under `AppShell` with history
+pagination, ordered streamed text, in-flight composer lock, concise tool
+activity (exact JobAgent status text), and visible failed/disconnected/interrupted
+states. Plan 3 / Master Phase 2 is complete. Later plans own production domain
+tools and profile/JD/match UI.
 
 ## Plan 3 progress and constraints
 
@@ -223,6 +239,11 @@ Plan 3 reuses Plan 2 foundation primitives without duplicating them:
   `app/api/chat.py` with dependency injection in `app/api/dependencies.py`.
   Package-owned checkpoint tables are never managed by Alembic or application
   repositories. Synthetic interrupt tools live only under `backend/tests/fakes/`.
+- Conversation client (Batch04): types/history/reducer under
+  `frontend/src/features/chat/`, API client under `frontend/src/lib/api/chat.ts`,
+  SSE parser/stream under `frontend/src/lib/sse/`, and `ChatPage` composition
+  wired into `frontend/src/app/App.tsx` via public Astryx Chat* components only.
+  No second client state store, approval cards, or domain-tool UI in Plan 3.
 
 Plan 3 must not call `create_all()`, alter status vocabulary, add independent
 graph IDs, or introduce production CV/JD/matching tools without a later plan.
@@ -271,3 +292,30 @@ python -m mypy app
 These integration tests use fakes and a temporary migrated SQLite file. They do
 not call the real ShopAIKey API. Public surface is health plus the three Plan 3
 chat endpoints; production tool registration remains empty.
+
+## React and Astryx conversation client verification (Batch04)
+
+From `frontend/`:
+
+```powershell
+npm test -- --run src/test/sse-reducer.test.ts src/test/chat-page.test.tsx
+npm run lint
+npm run typecheck
+npm run build
+```
+
+From `backend/` (fake-backed public API/Agent path; no provider call):
+
+```powershell
+python -m pytest tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q
+```
+
+Optional local UI smoke (user-managed ignored root `.env`, valid ShopAIKey,
+Docker, free loopback ports):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d
+```
+
+Then open the frontend and send a greeting; a natural persisted answer should
+stream with no tool activity. Synthetic interrupt behavior remains test-only.

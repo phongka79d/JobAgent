@@ -7,9 +7,21 @@ html,
 body,
 #root {
   min-height: 100%;
+  height: 100%;
 }
 
 #root {
   background-color: var(--color-background-body);
   color: var(--color-text-primary);
+}
+
+/**
+ * Chat layout fill: AppShell content hosts ChatLayout which expects
+ * a flex-sized parent (Astryx ChatLayout docs: no fixed height; fill container).
+ */
+#root .astryx-app-shell,
+#root .astryx-app-shell [data-slot='content'],
+#root .astryx-app-shell main {
+  min-height: 100%;
+  height: 100%;
 }

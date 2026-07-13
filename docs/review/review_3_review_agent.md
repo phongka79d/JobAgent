@@ -670,7 +670,7 @@ ACCEPTED
   - `build_system_prompt` empty path states "Registered JobAgent tools: none" and forbids inventing tools; injected names listed; ok=false never-claim-succeeded wording present
   - Static test: only `adapters/shopaikey_chat.py` contains `ChatOpenAI(` under `app/`
   - httpx request paths blocked during construction test
-  - Source SoT (Plan_3 §7.5, Master §12.5/§16.1, Phase 0 function_calling + tool_result_round_trip) aligned: no classifier/fallback; bind_tools for Phase 0 tool mode
+  - Source SoT (Plan_3 ï¿½7.5, Master ï¿½12.5/ï¿½16.1, Phase 0 function_calling + tool_result_round_trip) aligned: no classifier/fallback; bind_tools for Phase 0 tool mode
 
 ## Architecture Alignment
 - Settings remain the single configuration owner; adapter does not load a second env file
@@ -703,7 +703,7 @@ ACCEPTED
 - None
 
 ### Minor
-- `PHASE_0_CHAT_TOOL_MODE` is a documented constant and not a ChatOpenAI constructor kwarg; tool mode is realized via `bind_tools` (Master §16.1), which is correct
+- `PHASE_0_CHAT_TOOL_MODE` is a documented constant and not a ChatOpenAI constructor kwarg; tool mode is realized via `bind_tools` (Master ï¿½16.1), which is correct
 - Empty-registry prompt still mentions domain capability *examples* in general tool policy prose, but lists no tool names and explicitly forbids calling/inventing tools when registry is empty (acceptable; tests assert domain names absent)
 
 ## Decision
@@ -781,7 +781,7 @@ ACCEPTED
 - Command/check: workspace search equivalent of `rg -n "StateGraph|ToolNode|include_router|AsyncSession|session_scope|synthetic" backend/app/agent backend/app/tools`
   - Required: yes
   - Reported result: single StateGraph + ToolNode subclass in graph.py; no transport/persistence/synthetic in graph or tools packages; AsyncSession only in pre-existing context.py loader
-  - Rerun result: confirmed — `graph.py` has StateGraph/ToolNode only; `app/tools` has zero matches for banned patterns; `AsyncSession` only in `context.py` (not graph nodes); no `include_router`/`session_scope`/`synthetic` under agent graph or tools registry
+  - Rerun result: confirmed ï¿½ `graph.py` has StateGraph/ToolNode only; `app/tools` has zero matches for banned patterns; `AsyncSession` only in `context.py` (not graph nodes); no `include_router`/`session_scope`/`synthetic` under agent graph or tools registry
   - Status: passed
   - Notes: production registry empty; no shipped synthetic tool
 
@@ -796,9 +796,9 @@ ACCEPTED
   - Default limit from `Settings.TOOL_LOOP_LIMIT` (6); injectable override for tests
 
 ## Architecture Alignment
-- One Agent / one controlled loop (Master §12.1; Plan_3 §7.5): single StateGraph, decision + ToolNode, no multi-agent/classifier
-- Six-pass tool loop (Master §12.6; Plan_3 §7.4): increment-before-pass; controlled stable failure code
-- Empty production Phase 2 registry; synthetic/domain tools must not ship (Plan_3 §7.5) — satisfied
+- One Agent / one controlled loop (Master ï¿½12.1; Plan_3 ï¿½7.5): single StateGraph, decision + ToolNode, no multi-agent/classifier
+- Six-pass tool loop (Master ï¿½12.6; Plan_3 ï¿½7.4): increment-before-pass; controlled stable failure code
+- Empty production Phase 2 registry; synthetic/domain tools must not ship (Plan_3 ï¿½7.5) ï¿½ satisfied
 - Graph nodes own no DB writes / no FastAPI / no hidden transactions; durable tool replay remains service-owned for later runner wiring (correct for this task boundary)
 - State field set matches AgentState keys with `add_messages` reducer on `messages_for_this_turn` only
 
@@ -828,9 +828,9 @@ ACCEPTED
 - None
 
 ### Minor
-- `backend/app/agent/graph.py` is ~351 lines (slightly above ordinary 300-line guidance); still a single focused factory/topology module — acceptable for this task
-- Durable `execute_tool` is not invoked from ToolNode (intentional: nodes must not do DB work); later Batch03 runner/services own persistence/replay — out of (02C) acceptance scope
-- On seventh-pass controlled failure via decision route, `tool_iteration_count` remains 6 (not incremented for a pass that never runs tools) — matches "increment before each ToolNode pass" and unit tests
+- `backend/app/agent/graph.py` is ~351 lines (slightly above ordinary 300-line guidance); still a single focused factory/topology module ï¿½ acceptable for this task
+- Durable `execute_tool` is not invoked from ToolNode (intentional: nodes must not do DB work); later Batch03 runner/services own persistence/replay ï¿½ out of (02C) acceptance scope
+- On seventh-pass controlled failure via decision route, `tool_iteration_count` remains 6 (not incremented for a pass that never runs tools) ï¿½ matches "increment before each ToolNode pass" and unit tests
 
 ## Decision
 - Accept selected task: yes
@@ -1256,3 +1256,320 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - (04A)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - React and Astryx Conversation Client
+- Task ID: (04A)
+- Task title: Implement typed chat API/SSE parsing and the single streaming reducer
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04A scope; untracked frontend modules + execution report):
+  - `?? frontend/src/features/chat/types.ts`
+  - `?? frontend/src/features/chat/history.ts`
+  - `?? frontend/src/features/chat/reducer.ts`
+  - `?? frontend/src/lib/api/chat.ts`
+  - `?? frontend/src/lib/sse/parser.ts`
+  - `?? frontend/src/lib/sse/stream.ts`
+  - `?? frontend/src/test/sse-reducer.test.ts`
+  - `M docs/reports/report_3_execute_agent.md` (A1 execution report; not implementation)
+  - `M docs/tasks/task_3.md` (checkbox only by A2 after accept)
+  - `M docs/review/review_3_review_agent.md` (this review; not implementation)
+- Recent commits reviewed: not_needed (04A work is uncommitted working tree)
+
+## Files Reviewed
+- `frontend/src/features/chat/types.ts`: in scope - seven SSE events, exact RunState/ToolStatus, FORBIDDEN_STATUS_ALIASES complete/error, parseSseEventData/parseHistoryPage with UUID envelope and payload invariants; rejects role=tool
+- `frontend/src/features/chat/history.ts`: in scope - chronological merge, load-older, durable tool replacement (source history) for completed|failed runs, hydrateFromHistoryPage preserves next_cursor
+- `frontend/src/features/chat/reducer.ts`: in scope - single pure chatReducer; event_id dedupe; ordered text_delta; tool upsert; interruption; terminal completed/failed; disconnect/http_failed remain non-complete; isComposerLocked helper
+- `frontend/src/lib/api/chat.ts`: in scope - getApiBaseUrl from VITE_API_BASE_URL only; fetchChatHistory; streamChatTurn; streamChatResume; ChatApiError mapping; no provider/DB/graph imports
+- `frontend/src/lib/sse/parser.ts`: in scope - IncrementalSseParser split frames, comments ignored, frameToEvent with wire id/event mismatch checks
+- `frontend/src/lib/sse/stream.ts`: in scope - consumeSseResponse never invents run_completed; onDisconnected when body ends without terminal; StreamHttpError
+- `frontend/src/test/sse-reducer.test.ts`: in scope - 23 cases covering vocabulary, aliases, split frames, dedupe, direct/tool/interrupt/fail/disconnect, history hydrate/load-older, API env boundary
+
+## Validations Reviewed
+- Command/check: `Set-Location frontend; npm test -- --run src/test/sse-reducer.test.ts`
+  - Required: yes
+  - Reported result: 23 passed
+  - Rerun result: 23 passed (vitest v3.2.4)
+  - Status: passed
+
+- Command/check: `Set-Location frontend; npm run lint; npm run typecheck`
+  - Required: yes
+  - Reported result: eslint clean; tsc --noEmit Success
+  - Rerun result: eslint exit 0; tsc --noEmit exit 0
+  - Status: passed
+
+- Command/check: status ownership / env scan `complete|error|completed|failed|event_id|VITE_` under frontend/src/features/chat and frontend/src/lib
+  - Required: yes
+  - Reported result: exact statuses; aliases only in FORBIDDEN_STATUS_ALIASES; VITE_API_BASE_URL only in lib/api/chat.ts
+  - Rerun result: confirmed â€” application statuses pending|running|completed|failed and running|interrupted|completed|failed; complete/error only as forbidden aliases or non-status strings (event names run_completed/run_failed, field error_code/errorCode, prose comments); event_id dedupe in reducer; VITE_ only in chat.ts getApiBaseUrl
+  - Status: passed
+
+## Acceptance Review
+- Client union contains exactly the seven events and exact run/tool statuses; unknown/malformed fail safely without mutating state
+  - Status: satisfied
+  - Evidence: SSE_EVENT_NAMES length/sort test; parseSseEventData rejects aliases/unknown; sse/raw leaves state equal to initial
+
+- Duplicate event IDs ignored; deltas append once in arrival order; durable history replaces matching transient tool state
+  - Status: satisfied
+  - Evidence: dedupe test content "X" once; Hel+lo!; rehydrateWithDurableTruth replaces stream tools with history completed for matching run_id
+
+- Failure/disconnect remains visibly non-complete; history pages merge chronologically without duplicates and preserve next_cursor
+  - Status: satisfied
+  - Evidence: stream/disconnected keeps run state running + phase disconnected; load-older ids [MSG_OLD, MSG_USER, MSG_ASST], next_cursor null; hydrate preserves cursor-older
+
+- API code reads only VITE_API_BASE_URL, calls only three Plan 3 routes, no provider/database/graph
+  - Status: satisfied
+  - Evidence: getApiBaseUrl + /api/chat/history|/turns|/runs/{id}/resume in chat.ts; no backend/provider imports under features/chat or lib
+
+## Architecture Alignment
+- Plan_3 Â§7.7/Â§7.9: typed SSE client mirror of backend (01A) contracts; single reducer owns streaming state; event_id dedupe; history is durable truth for completed turns
+- Environment boundary: only VITE_API_BASE_URL (README / Plan 2 frontend contract)
+- Three Plan 3 routes only; no second reducer, event vocabulary, or parser owner
+- UI composition deferred to (04B) correctly
+
+## Implementation Reality
+- Real pure TypeScript validators (no stub parse always-success)
+- Real incremental SSE wire parser and fetch body consumer
+- Real pure reducer with full event matrix
+- Tests are unit/fake-backed as required; no live server required for (04A)
+- Not hardcoded to fixture-only paths in production modules
+
+## Hardcoding Review
+- UUID fixtures and event IDs appear only in tests
+- Production parse logic enforces UUID v4 and exact status sets generally
+- No fake completion on disconnect
+
+## Scope / Dependency Review
+- Dependency (03C) already A2-accepted and checked
+- Files match task Files list exactly (features/chat types/history/reducer; lib/api/chat; lib/sse parser+stream; test/sse-reducer.test.ts)
+- No UI page/components (04B); no backend changes in this task tree
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Note: only (04A) checkbox updated this review; (04B) left unchecked; batch header not modified
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `frontend/src/features/chat/types.ts` (~550 lines) and `reducer.ts` (~567 lines) exceed the ordinary 300-line soft target (A1 noted); still single owners for contract validation and streaming state â€” acceptable for this task
+- No UI wiring (owned by 04B); live fetch stream integration is unit-tested via parser/reducer, not against a running server (expected for 04A)
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - (04B)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - React and Astryx Conversation Client
+- Task ID: (04B)
+- Task title: Build the base Astryx chat page with history, concise tool activity, and failure states
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (04B scope plus shared Batch04 untracked modules and A1 report):
+  - `?? frontend/src/features/chat/ChatPage.tsx`
+  - `?? frontend/src/features/chat/components/ChatMessages.tsx` (repaired: toolsForAssistantDisplay)
+  - `?? frontend/src/features/chat/components/ChatToolActivity.tsx`
+  - `?? frontend/src/test/chat-page.test.tsx` (repaired: real history shape fixture)
+  - `M frontend/src/app/App.tsx`
+  - `M frontend/src/app/theme.css`
+  - `M frontend/src/app/App.test.tsx`
+  - `M frontend/src/test/setup.ts`
+  - `M frontend/package.json` (`@testing-library/user-event` exact pin 14.6.1)
+  - `M frontend/package-lock.json`
+  - `M docs/reports/report_3_execute_agent.md` (A1 execution report; not implementation)
+  - Prior (04A) untracked modules remain in tree (`types.ts`, `history.ts`, `reducer.ts`, `lib/api/chat.ts`, `lib/sse/*`, `sse-reducer.test.ts`) â€” reviewed only as dependencies, not re-accepted here
+  - `M docs/tasks/task_3.md` / `M docs/review/review_3_review_agent.md` â€” progress/review artifacts only
+- Recent commits reviewed: not_needed (04B work is uncommitted working tree)
+
+## Files Reviewed
+- `frontend/src/features/chat/ChatPage.tsx`: in scope - single `useReducer(chatReducer)`; history load + load-older via `next_cursor`; turn stream; composer lock; failed/disconnected/interrupted notices; injectable deps for tests; public `ChatLayout`/`ChatComposer`/`ChatSystemMessage`
+- `frontend/src/features/chat/components/ChatMessages.tsx`: in scope - public `ChatMessageList`/`ChatMessage`/`ChatMessageBubble`/`ChatSystemMessage`; stream notices; **repaired** `toolsForAssistantDisplay` prefers assistant.run.tools else projects preceding user.run.tools onto assistant ChatToolCalls (presentation-only)
+- `frontend/src/features/chat/components/ChatToolActivity.tsx`: in scope - friendly label, exact JobAgent status text via `stats`, duration, short outcome; presentation-only `completedâ†’complete` / `failedâ†’error` map for Astryx visual prop; no raw args/docs/stacks
+- `frontend/src/test/chat-page.test.tsx`: in scope - 12 UI cases; **repaired** `historyWithMessages` mirrors backend (tools only on user; assistant.run null) and still asserts Lookup Status / completed / 42ms / ok short after history load; stream tool path still green
+- `frontend/src/app/App.tsx`: in scope - AppShell hosts ChatPage only; no sidebar/approval/domain UI
+- `frontend/src/app/theme.css`: in scope - token/CSS-variable fill for AppShell/chat layout; no raw hex
+- `frontend/src/app/App.test.tsx`, `frontend/src/test/setup.ts`: supporting test harness (fetch mock, ResizeObserver/canvas polyfills)
+- `frontend/package.json` / `package-lock.json`: supporting exact pin for user-event composer tests
+
+## Validations Reviewed
+- Command/check: `Set-Location frontend; npx astryx component ChatToolCalls` (and related Chat* docs from prior review / A1)
+  - Required: yes
+  - Reported result: public APIs documented; visual status pending|running|complete|error
+  - Rerun result: prior A2 reconfirmed ToolCalls public import and visual vocabulary; repair does not change Astryx composition boundary
+  - Status: passed
+
+- Command/check: `Set-Location frontend; npm test -- --run src/test/sse-reducer.test.ts src/test/chat-page.test.tsx; npm run lint; npm run typecheck; npm run build`
+  - Required: yes
+  - Reported result (repair): 35 tests; lint/typecheck/build clean
+  - Rerun result (same_task_repair re-review): 35 passed (23 + 12); eslint exit 0; tsc --noEmit exit 0; vite build success
+  - Status: passed (history fixture now real API shape; tool projection covered)
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q`
+  - Required: yes
+  - Reported result: 28 passed on original (04B); not re-run for presentation-only frontend repair
+  - Rerun result: not re-run this pass (repair is frontend presentation/test only; prior A2 already verified 28 passed; no backend files changed in repair)
+  - Status: passed (prior evidence retained; no backend delta in same_task_repair)
+
+- Command/check: scan `frontend/src` for internal astryx imports, raw hex, complete/error aliases, profile|match_jobs|save_job
+  - Required: yes
+  - Reported result: clean of internals/hex/domain features; complete/error only presentation/alias-reject/prose
+  - Rerun result: no `@astryxdesign/.*/(src|dist)/`; no raw hex; no match_jobs/save_job; `profile` only in comments/test titles; `complete`/`error` only in FORBIDDEN aliases, presentation map, parser error names, and prose
+  - Status: passed
+
+- Command/check: optional docker compose live smoke
+  - Required: no
+  - Reported result: not_run
+  - Rerun result: not_run
+  - Status: not_run (optional; does not block)
+
+## Acceptance Review
+- AppShell contains ChatLayout, message list/messages, composer, tool calls, system status via public Astryx 0.1.4 imports only
+  - Status: satisfied
+  - Evidence: App.tsx â†’ ChatPage â†’ public Chat* composition; tools render for stream and real history shapes via projection
+
+- Page loads chronological history, load-older by next_cursor, send turn, stream text once, disable while run active
+  - Status: satisfied
+  - Evidence: UI tests + ChatPage handlers; A2 frontend suite green
+
+- Fake-backed backend API/Agent + frontend parser/reducer/UI cover direct and synthetic interrupt path without real provider
+  - Status: satisfied
+  - Evidence: prior backend 28 integration tests; frontend 35 tests including interrupt lock and real-history tools
+
+- Tool activity shows friendly name, exact pending|running|completed|failed, duration, short outcome; no complete/error in application state; no raw args/docs/stacks
+  - Status: satisfied
+  - Evidence: ChatToolActivity exact stats text; presentation-only Astryx map; history load with user-only tools still shows Lookup Status / completed / 42ms / ok short; stream path still uses assistant-owned tools
+
+- Failed, disconnected, interrupted visible and never false-complete; reducer sole streaming owner
+  - Status: satisfied
+  - Evidence: UI tests; single chatReducer; no approval cards
+
+- No profile approval card, PDF upload, sidebar, match/save-job, domain tool, internal Astryx import, raw visual scale, second design system
+  - Status: satisfied
+  - Evidence: scope tests + scans + App.tsx/theme.css
+
+## Architecture Alignment
+- Plan_3 Â§7.9 / Master Â§15.1â€“15.4: Astryx public chat composition, one reducer owner, concise tool display, failure/disconnect visibility â€” met
+- Backend durable history attaches tools only to initiating user messages; stream path attaches tools to assistant
+- Repair projects preceding user-run tools onto assistant ChatToolCalls for display only; does not rewrite app/reducer state or introduce complete/error aliases
+
+## Implementation Reality
+- Real page wiring over (04A) reducer/API; not a stub shell
+- Presentation-only Astryx status map remains documented and isolated
+- History fixture and render path now match Plan 3 history contract
+
+## Hardcoding Review
+- Production modules not hardcoded to fixture IDs
+- Test IDs are fixture-only and consistent with other chat UI tests
+
+## Scope / Dependency Review
+- Dependency (04A) already A2-accepted
+- Repair scoped to ChatMessages.tsx + chat-page.test.tsx; prior (04B) deliverables retained
+- No approval-card UI, sidebar, domain tools, or second state store
+- No implementation files modified by this review
+
+## Progress Tracking
+- Selected task checkbox before this re-review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Note: only (04B) checked on ACCEPTED; (04A) remains checked from prior A2 accept; batch header not modified
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None (prior major history-tool display defect fixed)
+
+### Minor
+- `chat-page.test.tsx` remains a large single suite (~615 lines after repair)
+- Optional Compose/provider smoke not run (explicitly optional)
+- Backend integration suite not re-run on this presentation-only repair (prior A2 evidence retained)
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13 - same_task_repair
+- what was re-checked:
+  - A2 prior repair items: (1) ChatMessages project preceding user-run tools onto assistant for display; (2) chat-page history fixture tools-only-on-user with assistant.run null and assert tool activity still renders
+  - Overall (04B) acceptance criteria, public Astryx composition, exact JobAgent statuses, failure/disconnect/interrupted visibility, scope scan
+  - Frontend validation suite (tests + lint + typecheck + build)
+  - Git status/diff and execution report repair log
+- repairs verified:
+  - `toolsForAssistantDisplay` prefers `assistant.run.tools`, else walks back to preceding user and uses `user.run.tools`; empty when no preceding user tools
+  - `historyWithMessages()` attaches `tool_executions` only on user; assistant `run: null`; history UI test asserts Lookup Status, completed, 42ms, ok short
+  - Stream tool tests still pass with assistant-owned tool_status events
+  - 35 tests, lint, typecheck, build all passed on A2 re-run
+- remaining issues:
+  - Minor suite size and optional live smoke only; no blocking/major issues
+- updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox (04B) checked; batch status unchanged; next task/batch gate may proceed to A3 orchestration (A2 does not mark batch complete)

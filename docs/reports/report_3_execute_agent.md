@@ -1225,3 +1225,281 @@ complete
 - validations to rerun: pytest test_chat_api + test_chat_history; pytest interrupt_resume + tool_replay; ruff chat api + main + test_chat_api; mypy app; route/CORS thinness scan
 - risk areas: test_chat_api.py is long (~560 lines) as a single integration suite; tool_status still depends on runner/graph emission (not route-owned); mid-stream ChatTurnError after SSE headers is rare and not re-mapped to JSON
 - next task readiness: can_review
+
+---
+
+# Task Execution Report - (04A)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch04 - React and Astryx Conversation Client
+
+## Task
+(04A) - Implement typed chat API/SSE parsing and the single streaming reducer
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - React and Astryx Conversation Client
+- Task ID: (04A)
+- Task title: Implement typed chat API/SSE parsing and the single streaming reducer
+- Files allowed / repair scope: frontend/src/features/chat/types.ts, history.ts, reducer.ts; frontend/src/lib/api/chat.ts; frontend/src/lib/sse/parser.ts, stream.ts; frontend/src/test/sse-reducer.test.ts
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.7 SSE contract and ordering
+- docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.9 Frontend reducer and UI
+- docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Frontend commands
+- backend/app/schemas/sse.py, chat.py, common.py ((01A)/(03C) contracts)
+
+## Supplemental Documents Used
+- README.md (project context; VITE_API_BASE_URL-only frontend env)
+- frontend/src/vite-env.d.ts (existing env typing)
+- backend/app/api/chat.py (SSE wire framing: event/id/data envelope)
+- docs/plans/Master_plan.md > ### 14.2 SSE contract
+
+## Dependency and User Action Check
+- Dependencies: (03C) complete per task file checkboxes and prior A1 report.
+- User Action: None.
+
+## Files Inspected Before Editing
+- backend/app/schemas/sse.py, chat.py, common.py, tools.py
+- backend/app/api/chat.py (format_sse_event framing)
+- frontend/package.json, vite.config.ts, tsconfig.json, eslint.config.js
+- frontend/src/vite-env.d.ts, main.tsx, app/App.tsx, test/setup.ts
+- docs/plans/Plan_3.md �7.7�7.9; task_3.md (04A)
+- frontend/src had no features/ or lib/ trees before this task
+
+## Completed Work
+- Implemented client types mirroring backend seven SSE events, exact run/tool statuses, history page/message/run/tool views, ToolResult shape, and strict parse helpers that reject `complete`/`error` aliases and unknown events without mutating state.
+- Implemented incremental SSE wire parser (split frames, multi-line data, comment ignore) and stream consumer that never invents `run_completed` on disconnect or malformed frames.
+- Implemented chat API client reading only `VITE_API_BASE_URL` for `GET /api/chat/history`, `POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume` with streamed failure mapping to `ChatApiError`.
+- Implemented history hydration helpers: chronological merge, load-older without duplicates, durable tool replacement for completed/failed turns.
+- Implemented single pure `chatReducer` owning message/run/tool streaming state: `event_id` dedupe, ordered text deltas, tool upsert, interruption, terminal completed/failed, disconnect/http failure as non-complete visible states.
+- Added `src/test/sse-reducer.test.ts` covering split frames, ordered/malformed events, duplicates, direct/tool/interruption/terminal paths, durable hydration, load-older, failed/disconnected states, and API base URL boundary.
+
+## Files Created or Modified
+- frontend/src/features/chat/types.ts (created)
+- frontend/src/features/chat/history.ts (created)
+- frontend/src/features/chat/reducer.ts (created)
+- frontend/src/lib/api/chat.ts (created)
+- frontend/src/lib/sse/parser.ts (created)
+- frontend/src/lib/sse/stream.ts (created)
+- frontend/src/test/sse-reducer.test.ts (created)
+
+## Key Implementation Decisions
+- Validation is pure TypeScript (no zod) so the client rejects invalid envelopes the same way backend Pydantic does at the boundary.
+- `seenEventIds` is a `Record<string, true>` for immutable reducer-friendly dedupe by `event_id`.
+- Disconnect leaves run `state='running'` (or last non-terminal) and sets `streamPhase='disconnected'` � never `completed`.
+- Durable history tools use `source: 'history'` and replace any `source: 'stream'` tools for matching completed/failed `run_id` on rehydrate/load-older.
+- API surface is exactly the three Plan 3 routes; no provider/DB/graph imports.
+
+## Tests or Validations Run
+- command/check: `Set-Location frontend; npm test -- --run src/test/sse-reducer.test.ts`
+- required: yes
+- result: passed
+- evidence or reason: 23 passed (parsing, event, reducer, deduplication, history, failure/disconnect cases).
+
+- command/check: `Set-Location frontend; npm run lint; npm run typecheck`
+- required: yes
+- result: passed
+- evidence or reason: eslint clean; `tsc --noEmit` Success after prefer-const fix in test file.
+
+- command/check: status ownership / env scan `complete|error|completed|failed|event_id|VITE_` under frontend/src/features/chat and frontend/src/lib
+- required: yes
+- result: passed
+- evidence or reason: Application statuses use only pending|running|completed|failed and running|interrupted|completed|failed; `FORBIDDEN_STATUS_ALIASES` is `complete`/`error`; `event_id` dedupe in reducer; `VITE_API_BASE_URL` only in `lib/api/chat.ts` (and vite-env). Occurrences of `complete`/`error` are alias rejection, event names `run_completed`/`run_failed`, field names `error_code`/`errorCode`, or prose in comments � not application status values.
+
+## Acceptance Check
+- condition: Client union contains exactly the seven events and exact run/tool statuses; unknown/malformed events fail safely without mutating state
+- status: satisfied
+- evidence: SSE_EVENT_NAMES + parseSseEventData tests; sse/raw malformed leaves state equal to initial.
+
+- condition: Duplicate event IDs ignored; deltas append once in arrival order; completed durable history replaces matching transient tool state
+- status: satisfied
+- evidence: dedupe test (content `X` once); ordered Hel+lo!; rehydrateWithDurableTruth replaces stream tools with history completed.
+
+- condition: Failure/disconnect remains visibly non-complete; history pages merge chronologically without duplicates and preserve next_cursor
+- status: satisfied
+- evidence: stream/disconnected keeps state running + phase disconnected; load-older id order [MSG_OLD, MSG_USER, MSG_ASST], next_cursor null; hydrate preserves cursor-older.
+
+- condition: API code reads only VITE_API_BASE_URL, calls only three Plan 3 routes, no provider/database/graph
+- status: satisfied
+- evidence: getApiBaseUrl + fetch paths in chat.ts; no other VITE_ or backend imports under features/chat or lib.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode � A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files: frontend/src/features/chat/types.ts, history.ts, reducer.ts; frontend/src/lib/api/chat.ts; frontend/src/lib/sse/parser.ts, stream.ts; frontend/src/test/sse-reducer.test.ts
+- validations to rerun: npm test -- --run src/test/sse-reducer.test.ts; npm run lint; npm run typecheck; status/env ownership scan under features/chat and lib
+- risk areas: types.ts and reducer.ts exceed the soft 300-line guideline (contract validation + full event matrix in one owner each); no UI wiring (owned by 04B); live fetch stream integration is unit-tested via parser/reducer, not against a running server
+- next task readiness: can_review
+
+---
+
+# Task Execution Report - (04B)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Report File
+docs/reports/report_3_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - React and Astryx Conversation Client
+
+## Task
+(04B) - Build the base Astryx chat page with history, concise tool activity, and failure states
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - React and Astryx Conversation Client
+- Task ID: (04B)
+- Task title: Build the base Astryx chat page with history, concise tool activity, and failure states
+- Files allowed / repair scope: frontend/src/features/chat/components/ChatMessages.tsx, frontend/src/test/chat-page.test.tsx (A2 same-task repair only; prior (04B) deliverables retained)
+
+## Source of Truth Used
+- docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.9 Frontend reducer and UI
+- docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Frontend commands
+- docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.1 Layout, ### 15.3 Chat components, ### 15.4 Tool activity display
+- docs/feasibility/phase_0_report.md > ## Astryx component matrix
+- frontend/AGENTS.md (public Astryx CLI discovery; no invent props/internal imports)
+
+## Supplemental Documents Used
+- README.md (project context)
+- frontend/src/features/chat/reducer.ts, types.ts, history.ts (04A single state owner)
+- frontend/src/lib/api/chat.ts (04A history/turn transport)
+- npx astryx component ChatLayout | ChatMessage | ChatComposer | ChatToolCalls | ChatSystemMessage | ChatMessageList
+- A2 review review_3_04B (REJECTED_WITH_WARNINGS — history tool display shape)
+
+## Dependency and User Action Check
+- Dependencies: (04A) complete (reducer/API present and tested).
+- User Action: None for required validation. Optional Compose/provider smoke not run.
+
+## Files Inspected Before Editing
+- frontend/src/app/App.tsx, App.test.tsx, theme.css, main.tsx
+- frontend/src/features/chat/reducer.ts, types.ts, history.ts
+- frontend/src/lib/api/chat.ts, lib/sse/stream.ts
+- frontend/AGENTS.md, package.json
+- node_modules/@astryxdesign/core/dist/Chat/*.d.ts (ChatToolCallStatus visual vocabulary)
+- docs/tasks/task_3.md (04B), Plan_3 §7.9, Master §15, phase_0_report matrix
+- frontend/src/features/chat/components/ChatMessages.tsx, frontend/src/test/chat-page.test.tsx (repair targets)
+- .agent/handoff/a2_response.json (repair instructions)
+
+## Completed Work
+- Ran Astryx CLI docs for ChatLayout, ChatMessage, ChatComposer, ChatToolCalls (plus ChatSystemMessage, ChatMessageList) from frontend against pin 0.1.4.
+- Implemented ChatPage wiring only the (04A) chatReducer + fetchChatHistory/streamChatTurn into Plan 2 AppShell: history load, load-older via ChatMessageList scrollToTopAction/next_cursor, turn stream, in-flight composer disable, interrupted/failed/disconnected notices.
+- Implemented ChatMessages with public ChatMessageList/ChatMessage/ChatMessageBubble/ChatSystemMessage; no approval cards or domain UI.
+- Implemented ChatToolActivity: concise friendly label, exact JobAgent status text (pending|running|completed|failed), duration, short outcome. Documented presentation-only map of completed→complete and failed→error for Astryx ChatToolCalls visual status prop; application/client state never stores complete/error aliases.
+- Updated App.tsx to host ChatPage; token-based theme.css fill for chat layout; test setup polyfills ResizeObserver/canvas; App.test updated for chat shell.
+- Added chat-page.test.tsx covering history/tool status, load-older, send/stream, in-flight lock, event_id dedupe UI, failed/disconnected/interrupted, no out-of-scope chrome.
+- Added exact-pinned devDependency @testing-library/user-event@14.6.1 for contentEditable composer interaction in tests.
+- Same-task repair (A2 review_3_04B): ChatMessages now projects preceding user-run tools onto the assistant row for display when assistant has no own tools (durable history shape); historyWithMessages fixture uses tools only on user + assistant.run null; stream path still uses assistant-owned tools.
+
+## Files Created or Modified
+- frontend/src/features/chat/ChatPage.tsx (created)
+- frontend/src/features/chat/components/ChatMessages.tsx (created; repaired — history tool projection)
+- frontend/src/features/chat/components/ChatToolActivity.tsx (created)
+- frontend/src/test/chat-page.test.tsx (created; repaired — real history fixture)
+- frontend/src/app/App.tsx (modified — host ChatPage)
+- frontend/src/app/theme.css (modified — fill height tokens for chat shell)
+- frontend/src/app/App.test.tsx (modified — expect chat shell)
+- frontend/src/test/setup.ts (modified — ResizeObserver + canvas stubs)
+- frontend/package.json (modified — user-event 14.6.1 exact pin)
+- frontend/package-lock.json (modified — lockfile for user-event)
+
+## Key Implementation Decisions
+- Single useReducer(chatReducer) is the only streaming state owner; ChatPage deps inject loadHistory/sendTurn for tests without a second store.
+- Astryx ChatToolCalls visual status prop vocabulary differs (complete|error); mapping lives only in ChatToolActivity.toAstryxVisualToolStatus and exact JobAgent status is always rendered via stats Text.
+- Composer is controlled (value/onChange draft) so in-flight disable and tests work with contentEditable.
+- inFlightRef marks turns synchronously so disconnect mid-stream is visible even before React commits streamPhase.
+- ChatLayout emptyState used when no list content; scrollToTopAction only when next_cursor is non-null.
+- Tool display is presentation-only: prefer assistant.run.tools (stream/rehydrate); else project preceding user.run.tools onto the assistant ChatToolCalls row. App state is not rewritten to move tools or store complete/error aliases.
+
+## Tests or Validations Run
+- command/check: `Set-Location frontend; npx astryx component ChatLayout; npx astryx component ChatMessage; npx astryx component ChatComposer; npx astryx component ChatToolCalls`
+- required: yes
+- result: passed
+- evidence or reason: Public imports `@astryxdesign/core/Chat`; ChatToolCalls status visual type pending|running|complete|error documented; required props recorded before implementation.
+
+- command/check: `Set-Location frontend; npm test -- --run src/test/sse-reducer.test.ts src/test/chat-page.test.tsx; npm run lint; npm run typecheck; npm run build`
+- required: yes
+- result: passed
+- evidence or reason: Repair re-run: 35 tests passed (23 reducer + 12 chat-page including history fixture with user-only tools); eslint clean; tsc --noEmit clean; vite build success (dist produced).
+
+- command/check: `Set-Location backend; python -m pytest tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q`
+- required: yes
+- result: passed
+- evidence or reason: 28 passed on original (04B) run (fake-backed public API / interrupt-resume / tool-replay; no provider call). Not re-run for presentation-only frontend repair.
+
+- command/check: scan `frontend/src` for internal astryx imports, raw hex, complete/error, profile|match_jobs|save_job
+- required: yes
+- result: passed
+- evidence or reason: No `@astryxdesign/.*/(src|dist)/` imports; no raw hex colors; no match_jobs/save_job. `complete`/`error` appear only as alias rejection (04A), presentation map in ChatToolActivity, parser field name `error`, and prose/tests — not application status values. `profile` only in “no profile” comments.
+
+- command/check: optional docker compose live smoke
+- required: no
+- result: not_run
+- evidence or reason: Optional; requires user .env/ShopAIKey/Docker — not required for acceptance.
+
+## Acceptance Check
+- condition: AppShell contains ChatLayout, message list/messages, composer, tool calls, system status via public Astryx 0.1.4 imports only
+- status: satisfied
+- evidence: App.tsx → ChatPage → ChatLayout/ChatComposer/ChatMessages/ChatToolActivity; imports from `@astryxdesign/core/Chat` and AppShell only.
+
+- condition: Page loads chronological history, load-older by next_cursor, send turn, stream text once, disable while run active
+- status: satisfied
+- evidence: chat-page tests history, IntersectionObserver load-older, send/stream Hello world once, contenteditable false while streaming.
+
+- condition: Fake-backed backend API/Agent + frontend parser/reducer/UI cover direct and synthetic interrupt path without real provider
+- status: satisfied
+- evidence: backend 28 integration tests + frontend 35 unit tests; UI interrupt locks composer without approval cards.
+
+- condition: Tool activity shows friendly name, exact pending|running|completed|failed, duration, short outcome; no complete/error in application state; no raw args/docs/stacks
+- status: satisfied
+- evidence: ChatToolActivity stats render exact status; toAstryxVisualToolStatus documented presentation-only; history load with tools only on user message still shows Lookup Status / completed / 42ms / ok short via assistant-row projection; no arguments_summary/resultDetail/stack in UI.
+
+- condition: Failed, disconnected, interrupted visible and never false-complete; reducer sole streaming owner
+- status: satisfied
+- evidence: UI tests for run_failed notice, disconnect notice + Partial text, Run interrupted + locked composer; single chatReducer.
+
+- condition: No profile approval card, PDF upload, sidebar, match/save-job, domain tool, internal Astryx import, raw visual scale, second design system
+- status: satisfied
+- evidence: scope tests + rg scan; no SideNav; no approval ButtonGroup; theme.css uses CSS variables only.
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode — A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files this repair: ChatMessages.tsx, chat-page.test.tsx (prior (04B) files unchanged this pass)
+- validations to rerun: npm test sse-reducer + chat-page; lint; typecheck; build
+- risk areas: tool projection is list-order dependent (preceding user only); ChatToolCalls visual status mapping must stay presentation-only; optional Compose smoke not run
+- next task readiness: can_review
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED_WITH_WARNINGS review_3_04B)
+- reason for repair: A2 major — durable history tool activity not rendered under real API shape (tools only on user turn; prior UI only showed tools when role===assistant; test overfitted by putting tools on assistant).
+- changes made:
+  - ChatMessages.tsx: toolsForAssistantDisplay prefers assistant.run.tools, else projects preceding user.run.tools onto assistant ChatToolCalls; still no complete/error in app state.
+  - chat-page.test.tsx: historyWithMessages tools only on user message; assistant.run null; asserts Lookup Status, completed, 42ms, ok short after history load.
+- validations rerun: npm test -- --run src/test/sse-reducer.test.ts src/test/chat-page.test.tsx (35 passed); npm run lint; npm run typecheck; npm run build — all passed.
+- outcome: complete; A2 repair items resolved.

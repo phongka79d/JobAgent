@@ -1,0 +1,185 @@
+/**
+ * Durable history hydration and chronological merge for chat state.
+ * History is authoritative: completed-turn tool activity replaces transient stream tools.
+ */
+
+import type {
+  AgentRunView,
+  ChatMessageView,
+  HistoryPage,
+  ToolExecutionView,
+} from './types';
+import type {
+  ClientMessage,
+  ClientRun,
+  ClientToolActivity,
+} from './reducer';
+
+/** Map a durable tool execution into client tool activity (history source). */
+export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity {
+  return {
+    toolExecutionId: tool.id,
+    toolCallId: tool.tool_call_id,
+    toolName: tool.tool_name,
+    status: tool.status,
+    durationMs: tool.duration_ms,
+    summary: tool.result?.summary ?? null,
+    errorCode: tool.error_code,
+    source: 'history',
+  };
+}
+
+/** Map a durable agent run into client run state. */
+export function runViewToClient(run: AgentRunView): ClientRun {
+  return {
+    id: run.id,
+    userMessageId: run.user_message_id,
+    state: run.state,
+    pendingApproval: run.pending_approval,
+    errorCode: run.error_code,
+    completedAt: run.completed_at,
+    tools: run.tool_executions.map(toolViewToActivity),
+  };
+}
+
+/** Map one history message item to a client message. */
+export function messageViewToClient(item: ChatMessageView): ClientMessage {
+  return {
+    id: item.id,
+    clientKey: item.id,
+    role: item.role,
+    content: item.content,
+    createdAt: item.created_at,
+    run: item.run ? runViewToClient(item.run) : null,
+    isStreaming: false,
+  };
+}
+
+/**
+ * Merge history items chronologically by (createdAt, id).
+ * Drops duplicates by durable message id.
+ */
+export function mergeMessagesChronological(
+  existing: readonly ClientMessage[],
+  incoming: readonly ClientMessage[],
+): ClientMessage[] {
+  const byId = new Map<string, ClientMessage>();
+  for (const m of existing) {
+    byId.set(m.id, m);
+  }
+  for (const m of incoming) {
+    byId.set(m.id, m);
+  }
+  return [...byId.values()].sort((a, b) => {
+    const ta = a.createdAt ?? '';
+    const tb = b.createdAt ?? '';
+    if (ta !== tb) {
+      return ta < tb ? -1 : 1;
+    }
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
+/**
+ * For completed (or failed) durable runs, replace any transient stream tools
+ * on matching run ids with history tool activity.
+ */
+export function replaceTransientToolsFromHistory(
+  messages: readonly ClientMessage[],
+  historyItems: readonly ChatMessageView[],
+): ClientMessage[] {
+  const durableByRun = new Map<string, ClientRun>();
+  for (const item of historyItems) {
+    if (item.run) {
+      const clientRun = runViewToClient(item.run);
+      if (
+        clientRun.state === 'completed' ||
+        clientRun.state === 'failed'
+      ) {
+        durableByRun.set(clientRun.id, clientRun);
+      }
+    }
+  }
+  if (durableByRun.size === 0) {
+    return [...messages];
+  }
+  return messages.map((msg) => {
+    if (!msg.run) {
+      return msg;
+    }
+    const durable = durableByRun.get(msg.run.id);
+    if (!durable) {
+      return msg;
+    }
+    return {
+      ...msg,
+      run: {
+        ...msg.run,
+        state: durable.state,
+        errorCode: durable.errorCode,
+        completedAt: durable.completedAt,
+        pendingApproval: durable.pendingApproval,
+        // Durable tools replace all transient stream tools for this run.
+        tools: durable.tools,
+      },
+      isStreaming: false,
+    };
+  });
+}
+
+/**
+ * Initial hydration: set messages from a history page (newest page).
+ * Preserves next_cursor; durable tools are the sole tool source for those turns.
+ */
+export function hydrateFromHistoryPage(page: HistoryPage): {
+  messages: ClientMessage[];
+  nextCursor: string | null;
+} {
+  const messages = page.items.map(messageViewToClient);
+  return {
+    messages: mergeMessagesChronological([], messages),
+    nextCursor: page.next_cursor,
+  };
+}
+
+/**
+ * Load-older merge: prepend older chronological items without duplicates.
+ * Updates next_cursor to the older page's cursor (null when no more).
+ */
+export function mergeOlderHistoryPage(
+  currentMessages: readonly ClientMessage[],
+  page: HistoryPage,
+): {
+  messages: ClientMessage[];
+  nextCursor: string | null;
+} {
+  const incoming = page.items.map(messageViewToClient);
+  // Replace transient tools on any overlapping completed runs.
+  const withDurableTools = replaceTransientToolsFromHistory(
+    mergeMessagesChronological(currentMessages, incoming),
+    page.items,
+  );
+  return {
+    messages: withDurableTools,
+    nextCursor: page.next_cursor,
+  };
+}
+
+/**
+ * Re-hydrate after reconnect: merge page and force durable tools for
+ * completed turns over any in-memory stream tool state.
+ */
+export function rehydrateWithDurableTruth(
+  currentMessages: readonly ClientMessage[],
+  page: HistoryPage,
+): {
+  messages: ClientMessage[];
+  nextCursor: string | null;
+} {
+  const incoming = page.items.map(messageViewToClient);
+  const merged = mergeMessagesChronological(currentMessages, incoming);
+  return {
+    messages: replaceTransientToolsFromHistory(merged, page.items),
+    nextCursor: page.next_cursor,
+  };
+}

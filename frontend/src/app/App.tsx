@@ -1,21 +1,15 @@
 import {AppShell} from '@astryxdesign/core/AppShell';
-import {Heading} from '@astryxdesign/core/Heading';
-import {Text} from '@astryxdesign/core/Text';
-import {VStack} from '@astryxdesign/core/VStack';
+
+import {ChatPage} from '../features/chat/ChatPage';
 
 /**
- * Minimal Phase 1 foundation shell. No chat, sidebar, approval, or match UI.
- * Plan 3 extends this frame with production regions.
+ * Plan 3 base conversation shell: AppShell → ChatPage (ChatLayout + composer).
+ * No sidebar, approval cards, profile, or domain-tool UI in this phase.
  */
 export function App() {
   return (
-    <AppShell contentPadding={4} height="fill" variant="surface">
-      <VStack gap={2}>
-        <Heading level={1}>JobAgent</Heading>
-        <Text type="supporting" color="secondary" as="p">
-          Astryx-neutral application foundation
-        </Text>
-      </VStack>
+    <AppShell contentPadding={0} height="fill" variant="surface">
+      <ChatPage />
     </AppShell>
   );
 }
