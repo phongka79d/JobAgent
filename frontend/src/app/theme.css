@@ -1,0 +1,15 @@
+/**
+ * Foundation theme adjustments only.
+ * Token-based values; no second design system, raw hex, or hard-coded scale.
+ */
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+#root {
+  background-color: var(--color-background-body);
+  color: var(--color-text-primary);
+}

@@ -4,15 +4,49 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jobagent-backend"
-version = "0.0.0"
-description = "JobAgent Phase 0 backend feasibility package"
+version = "0.1.0"
+description = "JobAgent Phase 1 backend application package"
 requires-python = ">=3.11"
 dependencies = [
+    # Phase 0 proven pins (preserved)
     "pypdf==6.14.2",
     "httpx==0.28.1",
     "pydantic==2.12.5",
+    # Phase 1 / Plan 2 runtime (Phase 0 intended versions)
+    "pydantic-settings==2.14.2",
+    "fastapi==0.139.0",
+    "uvicorn==0.51.0",
+    "sqlalchemy==2.0.51",
+    "aiosqlite==0.22.1",
+    "alembic==1.18.5",
+    "neo4j==6.2.0",
+    # Local quality tools (Phase 0 intended versions)
+    "ruff==0.15.21",
+    "mypy==1.18.2",
+    "pytest==9.1.1",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["app"]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

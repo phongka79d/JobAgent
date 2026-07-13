@@ -1,24 +1,38 @@
 # JobAgent
 
-JobAgent has completed Phase 0 feasibility validation. The repository contains the
-minimal backend/infrastructure scaffold and a pinned Astryx frontend used to verify
-documented public component APIs. Production JobAgent workflows remain out of this
-phase's scope; Plan 2 may consume the documented Phase 0 handoff.
+JobAgent has completed Phase 0 feasibility validation and the first Plan 2
+foundation batch. The repository now contains a pinned, testable backend core and
+a minimal Astryx application shell. Production CV, job, chat, Agent, approval, and
+matching workflows remain out of scope while the rest of Plan 2 is implemented.
 
 ## Repository layout
 
-- `frontend/` — minimal React, TypeScript, and Vite render using Astryx 0.1.4.
-- `backend/` — installable Python package scaffold; later feasibility tasks add only
-  the dependencies they require.
-- `infrastructure/` — local feasibility scripts and future local-service folders.
-- `docs/feasibility/phase_0_report.md` — reproducible compatibility evidence.
+- `frontend/` - minimal React, TypeScript, Vite, and Astryx 0.1.4 application
+  shell with lint, type-check, render-test, and build commands.
+- `backend/` - installable pinned Python application package with one settings
+  boundary and shared UUID/UTC conventions.
+- `infrastructure/` - local feasibility scripts and future local-service folders.
+- `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
 
 ## Configuration
 
 Keep one user-managed `.env` at the repository root. It is ignored by Git and must
 not be copied into tracked files. `.env.example` documents the supported variable
 names and safe defaults; secret fields are intentionally empty, and applications
-must not load `.env.example` at runtime.
+must not load `.env.example` at runtime. The frontend may consume only
+`VITE_API_BASE_URL`.
+
+## Backend foundation verification
+
+From the repository root:
+
+```powershell
+python -m pip install -e .\backend
+Set-Location backend
+python -m ruff check .
+python -m mypy app
+python -m pytest tests/unit/test_settings.py tests/unit/test_core_conventions.py -q
+```
 
 ## Astryx verification
 
@@ -26,9 +40,12 @@ From `frontend/`:
 
 ```powershell
 npm ci
+npm run lint
+npm run typecheck
+npm test -- --run
 npm run build
 npm run dev -- --host 127.0.0.1
-npx astryx --help
+npx astryx component AppShell
 ```
 
 The exact public-component documentation commands and observed props/imports are
@@ -63,8 +80,8 @@ must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contrac
 
 ## Phase status
 
-All four Phase 0 batches passed. They establish the scaffold, environment contract,
-pinned Astryx lockfile and public component evidence, synthetic PDF/pypdf gate,
-seven-group ShopAIKey compatibility gate, clean-environment reproduction, and final
-dependency decision. Plan 2 may consume the handoff recorded in
-`docs/feasibility/phase_0_report.md` without repeating Phase 0 feasibility work.
+All four Phase 0 batches passed. Plan 2 Batch 1 adds the exact-pinned backend
+foundation, cached root-environment settings, shared UUID/UTC helpers, and the
+minimal neutral Astryx shell. SQLite/Alembic, storage, Neo4j, health, and Compose
+remain in later Plan 2 batches. Phase 0 evidence remains recorded in
+`docs/feasibility/phase_0_report.md` and is not repeated.
