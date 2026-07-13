@@ -1,6 +1,6 @@
 # JobAgent Master Plan
 
-**Version:** 1.1
+**Version:** 1.4
 **Date:** 2026-07-13
 **Status:** Ready for implementation after Phase 0 feasibility gates  
 **Project type:** Single-user, local-first AI/NLP portfolio project  
@@ -13,16 +13,17 @@ JobAgent is a chat-first job matching assistant. The user primarily works throug
 
 The system must let the user:
 
-1. Upload a PDF CV from the sidebar or attach it in chat.
-2. Let the Agent call tools to parse, extract, normalize, and stage a Candidate Profile.
-3. Review the extracted profile inside chat and choose **Save Profile** or **Request Changes**.
-4. Send a public JD URL or paste JD text.
-5. Let the Agent save every accepted JD input, extract structured fields, normalize skills, and synchronize derived graph data.
-6. Rank saved jobs against the active profile.
-7. Explain matched skills, related skills, missing skills, and non-skill score components.
-8. Remember the active profile, preferences, corrections, saved jobs, and job-related conversation context across restarts.
+1. Chat naturally with the LLM about greetings, general questions, or job-related topics.
+2. Upload a PDF CV from the sidebar or attach it in chat.
+3. Let the Agent call tools to parse, extract, normalize, and stage a Candidate Profile.
+4. Review the extracted profile inside chat and choose **Save Profile** or **Request Changes**.
+5. Send a public JD URL or paste JD text.
+6. Let the Agent save every accepted JD input, extract structured fields, normalize skills, and synchronize derived graph data.
+7. Rank saved jobs against the active profile.
+8. Explain matched skills, related skills, missing skills, and non-skill score components.
+9. Persist chat history while keeping structured long-term memory focused on the active profile, preferences, corrections, and saved jobs.
 
-The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, evaluation, and failure handling.
+The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
 ### Complexity guardrail
 
@@ -31,7 +32,7 @@ The goal is to demonstrate practical AI/NLP engineering through structured extra
 Every new dependency or feature must satisfy at least one of these conditions:
 
 - It is required for a locked user flow.
-- It measurably improves a defined metric.
+- It clearly improves a locked user flow.
 - It removes a known reliability risk in the locked demo flow.
 
 Otherwise, it remains outside the MVP.
@@ -45,6 +46,7 @@ Otherwise, it remains outside the MVP.
 - Single user.
 - No authentication.
 - One persistent application conversation.
+- Natural general conversation without requiring a job-related intent.
 - React chat-first interface using Astryx.
 - Upload one active PDF CV.
 - No CV version history.
@@ -54,13 +56,13 @@ Otherwise, it remains outside the MVP.
 - JD persistence, quality classification, duplicate handling, and extraction.
 - Vietnamese and English CV/JD content.
 - JD inputs from any job family, not only AI/NLP roles.
-- Dynamic skills with `verified` or `provisional` status.
+- Deterministic skill normalization with a small seed alias/relationship taxonomy.
 - Neo4j skill graph and Neo4j vector search.
 - Transparent hybrid scoring.
 - Skill-gap and score-breakdown explanation.
 - Visible tool activity in chat.
 - Local Docker Compose deployment.
-- Local tests and evaluation commands.
+- Local automated tests and a manual demo checklist.
 
 ### 2.2 Explicitly out of scope
 
@@ -83,6 +85,7 @@ Otherwise, it remains outside the MVP.
 - 64K conversation memory injection.
 - LangSmith cloud dependency.
 - GitHub Actions or other CI workflows.
+- General-purpose external tools or long-term structured memory for unrelated conversation.
 
 ---
 
@@ -166,12 +169,6 @@ JobAgent/
 │   │   ├── schemas/
 │   │   └── main.py
 │   ├── migrations/
-│   ├── evaluation/
-│   │   ├── fixtures/
-│   │   ├── labels/
-│   │   ├── private/
-│   │   ├── reports/
-│   │   └── README.md
 │   ├── tests/
 │   ├── pyproject.toml
 │   └── alembic.ini
@@ -191,7 +188,7 @@ JobAgent/
 └── JobAgent_Master_Plan.md
 ```
 
-The repository has exactly three top-level working folders: `frontend`, `backend`, and `infrastructure`. Root files hold project-wide configuration and documentation. Real evaluation CV/JD data under `backend/evaluation/private/` is gitignored. Runtime CV/JD files use Docker volumes and are not stored in the repository.
+The repository has exactly three top-level working folders: `frontend`, `backend`, and `infrastructure`. Root files hold project-wide configuration and documentation. Automated-test fixtures live under `backend/tests/fixtures/` and use synthetic data. Runtime CV/JD files use Docker volumes and are not stored in the repository.
 
 ---
 
@@ -205,13 +202,12 @@ The repository has exactly three top-level working folders: `frontend`, `backend
 | `candidate_profile` | singleton `id`, `active_attachment_id`, `profile_json`, `embedding_model`, timestamps | Current approved Candidate Profile only |
 | `profile_drafts` | `id`, `source_attachment_id`, `draft_json`, `state`, timestamps | Temporary profile/preference proposal awaiting approval |
 | `job_preferences` | singleton `id`, `preferences_json`, timestamps | Target roles, locations, work modes, and target level |
-| `job_posts` | IDs, source, raw content, hashes, normalized keys, extracted fields, status fields, score cache, timestamps | Canonical JD records and ignored duplicate records |
+| `job_posts` | IDs, source, raw content, hashes, normalized keys, extracted fields, status fields, embedding, embedding model, score cache, timestamps | Canonical JD records and ignored duplicate records |
 | `conversation` | singleton `id`, timestamps | One application conversation |
 | `chat_messages` | `id`, `conversation_id`, `role`, `content`, `structured_payload`, timestamps | UI history and application-level conversation record |
 | `agent_runs` | `id`, `message_id`, `state`, `pending_approval`, error, timestamps | One LangGraph run per user turn |
-| `tool_executions` | run/tool IDs, short arguments summary, status, duration, error code, timestamps | Tool observability and evaluation |
+| `tool_executions` | run/tool IDs, short arguments summary, status, duration, error code, timestamps | Tool observability and debugging |
 | `memory_facts` | `key`, `value_json`, `source`, timestamps | Durable job-related facts not already represented by profile/preferences |
-| `graph_sync_outbox` | operation, entity ID, payload, status, attempts, timestamps | Durable SQLite-to-Neo4j synchronization |
 
 LangGraph checkpoint tables are created by `langgraph-checkpoint-sqlite` in the same SQLite file. They are short-lived and keyed by `agent_run.id`.
 
@@ -220,7 +216,7 @@ LangGraph checkpoint tables are created by `langgraph-checkpoint-sqlite` in the 
 - The approved profile is a validated Pydantic JSON document stored in the singleton `candidate_profile` row.
 - No historical profile snapshots are retained.
 - A new CV never overwrites the active profile before approval.
-- After approval, the transaction replaces the active profile and preferences, promotes the new file, deletes the previous file, deletes the draft, and enqueues a graph rebuild/sync.
+- After approval, the transaction replaces the active profile and preferences, promotes the new file, deletes the previous file, and deletes the draft. Neo4j synchronization runs directly after the SQLite transaction succeeds.
 
 ### 6.3 Job status dimensions
 
@@ -232,9 +228,6 @@ received | processing | processed | failed
 
 jd_quality:
 full | partial | unscorable
-
-graph_sync_status:
-not_required | pending | synced | failed
 
 record_status:
 active | ignored_duplicate
@@ -252,7 +245,6 @@ SkillRef
 - display_name: str
 - aliases: list[str]
 - category: str | None
-- status: verified | provisional
 - confidence: float [0, 1]
 - evidence: list[str]
 ```
@@ -316,7 +308,6 @@ JobPostExtraction
 - education_requirements: list[str]
 - language_requirements: list[str]
 - salary_text: str | None
-- job_family: str | None
 - extraction_confidence: float
 - jd_quality: full | partial | unscorable
 ```
@@ -340,8 +331,7 @@ The classifier must return reasons for `partial` and `unscorable` states.
 ```text
 (:Candidate {id})
 (:Job {id, title, company, location, work_mode, seniority, quality, embedding})
-(:Skill {canonical_key, display_name, aliases, category, status})
-(:JobFamily {canonical_key, display_name})
+(:Skill {canonical_key, display_name, aliases, category})
 ```
 
 ### 8.2 Relationships
@@ -350,8 +340,7 @@ The classifier must return reasons for `partial` and `unscorable` states.
 (Candidate)-[:HAS_SKILL {confidence, years, proficiency, evidence}]->(Skill)
 (Job)-[:REQUIRES {confidence, evidence}]->(Skill)
 (Job)-[:PREFERS {confidence, evidence}]->(Skill)
-(Skill)-[:RELATED_TO {weight, source, verified}]->(Skill)
-(Job)-[:IN_FAMILY]->(JobFamily)
+(Skill)-[:RELATED_TO {weight, source}]->(Skill)
 ```
 
 ### 8.3 Constraints and indexes
@@ -359,7 +348,6 @@ The classifier must return reasons for `partial` and `unscorable` states.
 - Unique constraint on `Candidate.id`.
 - Unique constraint on `Job.id`.
 - Unique constraint on `Skill.canonical_key`.
-- Unique constraint on `JobFamily.canonical_key`.
 - Vector index on `Job.embedding` using cosine similarity.
 - Vector dimension is fixed at 1536 by the locked embedding contract and must be recorded in application settings.
 
@@ -368,11 +356,10 @@ Changing the embedding model or dimensions requires a complete embedding and vec
 ### 8.4 Graph safety rules
 
 - Alias strings are properties on the canonical `Skill`; do not create separate alias nodes in the MVP.
-- A new unknown skill may be stored as `provisional`.
-- The LLM must not automatically create trusted `RELATED_TO` relationships.
-- Only verified relationships from the seed taxonomy or explicit user confirmation may contribute to scoring.
+- A new unknown skill may be stored as a canonical `Skill`, but it receives no `RELATED_TO` edges automatically.
+- Only aliases and `RELATED_TO` relationships from `skills_seed.yaml` contribute to related-skill scoring.
 - Duplicate ignored jobs are not synchronized to Neo4j.
-- Neo4j must be fully rebuildable through an infrastructure script using SQLite records.
+- Neo4j remains fully rebuildable through one local command using SQLite records.
 
 ---
 
@@ -384,13 +371,13 @@ Changing the embedding model or dimensions requires a complete embedding and vec
 2. Trim and collapse whitespace.
 3. Lowercase for canonical comparison.
 4. Normalize punctuation and common separators.
-5. Resolve against verified aliases in a small `skills_seed.yaml`.
-6. Compare against existing canonical Neo4j/SQLite skills.
-7. If unresolved, create a deterministic canonical key and mark it `provisional`.
+5. Resolve against aliases in a small `skills_seed.yaml`.
+6. Compare against existing canonical SQLite skills.
+7. If unresolved, create a deterministic canonical key without related-skill edges.
 
 ### 9.2 Seed taxonomy
 
-The MVP does not attempt a global job ontology. The seed contains only aliases and verified relationships observed in the development/evaluation data or manually approved for common skills.
+The MVP does not attempt a global job ontology. The seed contains only a small set of manually approved aliases and relationships for common skills used in the demo.
 
 ### 9.3 User corrections
 
@@ -454,9 +441,11 @@ The old active profile and CV remain usable until the new draft is approved. On 
 3. Promote the staged PDF to the active path.
 4. Remove the previous active PDF.
 5. Delete the draft.
-6. Enqueue Candidate graph synchronization.
+6. Synchronize Candidate and Skill nodes directly to Neo4j after the SQLite/file transaction succeeds.
 
 If any SQLite/file operation fails, the current active profile remains unchanged.
+
+If the later Neo4j sync fails, the approved SQLite profile remains committed. Return `NEO4J_SYNC_FAILED` with the rebuild instruction instead of rolling the profile back.
 
 ---
 
@@ -488,7 +477,7 @@ URL/text
 → normalize skills
 → classify quality
 → apply duplicate policy
-→ enqueue Neo4j synchronization if active and scorable
+→ synchronize directly to Neo4j if active and scorable
 → optional match against active profile
 ```
 
@@ -567,15 +556,25 @@ The model receives:
 
 It does not receive the entire conversation or a fixed 64K-token history. Profile and preference corrections are remembered through structured state, not by relying on old chat text.
 
-### 12.5 Domain policy
+General conversation remains available through persisted chat history and the bounded recent-message window. Do not promote unrelated facts into `memory_facts` or add a general-purpose memory extraction pipeline.
 
-The Agent handles CVs, Candidate Profile, job preferences, JDs, saved jobs, matching, and skill gaps.
+### 12.5 Conversation and tool policy
 
-For unrelated messages, respond briefly and redirect:
+The Agent may answer greetings, casual conversation, and general knowledge questions naturally through the LLM. A user message does not need to be related to jobs.
 
-> I focus on CVs, JDs, and job matching. Upload a CV or send a JD to continue.
+- Answer directly without tools when no JobAgent capability is needed.
+- Call JobAgent tools only for CVs, Candidate Profile, job preferences, JDs, saved jobs, matching, and skill gaps.
+- Do not invent or expose general-purpose tools for unrelated requests.
+- Keep the response language aligned with the user's language when practical.
 
-Do not add a separate classifier model. Enforce the boundary through the system prompt, tool preconditions, and tool-selection tests.
+Example:
+
+```text
+User: Xin chào
+JobAgent: Chào bạn! Hôm nay bạn muốn mình giúp gì?
+```
+
+Do not add a separate classifier model. The LLM chooses between a direct response and the existing JobAgent tools; tool preconditions remain the deterministic boundary for writes.
 
 ### 12.6 Tool loop limits
 
@@ -628,7 +627,7 @@ Input: `draft_id`, idempotency key.
 Input: exactly one of URL or raw text, plus optional explicit `force_new`.
 
 - Persists raw content before extraction.
-- Handles fetch, extraction, validation, deduplication, and outbox creation.
+- Handles fetch, extraction, validation, deduplication, and direct Neo4j synchronization.
 - Does not require approval.
 
 ### 13.6 `query_jobs`
@@ -644,7 +643,6 @@ Input: job ID or bounded filters.
 Input: optional saved-job filters and result limit.
 
 - Requires an active Candidate Profile.
-- Synchronizes pending graph operations first.
 - Runs retrieval, graph features, scoring, and explanation.
 - Defaults to final top 10.
 
@@ -758,7 +756,7 @@ Each top result shows:
 - Title, company, location, work mode.
 - Final score.
 - Matched required skills.
-- Related verified skills.
+- Related skills from the seed taxonomy.
 - Missing required skills.
 - Expandable component score breakdown.
 - Original source URL when available.
@@ -808,14 +806,14 @@ Use only ShopAIKey `text-embedding-3-small` through `POST /v1/embeddings`, with 
 
 ### 17.2 Provider compatibility gate
 
-Phase 0 must verify model availability, scalar and batch input support, stable input/output ordering, exactly 1536 finite float values per input, and clear timeout/rate-limit/invalid-response behavior. Record median/P95 request latency and validation-set `nDCG@10` and Recall@10 as baseline evidence; these measurements validate the locked adapter and do not select among models.
+Phase 0 must verify model availability, scalar and batch input support, stable input/output ordering, exactly 1536 finite float values per input, and clear timeout/rate-limit/invalid-response behavior. This is a compatibility check for the locked adapter, not a model or retrieval benchmark.
 
 ### 17.3 Text representations
 
 Candidate representation:
 
 ```text
-target roles + profile summary + verified skills + experience titles + preferences
+target roles + profile summary + normalized skills + experience titles + preferences
 ```
 
 Build the Candidate representation from the approved structured profile rather than the raw CV text. Candidate and Job representations use the same whitespace normalization and versioned text-builder contract.
@@ -832,7 +830,7 @@ No E5 query/passage prefixes are used. Apply the same documented whitespace norm
 
 1. Embed the active Candidate representation.
 2. Query Neo4j vector index for up to top 50 active, scorable jobs.
-3. Compute direct and verified-related skill features.
+3. Compute direct, alias, and seed-related skill features.
 4. Compute seniority, experience, location, and work-mode features.
 5. Calculate the transparent hybrid score.
 6. Return final top 10 with explanations.
@@ -854,9 +852,8 @@ Match strengths:
 | Match type | Strength |
 |---|---:|
 | Direct canonical match | 1.0 |
-| Verified alias match | 1.0 |
-| Verified related skill | 0.6 |
-| Provisional relationship | 0.0 |
+| Seed alias match | 1.0 |
+| Seed related skill | 0.6 |
 | No match | 0.0 |
 
 ### 18.2 Initial hybrid seed
@@ -875,7 +872,7 @@ Component rules are deterministic and return normalized scores in `[0, 1]`.
 
 ### 18.3 Missing fields
 
-If an optional component cannot be evaluated, renormalize the weights of available components. Then apply the JD quality multiplier:
+If an optional component cannot be computed, renormalize the weights of available components. Then apply the JD quality multiplier:
 
 ```text
 full       → 1.00
@@ -883,114 +880,30 @@ partial    → 0.85
 unscorable → final_score = null
 ```
 
-### 18.4 Weight tuning
+### 18.4 Fixed MVP weights
 
-- The values above are seeds, not claimed optimal weights.
-- Run bounded grid search on the validation set.
-- Optimize validation `nDCG@10`.
-- Lock weights before evaluating the held-out test set.
-- Store the chosen configuration with the evaluation report.
+- Use the documented weights as simple, deterministic defaults for the portfolio demo.
+- Do not claim that the weights are statistically optimal or generally applicable.
+- The developer may adjust them manually only when the demo consistently produces obviously unreasonable ordering.
 - Do not use `gpt-4o-mini` to produce the final numerical score.
-
-### 18.5 Graph ablation rule
-
-Evaluate:
-
-1. Semantic-only.
-2. Exact-skill-only.
-3. Semantic + exact skill.
-4. Semantic + skill graph.
-5. Full hybrid.
-
-If verified graph expansion does not improve held-out `nDCG@10`, disable related-skill score boosts. Neo4j may remain for structured explanation and direct graph traversal, but the README must report the result honestly.
 
 ---
 
-## 19. Evaluation Plan
+## 19. Manual JD Acceptance
 
-### 19.1 Data policy
+The developer validates JD behavior directly during local testing. No labeled JD dataset, benchmark suite, ranking metric, grid search, ablation, or evaluation report is required.
 
-- Use one synthetic or manually anonymized representative CV.
-- Use 150–200 public JD examples spanning relevant, adjacent, and unrelated jobs.
-- Real CV/JD data stays local and is gitignored.
-- The repository contains only synthetic fixtures, annotation templates, and aggregate reports.
-- Because there is one Candidate Profile, ranking claims are explicitly per-profile and not population-wide.
+Use a small, disposable set of representative JDs to check:
 
-### 19.2 Relevance labels
+- A public URL and pasted text both create a saved job.
+- Full, partial, and unscorable JDs receive the expected quality status.
+- Title, required/preferred skills, seniority, location, and work mode look reasonable in the saved result.
+- Exact and normalized duplicates follow the documented policy.
+- Matching returns plausible ordering for the active profile.
+- Score breakdown, matched skills, and missing skills agree with the displayed Candidate Profile and JD.
+- URL, extraction, provider, and Neo4j failures produce the documented fallback instead of false success.
 
-```text
-0 = irrelevant
-1 = related but missing many requirements
-2 = reasonably suitable
-3 = highly suitable / should apply
-```
-
-Use a fixed seeded split:
-
-- 60% development.
-- 20% validation.
-- 20% held-out test.
-
-Do not inspect test results while tuning weights or prompts.
-
-### 19.3 Extraction dataset
-
-Manually annotate at least 30 JDs for:
-
-- Required skills.
-- Preferred skills.
-- Seniority.
-- Work mode.
-- Location.
-
-### 19.4 Tool-selection dataset
-
-Create at least 50 conversation scenarios covering:
-
-- CV upload.
-- Profile correction.
-- Approval and rejection.
-- JD URL/text ingestion.
-- Duplicate job.
-- Match request with/without profile.
-- Unrelated conversation.
-- Tool failure.
-
-### 19.5 Pass/fail metrics
-
-Extraction:
-
-```text
-Required/preferred skill entity F1 ≥ 0.80
-Seniority macro-F1 ≥ 0.85
-Work-mode macro-F1 ≥ 0.85
-Location field accuracy ≥ 0.90
-```
-
-Ranking:
-
-```text
-Precision@10 ≥ 0.70 for labels 2–3
-Full hybrid nDCG@10 > semantic-only baseline
-Full hybrid nDCG@10 > skill-only baseline
-```
-
-Agent/tool use:
-
-```text
-Tool-selection accuracy ≥ 0.90
-Invalid tool arguments ≤ 5%
-Profile commits without approval = 0
-False success after tool failure = 0
-```
-
-Latency after model warm-up:
-
-```text
-First SSE event < 1 second
-P95 matching latency for 200 jobs < 2 seconds
-External extraction timeout ≤ 45 seconds
-```
+These checks are manual product acceptance only. Automated functional tests remain required under Section 24.
 
 ---
 
@@ -1006,7 +919,7 @@ External extraction timeout ≤ 45 seconds
 | JD extraction failure | Keep raw record with failed status |
 | Exact duplicate | Return existing job; no reprocessing |
 | Normalized duplicate | Save ignored record; no graph/score |
-| Neo4j unavailable | Keep SQLite data; outbox status failed/pending |
+| Neo4j unavailable during sync | Keep SQLite data; report `NEO4J_SYNC_FAILED` and offer the local rebuild command |
 | Match without profile | Ask user to upload/approve CV first |
 | Unauthorized profile commit | Reject tool execution |
 | Tool loop exceeds six iterations | End run with controlled failure |
@@ -1015,36 +928,30 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 
 ---
 
-## 21. SQLite-to-Neo4j Synchronization
+## 21. Direct SQLite-to-Neo4j Synchronization
 
-### 21.1 Outbox rule
+### 21.1 Direct sync rule
 
-Every SQLite transaction that changes graph-derived data writes an outbox row in the same transaction.
+- SQLite commits first and remains the source of truth.
+- After a successful profile or job write, call a focused Neo4j sync function immediately.
+- Use SQLite UUIDs as Neo4j `Candidate`/`Job` identifiers and `Skill.canonical_key` as skill identity.
+- Use Neo4j uniqueness constraints and `MERGE` so rerunning the same sync is safe.
+- Do not add an outbox table, background worker, retry queue, or graph-sync state machine.
 
-### 21.2 Processing
+### 21.2 Local failure behavior
 
-- Attempt synchronous processing immediately after the SQLite transaction.
-- If Neo4j is unavailable, retain the outbox row as `pending` or `failed`.
-- Retry pending items at backend startup and before `match_jobs`.
-- Keep retry limits visible; do not spin continuously.
+If direct synchronization fails, keep the committed SQLite data and return `NEO4J_SYNC_FAILED`. The UI tells the developer to restore Neo4j and run the rebuild command. The application does not retry continuously or hide the failure.
 
-### 21.3 Idempotency
+### 21.3 Rebuild command
 
-- Use SQLite UUIDs as Neo4j `Candidate`/`Job` identifiers.
-- Use `Skill.canonical_key` for skill identity.
-- Use Neo4j uniqueness constraints and `MERGE`.
-- Replaying an outbox operation must not create duplicate nodes or relationships.
+Provide one local command that:
 
-### 21.4 Rebuild
-
-Provide one infrastructure command that:
-
-1. Clears derived JobAgent nodes/relationships safely.
-2. Recreates constraints and vector index.
-3. Reads active/scorable SQLite records.
-4. Rebuilds Candidate, Job, Skill, JobFamily nodes and edges.
-5. Recomputes embeddings when required.
-6. Verifies entity counts and marks sync states.
+1. Clears only JobAgent nodes and relationships.
+2. Recreates constraints and the vector index.
+3. Reads the active Candidate and active/scorable Jobs from SQLite.
+4. Rebuilds Candidate, Job, Skill, and seed `RELATED_TO` data.
+5. Reuses stored embeddings when compatible and recomputes only missing or incompatible values.
+6. Prints rebuilt entity counts and exits non-zero on failure.
 
 ---
 
@@ -1103,12 +1010,15 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 ### 24.1 Backend unit tests
 
 - Pydantic validation.
+- JD extraction and field validation.
 - Skill canonicalization and alias resolution.
 - Duplicate policies.
 - JD quality classification.
 - Score components and weight renormalization.
+- Matching order and deterministic explanations.
+- General conversation produces a direct answer without JobAgent tool calls.
 - Tool preconditions for approval and required state.
-- Outbox idempotency.
+- Idempotent Neo4j `MERGE` payloads.
 
 ### 24.2 Backend integration tests
 
@@ -1116,8 +1026,11 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - SSE event schema/order.
 - LangGraph interrupt/resume.
 - SQLite persistence and migration.
-- Neo4j synchronization and rebuild.
+- Direct Neo4j synchronization and the local rebuild command.
+- URL and raw-text JD ingestion.
 - Exact/normalized duplicates.
+- `match_jobs` with deterministic fake embeddings.
+- Greeting and general-question turns persist messages and complete without tool events.
 - Fake ShopAIKey adapter for tool calls and invalid schema.
 
 Normal automated tests must not call the real ShopAIKey API.
@@ -1135,7 +1048,10 @@ Normal automated tests must not call the real ShopAIKey API.
 ### 24.4 End-to-end smoke test
 
 ```text
-Upload synthetic PDF
+Send greeting
+→ receive a natural response without tool calls
+→ continue in the same conversation
+→ upload synthetic PDF
 → create profile draft
 → approve profile
 → submit JD text
@@ -1152,8 +1068,7 @@ The final README must provide single-purpose commands for:
 - Frontend lint/type-check/test.
 - Neo4j integration tests.
 - ShopAIKey compatibility smoke test.
-- Extraction evaluation.
-- Ranking evaluation.
+- Manual JD acceptance checklist.
 - Full Docker Compose startup.
 
 ---
@@ -1170,10 +1085,9 @@ Tasks:
 - [ ] Pin a stable Astryx version and run `npx astryx init --features agents --agent codex`.
 - [ ] Inspect exact Astryx APIs for AppShell, ChatLayout, ChatComposer, ChatToolCalls, ChatMessage, ButtonGroup, Card, Collapsible, and ProgressBar.
 - [ ] Implement a temporary ShopAIKey compatibility script for model listing, chat completion, function calling, tool-result round trip, structured schema, and streaming.
-- [ ] Benchmark pypdf normal/layout extraction on 5–10 representative digital CV PDFs.
+- [ ] Verify pypdf normal/layout extraction on a few synthetic digital CV fixtures.
 - [ ] Verify `NO_EXTRACTABLE_TEXT` behavior on an image-only PDF fixture.
-- [ ] Verify ShopAIKey `text-embedding-3-small` scalar/batch compatibility, 1536-dimensional output, retrieval quality baseline, and request latency.
-- [ ] Record results in `backend/evaluation/reports/phase_0_feasibility.md`.
+- [ ] Verify ShopAIKey `text-embedding-3-small` scalar/batch compatibility and 1536-dimensional finite output.
 
 Exit gate:
 
@@ -1181,7 +1095,7 @@ Exit gate:
 - At least one schema strategy passes Pydantic validation reliably.
 - Astryx has all required public components or a documented composition path.
 - pypdf succeeds on the agreed majority of digital CV fixtures.
-- ShopAIKey `text-embedding-3-small` passes the compatibility contract and its 1536-dimensional retrieval/latency baseline is recorded.
+- ShopAIKey `text-embedding-3-small` passes the compatibility contract.
 
 If any gate fails, revise the affected adapter only. Do not add broad fallback stacks.
 
@@ -1196,8 +1110,7 @@ Tasks:
 - [ ] Add persistent volumes for SQLite/files and Neo4j.
 - [ ] Implement SQLite models and initial migrations.
 - [ ] Implement attachment storage abstraction.
-- [ ] Implement Neo4j driver, constraints, vector-index creation, health check, and rebuild skeleton.
-- [ ] Implement graph outbox repository and idempotent operation contracts.
+- [ ] Implement Neo4j driver, constraints, vector-index creation, health check, direct sync functions, and the local rebuild command.
 - [ ] Add local lint, type-check, migration, and test commands.
 
 Exit gate:
@@ -1218,7 +1131,7 @@ Tasks:
 - [ ] Implement per-turn AsyncSqliteSaver lifecycle and checkpoint cleanup.
 - [ ] Build the single LangGraph loop with `ToolNode`, iteration limit, error boundary, and interrupt support.
 - [ ] Implement ShopAIKey `ChatOpenAI` adapter using the verified Phase 0 mode.
-- [ ] Implement domain-focused system prompt.
+- [ ] Implement a conversation-first system prompt with explicit JobAgent tool boundaries.
 - [ ] Implement frontend SSE reducer and base Astryx chat shell.
 - [ ] Render concise tool status through `ChatToolCalls`.
 
@@ -1227,7 +1140,7 @@ Exit gate:
 - A local synthetic tool can run through the full frontend–FastAPI–LangGraph–SSE path.
 - Interrupt/resume survives a backend request boundary.
 - Completed run checkpoints are cleaned while conversation messages remain.
-- Unrelated messages are redirected briefly without tool calls.
+- Greetings and general questions receive natural direct answers without tool calls.
 
 ### Phase 3 — CV, Candidate Profile, and approval workflow
 
@@ -1244,7 +1157,7 @@ Tasks:
 - [ ] Implement atomic file/profile replacement with no history.
 - [ ] Implement sidebar CV upload/view/download state.
 - [ ] Implement Astryx approval card and request-change loop.
-- [ ] Synchronize Candidate/Skill nodes through the outbox.
+- [ ] Synchronize Candidate/Skill nodes directly after profile commit.
 
 Exit gate:
 
@@ -1263,10 +1176,10 @@ Tasks:
 - [ ] Implement JobPost Pydantic extraction and one-repair policy.
 - [ ] Implement full/partial/unscorable classification.
 - [ ] Implement exact and normalized duplicate policy.
-- [ ] Implement skill normalization, provisional creation, and seed aliases.
+- [ ] Implement deterministic skill normalization and seed aliases/relationships.
 - [ ] Implement `save_job` and `query_jobs`.
 - [ ] Generate ShopAIKey job embeddings for scorable active records.
-- [ ] Synchronize Job, Skill, and JobFamily graph data.
+- [ ] Synchronize Job and Skill graph data directly after SQLite persistence.
 - [ ] Add concise Job tool status and saved-job card to chat.
 
 Exit gate:
@@ -1277,29 +1190,25 @@ Exit gate:
 - Supported HTTP/HTTPS URLs can be fetched; unavailable pages fall back to pasted text.
 - Full and partial active jobs are queryable in Neo4j with matching IDs.
 
-### Phase 5 — Matching, explanation, and evaluation
+### Phase 5 — Matching, explanation, and manual acceptance
 
 Tasks:
 
 - [ ] Implement Candidate and Job embedding text builders.
 - [ ] Implement Neo4j top-50 vector retrieval.
-- [ ] Implement direct, alias, and verified-related skill features.
+- [ ] Implement direct, alias, and seed-related skill features.
 - [ ] Implement seniority, experience, location, and work-mode components.
 - [ ] Implement missing-field weight renormalization and quality multiplier.
 - [ ] Implement deterministic score explanation.
 - [ ] Implement `match_jobs` and top-10 response.
-- [ ] Build 150–200 relevance labels and 30-JD extraction labels locally.
-- [ ] Implement embedding benchmark, grid search, and sealed test evaluation.
-- [ ] Run graph ablation and apply the locked disable rule if necessary.
 - [ ] Implement Astryx match cards and collapsible breakdown.
-- [ ] Generate aggregate evaluation report with limitations.
+- [ ] Complete the manual JD acceptance checklist in Section 19.
 
 Exit gate:
 
-- All locked extraction, ranking, tool-selection, and latency thresholds pass.
-- Full hybrid beats semantic-only and skill-only baselines on the held-out set.
-- Graph boost is enabled only if its ablation result passes.
-- Top results expose evidence-backed explanations.
+- Matching unit and integration tests pass locally.
+- The developer confirms representative JD inputs are extracted and ranked plausibly.
+- Top results expose evidence-backed explanations consistent with the stored profile and JD.
 
 ### Phase 6 — Polish and local release
 
@@ -1311,8 +1220,7 @@ Tasks:
 - [ ] Verify graph rebuild from a fresh Neo4j volume.
 - [ ] Verify root `.env` is the only environment file.
 - [ ] Verify no secrets or real data are tracked by Git.
-- [ ] Add README architecture, setup, commands, demo flow, evaluation results, and limitations.
-- [ ] Add a concise model/data card for extraction and matching evaluation.
+- [ ] Add README architecture, setup, commands, demo flow, manual verification checklist, and limitations.
 - [ ] Perform final scope audit against the out-of-scope list.
 
 Exit gate:
@@ -1335,10 +1243,10 @@ Recommended sequence for one intern developer:
 | Phase 2 | 4–6 days |
 | Phase 3 | 3–5 days |
 | Phase 4 | 3–5 days |
-| Phase 5 | 6–9 days, including labeling/evaluation |
+| Phase 5 | 3–5 days |
 | Phase 6 | 2–4 days |
 
-This is approximately 4–6 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
+This is approximately 3–5 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
 ---
 
@@ -1347,6 +1255,7 @@ This is approximately 4–6 weeks part-time. Scope should be reduced, not infras
 JobAgent MVP is done only when all conditions are true:
 
 - The user can upload a PDF CV from sidebar or chat.
+- The user can chat naturally about general topics without triggering JobAgent tools.
 - The Agent creates a validated profile draft.
 - Profile/preference writes require in-chat approval.
 - Only one active CV/profile exists after commit.
@@ -1357,7 +1266,7 @@ JobAgent MVP is done only when all conditions are true:
 - Matching returns top jobs with transparent score breakdown and skill gaps.
 - Tool activity is visible and concise.
 - Failure paths do not report false success.
-- Evaluation thresholds pass and limitations are documented.
+- Automated functional tests pass and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.
 - No Qdrant, OCR, crawler, authentication, multi-agent, Redis, Celery, cloud deployment, or CI has been added.
 
@@ -1365,7 +1274,7 @@ JobAgent MVP is done only when all conditions are true:
 
 ## 28. Future Work — Not MVP Commitments
 
-Only consider these after MVP metrics and reliability pass:
+Only consider these after the MVP demo flow is stable:
 
 - Public job discovery.
 - Application tracking.
@@ -1374,9 +1283,8 @@ Only consider these after MVP metrics and reliability pass:
 - DOCX support.
 - Public cloud deployment and authentication.
 - Qdrant comparison when corpus/retrieval requirements justify it.
-- API reranking when an ablation demonstrates measurable improvement.
-- Alternate embedding models or dimensions when measured retrieval requirements justify a full rebuild.
-- Multiple-candidate evaluation for population-level claims.
+- API reranking if the current ordering is consistently poor in manual use.
+- Alternate embedding models or dimensions if the locked model cannot support the demo reliably.
 
 Future work must not be silently implemented during MVP phases.
 
@@ -1388,7 +1296,7 @@ Evidence is sufficient to begin implementation planning because all material pro
 
 The project remains intentionally narrow:
 
-> One user, one conversation, one active CV, one Agent, seven tools, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, and measurable matching quality.
+> One user, one natural conversation, one active CV, one Agent with job-specific tools, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, and transparent matching behavior.
 
 ---
 
