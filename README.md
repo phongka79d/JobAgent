@@ -1,16 +1,18 @@
 # JobAgent
 
-JobAgent has completed Phase 0 feasibility validation and the first Plan 2
-foundation batch. The repository now contains a pinned, testable backend core and
-a minimal Astryx application shell. Production CV, job, chat, Agent, approval, and
-matching workflows remain out of scope while the rest of Plan 2 is implemented.
+JobAgent has completed Phase 0 feasibility validation and the first two Plan 2
+foundation batches. The repository now contains a pinned backend core, the complete
+SQLite/Alembic source-of-truth schema, and a minimal Astryx application shell.
+Production CV, job, chat, Agent, approval, and matching workflows remain out of
+scope while the rest of Plan 2 is implemented.
 
 ## Repository layout
 
 - `frontend/` - minimal React, TypeScript, Vite, and Astryx 0.1.4 application
   shell with lint, type-check, render-test, and build commands.
 - `backend/` - installable pinned Python application package with one settings
-  boundary and shared UUID/UTC conventions.
+  boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
+  tables, and the explicit Alembic initial migration.
 - `infrastructure/` - local feasibility scripts and future local-service folders.
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
 
@@ -33,6 +35,23 @@ python -m ruff check .
 python -m mypy app
 python -m pytest tests/unit/test_settings.py tests/unit/test_core_conventions.py -q
 ```
+
+## SQLite and migration verification
+
+From `backend/`:
+
+```powershell
+python -m pytest tests/integration/test_database_pragmas.py -q
+python -m pytest tests/integration/test_database_contract.py tests/integration/test_migrations.py -q
+alembic upgrade head
+alembic current
+alembic upgrade head
+```
+
+Alembic owns exactly the nine application tables and seeds only
+`conversation('main')` and `job_preferences('active')`. Runtime code never calls
+`Base.metadata.create_all()`, and checkpoint-like tables remain outside Alembic
+ownership.
 
 ## Astryx verification
 
@@ -80,8 +99,9 @@ must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contrac
 
 ## Phase status
 
-All four Phase 0 batches passed. Plan 2 Batch 1 adds the exact-pinned backend
-foundation, cached root-environment settings, shared UUID/UTC helpers, and the
-minimal neutral Astryx shell. SQLite/Alembic, storage, Neo4j, health, and Compose
-remain in later Plan 2 batches. Phase 0 evidence remains recorded in
-`docs/feasibility/phase_0_report.md` and is not repeated.
+All four Phase 0 batches passed. Plan 2 Batches 1-2 add the exact-pinned backend
+foundation, cached root-environment settings, shared UUID/UTC helpers, minimal
+neutral Astryx shell, async SQLite boundary, all nine application tables, exact
+constraints/indexes/FKs, and idempotent Alembic singleton seeds. Storage, Neo4j,
+health, and Compose remain in later Plan 2 batches. Phase 0 evidence remains
+recorded in `docs/feasibility/phase_0_report.md` and is not repeated.

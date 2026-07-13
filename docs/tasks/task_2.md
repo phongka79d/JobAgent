@@ -270,7 +270,7 @@ LangGraph checkpoints, or public CRUD endpoints.
 
 ### Tasks
 
-- [ ] (02A): Implement the async SQLite session boundary and required connection PRAGMAs
+- [x] (02A): Implement the async SQLite session boundary and required connection PRAGMAs
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.2 Shared database conventions`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.1 Global conventions`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.4 Transaction boundaries`
   - Source Requirements:
     - Own one SQLAlchemy 2 async engine/session factory for
@@ -307,7 +307,7 @@ LangGraph checkpoints, or public CRUD endpoints.
     reproduction without switching database technology.
   - Files: `backend/app/db/base.py`, `backend/app/db/session.py`, `backend/tests/integration/test_database_pragmas.py`
 
-- [ ] (02B): Define the attachment and profile-family SQLAlchemy contracts
+- [x] (02B): Define the attachment and profile-family SQLAlchemy contracts
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.3 Application table ownership`; `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.4 Foreign keys, seeds, and migration ownership`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.2 Application table schemas > #### attachments`, `#### candidate_profile`, `#### profile_drafts`, and `#### job_preferences`
   - Source Requirements:
     - Define exactly `attachments`, `candidate_profile`,
@@ -349,7 +349,7 @@ LangGraph checkpoints, or public CRUD endpoints.
     the unsupported invariant rather than weakening it.
   - Files: `backend/app/db/models/__init__.py`, `backend/app/db/models/attachments.py`, `backend/app/db/models/profiles.py`, `backend/tests/unit/test_attachment_profile_models.py`
 
-- [ ] (02C): Define the exact job-post SQLAlchemy contract
+- [x] (02C): Define the exact job-post SQLAlchemy contract
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.3 Application table ownership`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.2 Application table schemas > #### job_posts`
   - Source Requirements:
     - Define only `job_posts` with the exact columns, status/quality values,
@@ -388,7 +388,7 @@ LangGraph checkpoints, or public CRUD endpoints.
     future service code.
   - Files: `backend/app/db/models/jobs.py`, `backend/tests/unit/test_job_post_model.py`
 
-- [ ] (02D): Define the conversation, message, run, and tool-execution SQLAlchemy contracts
+- [x] (02D): Define the conversation, message, run, and tool-execution SQLAlchemy contracts
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.3 Application table ownership`; `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.4 Foreign keys, seeds, and migration ownership`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.2 Application table schemas > #### conversation`, `#### chat_messages`, `#### agent_runs`, and `#### tool_executions`
   - Source Requirements:
     - Define the four exact chat-family tables with the singleton conversation,
@@ -424,7 +424,7 @@ LangGraph checkpoints, or public CRUD endpoints.
     contract failure instead of adding service or checkpoint behavior.
   - Files: `backend/app/db/models/chat.py`, `backend/tests/unit/test_chat_models.py`
 
-- [ ] (02E): Create the idempotent initial Alembic schema and singleton seeds
+- [x] (02E): Create the idempotent initial Alembic schema and singleton seeds
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.4 Foreign keys, seeds, and migration ownership`; `docs/plans/Plan_2.md > ## 9. Verification & Testing Plan > ### Automated commands`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.3 Foreign-key and deletion rules`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.5 Migration and checkpoint ownership`
   - Source Requirements:
     - Configure Alembic batch mode and create one initial revision that builds
