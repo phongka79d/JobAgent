@@ -1,16 +1,18 @@
-"""Integration tests for attachment repository primitives (pre-API layer).
+"""Integration tests for attachment repositories and CV upload API (Plan 4).
 
-Uses a migrated temporary SQLite file (Alembic head). Covers exact file-hash
-lookup, allowed attachment state transitions, invalid transitions that leave
-state untouched, missing rows, UTC timestamp updates, and constraint-visible
-failures. Higher CV upload routes/services are out of scope for task 01C.
+Repository primitives (01C) plus ``POST /api/attachments/cv`` bounded upload,
+exact-hash lifecycle, interrupt guard, and cleanup (02A). Uses migrated
+temporary SQLite and temporary FILES_DIR.
 """
 
 from __future__ import annotations
 
 import inspect
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import pytest
 from app.core.ids import new_uuid
@@ -21,17 +23,34 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.session import build_async_engine
+from app.db.session import build_async_engine, get_session_factory
+from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
+from app.repositories import chat_messages as messages_repo
+from app.repositories import profiles as profile_repo
 from app.repositories.attachments import (
     AttachmentNotFoundError,
     AttachmentRepositoryError,
     InvalidAttachmentTransitionError,
 )
-from sqlalchemy import select, text
+from app.schemas.attachments import CvUploadResponse
+from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from tests.support.db_migration import run_async, session_factory
+from tests.support.db_migration import (
+    cleanup_isolated_sqlite,
+    run_async,
+    session_factory,
+)
+from tests.support.health import (
+    FakeDriver,
+    health_client,
+    install_fake_driver,
+    prepare_health_env,
+    public_api_routes,
+)
 
 
 @pytest.fixture
@@ -635,3 +654,363 @@ def test_updated_at_not_advanced_when_transition_rejected(
             await engine.dispose()
 
     run_async(_body())
+
+# ---------------------------------------------------------------------------
+# POST /api/attachments/cv — bounded upload / exact-hash lifecycle (02A)
+# ---------------------------------------------------------------------------
+
+CV_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "cv"
+DIGITAL_CV = CV_FIXTURES / "digital_cv_01.pdf"
+DIGITAL_CV_B = CV_FIXTURES / "digital_cv_02.pdf"
+
+
+def _minimal_pdf_bytes(pages: int = 1) -> bytes:
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=72, height=72)
+    buf = BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def cv_api_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[tuple[Path, Path, FakeDriver]]:
+    db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    fake = install_fake_driver(monkeypatch)
+    yield db_path, files_dir, fake
+    cleanup_isolated_sqlite()
+
+
+def _upload(
+    client: TestClient,
+    data: bytes,
+    *,
+    filename: str = "resume.pdf",
+    content_type: str = "application/pdf",
+) -> Any:
+    return client.post(
+        "/api/attachments/cv",
+        files={"file": (filename, data, content_type)},
+    )
+
+
+def _attachment_count() -> int:
+    async def _body() -> int:
+        factory = get_session_factory()
+        async with factory() as session:
+            n = (
+                await session.execute(select(func.count()).select_from(Attachment))
+            ).scalar_one()
+            return int(n)
+
+    return run_async(_body())
+
+
+def _message_count() -> int:
+    async def _body() -> int:
+        from app.db.models.chat import ChatMessage
+
+        factory = get_session_factory()
+        async with factory() as session:
+            n = (
+                await session.execute(select(func.count()).select_from(ChatMessage))
+            ).scalar_one()
+            return int(n)
+
+    return run_async(_body())
+
+
+def test_upload_new_digital_cv_stages_row_and_uuid_file(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db_path, files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        response = _upload(client, payload, filename="My CV (final).pdf")
+    assert response.status_code == 200, response.text
+    body = CvUploadResponse.model_validate(response.json())
+    assert body.outcome == "new"
+    assert body.attachment.state == ATTACHMENT_STATE_STAGED
+    assert body.attachment.mime_type == ATTACHMENT_MIME_TYPE_PDF
+    assert body.attachment.size_bytes == len(payload)
+    assert body.attachment.page_count == 1
+    assert body.attachment.failure_code is None
+    assert body.attachment.original_name == "My CV (final).pdf"
+    assert "storage_path" not in response.json()["attachment"]
+    assert "storage_path" not in response.text
+    final = files_dir / body.attachment.id
+    assert final.is_file()
+    assert final.read_bytes() == payload
+    leftovers = [p.name for p in files_dir.iterdir() if p.name.startswith(".upload.")]
+    assert leftovers == []
+    assert _attachment_count() == 1
+
+
+def test_upload_rejects_interrupted_before_persist(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+
+    async def _seed_interrupted() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            user = await messages_repo.insert_message(
+                session, role="user", content="approve please"
+            )
+            run = await runs_repo.create_run(session, user_message_id=user.id)
+            await runs_repo.interrupt_run(
+                session,
+                run.id,
+                pending_approval_json={
+                    "kind": "profile_commit",
+                    "allowed_actions": ["save_profile", "request_changes"],
+                    "card": {},
+                },
+            )
+            await session.commit()
+
+    run_async(_seed_interrupted())
+    before_msg = _message_count()
+    before_att = _attachment_count()
+    before_files = list(files_dir.iterdir()) if files_dir.exists() else []
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        response = _upload(client, payload)
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "APPROVAL_ACTION_REQUIRED"
+    assert _message_count() == before_msg
+    assert _attachment_count() == before_att
+    after_files = list(files_dir.iterdir()) if files_dir.exists() else []
+    assert after_files == before_files
+
+
+def test_upload_rejects_invalid_mime_empty_magic_malformed_pages(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    with health_client() as client:
+        r = _upload(client, DIGITAL_CV.read_bytes(), content_type="text/plain")
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "INVALID_MIME"
+
+        r = _upload(client, b"not-a-pdf-at-all", content_type="application/pdf")
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "INVALID_PDF_MAGIC"
+
+        r = _upload(client, b"", content_type="application/pdf")
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "EMPTY_UPLOAD"
+
+        r = _upload(
+            client,
+            b"%PDF-1.4\nthis is not a valid pdf structure",
+            content_type="application/pdf",
+        )
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "MALFORMED_PDF"
+
+        r = _upload(client, _minimal_pdf_bytes(11), content_type="application/pdf")
+        assert r.status_code == 422
+        assert r.json()["detail"]["code"] == "PDF_TOO_MANY_PAGES"
+
+    assert _attachment_count() == 0
+    if files_dir.exists():
+        uuidish = [
+            p
+            for p in files_dir.iterdir()
+            if len(p.name) == 36 and p.name.count("-") == 4
+        ]
+        assert uuidish == []
+        temps = [
+            p
+            for p in files_dir.iterdir()
+            if ".upload." in p.name or p.name.endswith(".tmp")
+        ]
+        assert temps == []
+
+
+def test_upload_rejects_oversized(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    monkeypatch.setenv("MAX_PDF_SIZE_MB", "1")
+    from app.core.settings import clear_settings_cache
+
+    clear_settings_cache()
+    pad = b"%PDF-1.4\n" + (b"x" * (1024 * 1024 + 100))
+    with health_client() as client:
+        r = _upload(client, pad, content_type="application/pdf")
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "PDF_TOO_LARGE"
+    assert _attachment_count() == 0
+    if files_dir.exists():
+        assert list(files_dir.iterdir()) == []
+
+
+def test_exact_hash_active_staged_failed_and_new(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    payload_a = DIGITAL_CV.read_bytes()
+    payload_b = DIGITAL_CV_B.read_bytes()
+    assert payload_a != payload_b
+
+    with health_client() as client:
+        r1 = _upload(client, payload_a, filename="a.pdf")
+        assert r1.status_code == 200
+        first = CvUploadResponse.model_validate(r1.json())
+        assert first.outcome == "new"
+        att_a = first.attachment.id
+
+        r2 = _upload(client, payload_a, filename="a-again.pdf")
+        assert r2.status_code == 200
+        second = CvUploadResponse.model_validate(r2.json())
+        assert second.outcome == "existing_staged"
+        assert second.attachment.id == att_a
+        assert _attachment_count() == 1
+
+        r3 = _upload(client, payload_b, filename="b.pdf")
+        assert r3.status_code == 200
+        third = CvUploadResponse.model_validate(r3.json())
+        assert third.outcome == "new"
+        att_b = third.attachment.id
+        assert att_b != att_a
+        assert _attachment_count() == 2
+        assert (files_dir / att_a).is_file()
+        assert (files_dir / att_b).is_file()
+
+    async def _fail_a() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.mark_failed(
+                session, att_a, failure_code="NO_EXTRACTABLE_TEXT"
+            )
+            await session.commit()
+
+    run_async(_fail_a())
+
+    with health_client() as client:
+        r4 = _upload(client, payload_a, filename="a-retry.pdf")
+        assert r4.status_code == 200
+        fourth = CvUploadResponse.model_validate(r4.json())
+        assert fourth.outcome == "retry"
+        assert fourth.attachment.id == att_a
+        assert fourth.attachment.state == ATTACHMENT_STATE_STAGED
+        assert fourth.attachment.failure_code is None
+        assert _attachment_count() == 2
+
+    async def _activate_b() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.mark_active(session, att_b, page_count=1)
+            await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=att_b,
+                profile_json={
+                    "summary": "Experienced engineer",
+                    "current_title": "Senior Engineer",
+                    "total_experience_years": 5.0,
+                    "skills": [],
+                    "experiences": [],
+                    "education": [],
+                    "languages": [],
+                    "extraction_confidence": 0.9,
+                },
+            )
+            await session.commit()
+
+    run_async(_activate_b())
+
+    with health_client() as client:
+        r5 = _upload(client, payload_b, filename="b-active.pdf")
+        assert r5.status_code == 200
+        fifth = CvUploadResponse.model_validate(r5.json())
+        assert fifth.outcome == "existing_active"
+        assert fifth.attachment.id == att_b
+        assert fifth.attachment.state == ATTACHMENT_STATE_ACTIVE
+        assert fifth.profile is not None
+        assert fifth.profile.present is True
+        assert fifth.profile.current_title == "Senior Engineer"
+        assert _attachment_count() == 2
+
+
+def test_upload_filename_cannot_escape_or_inject(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    evil = "../../etc/passwd\r\nX-Injected: yes.pdf"
+    with health_client() as client:
+        r = _upload(client, DIGITAL_CV.read_bytes(), filename=evil)
+    assert r.status_code == 200
+    body = CvUploadResponse.model_validate(r.json())
+    assert ".." not in body.attachment.original_name
+    assert "/" not in body.attachment.original_name
+    assert "\\" not in body.attachment.original_name
+    assert "\r" not in body.attachment.original_name
+    assert "\n" not in body.attachment.original_name
+    assert (files_dir / body.attachment.id).is_file()
+    assert not (files_dir / "etc").exists()
+
+
+def test_upload_row_failure_cleans_uuid_file(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("simulated row insert failure")
+
+    import app.services.cv_upload as cv_mod
+
+    monkeypatch.setattr(cv_mod.att_repo, "create_staged", boom)
+
+    with health_client() as client:
+        # Uncaught service failure surfaces as server exception after cleanup.
+        with pytest.raises(RuntimeError, match="simulated row insert failure"):
+            _upload(client, DIGITAL_CV.read_bytes())
+
+    assert _attachment_count() == 0
+    if files_dir.exists():
+        uuid_files = [
+            p for p in files_dir.iterdir() if len(p.name) == 36 and "-" in p.name
+        ]
+        assert uuid_files == []
+
+
+def test_route_is_transport_thin_and_registered(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    src = (
+        Path(__file__).resolve().parents[2] / "app" / "api" / "attachments.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in (
+        "PdfReader",
+        "sha256",
+        "neo4j",
+        "ChatOpenAI",
+        "StateGraph",
+        "AsyncSqliteSaver",
+        "upsert_active_profile",
+        "write_bytes",
+    ):
+        assert forbidden not in src, f"route leaked {forbidden!r}"
+    assert "upload_cv_from_upload_file" in src
+    assert "UploadFile" in src
+
+    with health_client() as client:
+        routes = public_api_routes(client.app)
+    assert ("POST", "/api/attachments/cv") in routes
+
+
+def test_sanitize_original_name_unit() -> None:
+    from app.services.cv_upload import sanitize_original_name
+
+    assert sanitize_original_name(None) == "cv.pdf"
+    assert sanitize_original_name("") == "cv.pdf"
+    assert sanitize_original_name("../../x.pdf") == "x.pdf"
+    assert "\n" not in sanitize_original_name("a\r\nb.pdf")

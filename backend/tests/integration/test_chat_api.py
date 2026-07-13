@@ -153,7 +153,7 @@ def _client_with_fake(
 # ---------------------------------------------------------------------------
 
 
-def test_public_routes_are_health_plus_three_chat(
+def test_public_routes_are_health_chat_and_cv_upload(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     with health_client() as client:
@@ -161,6 +161,7 @@ def test_public_routes_are_health_plus_three_chat(
     assert routes == sorted(
         [
             ("GET", "/api/health"),
+            ("POST", "/api/attachments/cv"),
             ("GET", "/api/chat/history"),
             ("POST", "/api/chat/turns"),
             ("POST", "/api/chat/runs/{run_id}/resume"),

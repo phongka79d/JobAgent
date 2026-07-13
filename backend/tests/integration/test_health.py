@@ -222,26 +222,28 @@ def test_partial_startup_failure_cleans_up_resources(
     assert session_mod._session_factory is None
 
 
-def test_only_public_functional_routes_are_health_and_chat(
+def test_only_public_functional_routes_are_health_chat_and_cv_upload(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Plan 3 public surface: health + history/turn/resume only."""
+    """Public surface after 02A: health + chat + CV upload (profile reads later)."""
     with health_client() as client:
         assert sorted(public_api_routes(client.app)) == sorted(
             [
                 ("GET", "/api/health"),
+                ("POST", "/api/attachments/cv"),
                 ("GET", "/api/chat/history"),
                 ("POST", "/api/chat/turns"),
                 ("POST", "/api/chat/runs/{run_id}/resume"),
             ]
         )
         for path in (
-            "/api/attachments/cv",
             "/api/profile",
             "/api/jobs",
         ):
             assert client.get(path).status_code == 404
             assert client.post(path).status_code == 404
+        # CV upload is POST-only (GET is method-not-allowed, not a read route).
+        assert client.get("/api/attachments/cv").status_code == 405
 
 
 def test_source_tree_has_no_other_route_decorators() -> None:
@@ -252,6 +254,8 @@ def test_source_tree_has_no_other_route_decorators() -> None:
     )
     assert matches == sorted(
         [
+            "attachments.py:post_cv_upload:router.post("
+            "'/attachments/cv', response_model=CvUploadResponse)",
             "health.py:get_health:router.get("
             "'/health', response_model=HealthResponse)",
             history_dec,

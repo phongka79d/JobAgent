@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,11 @@ _FORBIDDEN_IMPORT_PREFIXES = (
     "app.api",
     "app.graph",
     "fastapi",
+)
+
+# UUID v4 pattern used only to assert temps are not UUID finals.
+_UUID_V4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 
 
@@ -258,6 +264,48 @@ def test_delete_os_error_returns_false(
 def test_write_bytes_rejects_non_bytes(store: AttachmentStorage) -> None:
     with pytest.raises(TypeError):
         store.write_bytes(new_uuid(), "not-bytes")  # type: ignore[arg-type]
+
+
+def test_create_temp_promote_and_discard(
+    store: AttachmentStorage, files_root: Path
+) -> None:
+    """Streaming temp is never a UUID path; promote is atomic; discard cleans."""
+    temp = store.create_temp_file()
+    assert temp.is_file()
+    assert temp.parent == files_root.resolve() or temp.parent.resolve() == files_root.resolve()
+    assert not _UUID_V4_RE.fullmatch(temp.name)
+    temp.write_bytes(b"%PDF-1.4 streamed")
+    attachment_id = new_uuid()
+    relative = store.promote_temp(temp, attachment_id)
+    assert relative == attachment_id
+    assert not temp.exists()
+    final = files_root / attachment_id
+    assert final.is_file()
+    assert final.read_bytes() == b"%PDF-1.4 streamed"
+
+    orphan = store.create_temp_file()
+    orphan.write_bytes(b"to-discard")
+    store.discard_temp(orphan)
+    assert not orphan.exists()
+    # UUID final untouched by discard of unrelated temp.
+    assert final.is_file()
+
+
+def test_promote_failed_leaves_no_final(
+    store: AttachmentStorage, files_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    temp = store.create_temp_file()
+    temp.write_bytes(b"data")
+    attachment_id = new_uuid()
+    final = files_root / attachment_id
+
+    def failing_replace(src: Any, dst: Any) -> None:
+        raise OSError("simulated promote failure")
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+    with pytest.raises(OSError, match="simulated promote failure"):
+        store.promote_temp(temp, attachment_id)
+    assert not final.exists()
 
 
 def test_module_has_no_parser_orm_or_service_imports() -> None:

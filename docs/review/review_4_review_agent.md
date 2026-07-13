@@ -524,3 +524,370 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 02A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Staged CV and Profile Proposal Pipeline
+- Task ID: 02A
+- Task title: Implement bounded CV upload, exact-hash lifecycle, and the shared upload endpoint
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes (uncommitted working tree; no 02A commit yet)
+- changed files from git:
+  - `M backend/app/main.py`
+  - `M backend/app/repositories/attachments.py`
+  - `M backend/app/storage/attachments.py`
+  - `M backend/pyproject.toml`
+  - `M backend/tests/integration/test_chat_api.py`
+  - `M backend/tests/integration/test_cv_api.py`
+  - `M backend/tests/integration/test_health.py`
+  - `M backend/tests/unit/test_storage.py`
+  - `M docs/reports/report_4_execute_agent.md`
+  - `?? backend/app/api/attachments.py`
+  - `?? backend/app/schemas/attachments.py`
+  - `?? backend/app/services/cv_upload.py`
+- recent commits: HEAD is P4B1 Complete; 02A work is uncommitted and matches A1 file list
+
+## Files Reviewed
+- `backend/app/services/cv_upload.py`: in scope - interrupt guard before read_chunk; stream+SHA-256 to storage temp; MIME/magic/size/pages; exact-hash active/staged/failed-retry/new; discard temp on reuse; promote then create_staged with matching UUID; cleanup final file on row failure; sanitize display name only
+- `backend/app/api/attachments.py`: in scope - thin POST /attachments/cv; UploadFile + map CvUploadError to HTTP; no provider/graph/checkpoint/Neo4j/active-profile write
+- `backend/app/schemas/attachments.py`: in scope - AttachmentPublic / CvUploadResponse / outcome literals; no storage_path
+- `backend/app/storage/attachments.py`: in scope - create_temp_file / promote_temp / discard_temp; UUID finals only after promote
+- `backend/app/repositories/attachments.py`: in scope - optional attachment_id on create_staged; reuse of retry_as_staged/get_by_file_hash
+- `backend/app/main.py`: in scope - register attachments_router under /api
+- `backend/pyproject.toml`: in scope - python-multipart==0.0.30 direct pin
+- `backend/tests/integration/test_cv_api.py`: in scope - guard/MIME/magic/empty/size/pages/hash branches/filename/cleanup/thin-route tests
+- `backend/tests/unit/test_storage.py`: in scope (required validation) - temp/promote/discard and promote-failure no final
+- `backend/tests/integration/test_health.py`: questionable-but-justified - public route inventory + decorator inventory for new POST; not fake work
+- `backend/tests/integration/test_chat_api.py`: questionable-but-justified - same public-route inventory update only
+
+## Source Requirements Checked
+- Plan_4 §7.3 order: guard → stream/hash/size → magic → pypdf pages → hash branches → leave other staged intact (MIME checked early before stream; still before final UUID/row; improves no-artifact property)
+- Master §10.1 hash policy and §14.1 APPROVAL_ACTION_REQUIRED on upload while interrupted
+- Shared endpoint for sidebar/chat; response compact metadata only
+
+## Implementation Reality
+- Real streaming hash, real pypdf parse_page_count, real repository transitions, real atomic promote
+- Not stubbed; tests exercise live TestClient + migrated SQLite + temp FILES_DIR
+
+## Hardcoding Review
+- No hardcoded success hashes/IDs; outcomes driven by DB state and content hash
+- Sanitizer and error codes are fixed stable application codes as required
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_cv_api.py tests/unit/test_storage.py tests/unit/test_pdf_extraction.py -q`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (all green; one pre-existing pdf extraction skip)
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `python -m ruff check app/api/attachments.py app/schemas/attachments.py app/services/cv_upload.py app/storage/attachments.py app/repositories/attachments.py tests/integration/test_cv_api.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (ruff All checks passed; mypy Success: no issues found in 57 source files)
+- Status: passed
+
+- Command/check: workspace search `APPROVAL_ACTION_REQUIRED|UploadFile|request.stream|MAX_PDF|%PDF-|sha256|write_bytes|temp|delete(` under backend/app and test_cv_api
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (guard/code in service+route; UploadFile only in thin route; streaming hash+temp lifecycle in service/storage; MAX_PDF_* from settings; cleanup via discard_temp/delete)
+- Status: passed
+
+## Acceptance Review
+- Interrupted approval → APPROVAL_ACTION_REQUIRED, no read/persist artifacts: satisfied (test_upload_rejects_interrupted_before_persist)
+- Unsupported/empty/oversized/malformed/over-page leave no final file/row: satisfied
+- Every hash branch existing/retry/new without duplicates; other staged intact: satisfied
+- UUID-only storage paths; safe display filenames; no storage_path in public body: satisfied
+- Route validation/delegation only: satisfied
+- Status: satisfied
+- Evidence: source read + git diff + A2 validation reruns
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Task Files list omits `test_health.py` / `test_chat_api.py` / `test_storage.py`; A1 + inventory necessity justify the small route-surface and required unit-test updates. Not material churn.
+- Plan §7.3 lists MIME after stream; implementation validates MIME before stream. Behavior remains correct and stricter on no-temp for bad MIME.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- Out-of-scope route inventory files were disclosed by A1
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 02B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Staged CV and Profile Proposal Pipeline
+- Task ID: 02B
+- Task title: Implement structured CV extraction and propose_profile_from_cv
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes (uncommitted working tree; no 02B commit yet)
+- changed files from git (02B-scoped):
+  - `?? backend/app/services/profile_extraction.py`
+  - `?? backend/app/services/profile_drafts.py`
+  - `?? backend/app/tools/profile.py`
+  - `?? backend/tests/unit/test_profile_extraction.py`
+  - `M backend/tests/integration/test_profile_approval.py` (+02B proposal cases)
+- working tree also contains Batch02 02A files (prior accepted task); not re-reviewed as 02B scope
+- recent commits: HEAD is P4B1 Complete; 02B work is uncommitted and matches A1 file list
+
+## Files Reviewed
+- `backend/app/services/profile_extraction.py`: in scope - pypdf via pdf_extraction; ShopAIKeyStructuredProfileInvoker with with_structured_output(method=json_schema, strict=True); at most one schema repair; at most one timeout/rate-limit retry; SkillNormalizer; empty JobPreferences; compact summaries without raw CV text; stable failure codes
+- `backend/app/services/profile_drafts.py`: in scope - active reuse without extraction; staged-backing-current-draft reuse; new staged extract then validated ProfileDraftPayload upsert; prior unreferenced staged delete + best-effort file cleanup only after success; failures mark same attachment failed and retain file; no active profile/preferences writes
+- `backend/app/tools/profile.py`: in scope - build_propose_profile_from_cv_tool factory; compact ToolResult; arguments_summary IDs-only; not registered in production_registry
+- `backend/tests/unit/test_profile_extraction.py`: in scope - fake invoker coverage for valid extract, no-text, one repair, exhausted repair, timeout/rate retry, exhausted provider, active/draft reuse, replacement cleanup, compact ToolResult, no production registration
+- `backend/tests/integration/test_profile_approval.py`: in scope - 02B draft create/replace and NO_EXTRACTABLE_TEXT failed retention cases added
+
+## Source Requirements Checked
+- Plan_4 �7.4: layout/normal text quality rule, gpt-4o-mini structured extraction, validate, at most one schema-repair
+- Plan_4 �7.5 / Master �13.1: propose_profile_from_cv compact tool boundary
+- Master �10.2 processing: failure retains file; replacement cleans prior unreferenced staged
+- phase_0 / adapter: locked ShopAIKey + strict_json_schema strategy reused; no second client/model
+- Fake-backed only; no live provider required for acceptance
+
+## Implementation Reality
+- Real extraction orchestration with injectable StructuredProfileInvoker protocol
+- Production invoker wraps real ChatOpenAI.with_structured_output; tests use FakeStructuredInvoker / scripted invoker (appropriate mocks)
+- Real repositories, storage, SkillNormalizer, ProfileDraftPayload validation
+- Not stubbed success paths; exhausted failures never claim ok=true
+
+## Hardcoding Review
+- No hardcoded success for fixtures only; behavior driven by invoker script + PDF text quality + DB state
+- Stable application failure codes are fixed constants as required (not overfitting)
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_profile_extraction.py tests/unit/test_profile_schemas.py tests/unit/test_skill_normalization.py tests/integration/test_profile_approval.py -q`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (full selected suite green)
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `python -m ruff check app/services/profile_extraction.py app/services/profile_drafts.py app/tools/profile.py tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (ruff All checks passed; mypy Success: no issues found in 60 source files)
+- Status: passed
+
+- Command/check: search `raw.*(cv|pdf|text)|extract_text|with_structured_output|repair|retry|draft_json|arguments_summary_json|ToolResult` under backend/app and backend/tests (workspace grep; shell rg unavailable)
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (with_structured_output + bounded repair/retry in profile_extraction.py; draft_json validated before upsert; arguments_summary_for_propose_cv IDs-only; ToolResult compact data; raw CV text only in transient prompt builder; production_registry empty)
+- Status: passed
+
+## Acceptance Review
+- Valid digital CV ? one validated normalized current draft; active/current-draft reuse without provider: satisfied
+- At most one schema repair; at most one timeout/rate retry; exhausted failure never success: satisfied
+- Failed extraction leaves same attachment/file failed with stable code; successful replacement removes only prior unreferenced staged + best-effort file: satisfied
+- Raw CV text absent from ToolResult/compact summaries; IDs/summaries only: satisfied
+- No active profile/preferences mutation; no production registration: satisfied
+- Status: satisfied
+- Evidence: source read + git evidence + A2 validation reruns
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Nested ExperienceItem/EducationItem/LanguageItem from domain schemas are reused in the LLM-facing ExtractedCandidateProfile (extra=forbid). Skill confidence bounds are clamped post-extract; A1 noted avoiding Field constraints on free-text skill rows. Acceptable for Batch02 fake path; live strict-schema edge cases remain environment-dependent (task allows fake-backed acceptance).
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- Scope limited to the five allowed files; sibling 02A working-tree changes pre-existed and are out of 02B review
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 02C
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Staged CV and Profile Proposal Pipeline
+- Task ID: 02C
+- Task title: Implement correction-preserving propose_profile_update for profile and preferences
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes (uncommitted working tree; no 02C-only commit yet)
+- changed files from git (02C-scoped):
+  - ?? backend/app/services/profile_drafts.py (extended with propose_profile_update; also holds prior 02B propose_from_cv)
+  - ?? backend/app/tools/profile.py (extended with build_propose_profile_update_tool)
+  - M backend/tests/integration/test_profile_approval.py (+02C update/correction/exclusion/rollback cases)
+- working tree also contains Batch02 02A/02B files (prior accepted tasks); not re-reviewed as 02C scope
+- recent commits: HEAD is P4B1 Complete; Batch02 work remains uncommitted and matches A1 file list for 02C extensions
+
+## Files Reviewed
+- ackend/app/services/profile_drafts.py: in scope - propose_profile_update loads current draft or active profile+preferences copy; merges profile/preference patches; applies skill_corrections with source=user_correction; re-asserts base exclusions unless explicit excluded=false; validates full ProfileDraftPayload before upsert_current_draft only; never calls upsert_active_profile / upsert_job_preferences
+- ackend/app/tools/profile.py: in scope - build_propose_profile_update_tool; compact ToolResult; arguments_summary keys/counts only; not registered in production_registry; no separate preference tool
+- ackend/tests/integration/test_profile_approval.py: in scope - current-draft update, active-context copy, preference-only null source, exclusion survival + re-include, invalid payload rollback, empty/no-context failures, tool/registry hygiene
+
+## Source Requirements Checked
+- Plan_4 7.2 / Master 9.3: explicit corrections use user_correction; excluded=true preserved; same-CV silent re-add blocked via exclusion re-assert
+- Plan_4 7.5 / Master 13.2: one update tool covers profile facts and Job Preferences; draft-only writes; no separate preference tool
+- Singleton draft upsert after full ProfileDraftPayload validation; nullable source_attachment_id (preserve on draft update; null for active-context / preference-only)
+
+## Validations Reviewed
+- Command/check: python -m pytest tests/unit/test_profile_schemas.py tests/unit/test_skill_normalization.py tests/integration/test_profile_approval.py -q
+  - Required: yes
+  - Reported result: passed (70 tests)
+  - Rerun result: passed (70 tests)
+  - Status: passed
+  - Notes: includes 02C update/correction/exclusion/rollback cases
+
+- Command/check: python -m ruff check app/services/profile_drafts.py app/tools/profile.py tests/integration/test_profile_approval.py; python -m mypy app
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 60 source files
+  - Status: passed
+
+- Command/check: search propose_profile_update|preference.*tool|user_correction|excluded|profile_json|preferences_json|draft_json under backend/app and backend/tests
+  - Required: yes
+  - Reported result: passed
+  - Rerun result: verified via repository search (rg unavailable in shell; used workspace grep)
+  - Status: passed
+  - Notes: one propose_profile_update service/tool; draft_json write via upsert_current_draft after parse_profile_draft_payload; no propose_preferences/update_preferences tool; production_registry empty
+
+## Acceptance Review
+- Draft-backed and active-context updates yield one validated current draft with correct nullable source attachment: satisfied
+  - Evidence: test_propose_update_current_draft_profile_and_skills; test_propose_update_active_context_copy; preference-only null source
+- Explicit corrections/exclusions survive repeated updates; invalid changes leave prior draft/active truth unchanged: satisfied
+  - Evidence: test_propose_update_exclusions_survive_repeated_updates; test_propose_update_invalid_payload_leaves_prior_unchanged
+- Compact tool I/O; no raw CV text; no active writes before approval: satisfied
+  - Evidence: compact ToolResult data; active profile/preferences assertions; arguments_summary keys/counts only
+- No separate preference tool or profile write CRUD path: satisfied
+  - Evidence: test_propose_update_tool_compact_and_no_preference_tool; production_registry empty
+
+## Implementation Reality
+- Real merge/validate/upsert path; not stubbed; SkillNormalizer used for corrections; full ProfileDraftPayload validation before write
+
+## Hardcoding Review
+- No hardcoded gold answers or fixture-only success paths in production code
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- Tool schema omits explicit draft_id argument and auto-selects current draft vs active context (singleton semantics). Aligns with Plan_4 singleton draft and task acceptance; Master_plan wording mentions draft_id or active context as conceptual input.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- Scope limited to the three allowed files; sibling 02A/02B working-tree changes pre-existed and are out of 02C review
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None

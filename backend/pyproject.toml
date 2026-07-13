@@ -15,6 +15,8 @@ dependencies = [
     # Phase 1 / Plan 2 runtime (Phase 0 intended versions)
     "pydantic-settings==2.14.2",
     "fastapi==0.139.0",
+    # FastAPI multipart UploadFile (Plan 4 CV upload); exact installed pin.
+    "python-multipart==0.0.30",
     "uvicorn==0.51.0",
     "sqlalchemy==2.0.51",
     "aiosqlite==0.22.1",

@@ -57,6 +57,66 @@ class AttachmentStorage:
         self._assert_under_root(candidate)
         return candidate
 
+    def create_temp_file(self) -> Path:
+        """Create an empty temporary file under the storage root for streaming.
+
+        Callers stream validated bytes into this path, then either
+        :meth:`promote_temp` (new UUID final) or :meth:`discard_temp`. The
+        temporary name is never a UUID final path, so partial streams are never
+        visible as attachment files.
+        """
+        self.ensure_root()
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=".upload.",
+            suffix=".tmp",
+            dir=str(self._root),
+        )
+        try:
+            os.close(fd)
+        except OSError:
+            self._best_effort_unlink(Path(tmp_name))
+            raise
+        return Path(tmp_name)
+
+    def promote_temp(self, temp_path: Path, attachment_id: str) -> str:
+        """Atomically move a completed temp file onto the UUID-derived path.
+
+        Returns the database-facing relative path. On failure the temp sibling
+        is cleaned best-effort and no partial final file is left behind when
+        replace did not succeed.
+        """
+        if not isinstance(temp_path, Path):
+            raise TypeError("temp_path must be a Path")
+        relative = self.relative_path_for(attachment_id)
+        self.ensure_root()
+        final_path = self.resolve_path(relative)
+        temp_resolved = temp_path.expanduser().resolve()
+        self._assert_under_root(temp_resolved)
+        if not temp_resolved.is_file():
+            raise FileNotFoundError(f"temp file not found: {temp_path}")
+        try:
+            os.replace(temp_resolved, final_path)
+        except Exception:
+            self._best_effort_unlink(temp_resolved)
+            # If replace failed, ensure no half-written final if platform left one.
+            if final_path.exists() and not final_path.is_file():
+                self._best_effort_unlink(final_path)
+            raise
+        return relative
+
+    def discard_temp(self, temp_path: Path | None) -> None:
+        """Best-effort delete of a streaming temporary file under the root."""
+        if temp_path is None:
+            return
+        try:
+            resolved = temp_path.expanduser().resolve()
+            self._assert_under_root(resolved)
+        except (OSError, PathEscapeError, ValueError):
+            # Still attempt unlink of the original path when resolution fails.
+            self._best_effort_unlink(temp_path if isinstance(temp_path, Path) else None)
+            return
+        self._best_effort_unlink(resolved)
+
     def write_bytes(self, attachment_id: str, data: bytes) -> str:
         """Atomically write ``data`` and return the relative storage path.
 

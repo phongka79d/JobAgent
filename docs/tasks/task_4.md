@@ -399,7 +399,7 @@ terminalize `commit_profile_draft`, sync Neo4j, expose profile reads, or add UI.
 
 ### Tasks
 
-- [ ] (02A): Implement bounded CV upload, exact-hash lifecycle, and the shared upload endpoint
+- [x] (02A): Implement bounded CV upload, exact-hash lifecycle, and the shared upload endpoint
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.3 Upload validation and exact-hash state handling`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.8 API and frontend behavior`; `docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.1 Upload`; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary > ### 14.1 API rules`
   - Source Requirements:
     - Reject an interrupted approval with `APPROVAL_ACTION_REQUIRED` before the
@@ -450,7 +450,7 @@ terminalize `commit_profile_draft`, sync Neo4j, expose profile reads, or add UI.
   - Blocked Condition: None.
   - Files: `backend/pyproject.toml` only if declaring multipart, `backend/app/storage/attachments.py`, `backend/app/schemas/attachments.py`, `backend/app/repositories/attachments.py`, `backend/app/services/cv_upload.py`, `backend/app/api/attachments.py`, `backend/app/main.py`, `backend/tests/integration/test_cv_api.py`
 
-- [ ] (02B): Implement structured CV extraction and `propose_profile_from_cv`
+- [x] (02B): Implement structured CV extraction and `propose_profile_from_cv`
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.4 PDF/profile extraction`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.5 Tool contracts and authorization`; `docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.2 Processing`; `docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.1 propose_profile_from_cv`; `docs/feasibility/phase_0_report.md > ## ShopAIKey chat and embedding gate`
   - Source Requirements:
     - Active attachment returns the approved profile without extraction/draft;
@@ -510,7 +510,7 @@ terminalize `commit_profile_draft`, sync Neo4j, expose profile reads, or add UI.
     unlimited/hidden fallback behavior.
   - Files: `backend/app/services/profile_extraction.py`, `backend/app/services/profile_drafts.py`, `backend/app/tools/profile.py`, `backend/tests/unit/test_profile_extraction.py`, `backend/tests/integration/test_profile_approval.py`
 
-- [ ] (02C): Implement correction-preserving `propose_profile_update` for profile and preferences
+- [x] (02C): Implement correction-preserving `propose_profile_update` for profile and preferences
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.2 Skill normalization ownership`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.5 Tool contracts and authorization`; `docs/plans/Master_plan.md > ## 9. Skill Normalization > ### 9.3 User corrections`; `docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.2 propose_profile_update`
   - Source Requirements:
     - Apply requested profile and/or preference changes to the current draft or

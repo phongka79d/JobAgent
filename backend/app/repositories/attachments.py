@@ -88,11 +88,14 @@ async def create_staged(
     storage_path: str,
     page_count: int | None = None,
     mime_type: str = ATTACHMENT_MIME_TYPE_PDF,
+    attachment_id: str | None = None,
 ) -> Attachment:
     """Insert one ``staged`` attachment row with optional *page_count*.
 
-    Does not validate business rules beyond what the ORM/CHECK constraints
-    enforce at flush. Does not finalize the caller's unit of work.
+    When *attachment_id* is provided it is used as the primary key so callers
+    can finalize a UUID-derived storage path before insert. Does not validate
+    business rules beyond what the ORM/CHECK constraints enforce at flush.
+    Does not finalize the caller's unit of work.
     """
     if not isinstance(file_hash, str) or file_hash.strip() == "":
         raise AttachmentRepositoryError("file_hash must be a non-empty string")
@@ -108,17 +111,36 @@ async def create_staged(
         raise AttachmentRepositoryError("size_bytes must be > 0")
     if page_count is not None and page_count <= 0:
         raise AttachmentRepositoryError("page_count must be > 0 when set")
+    if attachment_id is not None and (
+        not isinstance(attachment_id, str) or attachment_id.strip() == ""
+    ):
+        raise AttachmentRepositoryError(
+            "attachment_id must be a non-empty string when set"
+        )
 
-    row = Attachment(
-        file_hash=file_hash,
-        original_name=original_name,
-        mime_type=mime_type,
-        size_bytes=size_bytes,
-        page_count=page_count,
-        storage_path=storage_path,
-        state=ATTACHMENT_STATE_STAGED,
-        failure_code=None,
-    )
+    if attachment_id is not None:
+        row = Attachment(
+            id=attachment_id,
+            file_hash=file_hash,
+            original_name=original_name,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            page_count=page_count,
+            storage_path=storage_path,
+            state=ATTACHMENT_STATE_STAGED,
+            failure_code=None,
+        )
+    else:
+        row = Attachment(
+            file_hash=file_hash,
+            original_name=original_name,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            page_count=page_count,
+            storage_path=storage_path,
+            state=ATTACHMENT_STATE_STAGED,
+            failure_code=None,
+        )
     session.add(row)
     await session.flush()
     return row
