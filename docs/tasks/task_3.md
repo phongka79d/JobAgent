@@ -354,7 +354,7 @@ application transaction orchestration, production tools, or frontend behavior.
 
 ### Tasks
 
-- [ ] (02A): Define exact Agent state and bounded recent-context loading
+- [x] (02A): Define exact Agent state and bounded recent-context loading
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.4 Agent context and state`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.3 Agent state`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.4 Memory policy`
   - Source Requirements:
     - `AgentState` contains only the nine named fields; conversation is `main`
@@ -393,7 +393,7 @@ application transaction orchestration, production tools, or frontend behavior.
     fields; document the ambiguity and stop rather than defaulting to full history.
   - Files: `backend/app/agent/state.py`, `backend/app/agent/context.py`, `backend/tests/unit/test_agent_context.py`
 
-- [ ] (02B): Implement the verified ShopAIKey ChatOpenAI adapter and conversation-first prompt
+- [x] (02B): Implement the verified ShopAIKey ChatOpenAI adapter and conversation-first prompt
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.5 Graph and model adapter`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.5 Conversation and tool policy`; `docs/plans/Master_plan.md > ## 16. ShopAIKey Integration > ### 16.1 Configuration`; `docs/feasibility/phase_0_report.md > ## ShopAIKey chat and embedding gate`
   - Source Requirements:
     - Build `ChatOpenAI` from the existing masked root settings with the custom
@@ -436,7 +436,7 @@ application transaction orchestration, production tools, or frontend behavior.
     block required task acceptance.
   - Files: `backend/app/adapters/shopaikey_chat.py`, `backend/app/agent/prompt.py`, `backend/tests/unit/test_shopaikey_chat.py`
 
-- [ ] (02C): Build the injected-registry one-decision/one-ToolNode graph with a six-pass guard
+- [x] (02C): Build the injected-registry one-decision/one-ToolNode graph with a six-pass guard
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.5 Graph and model adapter`; `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.4 Agent context and state`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.1 One Agent, one controlled loop`; `docs/plans/Master_plan.md > ## 12. Agent Architecture > ### 12.6 Tool loop limits`
   - Source Requirements:
     - Build exactly one `StateGraph` with one LLM decision node and one

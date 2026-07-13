@@ -1,15 +1,19 @@
 # JobAgent
 
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
-foundation work, and Plan 3 / Master Phase 2 Batch01 (durable chat contracts and
-persistence). The repository contains a pinned backend core (including Phase 2
-LangGraph/LangChain pins), the complete SQLite/Alembic source-of-truth schema,
-validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
-replay and history-hydration services, UUID-rooted attachment storage, Neo4j
-foundation primitives, one health API, a minimal Astryx application shell, and a
-three-service local Docker Compose runtime. Public chat/Agent routes, the Agent
-graph, frontend chat UI, and production CV/job/matching tools remain later Plan 3
-batches or later plans.
+foundation work, Plan 3 / Master Phase 2 Batch01 (durable chat contracts and
+persistence), and Plan 3 Batch02 (controlled single-Agent runtime). The
+repository contains a pinned backend core (including Phase 2 LangGraph/LangChain
+pins), the complete SQLite/Alembic source-of-truth schema, validated
+chat/ToolResult/SSE contracts, message/run/tool repositories, tool replay and
+history-hydration services, bounded Agent state/context, a verified ShopAIKey
+ChatOpenAI adapter and conversation-first prompt, one injected-registry
+decision/ToolNode graph with a six-pass loop guard, UUID-rooted attachment
+storage, Neo4j foundation primitives, one health API, a minimal Astryx
+application shell, and a three-service local Docker Compose runtime. Public
+chat turn/resume/history routes, request-scoped checkpoints, the Astryx chat
+client, and production CV/job/matching tools remain later Plan 3 batches or
+later plans.
 
 ## Repository layout
 
@@ -19,8 +23,9 @@ batches or later plans.
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage,
   Neo4j lifecycle/schema setup, `GET /api/health`, Phase 2 chat/tool/SSE
-  Pydantic contracts, focused chat/run/tool repositories, and history/tool
-  services (no public chat routes yet).
+  Pydantic contracts, focused chat/run/tool repositories, history/tool services,
+  Agent state/context loader, ShopAIKey chat adapter/prompt, empty production
+  tool registry, and one StateGraph factory (no public chat routes yet).
 - `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, and retained
   local feasibility scripts.
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
@@ -168,8 +173,16 @@ Plan 3 / Master Phase 2 Batch01 is complete: exact Phase 2 runtime pins
 `langgraph-checkpoint-sqlite`), validated chat/history/resume, `ToolResult`, and
 seven-event SSE contracts; message and agent-run repositories; durable tool
 transitions with exact `(run_id, tool_call_id)` replay; opaque cursor history
-pagination and durable tool hydration. Remaining Plan 3 batches own the Agent
-graph/adapter, SSE turn/resume endpoints, and Astryx chat client.
+pagination and durable tool hydration.
+
+Plan 3 Batch02 is complete: exact nine-field `AgentState` and prompt-budget
+bounded recent-context loading; verified ShopAIKey `ChatOpenAI` adapter from
+root settings (custom base URL, `gpt-4o-mini`, temperature zero, Phase 0 tool
+mode) with conversation-first prompt; one injected-registry `StateGraph` with a
+single decision node and one `ToolNode`, six-pass tool-loop guard, and empty
+production registry (tests inject fakes only). Remaining Plan 3 batches own
+checkpoint/runner lifecycle, SSE turn/resume/history endpoints, and the Astryx
+chat client.
 
 ## Plan 3 progress and constraints
 
@@ -188,6 +201,11 @@ Plan 3 reuses Plan 2 foundation primitives without duplicating them:
 - Chat persistence (Batch01): contracts under `app/schemas/`, repositories under
   `app/repositories/`, and history/tool services under `app/services/` on the
   existing conversation/run/tool tables (no schema migration).
+- Agent runtime (Batch02): state/context under `app/agent/`, ShopAIKey factory
+  under `app/adapters/shopaikey_chat.py`, empty `production_registry()` under
+  `app/tools/`, and graph factory under `app/agent/graph.py`. Graph nodes do not
+  open DB sessions, call FastAPI, or construct the provider outside the adapter.
+  Normal tests use fakes only; optional live ShopAIKey smoke remains separate.
 
 Plan 3 must not call `create_all()`, alter status vocabulary, add independent
 graph IDs, or introduce production CV/JD/matching tools without a later plan.
@@ -204,3 +222,18 @@ python -m pytest tests/integration/test_chat_persistence.py tests/integration/te
 python -m ruff check app/schemas app/repositories app/services
 python -m mypy app
 ```
+
+## Controlled Agent runtime verification (Batch02)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/unit/test_agent_context.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py -q
+python -m ruff check app/agent app/adapters/shopaikey_chat.py app/tools tests/fakes/fake_chat_model.py tests/unit/test_agent_context.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py
+python -m mypy app
+```
+
+These unit tests use fakes and make no outbound ShopAIKey network calls. Optional
+live reconfirmation remains `python infrastructure/scripts/diagnose_shopaikey.py`
+from the repository root with a user-managed ignored root `.env`.
