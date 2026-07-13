@@ -1,6 +1,6 @@
 # JobAgent Master Plan
 
-**Version:** 1.4
+**Version:** 1.6
 **Date:** 2026-07-13
 **Status:** Ready for implementation after Phase 0 feasibility gates  
 **Project type:** Single-user, local-first AI/NLP portfolio project  
@@ -20,7 +20,7 @@ The system must let the user:
 5. Send a public JD URL or paste JD text.
 6. Let the Agent save every accepted JD input, extract structured fields, normalize skills, and synchronize derived graph data.
 7. Rank saved jobs against the active profile.
-8. Explain matched skills, related skills, missing skills, and non-skill score components.
+8. Explain semantic similarity, matched/related/missing skills, and the simple seniority, experience, location, and work-mode components.
 9. Persist chat history while keeping structured long-term memory focused on the active profile, preferences, corrections, and saved jobs.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
@@ -185,53 +185,224 @@ JobAgent/
 ├── .env.example
 ├── .gitignore
 ├── README.md
-└── JobAgent_Master_Plan.md
+└── docs/
+    └── plans/
+        └── Master_plan.md
 ```
 
-The repository has exactly three top-level working folders: `frontend`, `backend`, and `infrastructure`. Root files hold project-wide configuration and documentation. Automated-test fixtures live under `backend/tests/fixtures/` and use synthetic data. Runtime CV/JD files use Docker volumes and are not stored in the repository.
+The three runtime folders are `frontend`, `backend`, and `infrastructure`; `docs` contains planning and project documentation only. Root files hold project-wide configuration. Automated-test fixtures live under `backend/tests/fixtures/` and use synthetic data. Runtime CV/JD files use Docker volumes and are not stored in the repository.
 
 ---
 
-## 6. SQLite Source-of-Truth Model
+## 6. SQLite Database Contract
 
-### 6.1 Application tables
+### 6.1 Global conventions
 
-| Table | Essential fields | Responsibility |
-|---|---|---|
-| `attachments` | `id`, `file_hash`, `original_name`, `mime_type`, `size_bytes`, `page_count`, `storage_path`, `state`, timestamps | Staged and active CV file metadata |
-| `candidate_profile` | singleton `id`, `active_attachment_id`, `profile_json`, `embedding_model`, timestamps | Current approved Candidate Profile only |
-| `profile_drafts` | `id`, `source_attachment_id`, `draft_json`, `state`, timestamps | Temporary profile/preference proposal awaiting approval |
-| `job_preferences` | singleton `id`, `preferences_json`, timestamps | Target roles, locations, work modes, and target level |
-| `job_posts` | IDs, source, raw content, hashes, normalized keys, extracted fields, status fields, embedding, embedding model, score cache, timestamps | Canonical JD records and ignored duplicate records |
-| `conversation` | singleton `id`, timestamps | One application conversation |
-| `chat_messages` | `id`, `conversation_id`, `role`, `content`, `structured_payload`, timestamps | UI history and application-level conversation record |
-| `agent_runs` | `id`, `message_id`, `state`, `pending_approval`, error, timestamps | One LangGraph run per user turn |
-| `tool_executions` | run/tool IDs, short arguments summary, status, duration, error code, timestamps | Tool observability and debugging |
-| `memory_facts` | `key`, `value_json`, `source`, timestamps | Durable job-related facts not already represented by profile/preferences |
+- Use one SQLite file at `SQLITE_PATH` through SQLAlchemy 2 async sessions and `aiosqlite`.
+- Alembic owns every application table, constraint, and index listed in this section. LangGraph owns only its package-created checkpoint tables.
+- Enable `PRAGMA foreign_keys=ON`, `PRAGMA journal_mode=WAL`, and `PRAGMA busy_timeout=5000` on application connections.
+- Non-singleton entity IDs are lowercase UUID v4 strings stored as `TEXT`.
+- Fixed singleton IDs are `candidate_profile.id='active'`, `profile_drafts.id='current'`, `job_preferences.id='active'`, and `conversation.id='main'`.
+- Store timestamps as timezone-aware UTC `DATETIME` values. Every application table has `created_at` and `updated_at`; the application, not a database trigger, updates them.
+- SQLAlchemy `JSON` values are stored as SQLite text and must pass the corresponding Pydantic model before every write. Do not query inside JSON documents in the MVP.
+- Store enums as `TEXT` with named `CHECK` constraints. Store booleans as SQLite `INTEGER` through SQLAlchemy `Boolean`.
+- Use constraint names `pk_<table>`, `fk_<table>__<column>`, `uq_<table>__<columns>`, `ck_<table>__<rule>`, and index names `ix_<table>__<columns>`.
+- Enforce static enums, scalar ranges, singleton IDs, and simple null-coupling rules with named `CHECK` constraints. Pydantic/application services enforce JSON shape, finite embedding values, configuration-dependent limits, and cross-row invariants.
+- Do not add soft-delete columns, audit-history tables, database triggers, or generic key-value storage.
+- Never hold a SQLite transaction open while calling ShopAIKey, reading a remote URL, writing Neo4j, or streaming an SSE response.
 
-LangGraph checkpoint tables are created by `langgraph-checkpoint-sqlite` in the same SQLite file. They are short-lived and keyed by `agent_run.id`.
+### 6.2 Application table schemas
 
-### 6.2 Profile storage rule
+#### `attachments`
 
-- The approved profile is a validated Pydantic JSON document stored in the singleton `candidate_profile` row.
-- No historical profile snapshots are retained.
-- A new CV never overwrites the active profile before approval.
-- After approval, the transaction replaces the active profile and preferences, promotes the new file, deletes the previous file, and deletes the draft. Neo4j synchronization runs directly after the SQLite transaction succeeds.
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `file_hash` | `TEXT` | No | SHA-256; unique |
+| `original_name` | `TEXT` | No | Display filename |
+| `mime_type` | `TEXT` | No | Must equal `application/pdf` |
+| `size_bytes` | `INTEGER` | No | `> 0` |
+| `page_count` | `INTEGER` | Yes | `> 0` after parsing; service enforces `MAX_PDF_PAGES` |
+| `storage_path` | `TEXT` | No | Unique path relative to `FILES_DIR` |
+| `state` | `TEXT` | No | `staged | active | failed`; defaults to `staged` |
+| `failure_code` | `TEXT` | Yes | Stable application error code |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
-### 6.3 Job status dimensions
+Add `uq_attachments__file_hash`, `uq_attachments__storage_path`, and partial unique index `uq_attachments__single_active` on `state` where `state='active'`.
 
-Do not overload one status column.
+`failure_code` is required only for `state='failed'`. An active attachment must have a non-null `page_count`. Attachment/profile cross-row state is validated at the final Section 6.4 transaction boundary, not by a database `CHECK`.
 
-```text
-processing_status:
-received | processing | processed | failed
+Allowed transitions are `staged → active`, `staged → failed`, and `failed → staged` for an explicit same-file retry. An active row is removed only by an approved replacement after the profile is repointed.
 
-jd_quality:
-full | partial | unscorable
+#### `candidate_profile`
 
-record_status:
-active | ignored_duplicate
-```
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | Primary key; `CHECK (id='active')` |
+| `active_attachment_id` | `TEXT` | No | Unique FK to `attachments.id`; `ON DELETE RESTRICT` |
+| `profile_json` | `JSON` | No | Validated `CandidateProfile` |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+The table contains zero or one row. It stores only the current approved profile; no profile-history table exists.
+
+Outside the approved-replacement transaction, the service verifies that `active_attachment_id` references an active attachment. During replacement it may temporarily reference the validated staged attachment, but the transaction must end with exactly one active attachment and the profile pointing to it.
+
+#### `profile_drafts`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | Primary key; `CHECK (id='current')` |
+| `source_attachment_id` | `TEXT` | Yes | Unique FK to `attachments.id`; `ON DELETE CASCADE`; null for profile/preference-only updates |
+| `draft_json` | `JSON` | No | Validated profile/preferences proposal |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+The table contains zero or one row. Draft existence means approval is pending or the user is preparing a correction. Request Changes leaves the row intact; the next correction updates it. Successful Save Profile deletes it. Do not add a draft-history or draft-status table.
+
+When `source_attachment_id` is non-null, the service verifies that it references a `staged` attachment.
+
+#### `job_preferences`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | Primary key; `CHECK (id='active')` |
+| `preferences_json` | `JSON` | No | Validated `JobPreferences`; defaults to four empty lists |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+The table contains exactly one row after application initialization.
+
+#### `job_posts`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `source_type` | `TEXT` | No | `url | text` |
+| `source_url` | `TEXT` | Yes | Original URL; required only when `source_type='url'` |
+| `raw_content` | `TEXT` | Yes | Pasted or fetched JD text; null only while a URL fetch is pending or failed |
+| `raw_content_hash` | `TEXT` | Yes | SHA-256 unique exact-dedup key when content exists |
+| `extraction_json` | `JSON` | Yes | Validated `JobPostExtraction` after success |
+| `processing_status` | `TEXT` | No | `received | processing | processed | failed`; defaults to `received` |
+| `jd_quality` | `TEXT` | Yes | `full | partial | unscorable` after extraction |
+| `failure_code` | `TEXT` | Yes | Stable application error code |
+| `embedding_json` | `JSON` | Yes | Finite floats for scorable jobs |
+| `embedding_model` | `TEXT` | Yes | Must match configured model when embedding exists |
+| `embedding_dimensions` | `INTEGER` | Yes | `> 0`; service enforces configured dimensions |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+Constraints:
+
+- URL records require `source_url`; text records require non-null `raw_content` and null `source_url`.
+- `raw_content_hash` is non-null exactly when `raw_content` is non-null.
+- `processing_status='processed'` requires non-null `extraction_json` and `jd_quality`; `failure_code` is non-null exactly when `processing_status='failed'`.
+- `embedding_json`, `embedding_model`, and `embedding_dimensions` are either all null or all non-null.
+- Embeddings are permitted and required only for processed `full` or `partial` jobs; every other status/quality combination requires all three embedding fields to be null.
+- The service validates that `embedding_json` contains exactly `EMBEDDING_DIMENSIONS` finite floats.
+- Add `uq_job_posts__raw_content_hash` and `ix_job_posts__processing_quality` on `(processing_status, jd_quality)`.
+- Do not persist a score cache; `match_jobs` computes scores from the current profile and preferences.
+
+A scorable Job is exactly a row with `processing_status='processed'`, `jd_quality in ('full', 'partial')`, and embedding model/dimensions matching the locked runtime configuration; the database rules above guarantee that its embedding fields are present.
+
+Allowed transitions are `received → processing → processed | failed`, `received → failed` for fetch failure, and `failed → processing` only when the user resubmits the same content. `processed` is terminal in the MVP. A temporary URL placeholder may be deleted after its fetched hash selects an existing Job.
+
+#### `conversation`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | Primary key; `CHECK (id='main')` |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+The table contains exactly one row after application initialization.
+
+#### `chat_messages`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `conversation_id` | `TEXT` | No | FK to `conversation.id`; `ON DELETE CASCADE` |
+| `role` | `TEXT` | No | `user | assistant | system` |
+| `content` | `TEXT` | No | May be empty only when `structured_payload` is present |
+| `structured_payload` | `JSON` | Yes | Approval card or match card payload |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+Add `ix_chat_messages__conversation_created_at` on `(conversation_id, created_at, id)` for deterministic history pagination.
+
+#### `agent_runs`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key; also used as LangGraph `thread_id` |
+| `user_message_id` | `TEXT` | No | Unique FK to `chat_messages.id`; `ON DELETE CASCADE` |
+| `state` | `TEXT` | No | `running | interrupted | completed | failed`; defaults to `running` |
+| `pending_approval_json` | `JSON` | Yes | Present only while `state='interrupted'` |
+| `error_code` | `TEXT` | Yes | Stable application error code |
+| `completed_at` | `DATETIME` | Yes | Set for completed or failed runs |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+Add `uq_agent_runs__user_message_id` and `ix_agent_runs__state`.
+
+`pending_approval_json` is non-null exactly when `state='interrupted'`. `completed_at` is non-null exactly when `state in ('completed', 'failed')`.
+
+#### `tool_executions`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `run_id` | `TEXT` | No | FK to `agent_runs.id`; `ON DELETE CASCADE` |
+| `tool_call_id` | `TEXT` | No | Provider/tool-loop identifier |
+| `tool_name` | `TEXT` | No | One of the registered JobAgent tool names |
+| `arguments_summary_json` | `JSON` | Yes | Short non-document argument summary |
+| `status` | `TEXT` | No | `pending | running | completed | failed`; defaults to `pending` |
+| `duration_ms` | `INTEGER` | Yes | `>= 0` for a terminal execution |
+| `error_code` | `TEXT` | Yes | Stable application error code |
+| `result_json` | `JSON` | Yes | Validated `ToolResult` reused for idempotent replay |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+Add `uq_tool_executions__run_tool_call` on `(run_id, tool_call_id)` and `ix_tool_executions__run_status` on `(run_id, status)`.
+
+`duration_ms` and `result_json` are required for completed or failed executions. `error_code` is required only for failed executions. A repeated `(run_id, tool_call_id)` returns the stored result instead of repeating a side effect; do not add a second idempotency-key mechanism.
+
+Allowed transitions are `pending → running → completed | failed`. An interrupted approval keeps its existing tool execution at `running`; it does not create a second execution row.
+
+`tool_executions` is the only durable tool-status and tool-result record. Do not copy tool results into `chat_messages`. Provider `ToolMessage` objects live only in the active LangGraph state/checkpoint. Chat-history responses attach tool activity to the initiating user turn by joining `agent_runs.user_message_id` to `tool_executions`.
+
+### 6.3 Foreign-key and deletion rules
+
+| Parent | Child FK | On delete | Reason |
+|---|---|---|---|
+| `attachments` | `candidate_profile.active_attachment_id` | `RESTRICT` | Never delete the active CV metadata |
+| `attachments` | `profile_drafts.source_attachment_id` | `CASCADE` | Removing a staged upload removes a CV-backed draft; null is allowed for text-only updates |
+| `conversation` | `chat_messages.conversation_id` | `CASCADE` | Test cleanup may remove the complete conversation |
+| `chat_messages` | `agent_runs.user_message_id` | `CASCADE` | A run cannot exist without its initiating turn |
+| `agent_runs` | `tool_executions.run_id` | `CASCADE` | Tool logs belong to one run |
+
+Application startup inserts missing singleton rows for `conversation('main')` and `job_preferences('active')` in one idempotent transaction. The empty preferences document contains `target_roles`, `preferred_locations`, `acceptable_work_modes`, and `target_seniority` as empty lists. `candidate_profile('active')` is created only after the first approved CV.
+
+### 6.4 Transaction boundaries
+
+- **CV upload:** write the PDF once to its UUID-based path under `FILES_DIR`, then create the staged `attachments` row. Approval changes database state; it does not move the file again.
+- **Profile approval:** validate the draft and, when it references a CV, the staged attachment and stored file before opening the transaction. In one SQLite transaction, upsert `candidate_profile('active')`, upsert `job_preferences('active')` when changed, and delete `profile_drafts('current')`. For a CV replacement, repoint the profile, remove the now-unreferenced previous attachment row, mark the new attachment active, and verify the final one-active-attachment invariant before commit. Previous-file cleanup and direct Neo4j synchronization occur after commit.
+- **Approval decision:** both approval buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
+- **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
+- **Chat turn:** create the user message and `agent_runs` row together. Persist tool status transitions in short transactions. Persist the final assistant message and terminal run state together.
+- A failed external call updates only the relevant status and `error_code`; it does not roll back previously accepted raw input.
+
+### 6.5 Migration and checkpoint ownership
+
+- Alembic migrations live under `backend/migrations/` and create all application tables, named constraints, indexes, and singleton seed rows.
+- Configure Alembic SQLite migrations with batch mode for future constraint or column changes.
+- `alembic upgrade head` must work on an empty database and an existing initialized database.
+- Normal application startup does not call `Base.metadata.create_all()`.
+- `langgraph-checkpoint-sqlite` creates and manages its own checkpoint tables in the same file. Alembic must not alter or drop them.
+- Tests use a temporary SQLite file and run migrations before integration cases; they do not share the developer database.
+
+### 6.6 Neo4j identity mapping
+
+| SQLite source | Neo4j identity |
+|---|---|
+| `candidate_profile.id='active'` | `Candidate.id='active'` |
+| `job_posts.id` UUID | `Job.id` |
+| Normalized skill key in JSON/seed data | `Skill.canonical_key` |
+
+Neo4j stores no independent application IDs and never becomes the source of truth for profile, job, conversation, or status data.
 
 ---
 
@@ -245,11 +416,9 @@ SkillRef
 - display_name: str
 - aliases: list[str]
 - category: str | None
-- confidence: float [0, 1]
-- evidence: list[str]
 ```
 
-Evidence snippets must be short, relevant to the extracted field, and come from the source document. The LLM must not invent evidence.
+`SkillRef` contains normalized identity only. The deterministic normalizer populates aliases and category from `skills_seed.yaml`; an unresolved skill has an empty alias list and may have no category. The LLM must not invent aliases or relationships.
 
 ### 7.2 Candidate Profile
 
@@ -268,11 +437,31 @@ CandidateProfile
 ```text
 CandidateSkill
 - skill: SkillRef
+- confidence: float [0, 1]
 - proficiency: beginner | intermediate | advanced | unknown
 - years: float | None
 - source: cv | user_correction
 - excluded: bool
 - evidence: list[str]
+```
+
+```text
+ExperienceItem
+- title: str
+- company: str | None
+- start_date_text: str | None
+- end_date_text: str | present | None
+- summary: str
+
+EducationItem
+- institution: str
+- degree: str | None
+- field: str | None
+- graduation_year: int | None
+
+LanguageItem
+- name: str
+- proficiency: str | None
 ```
 
 Proficiency and years may be `unknown`. The model must not infer precise years without timeline evidence.
@@ -289,6 +478,12 @@ JobPreferences
 
 Profile facts and job preferences are separate. A CV address is not automatically a preferred work location.
 
+```text
+ProfileDraftPayload
+- candidate_profile: CandidateProfile
+- job_preferences: JobPreferences
+```
+
 ### 7.4 Job extraction
 
 ```text
@@ -304,23 +499,37 @@ JobPostExtraction
 - max_experience_years: float | None
 - location: str | None
 - work_mode: remote | hybrid | onsite | unknown
-- employment_type: full_time | part_time | contract | internship | unknown
-- education_requirements: list[str]
-- language_requirements: list[str]
-- salary_text: str | None
 - extraction_confidence: float
-- jd_quality: full | partial | unscorable
+
+JobSkill
+- skill: SkillRef
+- confidence: float [0, 1]
+- evidence: list[str]
 ```
 
-Salary is stored for display only and does not participate in MVP scoring.
+`JobPostExtraction` contains extracted facts only. The ingestion service assigns the authoritative `job_posts.jd_quality` column after validating the extraction.
 
-### 7.5 JD quality rules
+All evidence snippets must be short, relevant to the associated Candidate or Job skill, and copied from the source document. The LLM must not invent evidence.
+
+### 7.5 Tool execution result
+
+```text
+ToolResult
+- ok: bool
+- code: str | None
+- summary: str
+- data: dict[str, JSONValue] | None
+```
+
+Every terminal `tool_executions.result_json` must validate as `ToolResult`. `JSONValue` means a JSON scalar, list, or object. `ok=true` requires `code=null` and database status `completed`; `ok=false` requires a stable failure `code`, matching `error_code`, and database status `failed`. `data` uses the tool's compact output schema and may contain IDs, counts, or card payloads, but never raw CV/JD bodies. This same validated object is returned during idempotent replay.
+
+### 7.6 JD quality rules
 
 - `full`: sufficient title/description plus usable skill or responsibility evidence and most scoring fields.
 - `partial`: enough content to compute at least semantic and skill signals, but one or more important fields are missing.
 - `unscorable`: no meaningful job responsibilities/skills, contact-only content, or extraction contains insufficient evidence.
 
-The classifier must return reasons for `partial` and `unscorable` states.
+Do not duplicate `jd_quality` inside `extraction_json`.
 
 ---
 
@@ -329,8 +538,8 @@ The classifier must return reasons for `partial` and `unscorable` states.
 ### 8.1 Nodes
 
 ```text
-(:Candidate {id})
-(:Job {id, title, company, location, work_mode, seniority, quality, embedding})
+(:Candidate {id, source_updated_at})
+(:Job {id, title, company, location, work_mode, seniority, quality, embedding, source_updated_at})
 (:Skill {canonical_key, display_name, aliases, category})
 ```
 
@@ -351,14 +560,14 @@ The classifier must return reasons for `partial` and `unscorable` states.
 - Vector index on `Job.embedding` using cosine similarity.
 - Vector dimension is fixed at 1536 by the locked embedding contract and must be recorded in application settings.
 
-Changing the embedding model or dimensions requires a complete embedding and vector-index rebuild.
+Changing the embedding model or dimensions is outside the MVP. It requires an explicit full re-embedding migration and vector-index rebuild; the ordinary graph rebuild command does not make this change.
 
 ### 8.4 Graph safety rules
 
 - Alias strings are properties on the canonical `Skill`; do not create separate alias nodes in the MVP.
 - A new unknown skill may be stored as a canonical `Skill`, but it receives no `RELATED_TO` edges automatically.
 - Only aliases and `RELATED_TO` relationships from `skills_seed.yaml` contribute to related-skill scoring.
-- Duplicate ignored jobs are not synchronized to Neo4j.
+- An exact content match creates no new Job row or Neo4j node; the existing Job is returned or, when failed, retried in place.
 - Neo4j remains fully rebuildable through one local command using SQLite records.
 
 ---
@@ -372,8 +581,7 @@ Changing the embedding model or dimensions requires a complete embedding and vec
 3. Lowercase for canonical comparison.
 4. Normalize punctuation and common separators.
 5. Resolve against aliases in a small `skills_seed.yaml`.
-6. Compare against existing canonical SQLite skills.
-7. If unresolved, create a deterministic canonical key without related-skill edges.
+6. If unresolved, create a deterministic canonical key without related-skill edges.
 
 ### 9.2 Seed taxonomy
 
@@ -403,6 +611,14 @@ Validation:
 - Maximum size: 10 MB.
 - Maximum pages: 10.
 
+File-hash duplicate policy:
+
+- If the hash belongs to the active attachment, return that attachment/profile and do not extract again.
+- If the hash belongs to the current staged attachment, return the existing attachment/draft.
+- Uploading the same file again when its attachment is `failed` is the explicit retry signal: reuse the same file/row, change it to staged, clear `failure_code`, and process it again. Do not add a retry endpoint or flag.
+- Processing a different staged CV while a CV-backed draft exists replaces the singleton draft, removes the previous unreferenced staged row, and cleans up its file on a best-effort basis.
+- A parsing or extraction failure after staging changes the attachment to `failed` with a stable `failure_code`; the stored file is retained for an explicit retry or deletion.
+
 ### 10.2 Processing
 
 ```text
@@ -411,8 +627,8 @@ attachment_id
 → pypdf layout text extraction
 → extractable-text validation
 → gpt-4o-mini structured extraction
-→ Pydantic validation
-→ at most one JSON repair
+→ Pydantic validation, with at most one JSON repair and revalidation when invalid
+→ deterministic skill normalization
 → profile draft
 → LangGraph interrupt
 ```
@@ -427,23 +643,24 @@ The assistant renders a profile summary card with Astryx `ButtonGroup`:
 [Save Profile] [Request Changes]
 ```
 
-- `Save Profile` resumes the interrupted LangGraph run and calls `commit_profile_draft`.
-- `Request Changes` focuses the chat composer; the next user correction updates the same draft.
+- Both buttons call `POST /api/chat/runs/{run_id}/resume` with exactly one action: `save_profile` or `request_changes`.
+- `Save Profile` resumes the existing interrupted invocation of `commit_profile_draft`; it does not create a second commit tool call.
+- `Request Changes` resumes the interrupted run with `action=request_changes`, completes that run without committing, deletes its checkpoint, and then focuses the composer. The next correction starts a new run, updates the same draft, and creates a new approval interrupt.
+- The existing `commit_profile_draft` execution remains `running` while the run is interrupted. `save_profile` ends it as `completed` with `ToolResult(ok=true)` after commit. `request_changes` also ends it as `completed` with `ToolResult(ok=true, data={"committed": false})` while preserving the draft. An execution error ends it as `failed`.
 - Every profile or preference change creates or updates a draft and requires approval.
-- Buttons become disabled after a successful action to guarantee idempotency.
+- Both buttons become disabled after either accepted action. Repeating resume for a terminal run emits only the persisted terminal run state as a no-op SSE response; it does not replay text, execute the graph, or require another result column.
 
-### 10.4 Atomic replacement
+`agent_runs.pending_approval_json` is a UI/recovery projection containing `kind='profile_commit'`, `draft_id='current'`, and allowed actions `save_profile | request_changes`. The LangGraph checkpoint is the resumable execution state; both records are cleared when either action completes the run.
+
+### 10.4 Approved replacement
 
 The old active profile and CV remain usable until the new draft is approved. On approval:
 
-1. Replace the singleton Candidate Profile.
-2. Replace Job Preferences if the draft contains preference updates.
-3. Promote the staged PDF to the active path.
-4. Remove the previous active PDF.
-5. Delete the draft.
-6. Synchronize Candidate and Skill nodes directly to Neo4j after the SQLite/file transaction succeeds.
-
-If any SQLite/file operation fails, the current active profile remains unchanged.
+1. Confirm that the staged attachment and its UUID-based file already exist.
+2. Run the Section 6.4 SQLite transaction in constraint-safe order: repoint the profile, delete the old attachment row, mark the new attachment active, update preferences when present, and delete the draft. Before commit, verify that the new attachment is the only active attachment and is referenced by `candidate_profile('active')`.
+3. If the transaction fails, roll it back. The old profile remains active and the new attachment remains staged for retry or deletion.
+4. After commit, remove the previous PDF file on a best-effort basis. A cleanup failure is reported but does not invalidate the committed profile.
+5. Synchronize Candidate and Skill nodes directly to Neo4j.
 
 If the later Neo4j sync fails, the approved SQLite profile remains committed. Return `NEO4J_SYNC_FAILED` with the rebuild instruction instead of rolling the profile back.
 
@@ -470,34 +687,30 @@ If Trafilatura cannot obtain meaningful text, ask the user to paste the JD text.
 
 ```text
 URL/text
-→ save raw input with processing_status=received
-→ exact content-hash check
+→ for URL, save a source_url placeholder with processing_status=received and fetch it
+→ compute and check raw_content_hash before inserting text or updating the URL placeholder
+→ on an exact match, return the existing non-failed job or reuse the failed row for retry
+→ delete the temporary URL placeholder when an existing row was selected
+→ otherwise persist the unique pasted/fetched raw_content and hash before extraction
+→ set processing_status=processing
 → process/extract
 → Pydantic validation and one repair
 → normalize skills
 → classify quality
-→ apply duplicate policy
-→ synchronize directly to Neo4j if active and scorable
-→ optional match against active profile
+→ persist the terminal result
+→ synchronize directly to Neo4j if processed and scorable
 ```
 
-Raw input is retained even if extraction later fails.
+The submitted URL or pasted text is retained when fetching fails. Fetched/pasted `raw_content` is retained when extraction later fails.
 
-### 11.4 Duplicate policy
+### 11.4 Exact duplicate policy
 
 1. Exact `raw_content_hash` match:
-   - Return the existing job.
-   - Do not insert a new row.
-   - Do not extract or embed again.
-2. Same normalized `company + title + location`, different content:
-   - Insert an ignored duplicate record.
-   - Set `duplicate_of_job_id`.
-   - Set `record_status=ignored_duplicate`.
-   - Do not embed, synchronize, or score it.
-3. Explicit user override:
-   - `save_job(force_new=true)` may be used only after the user states it is a separate position.
+   - If the existing row is not failed, return it without extraction or embedding.
+   - If `processing_status='failed'`, reuse that row; clear `failure_code`, `extraction_json`, `jd_quality`, and all embedding fields; set it back to `processing`; then retry once through the normal pipeline.
+   - For text, do not insert a new row. For URL, delete the received placeholder before returning or retrying the existing row.
 
-If company/title/location are insufficient to compute the normalized key, use exact-hash deduplication only.
+Different content is always a new Job in the MVP. Do not add normalized-duplicate state or a `force_new` override.
 
 ---
 
@@ -524,8 +737,21 @@ Approval is implemented with `interrupt()` inside the guarded commit path.
 - The application has one persistent conversation in SQLite.
 - Every user turn creates a new `agent_run_id` and LangGraph `thread_id`.
 - An interrupted run uses the same ID when resumed.
-- After completion, the application deletes that run's checkpoint data.
+- While a run is interrupted, reject a new chat turn with `APPROVAL_ACTION_REQUIRED`; the user must choose an approval action first.
+- `request_changes` completes the interrupted run without committing the draft; the correction itself is a new user turn/run.
+- After a run reaches `completed` or `failed`, delete only that run's checkpoint data.
 - Conversation continuity comes from application data, not permanent LangGraph checkpoints.
+
+Allowed transitions:
+
+```text
+running → interrupted → running → completed
+running → interrupted → running → failed
+running → completed
+running → failed
+```
+
+Entering `interrupted` stores `pending_approval_json`. Resume atomically returns the same run to `running` and clears that projection before graph execution continues. The LangGraph checkpoint is the resumable state; `agent_runs` is durable UI/recovery metadata. No profile/preference side effect occurs before `interrupt()` returns an approval action.
 
 ### 12.3 Agent state
 
@@ -550,13 +776,12 @@ The model receives:
 
 - Current approved Candidate Profile.
 - Current Job Preferences.
-- Relevant durable memory facts.
 - Current turn.
 - A bounded recent message window that fits the prompt budget.
 
 It does not receive the entire conversation or a fixed 64K-token history. Profile and preference corrections are remembered through structured state, not by relying on old chat text.
 
-General conversation remains available through persisted chat history and the bounded recent-message window. Do not promote unrelated facts into `memory_facts` or add a general-purpose memory extraction pipeline.
+General conversation remains available through persisted chat history and the bounded recent-message window. Do not add a separate memory-fact table or a general-purpose memory extraction pipeline.
 
 ### 12.5 Conversation and tool policy
 
@@ -571,10 +796,12 @@ Example:
 
 ```text
 User: Xin chào
-JobAgent: Chào bạn! Hôm nay bạn muốn mình giúp gì?
+JobAgent: Chào bạn! Bạn muốn tôi giúp gì hôm nay?
 ```
 
 Do not add a separate classifier model. The LLM chooses between a direct response and the existing JobAgent tools; tool preconditions remain the deterministic boundary for writes.
+
+A greeting or general-question turn creates user and assistant messages plus one completed `agent_run`, creates zero `tool_executions`, emits no `tool_status` or `approval_required` event, and does not mutate profile, preferences, drafts, or jobs.
 
 ### 12.6 Tool loop limits
 
@@ -587,74 +814,69 @@ Do not add a separate classifier model. The LLM chooses between a direct respons
 
 ## 13. Agent-Facing Tool Contracts
 
-The Agent sees exactly seven tools.
+The Agent sees exactly six job-specific tools. Before graph execution, the application injects compact `candidate_context` from the approved profile and preferences; raw CV text is never injected and candidate context is not an Agent-facing tool.
 
-### 13.1 `get_candidate_context`
+`(run_id, tool_call_id)` is the durable identity of one tool invocation. Re-entering a terminal invocation returns its stored `result_json`; it never repeats a completed side effect. The LLM and frontend do not generate separate idempotency keys.
 
-Reads the active Candidate Profile and Job Preferences.
-
-- Read-only.
-- Returns a compact structured summary.
-- Does not return raw CV text.
-
-### 13.2 `propose_profile_from_cv`
+### 13.1 `propose_profile_from_cv`
 
 Input: `attachment_id`.
 
 - Validates attachment ownership/state.
-- Parses, extracts, validates, and creates a draft.
-- Returns `draft_id` and a short summary.
+- For a staged attachment already referenced by `profile_drafts('current')`, returns the existing draft without processing again.
+- For any other staged attachment, parses, extracts, validates, and creates a draft.
+- For the already active attachment, returns the existing approved profile without extraction or a new draft.
+- Returns either the new `draft_id` or the existing profile ID with a short summary.
 - Never commits the profile.
 
-### 13.3 `propose_profile_update`
+### 13.2 `propose_profile_update`
 
 Input: current `draft_id` or active context plus requested profile/preference changes.
 
 - Applies changes through Pydantic validation.
 - Produces a new/updated draft.
-- Covers both Candidate Profile facts and Job Preferences so an eighth tool is unnecessary.
+- Covers both Candidate Profile facts and Job Preferences so another tool is unnecessary.
 
-### 13.4 `commit_profile_draft`
+### 13.3 `commit_profile_draft`
 
-Input: `draft_id`, idempotency key.
+Input: `draft_id`.
 
 - Write tool guarded by LangGraph interrupt approval.
 - Refuses execution without valid approval state.
-- Atomically replaces the active profile and CV.
+- Updates the active profile/preferences and replaces the CV only when the draft references a staged attachment.
 
-### 13.5 `save_job`
+### 13.4 `save_job`
 
-Input: exactly one of URL or raw text, plus optional explicit `force_new`.
+Input: exactly one of URL or raw text.
 
-- Persists raw content before extraction.
-- Handles fetch, extraction, validation, deduplication, and direct Neo4j synchronization.
+- Persists the accepted URL or text before extraction.
+- Handles fetch, extraction, validation, exact-hash deduplication, and direct Neo4j synchronization.
 - Does not require approval.
 
-### 13.6 `query_jobs`
+### 13.5 `query_jobs`
 
-Input: job ID or bounded filters.
+Input: optional job ID, `processing_status`, `jd_quality`, and `limit` in `1..50`.
 
 - Read-only.
-- Returns compact job data or score details.
+- Returns compact saved-job data and processing/quality status.
 - Does not return every raw JD by default.
 
-### 13.7 `match_jobs`
+### 13.6 `match_jobs`
 
-Input: optional saved-job filters and result limit.
+Input: optional result limit in `1..10`; current approved `JobPreferences` are read from SQLite.
 
 - Requires an active Candidate Profile.
 - Runs retrieval, graph features, scoring, and explanation.
 - Defaults to final top 10.
 
-### 13.8 Tool authorization matrix
+### 13.7 Tool authorization matrix
 
-| State | Available write tools |
-|---|---|
-| No CV/profile | `propose_profile_from_cv`, `save_job` |
-| Profile draft pending | `propose_profile_update`, guarded `commit_profile_draft`, `save_job` |
-| Active profile | `propose_profile_from_cv`, `propose_profile_update`, `save_job`, `match_jobs` |
-
-Read tools are available when their preconditions can be satisfied.
+| State | Write tools | Read/compute tools |
+|---|---|---|
+| No active profile, no draft | `propose_profile_from_cv`, `save_job` | `query_jobs` |
+| Draft pending, no active profile | `propose_profile_from_cv`, `propose_profile_update`, guarded `commit_profile_draft`, `save_job` | `query_jobs` |
+| Active profile, no draft | `propose_profile_from_cv`, `propose_profile_update`, `save_job` | `query_jobs`, `match_jobs` |
+| Active profile with draft pending | `propose_profile_from_cv`, `propose_profile_update`, guarded `commit_profile_draft`, `save_job` | `query_jobs`, `match_jobs` against the approved profile only |
 
 ---
 
@@ -669,7 +891,7 @@ POST /api/attachments/cv
 GET  /api/profile
 GET  /api/profile/cv
 
-GET  /api/chat/history
+GET  /api/chat/history?limit=50&before=<opaque_cursor>
 POST /api/chat/turns
 POST /api/chat/runs/{run_id}/resume
 ```
@@ -682,14 +904,15 @@ POST /api/chat/runs/{run_id}/resume
 - Sidebar upload immediately starts a chat turn containing the returned attachment ID.
 - `POST /api/chat/turns` returns an SSE stream.
 - Resume also returns an SSE stream.
+- Chat history `limit` is `1..100`. The opaque `before` cursor encodes `(created_at, id)` from the oldest returned item. Query newest-first with `limit+1`, reverse the page for chronological output, and return `{items, next_cursor}`. A malformed cursor returns `422`.
+- While a run is interrupted for approval, both a new chat turn and a new CV upload return `APPROVAL_ACTION_REQUIRED` before persisting new input. The frontend disables the composer and upload controls until either approval action completes the run.
 
 ### 14.2 SSE contract
 
 ```text
 run_started
 assistant_status
-tool_started
-tool_completed
+tool_status
 approval_required
 text_delta
 run_completed
@@ -697,6 +920,8 @@ run_failed
 ```
 
 Every event includes `event_id`, `run_id`, `timestamp`, and an event-specific validated payload.
+
+`tool_status.payload.status` and the frontend state use exactly `pending | running | completed | failed`; do not introduce aliases such as `complete` or `error`. `run_started` carries `state='running'` and `resumed: bool`; `approval_required` carries `state='interrupted'`; terminal events carry their matching run state. A failed tool may still lead to a completed run that explains the failure, but the Agent must not claim the operation succeeded.
 
 FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may be non-streaming. The final text may stream from ShopAIKey when compatibility is confirmed.
 
@@ -743,7 +968,7 @@ Before implementing any Astryx component, run its CLI documentation command agai
 Display concise user-facing statuses:
 
 - Friendly tool label.
-- `pending`, `running`, `complete`, or `error`.
+- `pending`, `running`, `completed`, or `failed`.
 - Duration.
 - Short outcome summary.
 
@@ -828,12 +1053,13 @@ No E5 query/passage prefixes are used. Apply the same documented whitespace norm
 
 ### 17.4 Retrieval flow
 
-1. Embed the active Candidate representation.
-2. Query Neo4j vector index for up to top 50 active, scorable jobs.
-3. Compute direct, alias, and seed-related skill features.
-4. Compute seniority, experience, location, and work-mode features.
-5. Calculate the transparent hybrid score.
-6. Return final top 10 with explanations.
+1. Run the Section 21 pre-match consistency check against the current SQLite Candidate and scorable Jobs.
+2. Embed the active Candidate representation.
+3. Query the Neo4j vector index for up to 50 scorable jobs.
+4. Compute direct, alias, and seed-related skill features.
+5. Compute seniority, experience, location, and work-mode features.
+6. Calculate the transparent hybrid score.
+7. Return up to the requested top 10 with explanations.
 
 ---
 
@@ -856,6 +1082,8 @@ Match strengths:
 | Seed related skill | 0.6 |
 | No match | 0.0 |
 
+For each Job skill, take the strongest match against non-excluded Candidate skills. Coverage is the arithmetic mean of these best strengths. A non-empty Job skill list with no Candidate match has coverage `0`; an empty Job skill list makes that coverage unavailable. When only required or preferred skills exist, renormalize the `0.80/0.20` weights over the available list. `skill_score` is unavailable only when both lists are empty.
+
 ### 18.2 Initial hybrid seed
 
 ```text
@@ -870,6 +1098,12 @@ base_score =
 
 Component rules are deterministic and return normalized scores in `[0, 1]`.
 
+- `semantic_similarity = clamp(neo4j_cosine_score, 0, 1)`.
+- `seniority_score` is unavailable when JD seniority is `unknown` or `target_seniority` is empty; otherwise it is `1` for membership and `0` for mismatch.
+- `experience_score` is unavailable when Candidate years or JD minimum years is missing. It is `1` when Candidate years meet the minimum; otherwise use `clamp(candidate_years / minimum_years, 0, 1)`. A zero minimum yields `1`; maximum years are descriptive only.
+- `location_score` is unavailable when JD location is missing or preferred locations are empty; otherwise normalized exact membership is `1` and mismatch is `0`.
+- `work_mode_score` is unavailable when JD work mode is `unknown` or acceptable modes are empty; otherwise membership is `1` and mismatch is `0`.
+
 ### 18.3 Missing fields
 
 If an optional component cannot be computed, renormalize the weights of available components. Then apply the JD quality multiplier:
@@ -879,6 +1113,8 @@ full       → 1.00
 partial    → 0.85
 unscorable → final_score = null
 ```
+
+Sort with unrounded values by `final_score DESC`, `skill_score DESC NULLS LAST`, `semantic_similarity DESC`, then `job.id ASC`. Round only for UI display.
 
 ### 18.4 Fixed MVP weights
 
@@ -898,7 +1134,7 @@ Use a small, disposable set of representative JDs to check:
 - A public URL and pasted text both create a saved job.
 - Full, partial, and unscorable JDs receive the expected quality status.
 - Title, required/preferred skills, seniority, location, and work mode look reasonable in the saved result.
-- Exact and normalized duplicates follow the documented policy.
+- A processed exact duplicate returns the existing Job without reprocessing; a failed exact match retries the same row.
 - Matching returns plausible ordering for the active profile.
 - Score breakdown, matched skills, and missing skills agree with the displayed Candidate Profile and JD.
 - URL, extraction, provider, and Neo4j failures produce the documented fallback instead of false success.
@@ -914,12 +1150,13 @@ These checks are manual product acceptance only. Automated functional tests rema
 | ShopAIKey timeout/rate limit | Retry once, then persist failure |
 | Invalid structured output | One repair request, then fail safely |
 | No PDF text | `NO_EXTRACTABLE_TEXT`; no OCR |
-| Unsupported/oversized PDF | Reject before storage promotion |
+| Unsupported/oversized PDF | Reject before creating a persistent file or attachment row |
 | URL unsupported or unavailable | Ask user to paste JD text |
 | JD extraction failure | Keep raw record with failed status |
-| Exact duplicate | Return existing job; no reprocessing |
-| Normalized duplicate | Save ignored record; no graph/score |
+| Exact JD content match | Return an existing non-failed job; retry a failed row in place |
 | Neo4j unavailable during sync | Keep SQLite data; report `NEO4J_SYNC_FAILED` and offer the local rebuild command |
+| Neo4j unavailable during matching | Return `NEO4J_UNAVAILABLE`; do not return partial ranking |
+| SQLite/Neo4j revision mismatch | Return `NEO4J_REBUILD_REQUIRED`; do not rank stale graph data |
 | Match without profile | Ask user to upload/approve CV first |
 | Unauthorized profile commit | Reject tool execution |
 | Tool loop exceeds six iterations | End run with controlled failure |
@@ -934,7 +1171,8 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 
 - SQLite commits first and remains the source of truth.
 - After a successful profile or job write, call a focused Neo4j sync function immediately.
-- Use SQLite UUIDs as Neo4j `Candidate`/`Job` identifiers and `Skill.canonical_key` as skill identity.
+- Use `Candidate.id='active'`, the SQLite Job UUID, and `Skill.canonical_key` as Neo4j identities.
+- Copy the SQLite row's `updated_at` into Neo4j as `source_updated_at` on Candidate and Job nodes.
 - Use Neo4j uniqueness constraints and `MERGE` so rerunning the same sync is safe.
 - Do not add an outbox table, background worker, retry queue, or graph-sync state machine.
 
@@ -942,15 +1180,19 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 
 If direct synchronization fails, keep the committed SQLite data and return `NEO4J_SYNC_FAILED`. The UI tells the developer to restore Neo4j and run the rebuild command. The application does not retry continuously or hide the failure.
 
+Before matching, compare the SQLite Candidate `(id, updated_at)` and the full local set of scorable Job `(id, updated_at)` pairs against Neo4j `source_updated_at`. Any missing, extra, or mismatched node returns `NEO4J_REBUILD_REQUIRED`; unavailable Neo4j returns `NEO4J_UNAVAILABLE`. Do not repair or upsert graph data inside the matching path because that would hide a stale derived index.
+
+`ponytail:` this O(n) ID/revision comparison is intentional for the small local corpus. If the project later grows beyond portfolio scale, replace it with a sync ledger rather than silently adding one to the MVP.
+
 ### 21.3 Rebuild command
 
 Provide one local command that:
 
-1. Clears only JobAgent nodes and relationships.
-2. Recreates constraints and the vector index.
-3. Reads the active Candidate and active/scorable Jobs from SQLite.
-4. Rebuilds Candidate, Job, Skill, and seed `RELATED_TO` data.
-5. Reuses stored embeddings when compatible and recomputes only missing or incompatible values.
+1. Validates that every processed `full` or `partial` Job has a stored embedding matching the locked model and dimensions; exits non-zero with a configuration-restoration instruction on mismatch.
+2. Clears only JobAgent nodes and relationships.
+3. Recreates constraints and the vector index.
+4. Reads the active Candidate and all scorable Jobs from SQLite.
+5. Rebuilds Candidate, Job, Skill, and seed `RELATED_TO` data using the stored embeddings without calling ShopAIKey or mutating SQLite.
 6. Prints rebuilt entity counts and exits non-zero on failure.
 
 ---
@@ -962,7 +1204,7 @@ JobAgent is a single-user portfolio demo running locally, not a production or pu
 - Store configuration in the root `.env`; do not commit it or hard-code API keys.
 - Do not print API keys or authorization headers in logs.
 - Keep the existing PDF and URL size, type, and timeout limits so invalid input cannot stall the demo.
-- Bind the documented application setup to localhost.
+- Let services listen on `0.0.0.0` inside their containers, and publish application/Neo4j host ports only on `127.0.0.1` through Docker Compose.
 
 Authentication, role-based authorization, PII-redaction pipelines, SSRF/IP-range defenses, redirect validation, prompt-injection hardening, and a production threat model are explicitly outside the MVP. These may be documented as limitations, but they must not expand the implementation phases.
 
@@ -970,7 +1212,7 @@ Authentication, role-based authorization, PII-redaction pipelines, SSRF/IP-range
 
 ## 23. Environment Configuration
 
-All configurable values live in the single root `.env` and are documented in `.env.example`.
+All configurable runtime values live in the single root `.env` and are documented by the non-runtime template `.env.example`.
 
 ```text
 APP_ENV=local
@@ -1010,11 +1252,15 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 ### 24.1 Backend unit tests
 
 - Pydantic validation.
+- `ToolResult` success/failure coupling with tool status and `error_code`.
+- UUID, UTC timestamp, enum, and singleton-ID conventions from Section 6.1.
+- Settings-dependent PDF/embedding limits are enforced by services rather than migration constants.
 - JD extraction and field validation.
 - Skill canonicalization and alias resolution.
-- Duplicate policies.
+- Exact-hash return and failed-row retry policies.
 - JD quality classification.
 - Score components and weight renormalization.
+- Empty skill lists, excluded skills, seed-related best matches, quality multipliers, unavailable components, and exact-score ties.
 - Matching order and deterministic explanations.
 - General conversation produces a direct answer without JobAgent tool calls.
 - Tool preconditions for approval and required state.
@@ -1025,12 +1271,20 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - FastAPI PDF upload and validation.
 - SSE event schema/order.
 - LangGraph interrupt/resume.
-- SQLite persistence and migration.
+- `request_changes` completes the original run, deletes its checkpoint, preserves the draft, and lets the next correction start a new run.
+- `commit_profile_draft` remains `running` at interrupt; both approval actions emit one terminal `completed` tool status, while execution errors emit `failed`.
+- An interrupted approval blocks new chat turns and CV uploads with `APPROVAL_ACTION_REQUIRED` before any new input is persisted.
+- Re-entering the same `(run_id, tool_call_id)` replays one stored ToolResult and one SQLite side effect.
+- Chat-history hydration joins tool activity from `tool_executions` without persisted `role='tool'` messages.
+- SQLite PRAGMAs, named constraints, indexes, foreign-key cascades, singleton seeding, and Alembic migrations.
 - Direct Neo4j synchronization and the local rebuild command.
 - URL and raw-text JD ingestion.
-- Exact/normalized duplicates.
+- Active, staged, and failed CV hash reuse plus exact JD return/retry behavior.
 - `match_jobs` with deterministic fake embeddings.
+- Candidate/Job revision mismatch returns `NEO4J_REBUILD_REQUIRED`; unavailable Neo4j returns `NEO4J_UNAVAILABLE`.
 - Greeting and general-question turns persist messages and complete without tool events.
+- Chat-history cursor pagination and malformed-cursor `422` behavior.
+- Database and SSE payloads accept only `pending | running | completed | failed` for tools.
 - Fake ShopAIKey adapter for tool calls and invalid schema.
 
 Normal automated tests must not call the real ShopAIKey API.
@@ -1039,9 +1293,11 @@ Normal automated tests must not call the real ShopAIKey API.
 
 - SSE reducer.
 - `ChatToolCalls` event mapping.
+- Frontend tool state accepts only `pending | running | completed | failed`.
 - Approval buttons and idempotent disable state.
 - Sidebar attachment state.
 - Chat history hydration.
+- Load-older chat history pagination.
 - Match-card score breakdown.
 - Error and disconnected stream states.
 
@@ -1084,17 +1340,16 @@ Tasks:
 - [ ] Create the three-folder scaffold and root configuration placeholders.
 - [ ] Pin a stable Astryx version and run `npx astryx init --features agents --agent codex`.
 - [ ] Inspect exact Astryx APIs for AppShell, ChatLayout, ChatComposer, ChatToolCalls, ChatMessage, ButtonGroup, Card, Collapsible, and ProgressBar.
-- [ ] Implement a temporary ShopAIKey compatibility script for model listing, chat completion, function calling, tool-result round trip, structured schema, and streaming.
-- [ ] Verify pypdf normal/layout extraction on a few synthetic digital CV fixtures.
+- [ ] Implement and run a reusable local ShopAIKey diagnostic script for model listing, chat completion, function calling, tool-result round trip, structured schema, streaming, and scalar/batch 1536-dimensional embeddings.
+- [ ] Verify pypdf normal/layout extraction on five representative digital CV fixtures.
 - [ ] Verify `NO_EXTRACTABLE_TEXT` behavior on an image-only PDF fixture.
-- [ ] Verify ShopAIKey `text-embedding-3-small` scalar/batch compatibility and 1536-dimensional finite output.
 
 Exit gate:
 
 - ShopAIKey can complete a valid tool-call round trip with `gpt-4o-mini`.
 - At least one schema strategy passes Pydantic validation reliably.
 - Astryx has all required public components or a documented composition path.
-- pypdf succeeds on the agreed majority of digital CV fixtures.
+- pypdf succeeds on at least four of five representative digital CV fixtures.
 - ShopAIKey `text-embedding-3-small` passes the compatibility contract.
 
 If any gate fails, revise the affected adapter only. Do not add broad fallback stacks.
@@ -1108,38 +1363,41 @@ Tasks:
 - [ ] Create infrastructure Dockerfiles and Docker Compose.
 - [ ] Configure one root `.env` and `.env.example`.
 - [ ] Add persistent volumes for SQLite/files and Neo4j.
-- [ ] Implement SQLite models and initial migrations.
+- [ ] Implement the Section 6 SQLAlchemy models, connection PRAGMAs, named constraints, and indexes.
+- [ ] Implement Alembic migrations and idempotent singleton seeding without `create_all()`.
 - [ ] Implement attachment storage abstraction.
-- [ ] Implement Neo4j driver, constraints, vector-index creation, health check, direct sync functions, and the local rebuild command.
+- [ ] Implement Neo4j driver, health check, idempotent constraints, and the 1536-dimensional vector index.
 - [ ] Add local lint, type-check, migration, and test commands.
 
 Exit gate:
 
 - `docker compose` starts frontend, backend, and Neo4j locally.
 - Health endpoint reports SQLite, filesystem, and Neo4j status.
-- Migrations work on an empty and already-initialized volume.
+- `alembic upgrade head` works on an empty and already-initialized volume.
+- Integration tests prove foreign keys, singleton checks, partial unique indexes, cascades, and required connection PRAGMAs.
 - Neo4j constraints/index setup is idempotent.
 
 ### Phase 2 — Chat transport, Agent runtime, and persistence
 
 Tasks:
 
-- [ ] Implement conversation/message repositories for one conversation.
-- [ ] Implement agent-run and tool-execution repositories.
+- [ ] Implement conversation/message repositories for one conversation, including history joins for tool activity.
+- [ ] Implement agent-run and tool-execution repositories with ToolResult replay by `(run_id, tool_call_id)`.
 - [ ] Define SSE Pydantic event contracts.
-- [ ] Implement `POST /api/chat/turns`, history, and resume endpoints.
+- [ ] Implement `POST /api/chat/turns`, cursor-paginated history, and resume endpoints.
 - [ ] Implement per-turn AsyncSqliteSaver lifecycle and checkpoint cleanup.
 - [ ] Build the single LangGraph loop with `ToolNode`, iteration limit, error boundary, and interrupt support.
 - [ ] Implement ShopAIKey `ChatOpenAI` adapter using the verified Phase 0 mode.
 - [ ] Implement a conversation-first system prompt with explicit JobAgent tool boundaries.
 - [ ] Implement frontend SSE reducer and base Astryx chat shell.
 - [ ] Render concise tool status through `ChatToolCalls`.
+- [ ] Implement generic interrupt/resume decisions, terminal no-op replay, and checkpoint cleanup using a synthetic tool.
 
 Exit gate:
 
 - A local synthetic tool can run through the full frontend–FastAPI–LangGraph–SSE path.
-- Interrupt/resume survives a backend request boundary.
-- Completed run checkpoints are cleaned while conversation messages remain.
+- Both branches of a synthetic interrupt/resume survive a backend request boundary and terminate without replaying the tool call.
+- Completed and failed run checkpoints are cleaned while conversation messages and run metadata remain.
 - Greetings and general questions receive natural direct answers without tool calls.
 
 ### Phase 3 — CV, Candidate Profile, and approval workflow
@@ -1148,13 +1406,14 @@ Tasks:
 
 - [ ] Implement PDF upload endpoint and file validation.
 - [ ] Implement file-hash duplicate handling and staging lifecycle.
+- [ ] Implement shared deterministic skill normalization and the small `skills_seed.yaml` taxonomy.
 - [ ] Implement pypdf extraction and text-quality validation.
 - [ ] Implement Candidate/Profile/Preference Pydantic schemas.
 - [ ] Implement `propose_profile_from_cv`.
-- [ ] Implement `get_candidate_context`.
 - [ ] Implement `propose_profile_update` for profile and preference changes.
 - [ ] Implement interrupt-protected `commit_profile_draft`.
-- [ ] Implement atomic file/profile replacement with no history.
+- [ ] Implement terminal `save_profile`/`request_changes` semantics, ToolResult statuses, and profile checkpoint cleanup.
+- [ ] Implement the Section 6.4 approval transaction and staged-file cleanup with no profile history.
 - [ ] Implement sidebar CV upload/view/download state.
 - [ ] Implement Astryx approval card and request-change loop.
 - [ ] Synchronize Candidate/Skill nodes directly after profile commit.
@@ -1163,10 +1422,11 @@ Exit gate:
 
 - Sidebar and chat uploads use the same pipeline.
 - No profile write occurs without approval.
+- `request_changes` completes the old run, preserves the singleton draft, and lets the next correction start a new run.
 - User corrections persist across backend restarts.
-- Failed replacement leaves the previous profile intact.
+- A failed pre-commit replacement leaves the previous profile intact; post-commit cleanup failure does not corrupt database state.
 
-### Phase 4 — JD ingestion, extraction, deduplication, and graph sync
+### Phase 4 — JD ingestion, extraction, exact deduplication, and graph sync
 
 Tasks:
 
@@ -1175,32 +1435,32 @@ Tasks:
 - [ ] Implement raw-text input path.
 - [ ] Implement JobPost Pydantic extraction and one-repair policy.
 - [ ] Implement full/partial/unscorable classification.
-- [ ] Implement exact and normalized duplicate policy.
-- [ ] Implement deterministic skill normalization and seed aliases/relationships.
+- [ ] Implement the exact content-hash duplicate policy and reuse the Phase 3 skill normalizer.
 - [ ] Implement `save_job` and `query_jobs`.
-- [ ] Generate ShopAIKey job embeddings for scorable active records.
+- [ ] Implement the production ShopAIKey embedding adapter, shared whitespace normalization, the versioned Job text builder, and embeddings for scorable records.
 - [ ] Synchronize Job and Skill graph data directly after SQLite persistence.
+- [ ] Complete the local rebuild command after Candidate and Job sync paths exist.
 - [ ] Add concise Job tool status and saved-job card to chat.
 
 Exit gate:
 
 - Raw JD is retained across extraction failures.
-- Exact duplicates do not reprocess.
-- Normalized duplicates are stored but excluded from graph/ranking.
+- Non-failed exact matches do not reprocess; failed matches retry without creating a new row.
 - Supported HTTP/HTTPS URLs can be fetched; unavailable pages fall back to pasted text.
-- Full and partial active jobs are queryable in Neo4j with matching IDs.
+- Full and partial scorable jobs are queryable in Neo4j with matching IDs and `source_updated_at`.
 
 ### Phase 5 — Matching, explanation, and manual acceptance
 
 Tasks:
 
-- [ ] Implement Candidate and Job embedding text builders.
+- [ ] Implement the versioned Candidate embedding text builder by reusing the Phase 4 embedding adapter and whitespace normalizer.
 - [ ] Implement Neo4j top-50 vector retrieval.
 - [ ] Implement direct, alias, and seed-related skill features.
 - [ ] Implement seniority, experience, location, and work-mode components.
 - [ ] Implement missing-field weight renormalization and quality multiplier.
 - [ ] Implement deterministic score explanation.
 - [ ] Implement `match_jobs` and top-10 response.
+- [ ] Implement the pre-match Candidate/Job revision check without a sync ledger.
 - [ ] Implement Astryx match cards and collapsible breakdown.
 - [ ] Complete the manual JD acceptance checklist in Section 19.
 
@@ -1218,7 +1478,7 @@ Tasks:
 - [ ] Test ShopAIKey outage, Neo4j outage, invalid schema, disconnect, and duplicate scenarios.
 - [ ] Verify idempotency of approval buttons and all write tools.
 - [ ] Verify graph rebuild from a fresh Neo4j volume.
-- [ ] Verify root `.env` is the only environment file.
+- [ ] Verify root `.env` is the only runtime environment file; `.env.example` remains documentation only.
 - [ ] Verify no secrets or real data are tracked by Git.
 - [ ] Add README architecture, setup, commands, demo flow, manual verification checklist, and limitations.
 - [ ] Perform final scope audit against the out-of-scope list.
@@ -1261,14 +1521,15 @@ JobAgent MVP is done only when all conditions are true:
 - Only one active CV/profile exists after commit.
 - The Agent remembers approved corrections across restarts.
 - The user can submit public URL or raw JD text.
-- Every valid input is represented by an existing, active, failed, or ignored duplicate record.
+- Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
 - Scorable jobs synchronize to Neo4j.
-- Matching returns top jobs with transparent score breakdown and skill gaps.
+- Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
 - Tool activity is visible and concise.
 - Failure paths do not report false success.
 - Automated functional tests pass and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.
 - No Qdrant, OCR, crawler, authentication, multi-agent, Redis, Celery, cloud deployment, or CI has been added.
+- No JD evaluation dataset/metric, outbox/worker/queue/sync-state machine, or production security subsystem has been added.
 
 ---
 
@@ -1292,7 +1553,7 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Evidence is sufficient to begin implementation planning because all material product and architecture choices are locked, while uncertain technical integrations are isolated behind Phase 0 pass/fail gates.
+Evidence is sufficient to begin Phase 0 implementation because all material product and architecture choices are locked, while uncertain technical integrations are isolated behind Phase 0 pass/fail gates.
 
 The project remains intentionally narrow:
 
@@ -1335,9 +1596,7 @@ The following primary documentation supports the material technical decisions in
 ### Graph and vector search
 
 - [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/)
-- [Neo4j Full-Text Indexes](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/full-text-indexes/)
 - [Neo4j MERGE](https://neo4j.com/docs/cypher-manual/current/clauses/merge/)
-- [Neo4j Node Similarity](https://neo4j.com/docs/graph-data-science/current/algorithms/node-similarity/)
 
 ### Extraction and embeddings
 
