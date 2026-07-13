@@ -2,5 +2,8 @@
 
 from __future__ import annotations
 
-# Register shared migration harness fixtures (isolated_sqlite, migrated_sqlite).
-pytest_plugins = ("tests.support.db_migration",)
+# Shared fixtures: migration harness + health integration helpers.
+pytest_plugins = (
+    "tests.support.db_migration",
+    "tests.support.health",
+)

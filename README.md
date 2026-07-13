@@ -1,8 +1,9 @@
 # JobAgent
 
-JobAgent has completed Phase 0 feasibility validation and the first two Plan 2
+JobAgent has completed Phase 0 feasibility validation and the first three Plan 2
 foundation batches. The repository now contains a pinned backend core, the complete
-SQLite/Alembic source-of-truth schema, and a minimal Astryx application shell.
+SQLite/Alembic source-of-truth schema, UUID-rooted attachment storage, Neo4j
+foundation primitives, one health API, and a minimal Astryx application shell.
 Production CV, job, chat, Agent, approval, and matching workflows remain out of
 scope while the rest of Plan 2 is implemented.
 
@@ -12,7 +13,8 @@ scope while the rest of Plan 2 is implemented.
   shell with lint, type-check, render-test, and build commands.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
-  tables, and the explicit Alembic initial migration.
+  tables, the explicit Alembic initial migration, atomic attachment storage,
+  Neo4j lifecycle/schema setup, and `GET /api/health`.
 - `infrastructure/` - local feasibility scripts and future local-service folders.
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
 
@@ -52,6 +54,23 @@ Alembic owns exactly the nine application tables and seeds only
 `conversation('main')` and `job_preferences('active')`. Runtime code never calls
 `Base.metadata.create_all()`, and checkpoint-like tables remain outside Alembic
 ownership.
+
+## Storage, graph, and health verification
+
+From `backend/`:
+
+```powershell
+python -m pytest tests/unit/test_storage.py tests/unit/test_graph_setup.py -q
+python -m pytest tests/integration/test_health.py -q
+python -m ruff check app/storage app/graph app/api app/schemas/health.py app/main.py
+python -m mypy app
+```
+
+Attachment paths are UUID-derived and confined beneath `FILES_DIR`; complete
+writes become visible through atomic replacement. Neo4j setup owns only three
+idempotent uniqueness constraints and one 1536-dimensional cosine vector index.
+`GET /api/health` reports `available | unavailable` for SQLite, filesystem, and
+Neo4j without exposing connection details or adding other functional routes.
 
 ## Astryx verification
 
@@ -99,9 +118,10 @@ must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contrac
 
 ## Phase status
 
-All four Phase 0 batches passed. Plan 2 Batches 1-2 add the exact-pinned backend
+All four Phase 0 batches passed. Plan 2 Batches 1-3 add the exact-pinned backend
 foundation, cached root-environment settings, shared UUID/UTC helpers, minimal
 neutral Astryx shell, async SQLite boundary, all nine application tables, exact
-constraints/indexes/FKs, and idempotent Alembic singleton seeds. Storage, Neo4j,
-health, and Compose remain in later Plan 2 batches. Phase 0 evidence remains
+constraints/indexes/FKs, idempotent Alembic singleton seeds, atomic attachment
+storage, Neo4j lifecycle/base schema, and the three-component health boundary.
+Compose remains in the final Plan 2 batch. Phase 0 evidence remains
 recorded in `docs/feasibility/phase_0_report.md` and is not repeated.

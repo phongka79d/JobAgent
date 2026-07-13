@@ -1109,3 +1109,441 @@ complete
 - changes made: Restored 01B line from HEAD (0x97 em dash byte); scanned and confirmed zero U+FFFD; verified pre-02A matches HEAD; preserved 02A-02E blocks; appended this batch_scope execution report.
 - validations rerun: U+FFFD scan (0); pre-02A vs HEAD LF-normalized equality; Batch 2 header presence; git-diff shape check for pre-02A.
 - outcome: complete - listed batch-scope issue fixed; ready for A2 validation.
+
+---
+
+# Task Execution Report - 03A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Storage, Graph, and Health Primitives
+
+## Task
+03A - Implement the UUID-rooted atomic attachment storage boundary
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03A
+- Task title: Implement the UUID-rooted atomic attachment storage boundary
+- Files allowed / repair scope (original): `backend/app/storage/__init__.py`, `backend/app/storage/attachments.py`, `backend/tests/unit/test_storage.py`
+- Repair scope (A2 same_task): align `delete()` already-missing-file contract across implementation, docstring, focused test, and this report; preserve idempotent `True` behavior; do not broaden storage scope
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.5 Attachment storage
+- docs/plans/Plan_2.md > ## 9. Verification & Testing Plan > ### Automated commands
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md (Section 6.4 CV upload file path ownership; Section 6 attachments storage_path relative to FILES_DIR)
+- docs/review/review_2_review_agent.md (03A A2 REJECTED_WITH_WARNINGS — delete missing-file return contradiction)
+
+## Dependency and User Action Check
+- Dependencies: (01A) complete — shared `new_uuid`, settings `FILES_DIR`, and backend quality tooling available.
+- User Action: None. Tests use temporary directories and sanitized settings only.
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (03A block)
+- docs/plans/Plan_2.md §7.5, §9 automated commands
+- docs/plans/Master_plan.md attachment storage_path / CV upload notes
+- backend/app/core/ids.py (shared UUID owner)
+- backend/app/core/settings.py (FILES_DIR field)
+- backend/app/db/models/attachments.py (storage_path column ownership boundary; not modified)
+- backend/tests/unit/test_settings.py, test_core_conventions.py (test patterns)
+- Repository search for existing path/atomic-write/storage callers (none under app/storage)
+- backend/app/storage/attachments.py (repair: delete docstring vs idempotent True)
+- backend/tests/unit/test_storage.py (repair: already-missing delete contract)
+- docs/review/review_2_review_agent.md (03A A2 repair instructions)
+
+## Completed Work
+- Added filesystem-only `AttachmentStorage` rooted at configured `FILES_DIR`.
+- Relative DB-facing paths are derived solely from lowercase UUID v4 (`new_uuid` format); display/original filenames never participate.
+- Atomic writes use a temporary sibling under the root, flush/fsync, then `os.replace` onto the final path; failed writes best-effort unlink the temp sibling and leave no final partial file.
+- Path-accepting methods reject absolute paths, multi-segment paths, traversal (`..`), null bytes, and resolved escapes outside the root.
+- Existence, binary open, and explicit best-effort delete primitives implemented; delete runs only when called.
+- Module uses stdlib `pathlib`/`os`/`tempfile` only — no PDF parser, ORM model, or business service imports.
+- Unit tests cover UUID-relative naming, complete atomic visibility, replace/body failure cleanup, traversal/absolute rejection, exists/open, best-effort delete, and import boundary.
+- Same-task repair: chose explicit already-missing `delete()` contract as idempotent `True` (file absent after attempt, including never written / already gone); corrected docstring and report; focused test asserts second-delete and never-written UUID both return `True`; `False` remains only for OSError / file still present.
+
+## Files Created or Modified
+- backend/app/storage/__init__.py (created; unchanged in this repair)
+- backend/app/storage/attachments.py (created; repair: delete docstring contract)
+- backend/tests/unit/test_storage.py (created; repair: already-missing delete assertions)
+
+### This repair only
+- backend/app/storage/attachments.py
+- backend/tests/unit/test_storage.py
+- docs/reports/report_2_execute_agent.md (in-place 03A update)
+
+## Tests or Validations Run
+- command/check: `Set-Location backend; python -m pytest tests/unit/test_storage.py -q`
+- required: yes
+- result: passed
+- evidence or reason: repair re-run — all atomicity, path-safety, and file-operation cases green (including idempotent already-missing delete); 1 skipped (symlink escape case when platform cannot create/resolve symlinks)
+
+- command/check: `Set-Location backend; python -m ruff check app/storage/attachments.py tests/unit/test_storage.py`
+- required: yes
+- result: passed
+- evidence or reason: repair re-run — All checks passed!
+
+- command/check: `Set-Location backend; python -m mypy app`
+- required: yes
+- result: passed
+- evidence or reason: repair re-run — Success: no issues found in 16 source files
+
+## Acceptance Check
+- condition: Stored paths are relative, UUID-derived, and always resolve beneath the configured root; original/display filenames never control a path
+- status: satisfied
+- evidence: `relative_path_for` / `write_bytes` return the attachment UUID only; display-name IDs raise; path methods reject traversal/absolute/multi-segment; resolve asserts under root
+
+- condition: Successful writes become visible only after complete atomic replacement, and failed writes leave no final partial file
+- status: satisfied
+- evidence: replace-tracking test proves final absent before `os.replace`; replace-failure and mid-write failure tests leave empty root (no final, no leftover temps)
+
+- condition: Existence/open/delete work only within the root, deletion occurs only when called, and the module imports no PDF parser, ORM model, or business service
+- status: satisfied
+- evidence: exists/open/delete reject unsafe paths; delete only after explicit call; AST import scan forbids pypdf/sqlalchemy/app.db/app.api/app.graph/fastapi
+
+- condition (A2 repair): `delete()` already-missing-file contract is explicit and consistent across implementation, docstring, test, and report
+- status: satisfied
+- evidence: implementation returns True when target is absent (including already missing); docstring documents idempotent True; tests assert second delete and never-written UUID return True; False only on OSError / residual presence
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair / orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Relative storage path is the lowercase UUID v4 string itself (single path segment), never a display filename or extension derived from user input.
+- `os.replace` on a same-directory temporary sibling provides atomic final visibility on the supported local runtime (Windows included).
+- Invalid/escaping paths raise `PathEscapeError` even on delete (security).
+- `delete()` is best-effort and idempotent for absence: returns `True` when the file is gone after the attempt (including already missing / never written); returns `False` only on OSError during unlink or when the file remains present.
+
+## Notes for Review Agent
+- changed files this repair: backend/app/storage/attachments.py; backend/tests/unit/test_storage.py; docs/reports/report_2_execute_agent.md
+- cumulative task files: backend/app/storage/__init__.py, backend/app/storage/attachments.py, backend/tests/unit/test_storage.py
+- validations to rerun: `Set-Location backend; python -m pytest tests/unit/test_storage.py -q`; `python -m ruff check app/storage/attachments.py tests/unit/test_storage.py`; `python -m mypy app`
+- risk areas: inspect every path-accepting method (`resolve_path`, `exists`, `open`, `delete`, `write_bytes` via UUID) for escape; confirm no display-filename path construction; confirm temp cleanup on failure paths; confirm callers can rely on idempotent True for missing targets
+- next task readiness: can_review
+- repairOf: 03A (A2 REJECTED_WITH_WARNINGS — delete() docstring/report claimed False on missing file while implementation and test used idempotent True)
+
+## Workflow Integrity Check
+- Single task 03A same_task_repair only; no PDF parsing/hashing, ORM/database state, drafts, services, graph, health, APIs, or Compose
+- No checkbox/batch status updates; no commit or stage
+- Report updated in place with Repair Log (no duplicate 03A block)
+
+## Repair Log
+
+### 2026-07-13T15:34:04+07:00
+- reason for repair: A2 REJECTED_WITH_WARNINGS — `delete()` returned `True` for already-missing files while its docstring and the 03A execution report claimed missing files return `False`.
+- changes made: Kept idempotent `True` behavior (`unlink(missing_ok=True)` then absent-after-attempt). Corrected `AttachmentStorage.delete` docstring to state True when target is absent after the attempt (including already missing) and False only on OSError / residual presence. Strengthened `test_delete_is_best_effort_and_only_when_called` to assert second-delete and never-written UUID both return True. Updated this report Key Implementation Decisions and acceptance evidence to match.
+- validations rerun: `python -m pytest tests/unit/test_storage.py -q` (passed; 1 skipped symlink case); `python -m ruff check app/storage/attachments.py tests/unit/test_storage.py` (All checks passed!); `python -m mypy app` (Success: no issues found in 16 source files).
+- outcome: complete — single already-missing-file contract aligned; ready for A2 re-review.
+
+### 2026-07-13T15:38:57+07:00
+- reason for repair: A2 same_task repair - pre-03A report prefix was re-encoded (UTF-8 replacement sequence EF BF BD at former CP1252 byte 0x97; CRLF drift). Prefix before 03A delimiter must be byte-identical to HEAD.
+- changes made: Byte-safe restore of committed pre-03A content from HEAD (restores raw 0x97; removes EF BF BD). Preserved existing single 03A execution-report block content; appended this repair verification only. No storage code/tests changes.
+- validations rerun: prefix byte-identical to HEAD before 03A delimiter; no EF BF BD; exactly one 03A block; git diff -- docs/reports/report_2_execute_agent.md has no hunk before appended 03A block; Set-Location backend; python -m pytest tests/unit/test_storage.py -q; python -m ruff check app/storage/attachments.py tests/unit/test_storage.py; python -m mypy app.
+- outcome: complete - encoding/scope issue fixed; ready for A2 re-review.
+
+---
+
+# Task Execution Report - 03B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+orchestrated
+
+## Batch
+Batch03 - Storage, Graph, and Health Primitives
+
+## Task
+03B - Implement the Neo4j driver lifecycle and idempotent base schema
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03B
+- Task title: Implement the Neo4j driver lifecycle and idempotent base schema
+- Files allowed: backend/app/graph/__init__.py, backend/app/graph/driver.py, backend/app/graph/constraints.py, backend/tests/unit/test_graph_setup.py
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.6 Neo4j base contract
+- docs/plans/Master_plan.md > ## 8. Neo4j Derived Model > ### 8.3 Constraints and indexes
+- docs/plans/Master_plan.md > ## 8. Neo4j Derived Model > ### 8.4 Graph safety rules
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+
+## Dependency and User Action Check
+- Dependencies: (01A) complete — shared Settings (NEO4J_URI/USER/PASSWORD SecretStr), EMBEDDING_DIMENSIONS=1536 default, neo4j==6.2.0 pin, quality tooling available.
+- User Action: None for required unit validation; live Neo4j evidence deferred to (04B).
+
+## Files Inspected Before Editing
+- README.md
+- docs/tasks/task_2.md (03B block)
+- docs/plans/Plan_2.md §7.6
+- docs/plans/Master_plan.md §8.3–8.4
+- backend/pyproject.toml (neo4j==6.2.0)
+- backend/app/core/settings.py (NEO4J_* and EMBEDDING_DIMENSIONS)
+- backend/app/storage/* (focused-module ownership pattern)
+- Repository search for neo4j/graph callers (settings only; no prior app/graph package)
+- neo4j 6.2.0 AsyncGraphDatabase / AsyncDriver public API (driver, verify_connectivity, close, session)
+
+## Completed Work
+- Added app.graph package with single driver owner and single schema initializer.
+- driver.py: open_driver(settings) uses official AsyncGraphDatabase.driver with URI/user/SecretStr password; close_driver; check_connectivity returns bool without exposing secrets.
+- constraints.py: exactly three IF NOT EXISTS uniqueness constraints (Candidate.id, Job.id, Skill.canonical_key) plus one IF NOT EXISTS cosine vector index on Job.embedding at 1536 dimensions; ensure_base_schema runs the fixed SCHEMA_STATEMENTS via session.run.
+- Documented fixed identities (Candidate active, SQLite Job UUID, Skill canonical_key) without seeding nodes or writing domain data.
+- Unit tests with FakeDriver cover lifecycle, connectivity success/failure, exact DDL, repeat-safe setup, cosine/1536, secret non-exposure, and absence of later-phase graph behavior / SQLite imports.
+
+## Files Created or Modified
+- backend/app/graph/__init__.py (created)
+- backend/app/graph/driver.py (created)
+- backend/app/graph/constraints.py (created)
+- backend/tests/unit/test_graph_setup.py (created)
+- docs/reports/report_2_execute_agent.md (appended 03B block only)
+
+## Tests or Validations Run
+- command/check: Set-Location backend; python -m pytest tests/unit/test_graph_setup.py -q
+- required: yes
+- result: passed
+- evidence or reason: 13 passed (lifecycle, connectivity outcomes, exact DDL, repeat-safe setup, cosine/1536, secret hygiene, import boundary)
+
+- command/check: Set-Location backend; python -m ruff check app/graph tests/unit/test_graph_setup.py
+- required: yes
+- result: passed
+- evidence or reason: All checks passed!
+
+- command/check: Set-Location backend; python -m mypy app
+- required: yes
+- result: passed
+- evidence or reason: Success: no issues found in 19 source files
+
+- command/check: rg -n "HAS_SKILL|REQUIRES|PREFERS|RELATED_TO|source_updated_at|rebuild" backend/app/graph
+- required: yes
+- result: passed
+- evidence or reason: no matches (exit 1 / empty) — no later-phase relationship, sync-timestamp, or rebuild vocabulary in graph package
+
+## Acceptance Check
+- condition: Driver lifecycle and connectivity use configured URI/user/secret without exposing the password
+- status: satisfied
+- evidence: open_driver passes (uri, (user, secret_value)) to AsyncGraphDatabase.driver; tests assert password only in auth tuple and never in settings repr / config dumps; check_connectivity returns bool only
+
+- condition: Repeated setup issues only idempotent creation for three exact unique constraints and one exact cosine/1536 vector index
+- status: satisfied
+- evidence: SCHEMA_STATEMENTS length 4; all use IF NOT EXISTS; double ensure_base_schema yields identical statement list twice; vector index asserts cosine + 1536
+
+- condition: No graph domain write, seed relationship, sync/retry/rebuild behavior, second identifier, or SQLite mutation exists
+- status: satisfied
+- evidence: modules only open/close/connectivity + fixed DDL; AST import scan forbids app.db/sqlalchemy; forbidden-token scan clean; no MERGE/CREATE node/relationship statements
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: orchestrated mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Single owner split: driver.py lifecycle, constraints.py schema statements/ensure_base_schema.
+- Fixed DDL as source constants (no runtime interpolation of URI/password/dimensions into Cypher).
+- check_connectivity maps verify_connectivity exceptions to False for later health use without leaking secrets.
+- Identity rules documented in constraints module docstring only; no Candidate/Job/Skill node creation in this task.
+
+## Notes for Review Agent
+- changed files: backend/app/graph/__init__.py, backend/app/graph/driver.py, backend/app/graph/constraints.py, backend/tests/unit/test_graph_setup.py, docs/reports/report_2_execute_agent.md (append only)
+- validations to rerun: Set-Location backend; python -m pytest tests/unit/test_graph_setup.py -q; python -m ruff check app/graph tests/unit/test_graph_setup.py; python -m mypy app; rg forbidden-token scan on backend/app/graph
+- risk areas: exact Cypher text for Community vector index; secret not logged; no domain sync sneak-in
+- next task readiness: can_review
+
+## Workflow Integrity Check
+- Single task 03B only; no domain graph writes, relationships, health/API lifecycle, SQLite mutation, or Compose
+- No checkbox/batch status updates; no commit or stage
+- Report appended as new 03B block at EOF without rewriting prior bytes
+
+---
+
+# Task Execution Report - 03C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Report File
+docs/reports/report_2_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch03 - Storage, Graph, and Health Primitives
+
+## Task
+03C - Expose the validated three-component health boundary and application lifecycle
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03C
+- Task title: Expose the validated three-component health boundary and application lifecycle
+- Files allowed / repair scope: backend/app/api/__init__.py, backend/app/api/health.py, backend/app/schemas/health.py, backend/app/main.py, backend/tests/integration/test_health.py, backend/tests/support/health.py (shared test helpers); remove unlisted backend/app/schemas/__init__.py; register health fixtures in backend/tests/conftest.py
+
+## Source of Truth Used
+- docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.7 Health endpoint
+- docs/plans/Plan_2.md > ## 4. Scope
+- docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary > ### 14.1 API rules
+
+## Supplemental Documents Used
+- docs/plans/Plan_2.md
+- docs/plans/Master_plan.md
+
+## Dependency and User Action Check
+- Dependencies: (02E) migrated schema + ensure_singleton_seeds; (03A) AttachmentStorage; (03B) open/close/check_connectivity + ensure_base_schema — all present and reused.
+- User Action: None. Tests use dependency overrides/fakes and temporary SQLite/filesystem resources; no root .env, live Neo4j, or credentials required.
+
+## Files Inspected Before Editing
+- README.md
+- backend/app/core/settings.py
+- backend/app/db/session.py
+- backend/app/db/seed.py
+- backend/app/graph/driver.py
+- backend/app/graph/constraints.py
+- backend/app/storage/attachments.py
+- backend/app/main.py
+- backend/app/api/health.py
+- backend/app/schemas/health.py
+- backend/tests/conftest.py
+- backend/tests/support/db_migration.py
+- backend/tests/integration/test_health.py
+- backend/tests/unit/test_graph_setup.py
+- docs/plans/Plan_2.md section 7.7
+- docs/plans/Master_plan.md section 14 / 14.1
+- docs/tasks/task_2.md task 03C block
+- docs/review/review_2_review_agent.md 03C A2 findings
+
+## Completed Work
+- Implemented validated HealthResponse (overall + sqlite/filesystem/neo4j) with exact available|unavailable vocabulary; overall available iff all three components available.
+- Implemented probe_sqlite (SELECT 1 via session_scope), probe_filesystem (ensure_root + access, no user-data probe file), probe_neo4j (check_connectivity).
+- Lifespan opens shared resources with early try/finally cleanup: engine dispose and Neo4j close run on every exit path including partial startup failures.
+- Singleton safeguard runs only after a successful SQLite SELECT 1; SQLite unavailability does not terminate startup.
+- Filesystem root is not created eagerly at startup; create/access lives only in the exception-safe health probe.
+- Graph ensure_base_schema runs only when Neo4j connectivity succeeds; CORS uses FRONTEND_ORIGIN; never Alembic upgrade or create_all().
+- Integration tests cover all-available, real single-component unavailability (blocked SQLite path / FILES_DIR file / Neo4j connectivity fail), payload shape, non-mutating filesystem, startup idempotence, shutdown cleanup, partial-startup cleanup, seed skip when SQLite down, no other /api functional routes, and secret/path leak checks.
+- Reusable fakes/env helpers live in backend/tests/support/health.py; test_health.py kept under 300 lines.
+- Removed unnecessary unlisted backend/app/schemas/__init__.py; app.schemas.health imports remain valid.
+
+## Files Created or Modified
+- backend/app/api/__init__.py (created)
+- backend/app/api/health.py (created)
+- backend/app/schemas/health.py (created)
+- backend/app/main.py (created; repaired lifespan survivability + early cleanup)
+- backend/tests/integration/test_health.py (created; repaired real boundary failures + consolidation)
+- backend/tests/support/health.py (created; shared health test helpers)
+- backend/tests/conftest.py (register tests.support.health fixtures)
+- backend/app/schemas/__init__.py (removed as unnecessary unlisted package marker)
+- docs/reports/report_2_execute_agent.md (03C block updated in place)
+
+## Tests or Validations Run
+- command/check: Set-Location backend; python -m pytest tests/integration/test_health.py -q
+- required: yes
+- result: passed
+- evidence or reason: 15 passed (warnings only: aiosqlite datetime DeprecationWarning); includes real SQLite/filesystem/Neo4j component failures and partial-startup cleanup
+
+- command/check: Set-Location backend; python -m ruff check app/api app/schemas/health.py app/main.py tests/integration/test_health.py tests/support/health.py; python -m mypy app
+- required: yes
+- result: passed
+- evidence or reason: ruff All checks passed; mypy Success: no issues found in 23 source files
+
+- command/check: rg -n "@(app|router)\.(get|post|put|patch|delete)" backend/app
+- required: yes
+- result: passed
+- evidence or reason: single match backend/app/api/health.py:62 @router.get("/health", response_model=HealthResponse)
+
+- command/check: line-count inspection (test_health.py, support/health.py, main.py)
+- required: yes (repair)
+- result: passed
+- evidence or reason: test_health.py 292 lines; support/health.py 234 lines; main.py 109 lines (all <= 300)
+
+- command/check: from app.schemas.health import HealthResponse after removing schemas/__init__.py
+- required: yes (repair)
+- result: passed
+- evidence or reason: import ok
+
+## Acceptance Check
+- condition: Health payload validates and reports only the exact three components; overall available iff all available; one unavailable dependency represented without crash or SQLite ownership change
+- status: satisfied
+- evidence: test_health_all_available; test_health_single_component_unavailable_real_boundary (parametrized sqlite/filesystem/neo4j via blocked paths and FakeDriver); SQLite SELECT 1 still works when filesystem/neo4j unavailable
+
+- condition: Health performs no schema mutation and writes no user-data probe file; startup never runs migrations or create_all()
+- status: satisfied
+- evidence: test_health_does_not_mutate_schema; test_filesystem_health_writes_no_user_data_probe_file; test_startup_never_runs_migrations_or_create_all
+
+- condition: Lifespan opens/closes shared resources once, runs singleton and graph safeguards idempotently after migration availability, leaks no secret or connection detail
+- status: satisfied
+- evidence: test_shutdown_and_open_once; test_lifespan_opens_resources_once; test_startup_idempotent_seeds_and_graph; test_partial_startup_failure_cleans_up_resources; test_startup_skips_seeds_when_sqlite_unavailable; assert_no_secrets in payload tests
+
+- condition: No CV/profile/chat/job endpoint, SSE route, provider client, or Agent behavior is exposed
+- status: satisfied
+- evidence: test_only_public_functional_route_is_get_health; test_source_tree_has_no_other_route_decorators; rg route scan single match
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: same_task_repair mode — A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Reused existing owners only: get_engine/session_scope/dispose_engine, ensure_singleton_seeds, AttachmentStorage.ensure_root (health only), open_driver/close_driver/check_connectivity, ensure_base_schema.
+- SQLite and filesystem unavailability are survivable at startup so GET /api/health can report component states with HTTP 200.
+- Cleanup protection starts as soon as the engine can be acquired; partial failures close any opened driver and dispose the engine once.
+- Graph schema init runs at startup only when check_connectivity succeeds so Neo4j unavailable is a health component state, not a process crash.
+- Module-level app is lazy via __getattr__ so tests can set sanitized env before create_app(); uvicorn app.main:app still works.
+- Response model uses flat overall/sqlite/filesystem/neo4j fields with extra=forbid and a validator enforcing overall consistency.
+- No schemas package __init__ marker; health schema module imports directly.
+
+## Notes for Review Agent
+- changed files (repair): backend/app/main.py, backend/tests/integration/test_health.py, backend/tests/support/health.py, backend/tests/conftest.py, backend/app/schemas/__init__.py (deleted), docs/reports/report_2_execute_agent.md (03C in-place update)
+- prior 03C deliverables still present: backend/app/api/__init__.py, backend/app/api/health.py, backend/app/schemas/health.py
+- validations to rerun: Set-Location backend; python -m pytest tests/integration/test_health.py -q; python -m ruff check app/api app/schemas/health.py app/main.py tests/integration/test_health.py tests/support/health.py; python -m mypy app; rg -n "@(app|router)\.(get|post|put|patch|delete)" backend/app
+- risk areas: Neo4j down skips ensure_base_schema at startup (schema applied later when reachable or by ops); FastAPI still exposes default /docs/openapi (not functional app routes under /api); seed failure after successful SELECT 1 still propagates (only SQLite unavailability is swallowed)
+- next task readiness: can_review
+
+## Workflow Integrity Check
+- Single task 03C only; no CV/profile/chat/job/SSE/provider/Agent, no Compose, no migration rewrite
+- No checkbox/batch status updates; no commit or stage
+- Single 03C report block updated in place; pre-03C report bytes not rewritten
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED 03C)
+- reason for repair: A2 found eager SQLite seeding and filesystem ensure_root terminated startup before health could report real component failures; cleanup try/finally began too late for partial startup; unavailable tests stubbed probe returns; test_health.py exceeded 300 lines; unlisted schemas/__init__.py and inaccurate report scope claims.
+- changes made:
+  - main.py: survivable SQLite check before singleton seeds; no eager ensure_root; early try/finally always closes driver/disposes engine.
+  - tests: real blocked SQLite parent path, FILES_DIR-as-file, Neo4j connectivity fail; partial-startup cleanup assertion; seed-skip when SQLite down; helpers in tests/support/health.py; conftest registers health fixtures.
+  - removed backend/app/schemas/__init__.py; corrected this report's file/scope/coverage claims in place.
+- validations rerun: pytest tests/integration/test_health.py -q (15 passed); ruff focused paths (pass); mypy app (23 files, pass); rg public routes (single GET /api/health); line counts <= 300; schemas.health import ok.
+- outcome: complete — all A2 repair items addressed; acceptance satisfied for re-review.
+
+### 2026-07-13 (same_task_repair after A2 REJECTED 03C — report encoding)
+- reason for repair: A2 found the pre-03A report prefix was re-encoded vs HEAD (CRLF rewrite and 01B Progress Update reason line U+FFFD / EF BF BD instead of committed raw 0x97), mixing prior-batch byte corruption into the 03C report evidence.
+- changes made: Restored the entire prefix before the 03A delimiter byte-for-byte from HEAD (including raw 0x97 on the 01B reason line); preserved the single current 03A/03B/03C blocks without re-encoding; appended this repair verification only in the 03C Repair Log. No runtime code, tests, fixtures, routes, or Compose changes.
+- validations rerun: prefix-before-03A == HEAD bytes; zero EF BF BD in report; exactly one 03A/03B/03C block; git diff vs HEAD is pure append after committed EOF; pytest tests/integration/test_health.py -q; ruff focused paths; mypy app; rg public routes.
+- outcome: complete — report encoding/scope finding fixed; ready for A2 re-review.

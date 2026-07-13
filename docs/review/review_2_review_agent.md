@@ -821,3 +821,319 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03A
+- Task title: Implement the UUID-rooted atomic attachment storage boundary
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the three scoped storage files plus the updated execution report and this review report; prior accepted Batch 3 files: none.
+- scope conflict: none after the latest repair; the only report diff is the appended 03A block after committed EOF.
+
+## Files Reviewed
+- `backend/app/storage/__init__.py`: in scope - focused package export boundary.
+- `backend/app/storage/attachments.py`: in scope - real UUID-rooted, path-confined, atomic filesystem implementation; its `delete()` docstring contradicts its implemented already-missing-file behavior.
+- `backend/tests/unit/test_storage.py`: in scope - covers UUID naming, atomic visibility and cleanup, traversal/escape rejection, read/existence/delete behavior, and forbidden imports.
+- `docs/reports/report_2_execute_agent.md`: in scope - the selected 03A repair block accurately documents idempotent missing-file deletion, and the committed prefix is byte-identical to `HEAD` after the encoding repair.
+
+## Validations Reviewed
+- Command/check: `python -m pytest tests/unit/test_storage.py -q`
+- Required: yes
+- Reported result: passed (21 passed, 1 skipped on unavailable Windows symlink behavior)
+- Rerun result: passed (21 passed, 1 skipped)
+- Status: passed
+- Notes: storage behavior and failure cleanup remain green.
+
+- Command/check: `python -m ruff check app/storage/attachments.py tests/unit/test_storage.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (`All checks passed!`)
+- Status: passed
+- Notes: no focused lint failures.
+
+- Command/check: `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (16 source files)
+- Status: passed
+- Notes: no application type-check failures.
+
+## Acceptance Review
+- Task acceptance: accepted after same-task repairs.
+- Status: satisfied
+- Evidence: UUID-only relative naming, root confinement, atomic sibling replacement, failure cleanup, explicit existence/open/delete operations, and import boundaries satisfy the source requirements. Implementation, docstring, tests, and report consistently define already-missing deletion as idempotent `True`; focused tests, Ruff, and mypy pass; the report prefix is restored byte-identical to `HEAD`, contains no `EF BF BD`, and only the single 03A block is appended.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None; the original delete-contract contradiction is repaired.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13T15:37:00+07:00
+- what was re-checked: the A2 delete-contract finding, storage implementation/docstring/tests, updated 03A execution evidence, required tests/Ruff/mypy, full report diff, UTF-8 code points, and checkbox integrity.
+- repairs verified: missing-file deletion is consistently documented and tested as idempotent `True`; required validations pass.
+- remaining issues: the repair replaced committed byte `0x97` with `EF BF BD` in 01B report evidence at line 272, outside 03A and Batch 3 scope.
+- updated outcome: `REJECTED` in `same_task_repair` mode; 03A remains unchecked and requires one report-only encoding/scope repair before re-review.
+
+### 2026-07-13T15:40:00+07:00
+- what was re-checked: byte-level report prefix integrity, report diff hunks, `EF BF BD` count, single 03A block count, repaired delete contract, focused tests, Ruff, mypy, and checkbox integrity.
+- repairs verified: pre-03A report bytes equal committed `HEAD`; raw `0x97` is restored; no `EF BF BD` remains; the report diff is a pure 03A append; storage implementation/tests were unchanged by the encoding repair.
+- remaining issues: none.
+- updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox 03A was checked, batch status remains unchanged, and 03B may proceed.
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03B
+- Task title: Implement the Neo4j driver lifecycle and idempotent base schema
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the four scoped graph files and appended 03B report block; previously accepted 03A changes remain uncommitted in the same batch.
+
+## Files Reviewed
+- `backend/app/graph/__init__.py`: in scope - focused exports for lifecycle and schema primitives.
+- `backend/app/graph/driver.py`: in scope - official async-driver open/close/connectivity owner using shared settings and masked secret extraction.
+- `backend/app/graph/constraints.py`: in scope - fixed four-statement idempotent schema owner with exactly three uniqueness constraints and one cosine/1536 vector index.
+- `backend/tests/unit/test_graph_setup.py`: in scope - deterministic fake-driver coverage for lifecycle, failures, exact DDL, repeated setup, secret hygiene, and forbidden later-phase behavior; 287 lines.
+- `docs/reports/report_2_execute_agent.md`: in scope - 03B evidence is appended after 03A without changing the committed prefix.
+
+## Validations Reviewed
+- Command/check: `python -m pytest tests/unit/test_graph_setup.py -q`
+- Required: yes
+- Reported result: passed (13 tests)
+- Rerun result: passed (13 tests)
+- Status: passed
+- Notes: official lifecycle adapter, connectivity outcomes, exact/repeat-safe DDL, cosine/1536, and boundaries are covered by deterministic fakes.
+
+- Command/check: `python -m ruff check app/graph tests/unit/test_graph_setup.py`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (`All checks passed!`)
+- Status: passed
+- Notes: no focused lint failures.
+
+- Command/check: `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (19 source files)
+- Status: passed
+- Notes: no application type-check failures.
+
+- Command/check: forbidden later-phase graph-token scan
+- Required: yes
+- Reported result: passed with no matches
+- Rerun result: passed with no matches
+- Status: passed
+- Notes: graph primitives contain no relationship, sync timestamp, or rebuild behavior.
+
+## Acceptance Review
+- Task acceptance: accepted.
+- Status: satisfied
+- Evidence: `open_driver` uses configured URI/user/password only through official driver auth, close/connectivity behavior is real and async, fixed DDL contains exactly the required `IF NOT EXISTS` constraints/index, repeated setup reissues only those statements, vector settings are cosine/1536, and no domain node/relationship/sync/retry/rebuild/SQLite behavior exists.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 03C
+
+## Source Task File
+docs/tasks/task_2.md
+
+## Execution Report Reviewed
+docs/reports/report_2_execute_agent.md
+
+## Review Report File
+docs/review/review_2_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Storage, Graph, and Health Primitives
+- Task ID: 03C
+- Task title: Expose the validated three-component health boundary and application lifecycle
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: the task runtime/test files, focused `tests/support/health.py`, fixture registration in `tests/conftest.py`, the updated 03C report, and prior accepted 03A/03B batch changes.
+- scope conflict: none after the latest byte-safe repair; the report diff is a single pure append after committed EOF.
+
+## Files Reviewed
+- `backend/app/api/__init__.py`: in scope - public route package export.
+- `backend/app/api/health.py`: in scope - focused SQLite/filesystem/Neo4j probes and one validated GET route.
+- `backend/app/schemas/health.py`: in scope - exact two-state response model and derived-overall invariant.
+- `backend/app/main.py`: in scope - SQLite readiness gates singleton seeding, filesystem setup stays in the exception-safe probe, and cleanup now surrounds every partial/successful lifespan path; 109 lines.
+- `backend/tests/integration/test_health.py`: in scope - 292 focused lines now exercise real blocked SQLite/filesystem boundaries, Neo4j failure, idempotence, and partial-startup cleanup.
+- `backend/tests/support/health.py`: in repair scope - focused 234-line owner for shared sanitized environment, fake-driver, fixture, and route-inspection support.
+- `backend/tests/conftest.py`: in repair scope - minimal registration of the shared health fixture module without duplicating fixture logic.
+- `backend/app/schemas/__init__.py`: removed as instructed; direct `app.schemas.health` import works.
+- `docs/reports/report_2_execute_agent.md`: in scope - 03C evidence accurately covers runtime repairs, the committed prefix is byte-identical to `HEAD`, and exactly one 03A/03B/03C block exists.
+
+## Validations Reviewed
+- Command/check: `python -m pytest tests/integration/test_health.py -q`
+- Required: yes
+- Reported result: passed (15 tests)
+- Rerun result: passed (15 tests; only existing aiosqlite datetime-adapter warnings)
+- Status: passed
+- Notes: real component-boundary failures, successful lifecycle, and partial-startup cleanup are now covered.
+
+- Command/check: focused Ruff and mypy gates
+- Required: yes
+- Reported result: passed
+- Rerun result: passed (`All checks passed!`; mypy 23 source files)
+- Status: passed
+- Notes: no quality-tool failures.
+
+- Command/check: public route scan
+- Required: yes
+- Reported result: passed with one route
+- Rerun result: passed with only `@router.get("/health")`
+- Status: passed
+- Notes: no other functional route decorator exists.
+
+## Acceptance Review
+- Task acceptance: accepted after same-task repairs.
+- Status: satisfied
+- Evidence: real SQLite/filesystem/Neo4j unavailability yields validated 200 responses, seed gating and partial-startup cleanup are correct, all non-generated files are below 300 lines, the route boundary remains exact, required validations pass, the report prefix is byte-identical to `HEAD`, no `EF BF BD` remains, and the only report hunk is the three Batch 3 task blocks appended after committed EOF.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13T16:02:00+07:00
+- what was re-checked: every prior A2 runtime/test/scope finding, actual component-failure behavior, cleanup paths, file sizes, removed package marker, fixture ownership, required tests/Ruff/mypy/route scan, report block counts, diff hunks, and raw replacement bytes.
+- repairs verified: SQLite/filesystem startup survivability, early cleanup, real-boundary tests, file modularization, and package-marker cleanup are correct; 15 health tests and all quality gates pass.
+- remaining issues: one out-of-scope pre-Batch3 line remains changed from committed `0x97` to `EF BF BD`, and the report's byte-preservation claim is inaccurate.
+- updated outcome: `REJECTED` in `same_task_repair` mode; 03C remains unchecked pending a report-only byte-safe repair.
+
+### 2026-07-13T16:06:00+07:00
+- what was re-checked: byte-level report prefix equality, diff hunk/numstat, replacement-sequence count, single task-block counts, all prior runtime/test repairs, 15 health tests, focused Ruff, mypy, and route scan.
+- repairs verified: committed prefix and raw `0x97` are restored; no `EF BF BD` exists; report diff is 438 pure appended lines; runtime/test files did not change in the encoding repair.
+- remaining issues: none.
+- updated outcome: `ACCEPTED` in `same_task_repair` mode; only checkbox 03C was checked, batch status remains unchanged, and Batch 3 may proceed to A3.

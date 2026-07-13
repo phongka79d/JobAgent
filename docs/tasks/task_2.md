@@ -501,7 +501,7 @@ expose CRUD/chat endpoints, call ShopAIKey, or run Agent behavior.
 
 ### Tasks
 
-- [ ] (03A): Implement the UUID-rooted atomic attachment storage boundary
+- [x] (03A): Implement the UUID-rooted atomic attachment storage boundary
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.5 Attachment storage`; `docs/plans/Plan_2.md > ## 9. Verification & Testing Plan > ### Automated commands`
   - Source Requirements:
     - Root every file under configured `FILES_DIR`, generate database-facing
@@ -542,7 +542,7 @@ expose CRUD/chat endpoints, call ShopAIKey, or run Agent behavior.
     platform evidence instead of weakening atomicity.
   - Files: `backend/app/storage/__init__.py`, `backend/app/storage/attachments.py`, `backend/tests/unit/test_storage.py`
 
-- [ ] (03B): Implement the Neo4j driver lifecycle and idempotent base schema
+- [x] (03B): Implement the Neo4j driver lifecycle and idempotent base schema
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.6 Neo4j base contract`; `docs/plans/Master_plan.md > ## 8. Neo4j Derived Model > ### 8.3 Constraints and indexes`; `docs/plans/Master_plan.md > ## 8. Neo4j Derived Model > ### 8.4 Graph safety rules`
   - Source Requirements:
     - Own the official async driver lifecycle and connectivity check, using the
@@ -587,7 +587,7 @@ expose CRUD/chat endpoints, call ShopAIKey, or run Agent behavior.
     another vector store.
   - Files: `backend/app/graph/__init__.py`, `backend/app/graph/driver.py`, `backend/app/graph/constraints.py`, `backend/tests/unit/test_graph_setup.py`
 
-- [ ] (03C): Expose the validated three-component health boundary and application lifecycle
+- [x] (03C): Expose the validated three-component health boundary and application lifecycle
   - Source of Truth: `docs/plans/Plan_2.md > ## 7. Technical Specifications > ### 7.7 Health endpoint`; `docs/plans/Plan_2.md > ## 4. Scope`; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary > ### 14.1 API rules`
   - Source Requirements:
     - Expose only `GET /api/health` with a validated overall status and exact
