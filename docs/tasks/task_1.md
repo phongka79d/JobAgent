@@ -425,7 +425,7 @@ belongs to the owning earlier task. It does not add Phase 1 application behavior
 
 ### Tasks
 
-- [ ] (04A): Lock the successful stack and finalize every Phase 0 exit gate
+- [x] (04A): Lock the successful stack and finalize every Phase 0 exit gate
   - Source of Truth: `docs/plans/Plan_1.md` > `## 7. Technical Specifications` >
     `### 7.5 Phase report decision record`; `docs/plans/Plan_1.md` >
     `## 8. Implementation Steps`; `docs/plans/Plan_1.md` >

@@ -1,9 +1,9 @@
 # JobAgent
 
-JobAgent is in Phase 0 feasibility work. The repository currently contains the
+JobAgent has completed Phase 0 feasibility validation. The repository contains the
 minimal backend/infrastructure scaffold and a pinned Astryx frontend used to verify
-documented public component APIs. Production JobAgent workflows are intentionally
-out of scope until every Phase 0 gate passes.
+documented public component APIs. Production JobAgent workflows remain out of this
+phase's scope; Plan 2 may consume the documented Phase 0 handoff.
 
 ## Repository layout
 
@@ -63,7 +63,8 @@ must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contrac
 
 ## Phase status
 
-Batches 01 through 03 establish the scaffold, environment contract, pinned Astryx
-lockfile, public component evidence, synthetic PDF/pypdf gate, and the seven-group
-ShopAIKey compatibility gate. The clean-environment reproduction and final
-dependency decision remain owned by Batch04 in `docs/tasks/task_1.md`.
+All four Phase 0 batches passed. They establish the scaffold, environment contract,
+pinned Astryx lockfile and public component evidence, synthetic PDF/pypdf gate,
+seven-group ShopAIKey compatibility gate, clean-environment reproduction, and final
+dependency decision. Plan 2 may consume the handoff recorded in
+`docs/feasibility/phase_0_report.md` without repeating Phase 0 feasibility work.

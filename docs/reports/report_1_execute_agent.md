@@ -671,3 +671,189 @@ complete
   - updated Phase 0 + this A1 report with repair evidence
 - validations rerun: local stream/embed/missing-key fakes PASS; py_compile all modules PASS; live diagnostic once PASS (7/7, `SHOPAIKEY_COMPATIBILITY=PASS`)
 - outcome: repair complete; ready for A2 re-review
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Report File
+docs/reports/report_1_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - Locked Dependencies and Final Phase 0 Decision
+
+## Task
+04A - Lock the successful stack and finalize every Phase 0 exit gate
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Locked Dependencies and Final Phase 0 Decision
+- Task ID: 04A
+- Task title: Lock the successful stack and finalize every Phase 0 exit gate
+- Files allowed / repair scope: `frontend/package-lock.json` (npm regenerate so root deps/devDeps match `package.json` exactly); `docs/feasibility/phase_0_report.md` (remove semantic/syntactic placeholder wording); existing 04A block in `docs/reports/report_1_execute_agent.md` (repair evidence + no blank line at physical EOF)
+- Original task files (prior pass, retained): `backend/pyproject.toml`, `frontend/package.json`, `.env.example`, `.gitignore`
+
+## Source of Truth Used
+- docs/plans/Plan_1.md > ## 7. Technical Specifications > ### 7.5 Phase report decision record
+- docs/plans/Plan_1.md > ## 8. Implementation Steps
+- docs/plans/Plan_1.md > ## 9. Verification & Testing Plan
+- docs/plans/Plan_1.md > ## 10. Handoff Notes for Plan 2 / Master Phase 1
+- docs/plans/Master_plan.md > ## 3. Locked Technology Stack (FastAPI >=0.135.0 and later-stack names)
+- A2 REJECTED_WITH_WARNINGS repair instructions for 04A
+
+## Supplemental Documents Used
+- docs/plans/Plan_1.md
+- docs/plans/Master_plan.md
+
+## Dependency and User Action Check
+- Dependencies (01B), (02A), (03A): satisfied (prior A2-accepted evidence present)
+- User action: valid `SHOPAIKEY_API_KEY` available only via ignored root `.env` for the original live-provider rerun: satisfied (prior 04A evidence retained; this repair does not call the provider)
+- No provider-equivalent model ID used or requested
+
+## Files Inspected Before Editing
+- frontend/package.json
+- frontend/package-lock.json
+- docs/feasibility/phase_0_report.md
+- docs/reports/report_1_execute_agent.md
+- docs/review/review_1_review_agent.md (A2 rejection targets only)
+- README.md
+- docs/tasks/task_1.md
+
+## Completed Work
+1. Audited Phase 0 dependency callers: diagnostics use only `pypdf`, `httpx`, and `pydantic`; frontend uses pinned Astryx + React/Vite toolchain. No unused Phase 0 packages to remove.
+2. Left `backend/pyproject.toml` exact minimal pins (`pypdf==6.14.2`, `httpx==0.28.1`, `pydantic==2.12.5`). Did not install Phase 1 application packages.
+3. Pin-tightened `frontend/package.json` ranges to exact lockfile versions (React, Vite, TypeScript, types, plugin) while Astryx remained exact `0.1.4`.
+4. Verified later-stack intended versions exist on PyPI (FastAPI `0.139.0` >= `0.135.0`, LangGraph/LangChain family, SQLAlchemy, Neo4j driver, Trafilatura, uvicorn, aiosqlite, alembic, ruff, mypy, pytest) with no unresolved registry conflicts against proven pins.
+5. Recreated ignored root `.venv`, upgraded pip, installed editable backend from clean environment.
+6. Reran PDF diagnostic: exit 0, 5/5 digital, image-only `NO_EXTRACTABLE_TEXT`, `PYPDF_COMPATIBILITY=PASS`.
+7. Reran ShopAIKey diagnostic exactly once (only live-provider call for this task): exit 0, 7/7, `strict_json_schema`, 1536-d embeddings, `SHOPAIKEY_COMPATIBILITY=PASS`. Live provider not re-invoked during same-task repair.
+8. Clean `npm ci` + `npm run build` exit 0; reran all nine recorded `npx astryx component …` commands (`ALL_COMPONENT_DOCS=PASS`).
+9. Finalized `docs/feasibility/phase_0_report.md`: runtime facts, complete Astryx matrix, pypdf outcomes/threshold, seven ShopAIKey results + schema strategy, dependency decision record (Phase 0 installed + Phase 1 intended), final gate table, `PHASE_0_OVERALL=PASS`. Removed explanatory angle-bracket notation.
+10. Audited tracked diffs for secrets, real personal data, OCR usage paths, alternate stacks, and placeholders.
+11. Same-task repair: regenerated `frontend/package-lock.json` via `npm install --package-lock-only` so root `packages[""]` dependency and devDependency specs exactly equal `frontend/package.json` (no hand-edit of lock metadata).
+12. Same-task repair: replaced semantic `placeholder roles and skills` wording and rephrased the ChatComposer optional empty-input hint prop so A2's `(?i)\b(TODO|TBD|placeholder)\b|<[^>]+>` scan returns no matches.
+13. Same-task repair: updated this 04A block in place with repair evidence and removed the extra blank line at physical EOF.
+
+## Files Created or Modified
+- frontend/package.json (exact version pins; prior 04A pass)
+- frontend/package-lock.json (npm-regenerated; root specs now exact-match package.json)
+- docs/feasibility/phase_0_report.md (decision record + clean-rerun evidence + final gates + placeholder-wording repair)
+- docs/reports/report_1_execute_agent.md (this block, in-place repair update)
+
+Unchanged after inspection (already correct for Phase 0):
+- backend/pyproject.toml
+- .env.example
+- .gitignore
+
+## Key Implementation Decisions
+- Keep Phase 0 Python deps minimal and proven; record Phase 1 packages only in the feasibility report.
+- Production embedding/LLM client intended pin is `langchain-openai==1.3.5`; Phase 0 proof remains `httpx==0.28.1` direct OpenAI-compatible HTTP.
+- FastAPI intended pin `0.139.0` satisfies Master `>=0.135.0` native SSE requirement and `pydantic>=2.9.0`.
+- No architecture, model ID, dimension, or MVP scope changes.
+- Repair uses npm to rewrite lock root metadata only; dependency versions remain the same resolved pins.
+
+## Tests or Validations Run
+- command/check: `python -m venv --clear .venv; .\.venv\Scripts\python.exe -m pip install --upgrade pip; .\.venv\Scripts\python.exe -m pip install -e .\backend`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0 on original 04A pass; installed `pypdf==6.14.2`, `httpx==0.28.1`, `pydantic==2.12.5`, `jobagent-backend==0.0.0` (not re-run for repair; Python deps unchanged)
+
+- command/check: `.\.venv\Scripts\python.exe infrastructure/scripts/verify_pdf_extraction.py`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0 on original 04A pass; digital_pass=5/5; image_only=NO_EXTRACTABLE_TEXT; ends `PYPDF_COMPATIBILITY=PASS` (not re-run for repair)
+
+- command/check: `.\.venv\Scripts\python.exe infrastructure/scripts/diagnose_shopaikey.py`
+  - required: yes
+  - result: passed
+  - evidence or reason: exit 0 on original 04A pass; 7/7 capabilities PASS; strategy=strict_json_schema; scalar/batch 1536 finite ordered; ends `SHOPAIKEY_COMPATIBILITY=PASS`; single live-provider run retained; not re-run for this repair per A2 instructions
+
+- command/check: package/lock exact-spec assertion (root `packages[""]` deps/devDeps JSON-equal to package.json; resolved versions present)
+  - required: yes
+  - result: passed
+  - evidence or reason: `PACKAGE_LOCK_ASSERT=PASS`; exact specs and resolved versions: Astryx 0.1.4, react/react-dom 19.2.7, @types/react 19.2.17, @types/react-dom 19.2.3, @vitejs/plugin-react 4.7.0, typescript 5.9.3, vite 6.4.3
+
+- command/check: `Set-Location frontend; npm ci; npm run build`
+  - required: yes
+  - result: passed
+  - evidence or reason: repair re-run: npm ci exit 0 (199 packages); vite build exit 0 (152 modules; dist emitted)
+
+- command/check: rerun every exact Astryx CLI documentation command recorded in the report
+  - required: yes
+  - result: passed
+  - evidence or reason: all nine `npx astryx component …` commands exit 0 with non-empty docs including Import on original 04A pass (`ALL_COMPONENT_DOCS=PASS`); not required re-run for this repair (component docs unchanged)
+
+- command/check: `git check-ignore .env`; untracked check; `git diff --check`
+  - required: yes
+  - result: passed
+  - evidence or reason: `.env` ignored and untracked; `git diff --check` exit 0 after EOF blank-line removal
+
+- command/check: placeholder scan `rg -n '(?i)\b(TODO|TBD|placeholder)\b|<[^>]+>' docs/feasibility/phase_0_report.md`
+  - required: yes
+  - result: passed
+  - evidence or reason: no matches (`PLACEHOLDER_SCAN=PASS`) after wording repair (fixture text + ChatComposer optional prop phrasing)
+
+- command/check: secret-like pattern scan on changed diff text; OCR-import audit
+  - required: no
+  - result: passed
+  - evidence or reason: no key/authorization values in diffs; OCR strings only appear as explicit "never used" documentation in the PDF diagnostic
+
+## Acceptance Check
+- condition: Python manifest and npm lockfile contain exact, minimal, internally consistent Phase 0 dependency versions; report names every required later-stack version including FastAPI at least 0.135.0
+  - status: satisfied
+  - evidence: `backend/pyproject.toml` exact three pins; frontend package.json exact pins; package-lock root specs exact-match package.json with resolved versions above; report Phase 1 table includes `fastapi==0.139.0` and remaining Master stack
+
+- condition: Report contains timestamp/runtimes, complete Astryx matrix, all seven ShopAIKey capabilities and schema strategy, per-fixture pypdf results, aggregate threshold, fixed 1536 embedding evidence
+  - status: satisfied
+  - evidence: `docs/feasibility/phase_0_report.md` sections present and complete
+
+- condition: Every required gate PASS with matching rerun evidence; no placeholders, unresolved failures, silent substitutions, or architecture/scope changes
+  - status: satisfied
+  - evidence: clean-env reruns retained from original 04A; `PHASE_0_OVERALL=PASS`; A2 placeholder scan clean; models remain gpt-4o-mini / text-embedding-3-small / 1536
+
+- condition: `.env`, secrets, auth headers, real CV data, runtime DBs, generated volumes, OCR, alternate providers/models, production JobAgent behavior absent from tracked changes
+  - status: satisfied
+  - evidence: repair touches package-lock + phase report + this A1 report only among intended targets; `.env` ignored/untracked; secret scan PASS
+
+- condition: Plan 2 receives exactly Plan 1 Section 10 artifacts without repeating Phase 0
+  - status: satisfied
+  - evidence: final report handoff paragraph lists Section 10 artifacts with overall PASS
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: mode=same_task_repair; A1 must not update checkboxes or batch status
+
+## Notes for Review Agent
+- changed files (repair): `frontend/package-lock.json`, `docs/feasibility/phase_0_report.md`, this report; prior 04A also changed `frontend/package.json`
+- validations to rerun: package/lock exact-spec assert; `npm ci` + build; placeholder scan with A2 pattern including `\bplaceholder\b`; `git diff --check`
+- do not re-call ShopAIKey live diagnostic for this repair
+- risk areas: none observed for repair scope
+- next task readiness: ready for A2 re-review; Batch04 is single-task so A3 may follow after A2 ACCEPTED
+
+## Workflow Integrity Check
+- single task only: 04A same_task_repair
+- no sibling/future Plan 2 work
+- no commit or stage
+- no checkbox or batch status update
+- no `.env` open/print/copy/commit of secret values
+- ShopAIKey live diagnostic not re-run during repair; original single-run evidence retained
+
+## Repair Log
+
+### 2026-07-13 (same_task_repair after A2 REJECTED_WITH_WARNINGS)
+- reason for repair: A2 found (1) package-lock root caret ranges not synchronized with exact package.json specs, (2) semantic wording `placeholder roles and skills` (and matrix optional prop name matching `\bplaceholder\b`) in phase_0_report, (3) extra blank line at physical EOF of this execution report causing `git diff --check` failure
+- changes made:
+  - `frontend/package-lock.json`: regenerated with `npm install --package-lock-only` (no hand-edit); root deps/devDeps now exact-equal package.json
+  - `docs/feasibility/phase_0_report.md`: synthetic-fixture wording without "placeholder"; ChatComposer optional empty-input hint rephrased so A2 scan has zero matches
+  - this report: in-place update + Repair Log; EOF blank line removed
+- validations rerun: PACKAGE_LOCK_ASSERT=PASS; npm ci + npm run build exit 0; PLACEHOLDER_SCAN=PASS (A2 pattern); git check-ignore .env; git diff --check exit 0
+- outcome: all three A2 repair targets resolved; ready for A2 re-review

@@ -563,3 +563,125 @@ ACCEPTED
 - repairs verified: truthful stream ordering/terminal gate, raw list-order embedding validation, common config failure formatter, and modular split with one unchanged command
 - remaining issues: one final-report notation item assigned to Batch04's explicit placeholder-cleanup gate
 - updated outcome: ACCEPTED
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_1.md
+
+## Execution Report Reviewed
+docs/reports/report_1_execute_agent.md
+
+## Review Report File
+docs/review/review_1_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Locked Dependencies and Final Phase 0 Decision
+- Task ID: 04A
+- Task title: Lock the successful stack and finalize every Phase 0 exit gate
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `frontend/package.json`, `docs/feasibility/phase_0_report.md`, and `docs/reports/report_1_execute_agent.md`; the expected `frontend/package-lock.json` synchronization is absent
+
+## Files Reviewed
+- `frontend/package.json`: in scope - direct and development package specs were tightened to exact versions
+- `frontend/package-lock.json`: in scope - npm-regenerated root dependency/devDependency specs exactly equal `package.json`, and resolved package versions equal those exact pins
+- `backend/pyproject.toml`: in scope and unchanged - exact minimal Phase0 runtime pins remain pypdf/httpx/pydantic
+- `.env.example` and `.gitignore`: in scope evidence and unchanged - approved names/secrets and ignore behavior remain correct
+- `docs/feasibility/phase_0_report.md`: in scope - all gates, versions, registry evidence, reruns, handoff, and final PASS are complete with no semantic or syntactic placeholder entry
+- `docs/reports/report_1_execute_agent.md`: in scope - matching 04A block was updated in place with lockfile/wording/EOF repair evidence and now passes diff hygiene
+
+## Validations Reviewed
+- Command/check: clean venv install plus PDF and live ShopAIKey diagnostics
+- Required: yes
+- Reported result: all passed; PDF 5/5 and image-only rejection, ShopAIKey 7/7 with strict schema and ordered 1536-dimensional embeddings
+- Rerun result: A2 reran only the clean-venv pypdf diagnostic (passed) and did not repeat the single allowed live provider call
+- Status: passed from matching evidence
+- Notes: `.venv` remains ignored
+
+- Command/check: frontend build and all nine exact Astryx documentation commands
+- Required: yes
+- Reported result: clean `npm ci`, build, and all nine commands passed
+- Rerun result: `npm run build` and all nine local pinned commands passed
+- Status: passed
+- Notes: the public Astryx evidence remains reproducible
+
+- Command/check: exact package/lock root consistency assertion
+- Required: yes for exact internally consistent manifests/lockfile
+- Reported result: `PACKAGE_LOCK_ASSERT=PASS` after npm regeneration
+- Rerun result: passed for every direct/dev dependency; package spec, lock root spec, and resolved version are identical and exact
+- Status: passed
+- Notes: npm generated the lockfile metadata; it was not hand-edited
+
+- Command/check: final-report registry version existence/compatibility review
+- Required: yes
+- Reported result: passed
+- Rerun result: all recorded PyPI versions returned exact registry metadata; FastAPI/Pydantic/httpx and LangChain/LangGraph/core constraints are mutually compatible with the selected pins
+- Status: passed
+- Notes: FastAPI 0.139.0 satisfies the required minimum
+
+- Command/check: final report placeholder scan and semantic inspection
+- Required: yes
+- Reported result: TODO/TBD/placeholder-word/angle-bracket scan passed
+- Rerun result: passed with no matches; semantic inspection found no unresolved entry
+- Status: passed
+- Notes: synthetic fixture wording remains accurate without placeholder terminology
+
+- Command/check: `.env` hygiene and `git diff --check`
+- Required: yes
+- Reported result: passed
+- Rerun result: `.env` is ignored/untracked and `git diff --check` exits 0
+- Status: passed
+- Notes: no secret or authorization value was found in tracked changes
+
+## Acceptance Review
+- Task acceptance: exact synchronized locks, complete placeholder-free final decision record, and every required validation truthfully PASS
+- Status: satisfied
+- Evidence: all compatibility gates, exact manifests/lockfile, clean-environment evidence, registry decisions, placeholder/secret/scope scans, and final `PHASE_0_OVERALL=PASS` are internally consistent
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- None
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-13T13:31:00+07:00
+- what was re-checked: exact package/lock root/resolved versions, frontend build, final-report placeholder and semantic scans, report EOF/diff hygiene, `.env` tracking state, registry versions/compatibility, and retained clean/live evidence
+- repairs verified: npm-synchronized exact lock metadata, synthetic wording with zero placeholder matches, and clean execution-report EOF
+- remaining issues: none
+- updated outcome: ACCEPTED
