@@ -2,20 +2,23 @@
 
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
 foundation work, Plan 3 / Master Phase 2 (persistent conversation over the
-React–FastAPI–LangGraph–SSE path), Plan 4 / Master Phase 3 Batch01 (profile
-domain and extraction foundations), Plan 4 Batch02 (staged CV upload and
-profile proposal pipeline), and Plan 4 Batch03 (approved profile truth, Candidate
-sync, production profile tools, and profile/CV reads). The repository contains a
-pinned backend core (including Phase 2 LangGraph/LangChain pins), the complete
-SQLite/Alembic source-of-truth schema, validated chat/ToolResult/SSE contracts,
-message/run/tool repositories, tool replay and history-hydration services,
-bounded Agent state/context with compact approved candidate memory, a verified
-ShopAIKey ChatOpenAI adapter and conversation-first prompt, one injected-registry
-decision/ToolNode graph with a six-pass loop guard, request-scoped
-`AsyncSqliteSaver` checkpoints and Agent runner streaming, atomic
-chat-turn/interrupt/resume services, thin public history/turn/resume SSE
-endpoints, a typed React/Astryx conversation client (SSE parser, single streaming
-reducer, history/load-older, concise tool activity, failure states), UUID-rooted
+React–FastAPI–LangGraph–SSE path), and Plan 4 / Master Phase 3 (profile domain
+through React/Astryx CV approval UI): Batch01 (profile domain and extraction
+foundations), Batch02 (staged CV upload and profile proposal pipeline), Batch03
+(approved profile truth, Candidate sync, production profile tools, and
+profile/CV reads), and Batch04 (shared CV upload/sidebar and durable in-chat
+approval). The repository contains a pinned backend core (including Phase 2
+LangGraph/LangChain pins), the complete SQLite/Alembic source-of-truth schema,
+validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
+replay and history-hydration services, bounded Agent state/context with compact
+approved candidate memory, a verified ShopAIKey ChatOpenAI adapter and
+conversation-first prompt, one injected-registry decision/ToolNode graph with a
+six-pass loop guard, request-scoped `AsyncSqliteSaver` checkpoints and Agent
+runner streaming, atomic chat-turn/interrupt/resume services, thin public
+history/turn/resume SSE endpoints, a typed React/Astryx conversation client
+(SSE parser, single streaming reducer, history/load-older, concise tool
+activity, failure states) plus profile sidebar, shared multipart CV upload, and
+restart-safe Save Profile / Request Changes approval cards, UUID-rooted
 attachment storage with bounded multipart CV staging, Neo4j foundation
 primitives plus idempotent Candidate/Skill graph sync, exact Candidate Profile /
 skill / preference / draft Pydantic contracts, the sole skill taxonomy loader and
@@ -24,14 +27,15 @@ a single production pypdf extraction and meaningful-text owner, structured CV
 extraction/draft proposal and interrupt-guarded commit tools (three production
 profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
-runtime. Job/matching tools and profile UI remain later Plan 4 batches and later
-plans.
+runtime. Job/matching tools remain later plans.
 
 ## Repository layout
 
 - `frontend/` - React, TypeScript, Vite, and Astryx 0.1.4 application with the
   Plan 3 conversation client (chat page, SSE/API client, reducer, UI tests),
-  lint, type-check, test, and build commands.
+  Plan 4 profile feature (`features/profile`: typed transport, `CvSidebar`,
+  `ApprovalCard`), shared CV attach/upload over the existing chat shell, lint,
+  type-check, test, and build commands.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage
@@ -133,10 +137,16 @@ npx astryx component ChatToolCalls
 
 The frontend talks only to FastAPI via `VITE_API_BASE_URL`, keeps streaming state
 in one reducer with `event_id` deduplication, hydrates durable history as truth,
-and uses pinned public Astryx chat APIs. Application run/tool statuses remain
-`running|interrupted|completed|failed` and `pending|running|completed|failed`
-(no `complete`/`error` aliases in client state). Phase 0 public-component matrix
-evidence remains in `docs/feasibility/phase_0_report.md`.
+and uses pinned public Astryx chat and shell APIs (`AppShell`, `SideNav`,
+`ChatComposer`, `Card`, `ButtonGroup`, and related public components). Shared
+`uploadCv` stages PDFs for sidebar and composer; turns send attachment IDs only.
+Active CV view/download opens `GET /api/profile/cv` by URL only. Profile-commit
+interrupts render one in-chat approval card; resume uses the existing
+`streamChatResume` path once per accepted action. Application run/tool statuses
+remain `running|interrupted|completed|failed` and
+`pending|running|completed|failed` (no `complete`/`error` aliases in client
+state). Phase 0 public-component matrix evidence remains in
+`docs/feasibility/phase_0_report.md`.
 
 ## Local Docker Compose
 
@@ -265,8 +275,17 @@ and parameterized Candidate/Skill/seed sync under `app/graph/sync_candidate.py`;
 interrupt-guarded `commit_profile_draft` over the existing replay/resume path
 with production registration of exactly three profile tools; compact approved
 `candidate_context` loaded into new chat turns; and thin
-`GET /api/profile` / `GET /api/profile/cv` reads (no profile write CRUD). Later
-Plan 4 batches own profile UI and job/matching tools.
+`GET /api/profile` / `GET /api/profile/cv` reads (no profile write CRUD).
+
+Plan 4 Batch04 is complete: typed profile transport under
+`frontend/src/features/profile/` (parsers reject storage paths), shared
+`uploadCv` for sidebar and chat composer, `CvSidebar` (active filename, profile
+state, upload/replace, view/download via public Astryx), composer PDF token with
+attachment-ID-only turns, and durable `ApprovalCard` (Save Profile / Request
+Changes) wired through ChatMessages/ChatPage with single `streamChatResume`,
+composer focus on request-changes, sidebar refresh on save, and history
+hydration of pending approval. Plan 4 / Master Phase 3 is complete. Job/matching
+tools remain later plans.
 
 ## Plan 3 progress and constraints
 
@@ -371,6 +390,28 @@ interrupt/replay/chat transport without duplicating them:
 - Out of scope for Batch03: frontend upload/approval UI, profile write CRUD,
   JD/Job graph behavior, embeddings, rebuild completion, and matching tools.
 
+## Plan 4 Batch04 progress and constraints
+
+Plan 4 Batch04 reuses Plan 3 conversation client primitives and Batch02/03
+upload/profile/resume contracts without duplicating them:
+
+- Profile client: `frontend/src/features/profile/types.ts` and `api.ts` own
+  empty/active profile parse, shared multipart `POST /api/attachments/cv`, and
+  active CV URL for `GET /api/profile/cv` only (`VITE_API_BASE_URL`).
+- Sidebar: `CvSidebar` composes public Astryx `SideNav`/`FileInput`/`Button` and
+  shows only the four source-approved surfaces; successful sidebar upload starts
+  one concise chat turn with the returned `attachment_id`.
+- Chat attach: same `uploadCv`; composer shows a compact PDF token; turn body
+  carries attachment IDs only; upload disabled while connecting/streaming/
+  interrupted or while approval is pending.
+- Approval: `ApprovalCard` uses public `Card`/`ButtonGroup`/`Button` with exact
+  Save Profile / Request Changes labels and `save_profile` / `request_changes`
+  resume actions once per interrupted run; stream and history hydration project
+  `profile_commit` only; single `chatReducer` remains stream owner.
+- Out of scope for Batch04: full profile editor, CV history/version list, raw
+  PDF preview, profile write CRUD, JD/Job/match UI, second stream store, custom
+  design system, and internal Astryx imports.
+
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 
 From `backend/` after `python -m pip install -e .\backend` from the repository
@@ -422,6 +463,42 @@ These tests use temporary migrated SQLite, fakes, and injected Neo4j drivers.
 Live Neo4j is optional and does not block Batch03 acceptance. Public surface is
 exactly health, CV upload, profile/profile-CV reads, and the three Plan 3 chat
 endpoints; production registry contains exactly three profile tools.
+
+## React and Astryx CV approval workflow verification (Plan 4 Batch04)
+
+From `frontend/`:
+
+```powershell
+npm ci
+npm test -- --run src/test/approval-card.test.tsx src/test/cv-sidebar.test.tsx src/test/sse-reducer.test.ts src/test/chat-page.test.tsx
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Optional Astryx public-API discovery before UI changes:
+
+```powershell
+npx astryx build "CV sidebar upload and chat PDF attachment"
+npx astryx component AppShell
+npx astryx component SideNav
+npx astryx component ChatComposer
+npx astryx component Card
+npx astryx component ButtonGroup
+npx astryx component Button
+```
+
+From `backend/` (fake-backed contracts the frontend consumes; no provider call):
+
+```powershell
+python -m pytest tests/integration/test_cv_api.py tests/integration/test_chat_api.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q
+```
+
+These gates cover shared upload, sidebar lock/errors, ID-only turns, streamed and
+history-hydrated approval cards, single resume under rapid click, request-change
+focus, and truthful failure display. Optional full local UI smoke still needs the
+user-managed ignored root `.env`, valid ShopAIKey key, Docker, and free loopback
+ports.
 
 ## Durable chat contract verification (Batch01)
 

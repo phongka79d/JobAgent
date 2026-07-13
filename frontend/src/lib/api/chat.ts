@@ -43,13 +43,15 @@ export function getApiBaseUrl(): string {
   return raw.replace(/\/+$/, '');
 }
 
-function apiUrl(path: string): string {
+/** Build an absolute API URL under the configured VITE_API_BASE_URL origin. */
+export function apiUrl(path: string): string {
   const base = getApiBaseUrl();
   const normalized = path.startsWith('/') ? path : `/${path}`;
   return `${base}${normalized}`;
 }
 
-function parseErrorBody(status: number, body: string): ChatApiError {
+/** Map FastAPI-style error bodies to ChatApiError (shared by chat + profile). */
+export function parseErrorBody(status: number, body: string): ChatApiError {
   try {
     const json = JSON.parse(body) as {
       detail?: {code?: string; summary?: string} | string;

@@ -320,6 +320,136 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
     expect(isComposerLocked(state)).toBe(true);
   });
 
+  it('records profile_commit interrupt with exact tool statuses and pending card', () => {
+    let state = createInitialChatState();
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-commit',
+          tool_name: 'commit_profile_draft',
+          status: 'running',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'approval_required', {
+          state: 'interrupted',
+          kind: 'profile_commit',
+          allowed_actions: ['save_profile', 'request_changes'],
+          card: {
+            tool_name: 'commit_profile_draft',
+            current_title: 'Engineer',
+            draft_id: 'current',
+          },
+        }),
+      ),
+    ]);
+    const run = state.messages.find((m) => m.role === 'assistant')?.run;
+    expect(run?.state).toBe('interrupted');
+    expect(run?.tools[0]?.status).toBe('running');
+    expect(run?.tools[0]?.status).not.toBe('complete');
+    expect(state.pendingApproval?.kind).toBe('profile_commit');
+    expect(state.pendingApproval?.allowed_actions).toEqual([
+      'save_profile',
+      'request_changes',
+    ]);
+    expect(isComposerLocked(state)).toBe(true);
+
+    // Resume completion clears pending approval through the same reducer.
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_D, 'run_started', {state: 'running', resumed: true}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_E, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-commit',
+          tool_name: 'commit_profile_draft',
+          status: 'completed',
+          duration_ms: 10,
+          summary: 'saved',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_F, 'run_completed', {state: 'completed'}),
+      ),
+    ]);
+    expect(state.pendingApproval).toBeNull();
+    expect(isComposerLocked(state)).toBe(false);
+    const done = state.messages.find((m) => m.role === 'assistant')?.run;
+    expect(done?.state).toBe('completed');
+    expect(done?.tools[0]?.status).toBe('completed');
+  });
+
+  it('hydrates pending profile_commit from durable history after restart', () => {
+    const page: HistoryPage = {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'Commit profile',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'interrupted',
+            pending_approval: {
+              kind: 'profile_commit',
+              draft_id: 'current',
+              allowed_actions: ['save_profile', 'request_changes'],
+              card: {current_title: 'Hydrated Title'},
+            },
+            error_code: null,
+            completed_at: null,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc1',
+                tool_name: 'commit_profile_draft',
+                status: 'running',
+                duration_ms: null,
+                error_code: null,
+                result: null,
+                arguments_summary: null,
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'Please approve',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+    const state = chatReducer(createInitialChatState(), {
+      type: 'history/reset',
+      page,
+    });
+    expect(state.pendingApproval?.kind).toBe('profile_commit');
+    expect(state.pendingApproval?.card).toMatchObject({
+      current_title: 'Hydrated Title',
+    });
+    expect(state.activeRunId).toBe(RUN_ID);
+    expect(isComposerLocked(state)).toBe(true);
+    expect(state.messages[0]?.run?.state).toBe('interrupted');
+    expect(state.messages[0]?.run?.tools[0]?.status).toBe('running');
+  });
+
   it('run_failed sets failed phase and never completed', () => {
     let state = createInitialChatState();
     state = reduceAll(state, [

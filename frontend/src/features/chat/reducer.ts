@@ -7,6 +7,7 @@
 import {
   hydrateFromHistoryPage,
   mergeOlderHistoryPage,
+  recoverPendingApproval,
   rehydrateWithDurableTruth,
 } from './history';
 import type {
@@ -440,10 +441,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'history/reset': {
       const {messages, nextCursor} = hydrateFromHistoryPage(action.page);
+      const recovered = recoverPendingApproval(messages);
       return {
         ...createInitialChatState(),
         messages,
         nextCursor,
+        pendingApproval: recovered.pendingApproval,
+        activeRunId: recovered.activeRunId,
       };
     }
     case 'history/load_older': {
@@ -451,17 +455,37 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         state.messages,
         action.page,
       );
-      return {...state, messages, nextCursor};
+      // Prefer existing in-memory interrupt; otherwise recover from merged set.
+      const recovered =
+        state.pendingApproval !== null
+          ? {
+              pendingApproval: state.pendingApproval,
+              activeRunId: state.activeRunId,
+            }
+          : recoverPendingApproval(messages);
+      return {
+        ...state,
+        messages,
+        nextCursor,
+        pendingApproval: recovered.pendingApproval,
+        activeRunId: recovered.activeRunId,
+      };
     }
     case 'history/rehydrate': {
       const {messages, nextCursor} = rehydrateWithDurableTruth(
         state.messages,
         action.page,
       );
+      const recovered = recoverPendingApproval(messages);
       return {
         ...state,
         messages,
         nextCursor,
+        // Durable interrupted runs reconstruct pending approval after restart.
+        pendingApproval:
+          recovered.pendingApproval ??
+          (state.streamPhase === 'streaming' ? state.pendingApproval : null),
+        activeRunId: recovered.activeRunId ?? state.activeRunId,
         // Durable truth ends in-flight streaming presentation for hydrated runs.
         streamPhase:
           state.streamPhase === 'streaming' ? state.streamPhase : state.streamPhase,

@@ -1,12 +1,15 @@
 /**
  * Durable history hydration and chronological merge for chat state.
  * History is authoritative: completed-turn tool activity replaces transient stream tools.
+ * Interrupted profile_commit pending_approval is recovered for restart-safe cards.
  */
 
 import type {
   AgentRunView,
+  ApprovalRequiredPayload,
   ChatMessageView,
   HistoryPage,
+  JsonObject,
   ToolExecutionView,
 } from './types';
 import type {
@@ -125,6 +128,53 @@ export function replaceTransientToolsFromHistory(
       isStreaming: false,
     };
   });
+}
+
+/**
+ * Recover a single pending profile/approval interrupt from durable messages.
+ * Used after history load/restart so the approval card and composer lock return.
+ */
+export function recoverPendingApproval(messages: readonly ClientMessage[]): {
+  pendingApproval: ApprovalRequiredPayload | null;
+  activeRunId: string | null;
+} {
+  for (const msg of messages) {
+    const run = msg.run;
+    if (!run || run.state !== 'interrupted' || !run.pendingApproval) {
+      continue;
+    }
+    const raw = run.pendingApproval;
+    const kind =
+      typeof raw.kind === 'string' && raw.kind.trim() !== '' ? raw.kind : null;
+    if (kind === null) {
+      continue;
+    }
+    const allowedRaw = raw.allowed_actions;
+    const allowed_actions = Array.isArray(allowedRaw)
+      ? allowedRaw.filter(
+          (a): a is string => typeof a === 'string' && a.trim() !== '',
+        )
+      : [];
+    if (allowed_actions.length === 0) {
+      continue;
+    }
+    const card: JsonObject =
+      raw.card !== null &&
+      typeof raw.card === 'object' &&
+      !Array.isArray(raw.card)
+        ? (raw.card as JsonObject)
+        : {};
+    return {
+      pendingApproval: {
+        state: 'interrupted',
+        kind,
+        allowed_actions,
+        card,
+      },
+      activeRunId: run.id,
+    };
+  }
+  return {pendingApproval: null, activeRunId: null};
 }
 
 /**

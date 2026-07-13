@@ -769,7 +769,7 @@ store, custom design system, or internal Astryx imports.
 
 ### Tasks
 
-- [ ] (04A): Implement typed profile transport, shared CV attachment flow, and sidebar state
+- [x] (04A): Implement typed profile transport, shared CV attachment flow, and sidebar state
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.3 Upload validation and exact-hash state handling`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.8 API and frontend behavior`; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary > ### 14.1 API rules`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.1 Layout`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.2 Sidebar`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.3 Chat components`
   - Source Requirements:
     - One typed frontend API consumes profile empty/active state, multipart CV
@@ -826,7 +826,7 @@ store, custom design system, or internal Astryx imports.
     substitute component library.
   - Files: `frontend/src/features/profile/types.ts`, `frontend/src/features/profile/api.ts`, `frontend/src/features/profile/CvSidebar.tsx`, `frontend/src/app/App.tsx`, `frontend/src/features/chat/ChatPage.tsx`, `frontend/src/lib/api/chat.ts`, `frontend/src/test/cv-sidebar.test.tsx`, `frontend/src/test/chat-page.test.tsx`, `frontend/src/app/theme.css` only for source-required token-based layout adjustments
 
-- [ ] (04B): Render durable approval actions with one resume decision and request-change focus
+- [x] (04B): Render durable approval actions with one resume decision and request-change focus
   - Source of Truth: `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.6 Approval decisions and atomic commit`; `docs/plans/Plan_4.md > ## 7. Technical Specifications > ### 7.8 API and frontend behavior`; `docs/plans/Master_plan.md > ## 10. CV Ingestion and Approval Flow > ### 10.3 Chat approval`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.3 Chat components`; `docs/plans/Master_plan.md > ## 24. Local Testing Strategy > ### 24.3 Frontend tests`
   - Source Requirements:
     - A profile approval card summarizes profile/preferences and exposes exactly

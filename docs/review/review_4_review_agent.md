@@ -701,9 +701,9 @@ ACCEPTED
 - `backend/tests/integration/test_profile_approval.py`: in scope - 02B draft create/replace and NO_EXTRACTABLE_TEXT failed retention cases added
 
 ## Source Requirements Checked
-- Plan_4 §7.4: layout/normal text quality rule, gpt-4o-mini structured extraction, validate, at most one schema-repair
-- Plan_4 §7.5 / Master §13.1: propose_profile_from_cv compact tool boundary
-- Master §10.2 processing: failure retains file; replacement cleans prior unreferenced staged
+- Plan_4 ï¿½7.4: layout/normal text quality rule, gpt-4o-mini structured extraction, validate, at most one schema-repair
+- Plan_4 ï¿½7.5 / Master ï¿½13.1: propose_profile_from_cv compact tool boundary
+- Master ï¿½10.2 processing: failure retains file; replacement cleans prior unreferenced staged
 - phase_0 / adapter: locked ShopAIKey + strict_json_schema strategy reused; no second client/model
 - Fake-backed only; no live provider required for acceptance
 
@@ -1044,29 +1044,29 @@ ACCEPTED
 - git status reviewed: yes
 - git diff reviewed: yes
 - changed files from git (03B scope):
-  - `M backend/app/tools/profile.py` — commit tool + production tool builders
-  - `M backend/app/tools/registry.py` — production_registry builds three profile tools
-  - `M backend/app/services/tool_execution.py` — allow_running_reentry for same (run_id, tool_call_id)
-  - `M backend/app/services/chat_turns.py` — optional draft_id projection passthrough
-  - `M backend/app/agent/graph.py` — docstring only (production registry default)
-  - `M backend/app/api/dependencies.py` — wire production profile tools + lifespan deps
-  - `M backend/tests/integration/test_profile_approval.py` — full-path commit/interrupt cases
-  - `M backend/tests/integration/test_interrupt_resume.py` — production registry ownership
-  - `M backend/tests/integration/test_tool_replay.py` — running re-entry coverage
-  - `M docs/reports/report_4_execute_agent.md` — A1 execution report only
-- runner.py: no code change (existing Command(resume=) path reused) — confirmed empty git diff
-- Pre-existing Batch03 working-tree artifacts (03A): `?? profile_approval.py`, `?? sync_candidate.py`, `?? test_candidate_sync.py` — dependency inputs, not 03B edits
+  - `M backend/app/tools/profile.py` ï¿½ commit tool + production tool builders
+  - `M backend/app/tools/registry.py` ï¿½ production_registry builds three profile tools
+  - `M backend/app/services/tool_execution.py` ï¿½ allow_running_reentry for same (run_id, tool_call_id)
+  - `M backend/app/services/chat_turns.py` ï¿½ optional draft_id projection passthrough
+  - `M backend/app/agent/graph.py` ï¿½ docstring only (production registry default)
+  - `M backend/app/api/dependencies.py` ï¿½ wire production profile tools + lifespan deps
+  - `M backend/tests/integration/test_profile_approval.py` ï¿½ full-path commit/interrupt cases
+  - `M backend/tests/integration/test_interrupt_resume.py` ï¿½ production registry ownership
+  - `M backend/tests/integration/test_tool_replay.py` ï¿½ running re-entry coverage
+  - `M docs/reports/report_4_execute_agent.md` ï¿½ A1 execution report only
+- runner.py: no code change (existing Command(resume=) path reused) ï¿½ confirmed empty git diff
+- Pre-existing Batch03 working-tree artifacts (03A): `?? profile_approval.py`, `?? sync_candidate.py`, `?? test_candidate_sync.py` ï¿½ dependency inputs, not 03B edits
 - recent commits: HEAD is P4B2; 03A/03B work remains uncommitted working-tree change
 
 ## Files Reviewed
-- `backend/app/tools/profile.py`: in scope — interrupt-guarded commit_profile_draft; draft validation before interrupt(); projection kind=profile_commit, draft_id=current, allowed_actions save_profile|request_changes; execute_tool(..., allow_running_reentry=True); request_changes ToolResult(ok=true, committed=false); save_profile calls commit_approved_draft (03A) with pre-commit vs sqlite_committed/sync-failed ToolResult semantics; build_production_profile_tools returns exactly three tools
-- `backend/app/tools/registry.py`: in scope — production_registry closes over deps and registers three profile tools only; no match_jobs/synthetic
-- `backend/app/services/tool_execution.py`: in scope — single identity path; running + allow_running_reentry re-enters same row; terminal exact-replay; concurrent running without re-entry still raises ToolExecutionInProgressError
-- `backend/app/services/chat_turns.py`: in scope — domain-agnostic draft_id passthrough; no save_profile/request_changes hardcoding
-- `backend/app/agent/graph.py`: in scope — docstring only; still defaults to production_registry()
-- `backend/app/api/dependencies.py`: in scope — get_chat_agent_deps injects session_factory, storage, neo4j driver into production_registry
+- `backend/app/tools/profile.py`: in scope ï¿½ interrupt-guarded commit_profile_draft; draft validation before interrupt(); projection kind=profile_commit, draft_id=current, allowed_actions save_profile|request_changes; execute_tool(..., allow_running_reentry=True); request_changes ToolResult(ok=true, committed=false); save_profile calls commit_approved_draft (03A) with pre-commit vs sqlite_committed/sync-failed ToolResult semantics; build_production_profile_tools returns exactly three tools
+- `backend/app/tools/registry.py`: in scope ï¿½ production_registry closes over deps and registers three profile tools only; no match_jobs/synthetic
+- `backend/app/services/tool_execution.py`: in scope ï¿½ single identity path; running + allow_running_reentry re-enters same row; terminal exact-replay; concurrent running without re-entry still raises ToolExecutionInProgressError
+- `backend/app/services/chat_turns.py`: in scope ï¿½ domain-agnostic draft_id passthrough; no save_profile/request_changes hardcoding
+- `backend/app/agent/graph.py`: in scope ï¿½ docstring only; still defaults to production_registry()
+- `backend/app/api/dependencies.py`: in scope ï¿½ get_chat_agent_deps injects session_factory, storage, neo4j driver into production_registry
 - `backend/app/agent/runner.py`: inspected; no modification required
-- Integration tests listed above: in scope — missing draft before interrupt, request_changes preserve draft + checkpoint cleanup + identity, save success + terminal no-op, Neo4j failure after SQLite commit, re-entry, registry ownership, no second idempotency key
+- Integration tests listed above: in scope ï¿½ missing draft before interrupt, request_changes preserve draft + checkpoint cleanup + identity, save success + terminal no-op, Neo4j failure after SQLite commit, re-entry, registry ownership, no second idempotency key
 
 ## Validations Reviewed
 - Command/check: `Set-Location backend; python -m pytest tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py -q`
@@ -1178,33 +1178,33 @@ ACCEPTED
 - git status reviewed: yes
 - git diff reviewed: yes
 - changed files from git (03C scope):
-  - `M backend/app/agent/context.py` — compact approved candidate loader + projectors
-  - `M backend/app/agent/state.py` — candidate_context passthrough on initial state (still nine fields)
-  - `M backend/app/agent/graph.py` — format/inject candidate_context system block; initial_graph_state accepts cards
-  - `M backend/app/agent/runner.py` — pass candidate_context into initial_graph_state
-  - `M backend/app/services/chat_turns.py` — load recent + approved candidate context before graph (short session)
-  - `M backend/app/schemas/profile.py` — ProfileReadResponse + empty_profile_read_response
-  - `?? backend/app/api/profile.py` — GET /api/profile and GET /api/profile/cv only
-  - `M backend/app/main.py` — register profile router; seven public endpoints
-  - `M backend/tests/unit/test_agent_context.py` — compact context / approved-not-draft cases
-  - `M backend/tests/unit/test_agent_graph.py` — minimal production-registry expectation fix (03B three tools)
-  - `M backend/tests/integration/test_cv_api.py` — profile empty/active/CV stream/route thinness
-  - `M backend/tests/integration/test_chat_api.py` — seven-route inventory + turn injects approved context
-  - `M docs/reports/report_4_execute_agent.md` — A1 execution report only
+  - `M backend/app/agent/context.py` ï¿½ compact approved candidate loader + projectors
+  - `M backend/app/agent/state.py` ï¿½ candidate_context passthrough on initial state (still nine fields)
+  - `M backend/app/agent/graph.py` ï¿½ format/inject candidate_context system block; initial_graph_state accepts cards
+  - `M backend/app/agent/runner.py` ï¿½ pass candidate_context into initial_graph_state
+  - `M backend/app/services/chat_turns.py` ï¿½ load recent + approved candidate context before graph (short session)
+  - `M backend/app/schemas/profile.py` ï¿½ ProfileReadResponse + empty_profile_read_response
+  - `?? backend/app/api/profile.py` ï¿½ GET /api/profile and GET /api/profile/cv only
+  - `M backend/app/main.py` ï¿½ register profile router; seven public endpoints
+  - `M backend/tests/unit/test_agent_context.py` ï¿½ compact context / approved-not-draft cases
+  - `M backend/tests/unit/test_agent_graph.py` ï¿½ minimal production-registry expectation fix (03B three tools)
+  - `M backend/tests/integration/test_cv_api.py` ï¿½ profile empty/active/CV stream/route thinness
+  - `M backend/tests/integration/test_chat_api.py` ï¿½ seven-route inventory + turn injects approved context
+  - `M docs/reports/report_4_execute_agent.md` ï¿½ A1 execution report only
 - Pre-existing Batch03 artifacts not claimed as 03C ownership: tools/profile.py, registry, tool_execution, dependencies, profile_approval, sync_candidate, interrupt/tool_replay/profile_approval tests (03A/03B)
 - recent commits: HEAD is P4B2; Batch03 work remains uncommitted working-tree change
 
 ## Files Reviewed
-- `backend/app/agent/context.py`: in scope — load_candidate_context/project_candidate_context from active profile + preferences only; bounds evidence; omits aliases/storage_path/raw fields; empty without profile
-- `backend/app/agent/state.py`: in scope (supporting) — still exactly nine AgentState fields; build_initial_agent_state accepts optional candidate_context default empty
-- `backend/app/agent/graph.py`: in scope — _format_candidate_context_block injects approved memory as SystemMessage; initial_graph_state threads candidate_context
-- `backend/app/agent/runner.py`: in scope — stream_agent_run accepts and forwards candidate_context
-- `backend/app/services/chat_turns.py`: in scope — short session loads load_recent_context + load_candidate_context before stream_agent_run; session closed before provider/graph; draft_id passthrough remains from 03B
-- `backend/app/schemas/profile.py`: in scope — ProfileReadResponse with present/profile/preferences/active_attachment (AttachmentPublic); no PDF/storage_path
-- `backend/app/api/profile.py`: in scope — thin GET-only reads; Content-Disposition sanitization; streams via storage.open; no write CRUD/provider/graph
-- `backend/app/main.py`: in scope — include profile_router once with health/attachments/chat
-- Unit/integration tests above: in scope — empty/active reads, missing file safety, seven routes, approved-not-draft context injection
-- `backend/tests/unit/test_agent_graph.py`: in scope (minimal justified fix) — production_registry asserts three profile tools; empty-prompt case uses ToolRegistry()
+- `backend/app/agent/context.py`: in scope ï¿½ load_candidate_context/project_candidate_context from active profile + preferences only; bounds evidence; omits aliases/storage_path/raw fields; empty without profile
+- `backend/app/agent/state.py`: in scope (supporting) ï¿½ still exactly nine AgentState fields; build_initial_agent_state accepts optional candidate_context default empty
+- `backend/app/agent/graph.py`: in scope ï¿½ _format_candidate_context_block injects approved memory as SystemMessage; initial_graph_state threads candidate_context
+- `backend/app/agent/runner.py`: in scope ï¿½ stream_agent_run accepts and forwards candidate_context
+- `backend/app/services/chat_turns.py`: in scope ï¿½ short session loads load_recent_context + load_candidate_context before stream_agent_run; session closed before provider/graph; draft_id passthrough remains from 03B
+- `backend/app/schemas/profile.py`: in scope ï¿½ ProfileReadResponse with present/profile/preferences/active_attachment (AttachmentPublic); no PDF/storage_path
+- `backend/app/api/profile.py`: in scope ï¿½ thin GET-only reads; Content-Disposition sanitization; streams via storage.open; no write CRUD/provider/graph
+- `backend/app/main.py`: in scope ï¿½ include profile_router once with health/attachments/chat
+- Unit/integration tests above: in scope ï¿½ empty/active reads, missing file safety, seven routes, approved-not-draft context injection
+- `backend/tests/unit/test_agent_graph.py`: in scope (minimal justified fix) ï¿½ production_registry asserts three profile tools; empty-prompt case uses ToolRegistry()
 
 ## Validations Reviewed
 - Command/check: `Set-Location backend; python -m pytest tests/unit/test_agent_context.py tests/integration/test_cv_api.py tests/integration/test_chat_api.py tests/integration/test_profile_approval.py -q`
@@ -1224,7 +1224,7 @@ ACCEPTED
 - Command/check: search candidate_context|raw_(cv|pdf|text|content)|storage_path|Content-Disposition|@router.(get|post|put|patch|delete)|include_router under backend/app backend/tests
 - Required: yes
 - Reported result: passed
-- Rerun result: verified via repository search + file reads — load_candidate_context ownership; profile.py two GET routes + Content-Disposition; main four include_router; app/api only seven public GET/POST endpoints (health, attachments POST, profile x2, chat history/turns/resume); no profile PUT/PATCH/DELETE; AttachmentPublic excludes storage_path
+- Rerun result: verified via repository search + file reads ï¿½ load_candidate_context ownership; profile.py two GET routes + Content-Disposition; main four include_router; app/api only seven public GET/POST endpoints (health, attachments POST, profile x2, chat history/turns/resume); no profile PUT/PATCH/DELETE; AttachmentPublic excludes storage_path
 - Status: passed
 - Notes: shell rg unavailable on PATH; content verified via search tools and inspection
 
@@ -1275,6 +1275,301 @@ ACCEPTED
 - Execution report materially accurate on files, decisions, validations, and acceptance evidence
 - state.py and test_agent_graph.py disclosed and justified
 - Pre-existing 03A/03B working-tree files correctly not claimed as 03C primary ownership
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - React and Astryx CV Approval Workflow
+- Task ID: 04A
+- Task title: Implement typed profile transport, shared CV attachment flow, and sidebar state
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes (working tree; uncommitted 04A implementation)
+- changed files from git:
+  - `M frontend/src/app/App.tsx`
+  - `M frontend/src/app/App.test.tsx`
+  - `M frontend/src/features/chat/ChatPage.tsx`
+  - `M frontend/src/lib/api/chat.ts`
+  - `M frontend/src/test/chat-page.test.tsx`
+  - `M docs/reports/report_4_execute_agent.md` (execution report; not implementation)
+  - `?? frontend/src/features/profile/` (types.ts, api.ts, CvSidebar.tsx)
+  - `?? frontend/src/test/cv-sidebar.test.tsx`
+- recent commits: HEAD is P4B3 Complete; 04A artifacts are uncommitted working-tree changes matching A1 file list
+
+## Files Reviewed
+- `frontend/src/features/profile/types.ts`: in scope - typed AttachmentPublic/CvUploadResponse/ProfileReadResponse parsers; rejects `storage_path` at client boundary
+- `frontend/src/features/profile/api.ts`: in scope - `fetchProfile`, shared `uploadCv` (POST /api/attachments/cv), `getActiveCvUrl` (GET /api/profile/cv URL only), SIDEBAR_CV_TURN_MESSAGE; uses VITE_API_BASE_URL via apiUrl
+- `frontend/src/features/profile/CvSidebar.tsx`: in scope - SideNav composition; four source-approved surfaces (profile state, active filename, upload/replace FileInput, view/download); upload lock; error Banner; window.open for CV URL (no Blob state)
+- `frontend/src/app/App.tsx`: in scope - AppShell + sideNav CvSidebar + ChatPage; sidebar success sets ID-only turn request; profile refresh key; upload lock from chat interaction
+- `frontend/src/features/chat/ChatPage.tsx`: in scope - composer FileInput + Token drawer; same `uploadCv`; submit sends attachment_ids only; pending PDF outside SSE reducer; sidebar turn hook; lock for connecting/streaming/interrupted
+- `frontend/src/lib/api/chat.ts`: in scope - export `apiUrl` / `parseErrorBody` for shared origin/error mapping; turn body still attachment_ids only
+- `frontend/src/test/cv-sidebar.test.tsx`: in scope - parsers, empty/active, lock, errors, shared uploadâ†’ID-only turn
+- `frontend/src/test/chat-page.test.tsx`: in scope - PDF token + attachment_ids; attach disabled while streaming; out-of-scope chrome checks retained
+- `frontend/src/app/App.test.tsx`: in scope (justified extra) - AppShell+sidebar+chat mount after shell wiring; not listed in task Files but required by App change
+- `frontend/src/app/theme.css`: not modified (allowed only if needed)
+
+## Architecture Alignment
+- Public Astryx only: AppShell, SideNav, FileInput, Token, ChatComposer/Drawer, Banner, Button, StatusDot, Text, HStack/VStack â€” no `@astryxdesign/.../src|dist` internals
+- No raw `<div>`, no hex colors, no second design system
+- Single shared `uploadCv` for sidebar and composer
+- Profile fetch/upload local state outside SSE reducer; single chatReducer remains stream owner
+- Active CV view uses GET /api/profile/cv URL open only
+
+## Implementation Reality
+- Real fetch multipart upload and typed JSON parsers (not stubs)
+- Sidebar success â†’ one concise normal turn with returned attachment_id only
+- Errors surface ChatApiError code/summary without inventing success
+- No hardcoding of success paths beyond fixed concise SIDEBAR_CV_TURN_MESSAGE intent text (source-allowed concise turn message)
+
+## Hardcoding Review
+- No fake success logic; parsers reject path leakage
+- SIDEBAR_CV_TURN_MESSAGE is fixed concise user intent for sidebar-driven turns (acceptable; not a test overfit)
+
+## Validations Reviewed
+- Command/check: Astryx discovery (build, docs layout, AppShell, SideNav, ChatComposer)
+- Required: yes
+- Reported result: passed
+- Rerun result: not_run (composition verified via public imports + tests; A1 CLI evidence credible)
+- Status: passed
+- Notes: Public component usage matches documented AppShell sideNav, FileInput, Token, ChatComposerDrawer pattern
+
+- Command/check: `Set-Location frontend; npm test -- --run src/test/cv-sidebar.test.tsx src/test/chat-page.test.tsx; npm run lint; npm run typecheck; npm run build`
+- Required: yes
+- Reported result: passed (22 tests; eslint/tsc/vite clean)
+- Rerun result: passed â€” 22 tests (8 cv-sidebar + 14 chat-page); lint clean; tsc --noEmit clean; vite build succeeded
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_cv_api.py tests/integration/test_chat_api.py -q`
+- Required: yes
+- Reported result: passed (45)
+- Rerun result: passed (45 dots, exit 0)
+- Status: passed
+- Notes: Frontend-consumed upload/profile/chat contracts still green with fakes
+
+- Command/check: workspace search frontend/src for attachments/cv, /profile/cv, attachment_ids, storage_path, internal astryx, hex, raw div
+- Required: yes
+- Reported result: passed
+- Rerun result: passed â€” single POST /api/attachments/cv; GET /api/profile/cv URL only; attachment_ids on turns; storage_path only rejected/tested; no raw `<div>`, no hex, no internal @astryxdesign src/dist imports; no Blob/createObjectURL in production paths
+- Status: passed
+
+## Acceptance Review
+- Empty/active sidebar only four source-approved info/actions + public Astryx: satisfied â€” CvSidebar + tests
+- Shared uploadCv; success â†’ one concise ID-only turn; no PDF body/path/second stream store: satisfied â€” App + ChatPage + cv-sidebar/chat-page tests
+- Active CV view/download via GET /api/profile/cv only; no paths/bytes in UI state: satisfied â€” getActiveCvUrl + window.open; parsers reject storage_path
+- Upload disabled connecting/streaming/interrupted; stable errors no false success: satisfied â€” isComposerLocked + isUploadDisabled; PDF_TOO_LARGE banner without onSuccess
+- No full editor/history/JD/match, raw layout, internal Astryx, second design system: satisfied â€” out-of-scope chat-page test; import/hygiene grep clean
+- Task acceptance: satisfied
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `App.test.tsx` modified but not listed in task Files allowlist; justified as foundation shell test for required App.tsx AppShell+sidebar wiring (A1 disclosed).
+- Astryx CLI discovery not re-run by A2; public composition and frontend gates verified instead.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- App.test.tsx extra file disclosed
+- theme.css correctly reported as not modified
+- 04B approval card correctly out of scope
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - 04B
+
+## Source Task File
+docs/tasks/task_4.md
+
+## Execution Report Reviewed
+docs/reports/report_4_execute_agent.md
+
+## Review Report File
+docs/review/review_4_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - React and Astryx CV Approval Workflow
+- Task ID: 04B
+- Task title: Render durable approval actions with one resume decision and request-change focus
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes (working tree; uncommitted 04A+04B frontend work)
+- changed files from git (04B-relevant):
+  - `?? frontend/src/features/profile/ApprovalCard.tsx` (created)
+  - `M frontend/src/features/chat/components/ChatMessages.tsx`
+  - `M frontend/src/features/chat/ChatPage.tsx`
+  - `M frontend/src/features/chat/reducer.ts`
+  - `M frontend/src/features/chat/history.ts` (recoverPendingApproval; justified beyond Files allowlist)
+  - `M frontend/src/app/App.tsx` (onProfileSaved â†’ refreshKey; in-scope parent)
+  - `?? frontend/src/test/approval-card.test.tsx` (created)
+  - `M frontend/src/test/sse-reducer.test.ts`
+  - `M frontend/src/test/chat-page.test.tsx`
+  - `frontend/src/lib/api/chat.ts` â€” streamChatResume already present (export helpers from 04A)
+  - `frontend/src/features/profile/CvSidebar.tsx` â€” not modified (refreshKey already supported from 04A)
+- recent commits: HEAD is P4B3 Complete; Batch04 frontend work is uncommitted working-tree changes matching A1 report
+
+## Files Reviewed
+- `frontend/src/features/profile/ApprovalCard.tsx`: in scope - public Card/ButtonGroup/Button; exact Save Profile / Request Changes labels; save_profile / request_changes actions; summarizeApprovalCard caps unsafe dumps; parseProfileCommitProjection for profile_commit only
+- `frontend/src/features/chat/components/ChatMessages.tsx`: in scope - projects profile_commit card from stream assistant.run or history user.run; generic "Run interrupted" for non-profile kinds; no raw CV
+- `frontend/src/features/chat/ChatPage.tsx`: in scope - local approvalLockedRunIds + approvalInFlightRef only; single streamChatResume path; resume SSE into chatReducer; request_changes â†’ ChatComposerInput focus; save_profile â†’ onProfileSaved; composer/upload locked while pending
+- `frontend/src/features/chat/reducer.ts`: in scope - history/reset|load_older|rehydrate recover pendingApproval; same SSE path; exact tool statuses retained
+- `frontend/src/features/chat/history.ts`: justified extra - recoverPendingApproval reconstructs durable interrupt for restart; required by hydration acceptance
+- `frontend/src/app/App.tsx`: in scope parent - handleProfileSaved bumps CvSidebar refreshKey
+- `frontend/src/lib/api/chat.ts`: in scope (existing) - streamChatResume POST resume; no second transport
+- `frontend/src/features/profile/CvSidebar.tsx`: in scope (unchanged) - refreshKey reload path already present
+- `frontend/src/test/approval-card.test.tsx`: in scope - streamed card, rapid-click single resume, request_changes focus, failure truthfulness, history hydration, Save sidebar refresh
+- `frontend/src/test/sse-reducer.test.ts`: in scope - profile_commit interrupt + history hydration
+- `frontend/src/test/chat-page.test.tsx`: in scope - non-profile interrupt without Save/Request buttons
+
+## Architecture Alignment
+- Public Astryx only: Card, ButtonGroup, Button, ChatComposer, ChatComposerInput handleRef.focus â€” no `@astryxdesign/.../src|dist` internals
+- Single chatReducer remains stream owner; local button lock is not a second run/tool/approval store
+- Resume uses existing streamChatResume + SSE parser callbacks
+- No full editor, JD, or match UI added
+
+## Implementation Reality
+- Real ApprovalCard + ChatMessages/ChatPage wiring over durable pending_approval / approval_required projection
+- First accepted action disables both buttons and keeps lock via set + inFlight ref; rapid-click test asserts resumeRun once
+- Restart hydration recovers pendingApproval from durable run metadata
+- NEO4J_SYNC_FAILED / graph sync failure shown without false success
+- Tool statuses remain pending|running|completed|failed (complete/error only as forbidden aliases or Astryx visual presentation mapping)
+
+## Hardcoding Review
+- No fake success paths; action codes and labels match Master/Plan source
+- Summary fields use known card keys only; raw_cv_text not rendered
+
+## Validations Reviewed
+- Command/check: Astryx discovery (build, Card, ButtonGroup, Button, ChatComposer)
+- Required: yes
+- Reported result: passed
+- Rerun result: not_run (public imports + focus handle verified in source/tests; A1 CLI evidence credible)
+- Status: passed
+- Notes: Card/ButtonGroup/Button/ChatComposerInput.handleRef used as documented public APIs
+
+- Command/check: `Set-Location frontend; npm test -- --run src/test/approval-card.test.tsx src/test/cv-sidebar.test.tsx src/test/sse-reducer.test.ts src/test/chat-page.test.tsx; npm run lint; npm run typecheck; npm run build`
+- Required: yes
+- Reported result: passed (58 tests; eslint/tsc/vite clean)
+- Rerun result: passed â€” 58 tests (11 approval-card + 8 cv-sidebar + 25 sse-reducer + 14 chat-page); lint clean; tsc --noEmit clean; vite build succeeded
+- Status: passed
+- Notes: A2 independent rerun confirmed
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_profile_approval.py tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q`
+- Required: yes
+- Reported result: passed (65)
+- Rerun result: passed (all dots, exit 0)
+- Status: passed
+- Notes: Frontend-consumed approval/resume/replay contracts still green with fakes
+
+- Command/check: workspace search frontend/src for Save Profile|Request Changes|save_profile|request_changes|streamChatResume|pendingApproval|focus|disabled|complete|error|internal astryx
+- Required: yes
+- Reported result: passed
+- Rerun result: passed â€” exact labels/actions present; single streamChatResume resume path; pendingApproval in reducer/history; focus via ChatComposerInput; no @astryxdesign .../src|dist imports; complete/error only as forbidden aliases or Astryx presentation mapping
+- Status: passed
+
+- Command/check: `git status --short --untracked-files=all`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed â€” no root .env, real CV, SQLite/checkpoint, or runtime attachment tracked; only intentional source/test artifacts
+- Status: passed
+
+- Command/check: optional docker compose smoke
+- Required: no
+- Reported result: not_run
+- Rerun result: not_run
+- Status: not_run
+- Notes: optional; missing local-smoke prerequisites do not block acceptance
+
+## Acceptance Review
+- Streamed and hydrated profile_commit interruptions render one compact card with exactly two source-approved actions and no raw CV: satisfied â€” ApprovalCard + stream/history tests
+- First accepted action disables both buttons and upload/composer; repeated clicks cannot create a second client decision: satisfied â€” approvalLockedRunIds + approvalInFlightRef + rapid-click test
+- request_changes completion removes pending lock, focuses documented composer; Save refreshes sidebar: satisfied â€” focus test + onProfileSaved refreshKey
+- Backend tool/run failures including committed SQLite + failed Neo4j sync render truthful failure: satisfied â€” NEO4J_SYNC_FAILED body assertion
+- Client stream state remains in existing reducer with exact tool statuses; no second store/full editor/JD/match: satisfied â€” single chatReducer; scope grep clean
+- Task acceptance: satisfied
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `frontend/src/features/chat/history.ts` modified but not listed in task Files allowlist; justified as required restart hydration path (recoverPendingApproval) for acceptance criterion.
+- Astryx CLI discovery not re-run by A2; public composition and frontend gates verified instead.
+
+## Report Accuracy
+- Execution report materially accurate on files, decisions, validations, and acceptance evidence
+- history.ts and App.tsx parent wiring disclosed
+- CvSidebar correctly reported as not modified; streamChatResume already present
+- Optional docker smoke correctly not_run
 
 ## Decision
 - Accept selected task: yes

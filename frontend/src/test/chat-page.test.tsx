@@ -537,7 +537,7 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
     });
   });
 
-  it('shows interrupted state and locks the composer without approval cards', async () => {
+  it('shows interrupted state and locks the composer without approval cards for non-profile kinds', async () => {
     const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
     const sendTurn = vi.fn(
       async (
@@ -572,7 +572,15 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
         'false',
       );
     });
+    // Non-profile_commit interrupts never render Save Profile / Request Changes.
     expect(screen.queryByRole('button', {name: /approve/i})).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {name: 'Save Profile'}),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {name: 'Request Changes'}),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('jobagent-approval-card')).not.toBeInTheDocument();
   });
 });
 
@@ -602,7 +610,7 @@ describe('App shell hosts chat layout', () => {
 });
 
 describe('ChatPage no out-of-scope chrome', () => {
-  it('does not render sidebar, profile, match, or save-job UI', async () => {
+  it('does not render match or save-job UI on the chat page', async () => {
     const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
     renderChat({loadHistory, sendTurn: vi.fn()});
     await waitFor(() => {
@@ -610,5 +618,107 @@ describe('ChatPage no out-of-scope chrome', () => {
     });
     expect(screen.queryByText(/match jobs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/save job/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('ChatPage PDF attachment token (04A)', () => {
+  const ATTACH_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  it('renders compact PDF token and submits attachment_ids only', async () => {
+    const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
+    const uploadCv = vi.fn().mockResolvedValue({
+      attachment: {
+        id: ATTACH_ID,
+        original_name: 'chat-cv.pdf',
+        mime_type: 'application/pdf',
+        size_bytes: 100,
+        page_count: 1,
+        state: 'staged',
+        failure_code: null,
+      },
+      outcome: 'new',
+      profile: null,
+      draft: null,
+    });
+    const sendTurn = vi.fn().mockResolvedValue(undefined);
+
+    const {container} = renderChat({loadHistory, sendTurn, uploadCv});
+    await waitFor(() => {
+      expect(screen.getByText('Start a conversation')).toBeInTheDocument();
+    });
+
+    const file = new File(['%PDF-1.4'], 'chat-cv.pdf', {
+      type: 'application/pdf',
+    });
+    const input = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    await userEvent.upload(input!, file);
+
+    await waitFor(() => {
+      expect(uploadCv).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('jobagent-chat-pdf-token')).toBeInTheDocument();
+      expect(screen.getByText('chat-cv.pdf')).toBeInTheDocument();
+    });
+
+    await submitMessage(container, 'Please review my CV');
+
+    await waitFor(() => {
+      expect(sendTurn).toHaveBeenCalled();
+    });
+    const body = sendTurn.mock.calls[0]![0] as {
+      message: string;
+      attachment_ids?: string[];
+    };
+    expect(body.message).toBe('Please review my CV');
+    expect(body.attachment_ids).toEqual([ATTACH_ID]);
+    expect(JSON.stringify(body)).not.toMatch(/storage_path|%PDF/);
+  });
+
+  it('disables PDF attach while streaming', async () => {
+    const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
+    let resolveStream: (() => void) | null = null;
+    const sendTurn = vi.fn(
+      async (
+        _body: {message: string},
+        cbs: StreamCallbacks,
+        _signal?: AbortSignal,
+      ) => {
+        cbs.onEvent(
+          sse(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+        );
+        await new Promise<void>((resolve) => {
+          resolveStream = resolve;
+        });
+        cbs.onEvent(sse(EVENT_B, 'run_completed', {state: 'completed'}));
+      },
+    );
+    const uploadCv = vi.fn();
+
+    const {container} = renderChat({loadHistory, sendTurn, uploadCv});
+    await waitFor(() => {
+      expect(screen.getByText('Start a conversation')).toBeInTheDocument();
+    });
+    await submitMessage(container, 'Streaming now');
+
+    await waitFor(() => {
+      const field = getComposerEditable(container);
+      expect(field.getAttribute('contenteditable')).toBe('false');
+    });
+
+    const input = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    expect(
+      input!.disabled ||
+        input!.getAttribute('aria-disabled') === 'true' ||
+        input!.closest('[aria-disabled="true"]') !== null,
+    ).toBe(true);
+
+    await act(async () => {
+      resolveStream?.();
+    });
   });
 });

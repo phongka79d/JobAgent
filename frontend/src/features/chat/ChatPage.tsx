@@ -1,23 +1,33 @@
 /**
  * Base Astryx conversation page over the Plan 3 history/SSE API path.
- * Single owner of UI dispatch into the (04A) chatReducer — no second store.
+ * Single owner of UI dispatch into the chatReducer — no second stream store.
+ * Plan 4: PDF attachment token + profile_commit approval resume/focus.
  */
 
 import {useCallback, useEffect, useReducer, useRef, useState} from 'react';
 import {
   ChatComposer,
+  ChatComposerDrawer,
+  ChatComposerInput,
   ChatLayout,
   ChatSystemMessage,
+  type ChatComposerInputHandle,
 } from '@astryxdesign/core/Chat';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
+import {FileInput} from '@astryxdesign/core/FileInput';
+import {Token} from '@astryxdesign/core/Token';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {
   ChatApiError,
   fetchChatHistory,
+  streamChatResume,
   streamChatTurn,
   type StreamCallbacks,
 } from '../../lib/api/chat';
+import {uploadCv as defaultUploadCv} from '../profile/api';
+import type {ProfileApprovalAction} from '../profile/ApprovalCard';
+import type {PendingPdfAttachment} from '../profile/types';
 import {ChatMessages} from './components/ChatMessages';
 import {
   chatReducer,
@@ -28,11 +38,30 @@ import {
 export type ChatPageDeps = {
   loadHistory?: typeof fetchChatHistory;
   sendTurn?: typeof streamChatTurn;
+  /** Injectable resume transport for approval actions. */
+  resumeRun?: typeof streamChatResume;
+  /** Shared CV upload used by composer attachment (same as sidebar). */
+  uploadCv?: typeof defaultUploadCv;
+};
+
+/** One concise sidebar-driven turn: attachment ID only, no PDF body. */
+export type SidebarAttachmentTurnRequest = {
+  /** Monotonic key so the same id can re-fire after completion. */
+  requestKey: number;
+  attachmentId: string;
+  message: string;
 };
 
 export type ChatPageProps = {
-  /** Injectable transport for tests; defaults to Plan 3 API client. */
+  /** Injectable transport for tests; defaults to Plan 3/4 API clients. */
   deps?: ChatPageDeps;
+  /** Reflect lock to App/sidebar so upload disables with composer. */
+  onInteractionLockChange?: (locked: boolean) => void;
+  /** Sidebar successful upload → start one normal turn with attachment_id. */
+  sidebarAttachmentTurn?: SidebarAttachmentTurnRequest | null;
+  onSidebarAttachmentTurnHandled?: (requestKey: number) => void;
+  /** After save_profile completes successfully — refresh approved sidebar. */
+  onProfileSaved?: () => void;
 };
 
 function newClientKey(prefix: string): string {
@@ -42,9 +71,19 @@ function newClientKey(prefix: string): string {
   return `${prefix}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function ChatPage({deps}: ChatPageProps) {
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+export function ChatPage({
+  deps,
+  onInteractionLockChange,
+  sidebarAttachmentTurn,
+  onSidebarAttachmentTurnHandled,
+  onProfileSaved,
+}: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
+  const resumeRun = deps?.resumeRun ?? streamChatResume;
+  const doUpload = deps?.uploadCv ?? defaultUploadCv;
 
   const [state, dispatch] = useReducer(
     chatReducer,
@@ -54,9 +93,28 @@ export function ChatPage({deps}: ChatPageProps) {
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [draft, setDraft] = useState('');
+  const [pendingPdf, setPendingPdf] = useState<PendingPdfAttachment | null>(
+    null,
+  );
+  const [composerFile, setComposerFile] = useState<File | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [isAttaching, setIsAttaching] = useState(false);
+  /** Local only: first accepted approval action per run (not a second store). */
+  const [approvalLockedRunIds, setApprovalLockedRunIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
-  /** Set true synchronously when a turn starts; cleared on terminal UI phases. */
+  /** Set true synchronously when a turn/resume starts; cleared on terminal UI phases. */
   const inFlightRef = useRef(false);
+  const handledSidebarKeysRef = useRef<Set<number>>(new Set());
+  /** Guards rapid double-clicks before React re-renders disabled buttons. */
+  const approvalInFlightRef = useRef<Set<string>>(new Set());
+  const composerInputRef = useRef<ChatComposerInputHandle | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const onProfileSavedRef = useRef(onProfileSaved);
+  onProfileSavedRef.current = onProfileSaved;
+
   useEffect(() => {
     if (
       state.streamPhase === 'idle' ||
@@ -72,7 +130,12 @@ export function ChatPage({deps}: ChatPageProps) {
     }
   }, [state.streamPhase]);
 
-  // Initial history hydration (newest page).
+  const locked = isComposerLocked(state);
+  useEffect(() => {
+    onInteractionLockChange?.(locked);
+  }, [locked, onInteractionLockChange]);
+
+  // Initial history hydration (newest page) — reconstructs pending approval cards.
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
@@ -135,50 +198,71 @@ export function ChatPage({deps}: ChatPageProps) {
     }
   }, [loadHistory]);
 
-  const handleSubmit = useCallback(
-    (value: string) => {
-      const trimmed = value.trim();
-      if (trimmed === '' || isComposerLocked(state)) {
-        return;
-      }
-
-      setDraft('');
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const clientKey = newClientKey('user');
-      // Mark in-flight before any async work so mid-stream disconnect is visible
-      // even when React has not yet committed connecting/streaming phase.
-      inFlightRef.current = true;
-      dispatch({type: 'turn/start', clientKey, message: trimmed});
-
-      const callbacks: StreamCallbacks = {
+  const makeStreamCallbacks = useCallback(
+    (opts?: {
+      onTerminal?: (kind: 'completed' | 'failed' | 'interrupted') => void;
+    }): StreamCallbacks => {
+      return {
         onEvent: (event) => {
           dispatch({type: 'sse/event', event});
-          if (
-            event.event === 'run_completed' ||
-            event.event === 'run_failed' ||
-            event.event === 'approval_required'
-          ) {
+          if (event.event === 'run_completed') {
             inFlightRef.current = false;
+            opts?.onTerminal?.('completed');
+          } else if (event.event === 'run_failed') {
+            inFlightRef.current = false;
+            opts?.onTerminal?.('failed');
+          } else if (event.event === 'approval_required') {
+            inFlightRef.current = false;
+            opts?.onTerminal?.('interrupted');
           }
         },
         onMalformed: () => {
           // Malformed frames must not invent completion (reducer ignores via sse/raw).
         },
         onDisconnected: () => {
-          // Visible non-complete: only while the turn is still in-flight.
           if (inFlightRef.current) {
             inFlightRef.current = false;
             dispatch({type: 'stream/disconnected'});
           }
         },
       };
+    },
+    [],
+  );
+
+  const runTurn = useCallback(
+    (message: string, attachmentIds: string[]) => {
+      const trimmed = message.trim();
+      // Allow ID-only turns when message is the concise sidebar intent;
+      // still require non-empty message (backend contract).
+      if (trimmed === '' || isComposerLocked(stateRef.current)) {
+        return false;
+      }
+
+      setDraft('');
+      setPendingPdf(null);
+      setComposerFile(null);
+      setAttachError(null);
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const clientKey = newClientKey('user');
+      inFlightRef.current = true;
+      dispatch({type: 'turn/start', clientKey, message: trimmed});
+
+      const callbacks = makeStreamCallbacks();
 
       void (async () => {
         try {
-          await sendTurn({message: trimmed}, callbacks, controller.signal);
+          await sendTurn(
+            {
+              message: trimmed,
+              attachment_ids: attachmentIds,
+            },
+            callbacks,
+            controller.signal,
+          );
         } catch (err) {
           if (controller.signal.aborted) {
             return;
@@ -199,8 +283,167 @@ export function ChatPage({deps}: ChatPageProps) {
           });
         }
       })();
+      return true;
     },
-    [sendTurn, state],
+    [makeStreamCallbacks, sendTurn],
+  );
+
+  const handleSubmit = useCallback(
+    (value: string) => {
+      const ids = pendingPdf ? [pendingPdf.attachmentId] : [];
+      runTurn(value, ids);
+    },
+    [pendingPdf, runTurn],
+  );
+
+  const focusComposer = useCallback(() => {
+    // Documented ChatComposerInput focus handle (public Astryx API).
+    const focus = () => {
+      composerInputRef.current?.focus();
+    };
+    // Defer until after unlock re-render enables the contenteditable.
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(() => {
+        requestAnimationFrame(focus);
+      });
+    } else {
+      setTimeout(focus, 0);
+    }
+  }, []);
+
+  const handleApprovalAction = useCallback(
+    (runId: string, action: ProfileApprovalAction) => {
+      // One accepted action per run: ignore rapid repeats and second store.
+      if (
+        approvalInFlightRef.current.has(runId) ||
+        approvalLockedRunIds.has(runId)
+      ) {
+        return;
+      }
+      approvalInFlightRef.current.add(runId);
+      setApprovalLockedRunIds((prev) => {
+        const next = new Set(prev);
+        next.add(runId);
+        return next;
+      });
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      inFlightRef.current = true;
+
+      const callbacks = makeStreamCallbacks({
+        onTerminal: (kind) => {
+          approvalInFlightRef.current.delete(runId);
+          if (kind === 'completed') {
+            if (action === 'save_profile') {
+              onProfileSavedRef.current?.();
+            } else if (action === 'request_changes') {
+              focusComposer();
+            }
+          }
+        },
+      });
+
+      void (async () => {
+        try {
+          await resumeRun(runId, action, callbacks, controller.signal);
+        } catch (err) {
+          if (controller.signal.aborted) {
+            return;
+          }
+          approvalInFlightRef.current.delete(runId);
+          // Keep buttons locked after an accepted action; surface failure truthfully.
+          // Terminal no-op or HTTP errors never invent success.
+          if (err instanceof ChatApiError) {
+            dispatch({
+              type: 'stream/http_failed',
+              code: err.code,
+              summary: err.summary,
+            });
+            return;
+          }
+          dispatch({
+            type: 'stream/http_failed',
+            code: 'STREAM_ERROR',
+            summary:
+              err instanceof Error ? err.message : 'Resume failed unexpectedly',
+          });
+        }
+      })();
+    },
+    [approvalLockedRunIds, focusComposer, makeStreamCallbacks, resumeRun],
+  );
+
+  // Sidebar upload success → one normal concise turn with attachment_id only.
+  useEffect(() => {
+    if (!sidebarAttachmentTurn) {
+      return;
+    }
+    const {requestKey, attachmentId, message} = sidebarAttachmentTurn;
+    if (handledSidebarKeysRef.current.has(requestKey)) {
+      return;
+    }
+    if (isComposerLocked(stateRef.current)) {
+      // Wait until unlock; do not mark handled so it can retry.
+      return;
+    }
+    handledSidebarKeysRef.current.add(requestKey);
+    const started = runTurn(message, [attachmentId]);
+    if (started) {
+      onSidebarAttachmentTurnHandled?.(requestKey);
+    } else {
+      handledSidebarKeysRef.current.delete(requestKey);
+    }
+  }, [
+    sidebarAttachmentTurn,
+    runTurn,
+    onSidebarAttachmentTurnHandled,
+    state.streamPhase,
+    state.pendingApproval,
+    state.messages,
+  ]);
+
+  const handleComposerFileChange = useCallback(
+    (files: File | File[] | null) => {
+      const file = Array.isArray(files) ? (files[0] ?? null) : files;
+      setComposerFile(file);
+      setAttachError(null);
+    },
+    [],
+  );
+
+  const handleComposerAttach = useCallback(
+    async (files: File | File[] | null) => {
+      const file = Array.isArray(files) ? (files[0] ?? null) : files;
+      if (!file || locked || isAttaching) {
+        return;
+      }
+      setIsAttaching(true);
+      setAttachError(null);
+      try {
+        const result = await doUpload(file);
+        // Compact PDF token: display name + ID only (no bytes/path).
+        setPendingPdf({
+          attachmentId: result.attachment.id,
+          displayName: result.attachment.original_name,
+        });
+        setComposerFile(null);
+      } catch (err) {
+        const code = err instanceof ChatApiError ? err.code : 'UPLOAD_FAILED';
+        const summary =
+          err instanceof ChatApiError
+            ? err.summary
+            : err instanceof Error
+              ? err.message
+              : 'CV attach failed';
+        setAttachError(`${summary} (${code})`);
+        setPendingPdf(null);
+      } finally {
+        setIsAttaching(false);
+      }
+    },
+    [doUpload, isAttaching, locked],
   );
 
   useEffect(() => {
@@ -209,30 +452,35 @@ export function ChatPage({deps}: ChatPageProps) {
     };
   }, []);
 
-  const locked = isComposerLocked(state);
   const isStreaming =
     state.streamPhase === 'streaming' || state.streamPhase === 'connecting';
   const hasInterrupted = state.messages.some(
     (m) => m.run?.state === 'interrupted',
-  );
+  ) || state.pendingApproval !== null;
 
   const composerStatus =
-    state.streamPhase === 'failed' && state.streamError
+    attachError
       ? {
-          type: 'warning' as const,
-          message: `${state.streamError.summary} (${state.streamError.code})`,
+          type: 'error' as const,
+          message: attachError,
         }
-      : state.streamPhase === 'disconnected'
+      : state.streamPhase === 'failed' && state.streamError
         ? {
             type: 'warning' as const,
-            message: 'Stream disconnected — run is not completed',
+            message: `${state.streamError.summary} (${state.streamError.code})`,
           }
-        : hasInterrupted
+        : state.streamPhase === 'disconnected'
           ? {
               type: 'warning' as const,
-              message: 'Run interrupted — new turns are blocked until resumed',
+              message: 'Stream disconnected — run is not completed',
             }
-          : undefined;
+          : hasInterrupted
+            ? {
+                type: 'warning' as const,
+                message:
+                  'Run interrupted — new turns are blocked until resumed',
+              }
+            : undefined;
 
   const emptyState = (
     <EmptyState
@@ -251,13 +499,14 @@ export function ChatPage({deps}: ChatPageProps) {
     state.streamPhase === 'streaming' ||
     state.assistantStatus !== null;
 
-  // Only wire infinite-scroll when an older page exists (avoids empty mock hits in tests).
   const scrollToTopAction =
     state.nextCursor !== null && !isLoadingOlder
       ? async () => {
           await handleLoadOlder();
         }
       : undefined;
+
+  const uploadDisabled = locked || isAttaching;
 
   return (
     <VStack
@@ -289,6 +538,55 @@ export function ChatPage({deps}: ChatPageProps) {
             }
             status={composerStatus}
             statusPosition="top"
+            input={
+              <ChatComposerInput
+                handleRef={composerInputRef}
+                data-testid="jobagent-chat-composer-input"
+              />
+            }
+            headerActions={
+              <FileInput
+                label="Attach PDF"
+                value={composerFile}
+                onChange={handleComposerFileChange}
+                changeAction={handleComposerAttach}
+                accept="application/pdf,.pdf"
+                maxSize={MAX_PDF_BYTES}
+                mode="input"
+                isLabelHidden
+                isDisabled={uploadDisabled}
+                disabledMessage={
+                  locked
+                    ? 'Attachment upload is disabled while a run is active or interrupted'
+                    : undefined
+                }
+                isLoading={isAttaching}
+                placeholder="PDF"
+                data-testid="jobagent-chat-pdf-upload"
+              />
+            }
+            drawer={
+              pendingPdf ? (
+                <ChatComposerDrawer
+                  count={1}
+                  label="Attachments"
+                  data-testid="jobagent-chat-pdf-drawer"
+                >
+                  <Token
+                    label={pendingPdf.displayName}
+                    description={`PDF attachment ${pendingPdf.attachmentId}`}
+                    onRemove={
+                      locked
+                        ? undefined
+                        : () => {
+                            setPendingPdf(null);
+                          }
+                    }
+                    data-testid="jobagent-chat-pdf-token"
+                  />
+                </ChatComposerDrawer>
+              ) : undefined
+            }
           />
         }
       >
@@ -300,6 +598,8 @@ export function ChatPage({deps}: ChatPageProps) {
             assistantStatus={state.assistantStatus}
             onLoadOlder={scrollToTopAction}
             isStreaming={isStreaming}
+            onApprovalAction={handleApprovalAction}
+            approvalLockedRunIds={approvalLockedRunIds}
           />
         ) : null}
       </ChatLayout>
