@@ -1,7 +1,7 @@
 # JobAgent Master Plan
 
-**Version:** 1.0  
-**Date:** 2026-07-10  
+**Version:** 1.1
+**Date:** 2026-07-13
 **Status:** Ready for implementation after Phase 0 feasibility gates  
 **Project type:** Single-user, local-first AI/NLP portfolio project  
 
@@ -14,7 +14,7 @@ JobAgent is a chat-first job matching assistant. The user primarily works throug
 The system must let the user:
 
 1. Upload a PDF CV from the sidebar or attach it in chat.
-2. Let the Agent call tools to parse, redact, extract, normalize, and stage a Candidate Profile.
+2. Let the Agent call tools to parse, extract, normalize, and stage a Candidate Profile.
 3. Review the extracted profile inside chat and choose **Save Profile** or **Request Changes**.
 4. Send a public JD URL or paste JD text.
 5. Let the Agent save every accepted JD input, extract structured fields, normalize skills, and synchronize derived graph data.
@@ -32,7 +32,7 @@ Every new dependency or feature must satisfy at least one of these conditions:
 
 - It is required for a locked user flow.
 - It measurably improves a defined metric.
-- It removes a known reliability or security risk.
+- It removes a known reliability risk in the locked demo flow.
 
 Otherwise, it remains outside the MVP.
 
@@ -58,7 +58,7 @@ Otherwise, it remains outside the MVP.
 - Neo4j skill graph and Neo4j vector search.
 - Transparent hybrid scoring.
 - Skill-gap and score-breakdown explanation.
-- Visible, sanitized tool activity in chat.
+- Visible tool activity in chat.
 - Local Docker Compose deployment.
 - Local tests and evaluation commands.
 
@@ -164,7 +164,6 @@ JobAgent/
 │   │   ├── db/
 │   │   ├── graph/
 │   │   ├── schemas/
-│   │   ├── security/
 │   │   └── main.py
 │   ├── migrations/
 │   ├── evaluation/
@@ -210,7 +209,7 @@ The repository has exactly three top-level working folders: `frontend`, `backend
 | `conversation` | singleton `id`, timestamps | One application conversation |
 | `chat_messages` | `id`, `conversation_id`, `role`, `content`, `structured_payload`, timestamps | UI history and application-level conversation record |
 | `agent_runs` | `id`, `message_id`, `state`, `pending_approval`, error, timestamps | One LangGraph run per user turn |
-| `tool_executions` | run/tool IDs, sanitized arguments summary, status, duration, error code, timestamps | Tool observability and evaluation |
+| `tool_executions` | run/tool IDs, short arguments summary, status, duration, error code, timestamps | Tool observability and evaluation |
 | `memory_facts` | `key`, `value_json`, `source`, timestamps | Durable job-related facts not already represented by profile/preferences |
 | `graph_sync_outbox` | operation, entity ID, payload, status, attempts, timestamps | Durable SQLite-to-Neo4j synchronization |
 
@@ -258,7 +257,7 @@ SkillRef
 - evidence: list[str]
 ```
 
-Evidence snippets must be short, redact contact details, and come from the source document. The LLM must not invent evidence.
+Evidence snippets must be short, relevant to the extracted field, and come from the source document. The LLM must not invent evidence.
 
 ### 7.2 Candidate Profile
 
@@ -416,7 +415,6 @@ Validation:
 - Magic bytes must begin with `%PDF-`.
 - Maximum size: 10 MB.
 - Maximum pages: 10.
-- The parser must not execute embedded content.
 
 ### 10.2 Processing
 
@@ -425,21 +423,12 @@ attachment_id
 → file-hash duplicate check
 → pypdf layout text extraction
 → extractable-text validation
-→ deterministic PII redaction
 → gpt-4o-mini structured extraction
 → Pydantic validation
 → at most one JSON repair
 → profile draft
 → LangGraph interrupt
 ```
-
-PII redaction removes at minimum:
-
-- Email addresses.
-- Phone numbers.
-- Address lines labeled as address/contact address.
-
-Name, education, experience, and skills remain available unless the user later requests stronger anonymization.
 
 If no meaningful digital text is available, return `NO_EXTRACTABLE_TEXT`. Do not add OCR fallback.
 
@@ -478,12 +467,9 @@ If any SQLite/file operation fails, the current active profile remains unchanged
 - Public HTTP/HTTPS URL.
 - Raw JD text pasted into chat.
 
-### 11.2 URL security
+### 11.2 Simple URL fetching
 
 - Allow only HTTP and HTTPS.
-- Block localhost, private, loopback, link-local, and metadata-service IP ranges.
-- Resolve and validate every redirect target.
-- Maximum three redirects.
 - Ten-second download timeout.
 - Maximum response body: 5 MB.
 - Allow only `text/html` and `text/plain`.
@@ -617,8 +603,8 @@ Reads the active Candidate Profile and Job Preferences.
 Input: `attachment_id`.
 
 - Validates attachment ownership/state.
-- Parses, redacts, extracts, validates, and creates a draft.
-- Returns `draft_id` and sanitized summary.
+- Parses, extracts, validates, and creates a draft.
+- Returns `draft_id` and a short summary.
 - Never commits the profile.
 
 ### 13.3 `propose_profile_update`
@@ -756,14 +742,14 @@ Before implementing any Astryx component, run its CLI documentation command agai
 
 ### 15.4 Tool activity display
 
-Display sanitized statuses only:
+Display concise user-facing statuses:
 
 - Friendly tool label.
 - `pending`, `running`, `complete`, or `error`.
 - Duration.
 - Short outcome summary.
 
-Never display raw arguments, raw CV/JD content, API keys, stack traces, or internal-only IDs.
+The activity component does not need a developer-oriented arguments or stack-trace view.
 
 ### 15.5 Match result card
 
@@ -822,7 +808,7 @@ Use only ShopAIKey `text-embedding-3-small` through `POST /v1/embeddings`, with 
 
 ### 17.2 Provider compatibility gate
 
-Phase 0 must verify model availability, scalar and batch input support, stable input/output ordering, exactly 1536 finite float values per input, and sanitized timeout/rate-limit/invalid-response behavior. Record median/P95 request latency and validation-set `nDCG@10` and Recall@10 as baseline evidence; these measurements validate the locked adapter and do not select among models.
+Phase 0 must verify model availability, scalar and batch input support, stable input/output ordering, exactly 1536 finite float values per input, and clear timeout/rate-limit/invalid-response behavior. Record median/P95 request latency and validation-set `nDCG@10` and Recall@10 as baseline evidence; these measurements validate the locked adapter and do not select among models.
 
 ### 17.3 Text representations
 
@@ -832,7 +818,7 @@ Candidate representation:
 target roles + profile summary + verified skills + experience titles + preferences
 ```
 
-The Candidate representation must pass through the shared deterministic PII-redaction boundary before any embedding request. If redaction fails, do not call ShopAIKey. Public Job representations still pass through the same normalization and logging-safety boundary.
+Build the Candidate representation from the approved structured profile rather than the raw CV text. Candidate and Job representations use the same whitespace normalization and versioned text-builder contract.
 
 Job representation:
 
@@ -924,7 +910,7 @@ If verified graph expansion does not improve held-out `nDCG@10`, disable related
 
 ### 19.1 Data policy
 
-- Use one real CV that is redacted before external processing.
+- Use one synthetic or manually anonymized representative CV.
 - Use 150–200 public JD examples spanning relevant, adjacent, and unrelated jobs.
 - Real CV/JD data stays local and is gitignored.
 - The repository contains only synthetic fixtures, annotation templates, and aggregate reports.
@@ -969,7 +955,6 @@ Create at least 50 conversation scenarios covering:
 - Match request with/without profile.
 - Unrelated conversation.
 - Tool failure.
-- Prompt injection inside a CV/JD.
 
 ### 19.5 Pass/fail metrics
 
@@ -996,7 +981,6 @@ Agent/tool use:
 Tool-selection accuracy ≥ 0.90
 Invalid tool arguments ≤ 5%
 Profile commits without approval = 0
-PII leakage to ShopAIKey test adapter = 0
 False success after tool failure = 0
 ```
 
@@ -1017,9 +1001,8 @@ External extraction timeout ≤ 45 seconds
 | ShopAIKey timeout/rate limit | Retry once, then persist failure |
 | Invalid structured output | One repair request, then fail safely |
 | No PDF text | `NO_EXTRACTABLE_TEXT`; no OCR |
-| PII redaction failure | Do not send text externally |
 | Unsupported/oversized PDF | Reject before storage promotion |
-| URL blocked or unavailable | Ask user to paste JD text |
+| URL unsupported or unavailable | Ask user to paste JD text |
 | JD extraction failure | Keep raw record with failed status |
 | Exact duplicate | Return existing job; no reprocessing |
 | Normalized duplicate | Save ignored record; no graph/score |
@@ -1065,45 +1048,16 @@ Provide one infrastructure command that:
 
 ---
 
-## 22. Security and Privacy
+## 22. Local Demo Safeguards
 
-### 22.1 Network exposure
+JobAgent is a single-user portfolio demo running locally, not a production or public-facing service. The MVP keeps only a small baseline:
 
-- Bind published frontend and backend ports to `127.0.0.1` only.
-- Keep Neo4j Bolt/HTTP ports inside the Docker network unless a local development profile explicitly exposes them to localhost.
-- Use an exact frontend origin in CORS configuration.
+- Store configuration in the root `.env`; do not commit it or hard-code API keys.
+- Do not print API keys or authorization headers in logs.
+- Keep the existing PDF and URL size, type, and timeout limits so invalid input cannot stall the demo.
+- Bind the documented application setup to localhost.
 
-### 22.2 Secrets
-
-- One `.env` file at repository root.
-- Frontend receives only explicitly prefixed public values.
-- ShopAIKey and Neo4j secrets are backend-only.
-- Never hard-code fallback keys.
-- Never log Authorization headers.
-
-### 22.3 Untrusted content
-
-CV and JD content is data, not Agent instruction. Prompt construction must clearly delimit documents and state that embedded instructions are untrusted.
-
-Tool authorization comes from application state and system policy, never document content.
-
-### 22.4 Logging
-
-Logs may contain:
-
-- Run/tool IDs.
-- Sanitized status summaries.
-- Timings.
-- Token counts.
-- Error codes.
-
-Logs must not contain:
-
-- Raw CV/JD content.
-- Contact PII.
-- API keys.
-- Raw provider request headers.
-- Raw tool arguments containing document data.
+Authentication, role-based authorization, PII-redaction pipelines, SSRF/IP-range defenses, redirect validation, prompt-injection hardening, and a production threat model are explicitly outside the MVP. These may be documented as limitations, but they must not expand the implementation phases.
 
 ---
 
@@ -1148,14 +1102,12 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 
 ### 24.1 Backend unit tests
 
-- PII redaction.
 - Pydantic validation.
 - Skill canonicalization and alias resolution.
 - Duplicate policies.
 - JD quality classification.
 - Score components and weight renormalization.
-- Tool preconditions and authorization.
-- Prompt-injection isolation.
+- Tool preconditions for approval and required state.
 - Outbox idempotency.
 
 ### 24.2 Backend integration tests
@@ -1251,7 +1203,7 @@ Tasks:
 Exit gate:
 
 - `docker compose` starts frontend, backend, and Neo4j locally.
-- Health endpoint reports SQLite, filesystem, and Neo4j status without exposing secrets.
+- Health endpoint reports SQLite, filesystem, and Neo4j status.
 - Migrations work on an empty and already-initialized volume.
 - Neo4j constraints/index setup is idempotent.
 
@@ -1266,9 +1218,9 @@ Tasks:
 - [ ] Implement per-turn AsyncSqliteSaver lifecycle and checkpoint cleanup.
 - [ ] Build the single LangGraph loop with `ToolNode`, iteration limit, error boundary, and interrupt support.
 - [ ] Implement ShopAIKey `ChatOpenAI` adapter using the verified Phase 0 mode.
-- [ ] Implement domain-focused system prompt and prompt-injection delimiters.
+- [ ] Implement domain-focused system prompt.
 - [ ] Implement frontend SSE reducer and base Astryx chat shell.
-- [ ] Render sanitized tool status through `ChatToolCalls`.
+- [ ] Render concise tool status through `ChatToolCalls`.
 
 Exit gate:
 
@@ -1284,7 +1236,6 @@ Tasks:
 - [ ] Implement PDF upload endpoint and file validation.
 - [ ] Implement file-hash duplicate handling and staging lifecycle.
 - [ ] Implement pypdf extraction and text-quality validation.
-- [ ] Implement deterministic PII redaction and leakage tests.
 - [ ] Implement Candidate/Profile/Preference Pydantic schemas.
 - [ ] Implement `propose_profile_from_cv`.
 - [ ] Implement `get_candidate_context`.
@@ -1300,14 +1251,13 @@ Exit gate:
 - Sidebar and chat uploads use the same pipeline.
 - No profile write occurs without approval.
 - User corrections persist across backend restarts.
-- PII leakage tests have zero failures.
 - Failed replacement leaves the previous profile intact.
 
 ### Phase 4 — JD ingestion, extraction, deduplication, and graph sync
 
 Tasks:
 
-- [ ] Implement SSRF-safe HTTP downloader.
+- [ ] Implement a basic HTTP/HTTPS downloader with timeout, response-size, and content-type limits.
 - [ ] Implement Trafilatura extraction and text fallback request.
 - [ ] Implement raw-text input path.
 - [ ] Implement JobPost Pydantic extraction and one-repair policy.
@@ -1317,14 +1267,14 @@ Tasks:
 - [ ] Implement `save_job` and `query_jobs`.
 - [ ] Generate ShopAIKey job embeddings for scorable active records.
 - [ ] Synchronize Job, Skill, and JobFamily graph data.
-- [ ] Add sanitized Job tool status and saved-job card to chat.
+- [ ] Add concise Job tool status and saved-job card to chat.
 
 Exit gate:
 
 - Raw JD is retained across extraction failures.
 - Exact duplicates do not reprocess.
 - Normalized duplicates are stored but excluded from graph/ranking.
-- Private/local URL attempts are blocked.
+- Supported HTTP/HTTPS URLs can be fetched; unavailable pages fall back to pasted text.
 - Full and partial active jobs are queryable in Neo4j with matching IDs.
 
 ### Phase 5 — Matching, explanation, and evaluation
@@ -1351,7 +1301,7 @@ Exit gate:
 - Graph boost is enabled only if its ablation result passes.
 - Top results expose evidence-backed explanations.
 
-### Phase 6 — Hardening and local release
+### Phase 6 — Polish and local release
 
 Tasks:
 
@@ -1383,12 +1333,12 @@ Recommended sequence for one intern developer:
 | Phase 0 | 2–3 focused days |
 | Phase 1 | 3–5 days |
 | Phase 2 | 4–6 days |
-| Phase 3 | 4–6 days |
-| Phase 4 | 4–6 days |
+| Phase 3 | 3–5 days |
+| Phase 4 | 3–5 days |
 | Phase 5 | 6–9 days, including labeling/evaluation |
-| Phase 6 | 3–5 days |
+| Phase 6 | 2–4 days |
 
-This is approximately 5–7 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
+This is approximately 4–6 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
 ---
 
@@ -1397,7 +1347,7 @@ This is approximately 5–7 weeks part-time. Scope should be reduced, not infras
 JobAgent MVP is done only when all conditions are true:
 
 - The user can upload a PDF CV from sidebar or chat.
-- The Agent creates a redacted, validated profile draft.
+- The Agent creates a validated profile draft.
 - Profile/preference writes require in-chat approval.
 - Only one active CV/profile exists after commit.
 - The Agent remembers approved corrections across restarts.
@@ -1405,7 +1355,7 @@ JobAgent MVP is done only when all conditions are true:
 - Every valid input is represented by an existing, active, failed, or ignored duplicate record.
 - Scorable jobs synchronize to Neo4j.
 - Matching returns top jobs with transparent score breakdown and skill gaps.
-- Tool activity is visible and sanitized.
+- Tool activity is visible and concise.
 - Failure paths do not report false success.
 - Evaluation thresholds pass and limitations are documented.
 - The project starts locally through Docker Compose and one root `.env`.

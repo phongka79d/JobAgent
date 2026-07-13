@@ -1,5 +1,0 @@
-# Production skill seed — approval-only verified aliases.
-# No alias is treated as verified unless listed under `skills`.
-# An empty list is valid when no aliases have documented approval.
-# Do not add RELATED_TO / trusted graph relationships here.
-skills: []
