@@ -1,4 +1,4 @@
-"""FastAPI application entry: lifespan and the single public health route.
+"""FastAPI application entry: lifespan, health, and Plan 3 chat routes.
 
 Startup opens shared resources once. The singleton-seed safeguard runs only
 after a successful SQLite availability check. Graph base-schema init runs
@@ -6,8 +6,8 @@ only when Neo4j connectivity succeeds. Filesystem root creation is not
 eager at startup; the health probe owns create/access checks. Startup never
 runs Alembic migrations or SQLAlchemy metadata schema creation. Cleanup
 closes any opened Neo4j driver and disposes the SQLite engine on every exit
-path, including partial startup failures. Health reporting lives in
-``app.api.health``.
+path, including partial startup failures. Public functional routes are
+health plus history/turn/resume only.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from neo4j import AsyncDriver
 from sqlalchemy import text
 
+from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.core.settings import Settings, get_settings
 from app.db.seed import ensure_singleton_seeds
@@ -86,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    """Build the FastAPI application with CORS and the health route only."""
+    """Build the FastAPI application with CORS, health, and chat routes."""
     settings = get_settings()
     application = FastAPI(
         title="JobAgent",
@@ -96,10 +97,12 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.FRONTEND_ORIGIN],
         allow_credentials=True,
-        allow_methods=["GET"],
+        # Plan 3 needs POST for turns/resume; keep origin restricted.
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
     application.include_router(health_router, prefix="/api")
+    application.include_router(chat_router, prefix="/api")
     return application
 
 

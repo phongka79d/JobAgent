@@ -497,7 +497,7 @@ routes. It does not own frontend state or production domain tools.
 
 ### Tasks
 
-- [ ] (03A): Implement request-scoped checkpoints, runner streaming, and terminal cleanup
+- [x] (03A): Implement request-scoped checkpoints, runner streaming, and terminal cleanup
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.6 Checkpoint lifecycle and interrupt/resume`; `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.7 SSE contract and ordering`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.5 Migration and checkpoint ownership`
   - Source Requirements:
     - Open/close one `AsyncSqliteSaver` lifecycle per turn/resume request against
@@ -543,7 +543,7 @@ routes. It does not own frontend state or production domain tools.
     evidence to (01A) instead of deleting the database or all checkpoints.
   - Files: `backend/app/agent/checkpoint.py`, `backend/app/agent/runner.py`, `backend/tests/integration/test_agent_runner.py`
 
-- [ ] (03B): Implement atomic chat-turn and generic interrupt/resume services with a synthetic proof tool
+- [x] (03B): Implement atomic chat-turn and generic interrupt/resume services with a synthetic proof tool
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.2 Repository and transaction rules`; `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.6 Checkpoint lifecycle and interrupt/resume`; `docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Failure handling`
   - Source Requirements:
     - Atomically persist user message plus running run before graph execution;
@@ -594,7 +594,7 @@ routes. It does not own frontend state or production domain tools.
     evidence to (03A) and stop rather than retaining a process-global saver.
   - Files: `backend/app/services/chat_turns.py`, `backend/tests/fakes/synthetic_tool.py`, `backend/tests/integration/test_interrupt_resume.py`, `backend/tests/integration/test_tool_replay.py`
 
-- [ ] (03C): Expose thin history, turn, and resume endpoints with validated SSE framing
+- [x] (03C): Expose thin history, turn, and resume endpoints with validated SSE framing
   - Source of Truth: `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.7 SSE contract and ordering`; `docs/plans/Plan_3.md > ## 7. Technical Specifications > ### 7.8 Public endpoint behavior`; `docs/plans/Plan_3.md > ## 9. Verification & Testing Plan > ### Backend commands`; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary`
   - Source Requirements:
     - Expose only `GET /api/chat/history`, `POST /api/chat/turns`, and

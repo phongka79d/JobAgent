@@ -485,3 +485,35 @@ def test_hydration_without_run_leaves_run_null(db_path: Path) -> None:
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_history_http_malformed_cursor_422(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Public GET /api/chat/history returns 422 for malformed opaque cursors."""
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    from tests.support.db_migration import (
+        bind_isolated_sqlite,
+        cleanup_isolated_sqlite,
+        upgrade_to_head,
+    )
+    from tests.support.health import install_fake_driver
+
+    db = bind_isolated_sqlite(monkeypatch, tmp_path, db_name="history-http.db")
+    upgrade_to_head(db)
+    install_fake_driver(monkeypatch)
+    try:
+        with TestClient(create_app()) as client:
+            response = client.get(
+                "/api/chat/history",
+                params={"before": "!!!not-base64!!!"},
+            )
+            assert response.status_code == 422
+            empty = client.get("/api/chat/history")
+            assert empty.status_code == 200
+            body = empty.json()
+            assert set(body.keys()) == {"items", "next_cursor"}
+    finally:
+        cleanup_isolated_sqlite()

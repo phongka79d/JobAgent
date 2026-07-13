@@ -222,15 +222,22 @@ def test_partial_startup_failure_cleans_up_resources(
     assert session_mod._session_factory is None
 
 
-def test_only_public_functional_route_is_get_health(
+def test_only_public_functional_routes_are_health_and_chat(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
+    """Plan 3 public surface: health + history/turn/resume only."""
     with health_client() as client:
-        assert public_api_routes(client.app) == [("GET", "/api/health")]
+        assert sorted(public_api_routes(client.app)) == sorted(
+            [
+                ("GET", "/api/health"),
+                ("GET", "/api/chat/history"),
+                ("POST", "/api/chat/turns"),
+                ("POST", "/api/chat/runs/{run_id}/resume"),
+            ]
+        )
         for path in (
             "/api/attachments/cv",
             "/api/profile",
-            "/api/chat/turns",
             "/api/jobs",
         ):
             assert client.get(path).status_code == 404
@@ -238,9 +245,21 @@ def test_only_public_functional_route_is_get_health(
 
 
 def test_source_tree_has_no_other_route_decorators() -> None:
-    assert route_decorator_matches() == [
-        "health.py:get_health:router.get('/health', response_model=HealthResponse)"
-    ]
+    matches = sorted(route_decorator_matches())
+    history_dec = (
+        "chat.py:get_chat_history:router.get("
+        "'/chat/history', response_model=HistoryPage)"
+    )
+    assert matches == sorted(
+        [
+            "health.py:get_health:router.get("
+            "'/health', response_model=HealthResponse)",
+            history_dec,
+            "chat.py:post_chat_turn:router.post('/chat/turns')",
+            "chat.py:post_chat_resume:router.post("
+            "'/chat/runs/{run_id}/resume')",
+        ]
+    )
 
 
 def test_lifespan_opens_resources_once(

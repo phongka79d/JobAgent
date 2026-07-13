@@ -2,18 +2,19 @@
 
 JobAgent has completed Phase 0 feasibility validation, Plan 2 / Master Phase 1
 foundation work, Plan 3 / Master Phase 2 Batch01 (durable chat contracts and
-persistence), and Plan 3 Batch02 (controlled single-Agent runtime). The
-repository contains a pinned backend core (including Phase 2 LangGraph/LangChain
-pins), the complete SQLite/Alembic source-of-truth schema, validated
-chat/ToolResult/SSE contracts, message/run/tool repositories, tool replay and
-history-hydration services, bounded Agent state/context, a verified ShopAIKey
-ChatOpenAI adapter and conversation-first prompt, one injected-registry
-decision/ToolNode graph with a six-pass loop guard, UUID-rooted attachment
-storage, Neo4j foundation primitives, one health API, a minimal Astryx
-application shell, and a three-service local Docker Compose runtime. Public
-chat turn/resume/history routes, request-scoped checkpoints, the Astryx chat
-client, and production CV/job/matching tools remain later Plan 3 batches or
-later plans.
+persistence), Plan 3 Batch02 (controlled single-Agent runtime), and Plan 3
+Batch03 (durable turn/resume lifecycle and typed SSE transport). The repository
+contains a pinned backend core (including Phase 2 LangGraph/LangChain pins), the
+complete SQLite/Alembic source-of-truth schema, validated chat/ToolResult/SSE
+contracts, message/run/tool repositories, tool replay and history-hydration
+services, bounded Agent state/context, a verified ShopAIKey ChatOpenAI adapter
+and conversation-first prompt, one injected-registry decision/ToolNode graph
+with a six-pass loop guard, request-scoped `AsyncSqliteSaver` checkpoints and
+Agent runner streaming, atomic chat-turn/interrupt/resume services, thin public
+history/turn/resume SSE endpoints, UUID-rooted attachment storage, Neo4j
+foundation primitives, one health API, a minimal Astryx application shell, and a
+three-service local Docker Compose runtime. The Astryx conversation client and
+production CV/job/matching tools remain later Plan 3 Batch04 or later plans.
 
 ## Repository layout
 
@@ -25,7 +26,9 @@ later plans.
   Neo4j lifecycle/schema setup, `GET /api/health`, Phase 2 chat/tool/SSE
   Pydantic contracts, focused chat/run/tool repositories, history/tool services,
   Agent state/context loader, ShopAIKey chat adapter/prompt, empty production
-  tool registry, and one StateGraph factory (no public chat routes yet).
+  tool registry, one StateGraph factory, request-scoped checkpoint/runner
+  lifecycle, chat-turn/resume orchestration, and thin public chat
+  history/turn/resume routes with validated SSE framing.
 - `infrastructure/` - Docker Compose, backend/frontend Dockerfiles, and retained
   local feasibility scripts.
 - `docs/feasibility/phase_0_report.md` - reproducible compatibility evidence.
@@ -84,9 +87,9 @@ Attachment paths are UUID-derived and confined beneath `FILES_DIR`; complete
 writes become visible through atomic replacement. Neo4j setup owns only three
 idempotent uniqueness constraints and one 1536-dimensional cosine vector index.
 `GET /api/health` reports `available | unavailable` for SQLite, filesystem, and
-Neo4j without exposing connection details or adding other functional routes.
-Live Neo4j/Compose integration tests skip when the stack or process credentials
-are unavailable.
+Neo4j without exposing connection details. Public functional routes are health
+plus Plan 3 chat history/turn/resume only. Live Neo4j/Compose integration tests
+skip when the stack or process credentials are unavailable.
 
 ## Astryx verification
 
@@ -180,9 +183,16 @@ bounded recent-context loading; verified ShopAIKey `ChatOpenAI` adapter from
 root settings (custom base URL, `gpt-4o-mini`, temperature zero, Phase 0 tool
 mode) with conversation-first prompt; one injected-registry `StateGraph` with a
 single decision node and one `ToolNode`, six-pass tool-loop guard, and empty
-production registry (tests inject fakes only). Remaining Plan 3 batches own
-checkpoint/runner lifecycle, SSE turn/resume/history endpoints, and the Astryx
-chat client.
+production registry (tests inject fakes only).
+
+Plan 3 Batch03 is complete: request-scoped `AsyncSqliteSaver` on the application
+SQLite file with `run_id` as `thread_id`; runner streaming of validated SSE
+events and terminal per-run checkpoint cleanup; atomic chat-turn create and
+terminal success/failure/interrupt services; generic interrupt/resume with
+test-only synthetic tool; thin FastAPI routes `GET /api/chat/history`,
+`POST /api/chat/turns`, and `POST /api/chat/runs/{run_id}/resume` with CORS
+restricted to `FRONTEND_ORIGIN` for `GET`/`POST`. Remaining Plan 3 Batch04 owns
+the Astryx conversation client.
 
 ## Plan 3 progress and constraints
 
@@ -195,8 +205,9 @@ Plan 3 reuses Plan 2 foundation primitives without duplicating them:
 - Storage: UUID-relative paths under `FILES_DIR` with atomic write support.
 - Graph: Neo4j driver lifecycle plus idempotent uniqueness constraints and the
   cosine/1536 vector index (no domain sync yet).
-- API status: only `GET /api/health` with `available | unavailable` components
-  until later Plan 3 batches add transport routes.
+- API status: `GET /api/health` plus Plan 3 chat history/turn/resume; no other
+  public functional routes. CORS allows only configured `FRONTEND_ORIGIN` for
+  `GET` and `POST`.
 - Runtime: Compose services `frontend`, `backend`, and `neo4j` on loopback ports.
 - Chat persistence (Batch01): contracts under `app/schemas/`, repositories under
   `app/repositories/`, and history/tool services under `app/services/` on the
@@ -206,6 +217,12 @@ Plan 3 reuses Plan 2 foundation primitives without duplicating them:
   `app/tools/`, and graph factory under `app/agent/graph.py`. Graph nodes do not
   open DB sessions, call FastAPI, or construct the provider outside the adapter.
   Normal tests use fakes only; optional live ShopAIKey smoke remains separate.
+- Turn/resume transport (Batch03): checkpoint lifecycle under
+  `app/agent/checkpoint.py`, runner under `app/agent/runner.py`, chat-turn
+  orchestration under `app/services/chat_turns.py`, and thin routes under
+  `app/api/chat.py` with dependency injection in `app/api/dependencies.py`.
+  Package-owned checkpoint tables are never managed by Alembic or application
+  repositories. Synthetic interrupt tools live only under `backend/tests/fakes/`.
 
 Plan 3 must not call `create_all()`, alter status vocabulary, add independent
 graph IDs, or introduce production CV/JD/matching tools without a later plan.
@@ -237,3 +254,20 @@ python -m mypy app
 These unit tests use fakes and make no outbound ShopAIKey network calls. Optional
 live reconfirmation remains `python infrastructure/scripts/diagnose_shopaikey.py`
 from the repository root with a user-managed ignored root `.env`.
+
+## Durable turn, resume, and SSE transport verification (Batch03)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/integration/test_agent_runner.py -q
+python -m pytest tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q
+python -m pytest tests/integration/test_chat_api.py tests/integration/test_chat_history.py -q
+python -m ruff check app/agent/checkpoint.py app/agent/runner.py app/services/chat_turns.py app/api/chat.py app/api/dependencies.py app/main.py tests/fakes/synthetic_tool.py tests/integration/test_agent_runner.py tests/integration/test_interrupt_resume.py tests/integration/test_chat_api.py
+python -m mypy app
+```
+
+These integration tests use fakes and a temporary migrated SQLite file. They do
+not call the real ShopAIKey API. Public surface is health plus the three Plan 3
+chat endpoints; production tool registration remains empty.

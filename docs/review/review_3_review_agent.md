@@ -842,3 +842,417 @@ ACCEPTED
 
 ## Repair Instructions
 - None
+
+---
+
+# Task Review Report - (03A)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Durable Turn, Resume, and SSE Transport
+- Task ID: (03A)
+- Task title: Implement request-scoped checkpoints, runner streaming, and terminal cleanup
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03A scope; untracked production/test modules):
+  - `?? backend/app/agent/checkpoint.py`
+  - `?? backend/app/agent/runner.py`
+  - `?? backend/tests/integration/test_agent_runner.py`
+  - `M docs/reports/report_3_execute_agent.md` (execution report append; not implementation)
+  - `M docs/tasks/task_3.md` (checkbox only by A2 after accept)
+  - `M docs/review/review_3_review_agent.md` (this review; not implementation)
+
+## Files Reviewed
+- `backend/app/agent/checkpoint.py`: in scope - request-scoped `open_checkpointer` via `AsyncSqliteSaver.from_conn_string` on application `SQLITE_PATH`; `thread_config(run_id)` as LangGraph `thread_id`; `delete_run_checkpoint` via package `adelete_thread`; `thread_has_checkpoints` helper; no Alembic/repo ownership
+- `backend/app/agent/runner.py`: in scope - `stream_agent_run` opens one checkpointer per invocation, recompiles injected graph with request-scoped saver, yields validated SSE (`run_started`, optional `assistant_status`, ordered non-empty `text_delta`, `run_completed`/`run_failed`); durable-terminal callback gate; cleanup only for completed|failed after commit signal; interrupted retains checkpoint; no `AsyncSession`/`session_scope` during stream
+- `backend/tests/integration/test_agent_runner.py`: in scope - temporary SQLite lifecycle/close, thread identity, direct-answer order+validation, controlled loop-limit failure, durable-commit gate, per-run isolation, ownership static checks, no session_scope in runner source
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_agent_runner.py -q`
+  - Required: yes
+  - Reported result: 10 passed
+  - Rerun result: 10 passed (only unrelated Starlette/httpx TestClient deprecation warning)
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: `Set-Location backend; python -m ruff check app/agent/checkpoint.py app/agent/runner.py tests/integration/test_agent_runner.py; python -m mypy app`
+  - Required: yes
+  - Reported result: ruff All checks passed; mypy Success (45 source files)
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 45 source files
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: workspace search `checkpoint|checkpoints|checkpoint_writes` under `backend/migrations` and `backend/app/repositories`
+  - Required: yes
+  - Reported result: repositories zero matches; migrations only documentary exclusion (never manage checkpoint tables)
+  - Rerun result: confirmed — repositories: no matches; migrations: only exclusion comments in `env.py` and `0001_initial_schema.py` (no create/update/drop of package checkpoint tables)
+  - Status: passed
+  - Notes: static ownership test in integration suite also asserts no CREATE/DROP checkpoints/writes and no AsyncSqliteSaver in repos/migrations
+
+## Acceptance Review
+- Task acceptance: One checkpointer lifecycle per invocation on configured SQLite; `run_id` as `thread_id`; direct-answer stream order and controlled `run_failed`; terminal cleanup only after durable-commit signal and only this run; interrupted checkpoints retained; Alembic/repos do not own checkpoint tables
+- Status: satisfied
+- Evidence:
+  - Lifecycle spy asserts open/close == 1 on direct-answer path; close raises no-active-connection after context exit; `thread_config` maps run_id to `configurable.thread_id`
+  - Events validate via `parse_sse_event`; order `run_started` → optional `assistant_status` → non-empty `text_delta` → `run_completed`; failure path ends with `run_failed` and safe `TOOL_LOOP_LIMIT_EXCEEDED` summary (no traceback)
+  - `on_durable_terminal` returning False retains checkpoint; accept path deletes only that run; isolation test keeps RUN_B when RUN_A is cleaned; interrupted kind skips delete in runner; package `adelete_thread` is per-thread
+  - Migrations/repos contain no package checkpoint DDL ownership; runner source has no session_scope/AsyncSession across stream
+
+## Architecture Alignment
+- Plan_3 §7.6: per-request AsyncSqliteSaver lifecycle; package owns checkpoint tables; terminal delete only after durable commit; interrupted retain — satisfied at runner/checkpointer boundary
+- Plan_3 §7.7: validated typed SSE envelopes with UUID event_id, run_id, aware UTC; direct-answer ordering — satisfied; `tool_status`/`approval_required` framing deferred to (03B)/(03C) as noted
+- Master §6.5: Alembic/application repositories never manage LangGraph checkpoint tables — satisfied
+- No open application transaction during graph execution or event yield — satisfied (callback injection only; no AsyncSession in runner)
+- Graph factory remains free of transport ownership; checkpointer attached via recompile of `bundle.compiled.builder`
+
+## Implementation Reality
+- Real `langgraph-checkpoint-sqlite` AsyncSqliteSaver (`from_conn_string`, `setup`, `adelete_thread`, `alist`); not a stub
+- Real graph streaming via `compiled.astream(..., stream_mode="updates")` with FakeChatModel only in tests
+- Durable-terminal callback is a real gate used by tests for refuse/accept cleanup semantics (chat-turn atomic commits owned by (03B))
+
+## Hardcoding Review
+- No fixture-answer overfitting in production path
+- Stable error codes/summaries are intentional contract strings
+- Isolation tests use fixed UUID run IDs as thread identities only (not fake success)
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Note: only (03A) checkbox updated this review; (03B)/(03C) left unchecked; batch header not modified
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `backend/app/agent/runner.py` is ~330 lines (slightly above ordinary 300-line guidance); still a single focused runner module — acceptable for this task
+- Full interrupt stream framing (`approval_required`) and chat-turn durable transactions are intentionally (03B); runner stops without `run_completed` and retains checkpoint when `pending_approval` is set, but synthetic interrupt path is not exercised end-to-end here
+- `tool_status` emission is not fully wired from graph stream alone (needs durable tool_execution_id from later services) — outside (03A) acceptance; direct-answer and controlled-failure paths are covered
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - (03B)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Durable Turn, Resume, and SSE Transport
+- Task ID: (03B)
+- Task title: Implement atomic chat-turn and generic interrupt/resume services with a synthetic proof tool
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03B scope; untracked/modified production and test modules):
+  - `?? backend/app/services/chat_turns.py`
+  - `?? backend/tests/fakes/synthetic_tool.py`
+  - `M backend/tests/fakes/__init__.py` (re-export synthetic builders)
+  - `?? backend/tests/integration/test_interrupt_resume.py`
+  - `?? backend/app/agent/runner.py` (interrupt chunk detection + Command resume; also (03A) base — justified (03B) extension)
+  - co-present (03A) `?? backend/app/agent/checkpoint.py`, `?? backend/tests/integration/test_agent_runner.py` (already A2-accepted; not re-scoped as (03B) work)
+  - `M docs/reports/report_3_execute_agent.md` (A1 execution report; not implementation)
+  - `M docs/tasks/task_3.md` (checkbox only by A2 after accept)
+  - `M docs/review/review_3_review_agent.md` (this review; not implementation)
+  - `backend/tests/integration/test_tool_replay.py` not modified (regression validation only)
+
+## Files Reviewed
+- `backend/app/services/chat_turns.py`: in scope - atomic `create_user_turn` (user+running) with `APPROVAL_ACTION_REQUIRED` before insert; `persist_terminal_success` / `persist_terminal_failure` / `persist_interrupt` / `claim_resume` short transactions; `stream_chat_turn` / `stream_resume` with graph/SSE outside transactions; terminal no-op stream; generic `approval_required` framing
+- `backend/tests/fakes/synthetic_tool.py`: in scope (test-only) - LangGraph `interrupt()`, durable pending→running across pause, single post-resume side-effect counter, one terminal ToolResult, identity replay if already terminal
+- `backend/tests/fakes/__init__.py`: in scope - re-exports synthetic builders; remains under tests/fakes
+- `backend/tests/integration/test_interrupt_resume.py`: in scope - approve/reject branches across request boundary, guard zero-insert, invalid action unchanged, terminal no-op, failure retains user turn, production registry empty/static ownership, SSE validation
+- `backend/app/agent/runner.py`: in scope (minimal extension justified by acceptance) - `__interrupt__` / snapshot interrupt projection, `Command(resume=...)` for resume_value, interrupted retains checkpoint and does not emit run_completed
+- `backend/app/tools/registry.py`: reviewed (not modified) - production_registry remains empty
+- `backend/tests/integration/test_tool_replay.py`: reviewed (not modified) - replay regression still green
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q`
+  - Required: yes
+  - Reported result: 17 passed
+  - Rerun result: 17 passed (only unrelated Starlette/httpx and aiosqlite datetime adapter warnings)
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: `Set-Location backend; python -m ruff check app/services/chat_turns.py tests/fakes/synthetic_tool.py tests/integration/test_interrupt_resume.py app/agent/runner.py; python -m mypy app`
+  - Required: yes
+  - Reported result: ruff All checks passed; mypy Success (46 source files)
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 46 source files
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: workspace search `synthetic|interrupt\(|pending_approval|APPROVAL_ACTION_REQUIRED` under `backend/app` and `backend/tests/fakes`
+  - Required: yes
+  - Reported result: synthetic/`interrupt(` only under tests/fakes; production registry empty; chat_turns owns APPROVAL_ACTION_REQUIRED / generic pending_approval
+  - Rerun result: confirmed — `interrupt(` and `build_synthetic_interrupt_tool` only in `tests/fakes/synthetic_tool.py`; production `registry.py` has no synthetic registration; `chat_turns` has generic approval codes with no domain profile/CV workflow names; runner only detects interrupt projections for stream lifecycle
+  - Status: passed
+  - Notes: `production_registry().is_empty()` import check returns True / []
+
+## Acceptance Review
+- Task acceptance: User/run create and assistant/terminal completion are each one atomic short transaction; no transaction spans graph/SSE; both synthetic approve/reject branches resume same run/thread across new request, one side effect, one terminal tool result, terminal checkpoint removed only after terminal; new-turn guard `APPROVAL_ACTION_REQUIRED` before insert; invalid actions leave interruption unchanged; terminal resume is no-op without graph/model/tool/text replay; production registry empty and synthetic only under tests/fakes
+- Status: satisfied
+- Evidence:
+  - `create_user_turn` / `persist_*` / `claim_resume` use `_short_transaction`; `stream_chat_turn`/`stream_resume` call `stream_agent_run` only outside those scopes
+  - `test_interrupt_resume_approve_branch` and `test_interrupt_resume_reject_branch`: checkpoint present at interrupt, counter n==1, one completed tool row, checkpoint absent after terminal
+  - `test_new_turn_blocked_during_interrupt_zero_inserts`: APPROVAL_ACTION_REQUIRED, message/run counts unchanged
+  - `test_invalid_action_leaves_interruption_unchanged`: INVALID_APPROVAL_ACTION, projection and interrupted state preserved, checkpoint retained
+  - `test_terminal_resume_is_noop_no_graph_or_side_effect`: events exactly run_started+run_completed, boom_model.invoke_count==0, counter unchanged, one tool row
+  - `test_production_registry_empty_and_synthetic_is_test_only` plus static scans
+  - Plan_3 §7.2/§7.6 transaction and interrupt/resume contracts aligned
+
+## Architecture Alignment
+- Services own short durable transactions; graph nodes and runner do not hold application sessions during execution (Plan_3 §7.2 / Master §6.4)
+- Generic interrupt projection (`kind`, `allowed_actions`, `card`) — no domain workflow in production path
+- Request-scoped checkpointer from (03A) reused; `Command(resume=...)` continues same `run_id` thread across new open/close lifecycle
+- Empty production registry; synthetic tool test-only under `backend/tests/fakes/`
+- Public HTTP/SSE routes remain (03C); this task owns services + synthetic proof + runner interrupt framing support
+
+## Implementation Reality
+- Real LangGraph `interrupt()` / `Command(resume=...)` path with AsyncSqliteSaver across request boundary
+- Real SQLAlchemy short commits via message/run/tool repositories
+- Not stubs; counted side effect proves single invocation; identity replay path present in synthetic tool
+- FakeChatModel and synthetic tool are test-only; no provider/domain calls
+
+## Hardcoding Review
+- No fixture-answer overfitting in production chat_turns path
+- Stable error codes (`APPROVAL_ACTION_REQUIRED`, `INVALID_APPROVAL_ACTION`, etc.) are intentional contracts
+- Synthetic tool name/kind only in tests/fakes
+
+## Scope / Dependency Review
+- Dependencies (01B), (01C), (03A) already A2-accepted and checked
+- Files match task Files list plus justified minimal `runner.py` interrupt/Command support called out in A1 selected scope
+- `test_tool_replay.py` intentionally not modified; required regression validation passed
+- No FastAPI routes, schema migration, or production domain tools introduced
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Note: only (03B) checkbox updated this review; (03A) left checked; (03C) left unchecked; batch header not modified
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `backend/app/services/chat_turns.py` is ~421 lines (above ordinary 300-line soft target); still a single orchestration owner — acceptable for this task
+- `tool_status` SSE emission still not fully wired through graph stream (A1 note; public framing is (03C))
+- Runner was extended beyond the original (03A) file set; justified by (03B) acceptance and scoped to interrupt detection + Command resume only
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
+
+---
+
+# Task Review Report - (03C)
+
+## Source Task File
+docs/tasks/task_3.md
+
+## Execution Report Reviewed
+docs/reports/report_3_execute_agent.md
+
+## Review Report File
+docs/review/review_3_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Durable Turn, Resume, and SSE Transport
+- Task ID: (03C)
+- Task title: Expose thin history, turn, and resume endpoints with validated SSE framing
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff reviewed: yes
+- changed files from git (03C scope; tracked modified + untracked):
+  - `?? backend/app/api/chat.py` (thin history/turn/resume routes + SSE framing)
+  - `?? backend/app/api/dependencies.py` (ChatAgentDeps + production empty registry)
+  - `M backend/app/main.py` (include chat router; CORS GET/POST; FRONTEND_ORIGIN only)
+  - `M backend/app/api/__init__.py` (export chat_router)
+  - `?? backend/tests/integration/test_chat_api.py`
+  - `M backend/tests/integration/test_chat_history.py` (HTTP malformed-cursor 422)
+  - `M backend/tests/integration/test_health.py` (public route inventory for Plan 3)
+  - co-present Batch03 untracked (03A)/(03B) modules already A2-accepted (checkpoint, runner, chat_turns, synthetic_tool, interrupt_resume, agent_runner)
+  - `M docs/reports/report_3_execute_agent.md` (A1 execution report; not implementation)
+  - `M docs/tasks/task_3.md` (checkbox only by A2 after accept)
+  - `M docs/review/review_3_review_agent.md` (this review; not implementation)
+
+## Files Reviewed
+- `backend/app/api/chat.py`: in scope - GET `/chat/history`, POST `/chat/turns`, POST `/chat/runs/{run_id}/resume`; HistoryQuery/ChatTurnRequest/ResumeRequest validation; delegates to `get_history_page` / `stream_chat_turn` / `stream_resume`; re-validates SSE via `parse_sse_event` + FastAPI `EventSourceResponse`/`format_sse_event`; pre-stream ChatTurnError JSON mapping; no graph/SQLAlchemy write/provider construction
+- `backend/app/api/dependencies.py`: in scope - production `ChatAgentDeps` with `production_registry()`, deferred model (None → runner builds adapter), SQLITE_PATH; test override seam only
+- `backend/app/main.py`: in scope - `include_router(chat_router, prefix="/api")`; CORS `allow_origins=[FRONTEND_ORIGIN]`, `allow_methods=["GET", "POST"]`
+- `backend/app/api/__init__.py`: in scope - export chat_router required by package surface
+- `backend/tests/integration/test_chat_api.py`: in scope - route inventory, thinness scan, history shape/422, greeting SSE+persistence zero tools, public synthetic interrupt/resume, CORS allow/deny, pagination smoke
+- `backend/tests/integration/test_chat_history.py`: in scope (HTTP 422 extension) - public malformed cursor
+- `backend/tests/integration/test_health.py`: in scope (route inventory) - Plan 3 public surface health + three chat endpoints only
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_chat_api.py tests/integration/test_chat_history.py -q`
+  - Required: yes
+  - Reported result: 21 passed
+  - Rerun result: 21 passed (only unrelated Starlette/httpx and aiosqlite datetime adapter warnings)
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_interrupt_resume.py tests/integration/test_tool_replay.py -q`
+  - Required: yes
+  - Reported result: 17 passed
+  - Rerun result: 17 passed (only unrelated Starlette/httpx and aiosqlite datetime adapter warnings)
+  - Status: passed
+  - Notes: public lifecycle did not regress interrupt/replay
+
+- Command/check: `Set-Location backend; python -m ruff check app/api/chat.py app/api/dependencies.py app/main.py tests/integration/test_chat_api.py; python -m mypy app`
+  - Required: yes
+  - Reported result: ruff All checks passed; mypy Success (48 source files)
+  - Rerun result: ruff All checks passed; mypy Success: no issues found in 48 source files
+  - Status: passed
+  - Notes: A2 rerun confirms A1 evidence
+
+- Command/check: workspace search `@router.(get|post)|include_router|CORSMiddleware|AsyncSession|StateGraph|ChatOpenAI` under `backend/app/api` and `backend/app/main.py`
+  - Required: yes
+  - Reported result: routes only health + three chat; CORS GET/POST; thin handlers
+  - Rerun result: confirmed — health GET `/health`; chat GET history, POST turns, POST resume; main includes both routers + CORSMiddleware allow_methods GET/POST; no StateGraph/ChatOpenAI/AsyncSession/create_all/AsyncSqliteSaver in `chat.py`; production deps use empty `production_registry()`
+  - Status: passed
+
+## Acceptance Review
+- OpenAPI/application routes contain exactly health plus the three Plan 3 functional endpoints; turn/resume use SSE; history shape `{items, next_cursor}`
+  - Status: satisfied
+  - Evidence: `test_public_routes_are_health_plus_three_chat`; health inventory update; history empty/page responses
+
+- Every yielded event validates against (01A), includes common metadata, follows direct/tool/interruption/terminal ordering
+  - Status: satisfied
+  - Evidence: `_format_validated_sse` re-validates via `parse_sse_event`; tests re-parse wire SSE; greeting and synthetic path order assertions
+
+- Greeting creates user+assistant messages and one completed run, zero tool executions, no tool_status/approval_required
+  - Status: satisfied
+  - Evidence: `test_turn_greeting_sse_order_and_persistence` asserts counts (2,1,0) and event names
+
+- Synthetic tool traverses public turn/resume SSE, one side effect/result, terminal checkpoint cleanup
+  - Status: satisfied
+  - Evidence: `test_public_turn_resume_synthetic_interrupt` — counter n==1, one completed tool row, checkpoint gone, terminal no-op, 409 blocked turn
+
+- Malformed cursor 422; safe controlled errors; CORS only FRONTEND_ORIGIN for GET/POST
+  - Status: satisfied
+  - Evidence: history 422 (API + chat_history HTTP test); APPROVAL_ACTION_REQUIRED 409 / INVALID 400 / NOT_FOUND 404 without Traceback/secret; CORS allow/deny tests
+
+- Route handlers contain no graph construction, business rules, SQLAlchemy writes, checkpoint table logic, or direct provider call
+  - Status: satisfied
+  - Evidence: static thinness test + source scan; handlers only validate, Depends, service delegate, SSE frame; short read-only session for history closed before return
+
+## Architecture Alignment
+- Plan_3 §7.7/§7.8 and Master §14: public FastAPI boundary is health + history/turn/resume only; SSE framed from already-validated events
+- Transport-only routes: services own durable transactions and Agent orchestration; production registry empty; synthetic tools test-injected via dependency override only
+- CORS remains origin-restricted to `FRONTEND_ORIGIN` with required GET/POST methods
+- No schema migration, domain tools, WebSocket, or extra public CRUD
+
+## Implementation Reality
+- Real FastAPI native SSE (`EventSourceResponse`, `format_sse_event`) over (03B) `stream_chat_turn`/`stream_resume` and (01D) `get_history_page`
+- Stream priming so pre-stream ChatTurnError maps to JSON HTTP (not empty SSE 200)
+- Fake-backed integration only; production deps never register synthetic tools (`production_registry().is_empty()` True)
+- Not stubs; durable SQLite state and checkpoint cleanup exercised through public endpoints
+
+## Hardcoding Review
+- No fixture-answer overfitting in production routes
+- Stable error code → HTTP status map is intentional contract surface
+- CORS test origins are test fixtures only
+
+## Scope / Dependency Review
+- Dependencies (01D), (03A), (03B) already A2-accepted and checked
+- Files match task Files list plus justified `api/__init__.py` export and `test_health.py` public-route inventory updates called out in A1 selected scope
+- Co-present Batch03 modules for (03A)/(03B) not re-scoped as (03C) implementation
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+- Note: only (03C) checkbox updated this review; (03A)/(03B) left checked; batch header not modified
+
+## Issues
+
+### Blocking
+- None
+
+### Major
+- None
+
+### Minor
+- `backend/tests/integration/test_chat_api.py` is long (~560 lines) as a single integration suite (A1 noted) — acceptable for this task
+- History route opens a short session via `get_session_factory` for read-only `get_history_page` and commits/closes before JSON return; no SQLAlchemy writes or business rules in the handler — acceptable thin transport lifecycle
+- Mid-stream ChatTurnError after SSE headers is rare and not re-mapped to JSON (A1 note); pre-stream errors are correctly JSON
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None
