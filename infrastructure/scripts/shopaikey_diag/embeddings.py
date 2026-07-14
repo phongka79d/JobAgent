@@ -1,8 +1,14 @@
-"""Scalar and batch embedding capability with list-order index assertions."""
+"""Scalar and batch embedding capability with list-order index assertions.
+
+Vector validation and the locked model/dimension contract are owned by
+production ``app.schemas.embeddings``; this module only performs the live HTTP
+smoke and maps failures to diagnostic codes.
+"""
 
 from __future__ import annotations
 
-import math
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,115 +18,92 @@ from shopaikey_diag.common import (
     CODE_MALFORMED,
     CODE_MODEL_ABSENCE,
     CODE_ORDERING,
-    LOCKED_DIMENSIONS,
-    LOCKED_EMBED_MODEL,
     DiagnosticError,
     Settings,
     request_json,
 )
 
+# Production package lives under backend/; make it importable for the diagnostic.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_BACKEND_ROOT = _REPO_ROOT / "backend"
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
-def validate_embedding_item(
-    item: Any,
-    expected_index: int,
-    dimensions: int,
-    capability: str,
-) -> list[float]:
-    """Validate one embedding item at its list position (no reordering)."""
-    if not isinstance(item, dict):
-        raise DiagnosticError(CODE_MALFORMED, capability, "embedding_item_type")
-    if "index" not in item:
-        raise DiagnosticError(
-            CODE_ORDERING,
-            capability,
-            f"missing_index expected_index={expected_index}",
-        )
-    idx = item["index"]
-    if idx != expected_index:
-        raise DiagnosticError(
-            CODE_ORDERING,
-            capability,
-            f"expected_index={expected_index} got={idx}",
-        )
-    vec = item.get("embedding")
-    if not isinstance(vec, list):
-        raise DiagnosticError(CODE_MALFORMED, capability, "embedding_not_list")
-    if len(vec) != dimensions:
-        raise DiagnosticError(
-            CODE_DIMENSION,
-            capability,
-            f"len={len(vec)} expected={dimensions}",
-        )
-    floats: list[float] = []
-    for v in vec:
-        try:
-            f = float(v)
-        except (TypeError, ValueError) as exc:
-            raise DiagnosticError(CODE_MALFORMED, capability, "non_float") from exc
-        if not math.isfinite(f):
-            raise DiagnosticError(CODE_DIMENSION, capability, "non_finite")
-        floats.append(f)
-    return floats
+from app.schemas.embeddings import (  # noqa: E402
+    CODE_MODEL,
+    LOCKED_EMBEDDING_DIMENSIONS,
+    LOCKED_EMBEDDING_MODEL,
+    LOCKED_ENCODING_FORMAT,
+    EmbeddingVectorError,
+    require_locked_embedding_contract,
+    validate_embedding_data_list,
+    validate_embedding_item,
+)
+
+# Re-export production validators so callers share one owner (no local copy).
+__all__ = [
+    "check_scalar_batch_embeddings",
+    "validate_embedding_data_list",
+    "validate_embedding_item",
+]
 
 
-def validate_embedding_data_list(
+def _map_vector_error(exc: EmbeddingVectorError, capability: str) -> DiagnosticError:
+    """Map production validation codes to diagnostic codes (same string values)."""
+    code = exc.code
+    if code == CODE_MODEL:
+        return DiagnosticError(CODE_MODEL_ABSENCE, capability, exc.detail)
+    if code not in {CODE_MALFORMED, CODE_DIMENSION, CODE_ORDERING}:
+        code = CODE_MALFORMED
+    return DiagnosticError(code, capability, exc.detail)
+
+
+def _validate_data(
     data: Any,
     *,
     expected_count: int,
-    dimensions: int,
     capability: str,
 ) -> list[list[float]]:
-    """Validate provider `data` list in returned order against expected indices."""
-    if not isinstance(data, list):
-        raise DiagnosticError(CODE_MALFORMED, capability, "embedding_data_type")
-    if len(data) != expected_count:
-        raise DiagnosticError(
-            CODE_ORDERING,
-            capability,
-            f"count={len(data)} expected={expected_count}",
+    """Consume the production locked-length validator (always 1536)."""
+    try:
+        return validate_embedding_data_list(
+            data,
+            expected_count=expected_count,
         )
-    vectors: list[list[float]] = []
-    for expected_index, item in enumerate(data):
-        vectors.append(
-            validate_embedding_item(item, expected_index, dimensions, capability)
-        )
-    return vectors
+    except EmbeddingVectorError as exc:
+        raise _map_vector_error(exc, capability) from exc
 
 
 def check_scalar_batch_embeddings(
     client: httpx.Client, settings: Settings
 ) -> tuple[str, str]:
     cap = "scalar_batch_embeddings"
-    if settings.embedding_dimensions != LOCKED_DIMENSIONS:
-        raise DiagnosticError(
-            CODE_DIMENSION,
-            cap,
-            f"config_dim={settings.embedding_dimensions} locked={LOCKED_DIMENSIONS}",
+    try:
+        require_locked_embedding_contract(
+            model=settings.embedding_model,
+            dimensions=settings.embedding_dimensions,
         )
-    if settings.embedding_model != LOCKED_EMBED_MODEL:
-        raise DiagnosticError(
-            CODE_MODEL_ABSENCE,
-            cap,
-            f"config_embed={settings.embedding_model} locked={LOCKED_EMBED_MODEL}",
-        )
+    except EmbeddingVectorError as exc:
+        raise _map_vector_error(exc, cap) from exc
 
-    dim = settings.embedding_dimensions
+    dim = LOCKED_EMBEDDING_DIMENSIONS
+    model = LOCKED_EMBEDDING_MODEL
     url = f"{settings.base_url}/embeddings"
 
     scalar_body = {
-        "model": settings.embedding_model,
+        "model": model,
         "input": "JobAgent scalar embedding probe alpha",
-        "encoding_format": "float",
+        "encoding_format": LOCKED_ENCODING_FORMAT,
         "dimensions": dim,
     }
     scalar = request_json(
         client, "POST", url, secret=settings.api_key, capability=cap, json_body=scalar_body
     )
     try:
-        s_vectors = validate_embedding_data_list(
-            scalar["data"], expected_count=1, dimensions=dim, capability=cap
+        s_vectors = _validate_data(
+            scalar["data"], expected_count=1, capability=cap
         )
-        scalar_model = scalar.get("model") or settings.embedding_model
+        scalar_model = scalar.get("model") or model
     except DiagnosticError:
         raise
     except (KeyError, TypeError) as exc:
@@ -131,21 +114,21 @@ def check_scalar_batch_embeddings(
         "JobAgent batch embedding probe second unique",
     ]
     batch_body = {
-        "model": settings.embedding_model,
+        "model": model,
         "input": inputs,
-        "encoding_format": "float",
+        "encoding_format": LOCKED_ENCODING_FORMAT,
         "dimensions": dim,
     }
     batch = request_json(
         client, "POST", url, secret=settings.api_key, capability=cap, json_body=batch_body
     )
     try:
-        b_vectors = validate_embedding_data_list(
-            batch["data"], expected_count=2, dimensions=dim, capability=cap
+        b_vectors = _validate_data(
+            batch["data"], expected_count=2, capability=cap
         )
         if b_vectors[0] == b_vectors[1]:
             raise DiagnosticError(CODE_ORDERING, cap, "batch_vectors_identical")
-        batch_model = batch.get("model") or settings.embedding_model
+        batch_model = batch.get("model") or model
     except DiagnosticError:
         raise
     except (KeyError, TypeError) as exc:

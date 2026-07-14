@@ -1,1 +1,1 @@
-"""External service adapters (ShopAIKey chat, later embeddings)."""
+"""External service adapters (ShopAIKey chat and embeddings)."""

@@ -671,9 +671,16 @@ def test_tool_boundary_compact_and_not_production_registered(
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
 
-    # Production registry must remain empty of profile tools.
-    assert PROPOSE_PROFILE_FROM_CV_NAME not in production_registry().tool_names()
-    assert production_registry().is_empty()
+    # Plan 4 production registry: exactly three profile tools; no job tools yet.
+    prod_names = production_registry().tool_names()
+    assert PROPOSE_PROFILE_FROM_CV_NAME in prod_names
+    assert prod_names == [
+        "propose_profile_from_cv",
+        "propose_profile_update",
+        "commit_profile_draft",
+    ]
+    assert "save_job" not in prod_names
+    assert "query_jobs" not in prod_names
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)

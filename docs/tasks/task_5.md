@@ -406,7 +406,7 @@ graph, create frontend UI, or implement matching/retrieval.
 
 ### Tasks
 
-- [ ] (02A): Implement validated structured JD extraction, repair, and shared skill normalization
+- [x] (02A): Implement validated structured JD extraction, repair, and shared skill normalization
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.1 Job extraction contracts`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.4 Extraction, repair, and quality classification`; `docs/plans/Master_plan.md > ## 16. ShopAIKey Integration > ### 16.2 Startup/diagnostic compatibility checks`; `docs/plans/Master_plan.md > ## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Use locked `gpt-4o-mini` structured extraction with full Pydantic
@@ -454,7 +454,7 @@ graph, create frontend UI, or implement matching/retrieval.
     failure; do not switch provider/model, relax validation, or add unbounded repair.
   - Files: `backend/app/services/provider_retry.py`, `backend/app/services/profile_extraction.py`, `backend/app/services/jd_extraction.py`, `backend/tests/unit/test_profile_extraction.py`, `backend/tests/unit/test_jd_extraction.py`
 
-- [ ] (02B): Implement the sole production embedding adapter and versioned Job representation
+- [x] (02B): Implement the sole production embedding adapter and versioned Job representation
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.5 Embedding adapter and text contract`; `docs/plans/Master_plan.md > ## 16. ShopAIKey Integration > ### 16.1 Configuration`; `docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.1 Locked embedding contract`; `docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.3 Text representations`
   - Source Requirements:
     - One production adapter uses the configured ShopAIKey OpenAI-compatible
@@ -505,7 +505,7 @@ graph, create frontend UI, or implement matching/retrieval.
     a second adapter, alternate provider/model, or changed dimensions.
   - Files: `backend/app/adapters/shopaikey_embeddings.py`, `backend/app/schemas/embeddings.py`, `backend/app/services/embedding_text.py`, `infrastructure/scripts/shopaikey_diag/embeddings.py`, `backend/tests/unit/test_embedding_adapter.py`, `backend/tests/unit/test_embedding_text.py`
 
-- [ ] (02C): Implement raw-text persistence-first selection, processing, and exact retry
+- [x] (02C): Implement raw-text persistence-first selection, processing, and exact retry
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.3 Persistence-first ingestion and exact deduplication`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.4 Extraction, repair, and quality classification`; `docs/plans/Plan_5.md > ## 9. Verification & Testing Plan > ### Backend commands`; `docs/plans/Master_plan.md > ## 11. JD Ingestion Flow > ### 11.3 Persistence-first processing`; `docs/plans/Master_plan.md > ## 11. JD Ingestion Flow > ### 11.4 Exact duplicate policy`
   - Source Requirements:
     - Require non-whitespace pasted text, compute exact SHA-256 before insert,
@@ -559,7 +559,7 @@ graph, create frontend UI, or implement matching/retrieval.
   - Blocked Condition: None.
   - Files: `backend/app/db/session.py`, `backend/app/services/jd_ingestion.py`, `backend/tests/integration/test_job_ingestion.py`, `backend/tests/integration/test_database_pragmas.py`
 
-- [ ] (02D): Complete URL placeholder, fetched-hash reuse, and durable fetch-failure flow
+- [x] (02D): Complete URL placeholder, fetched-hash reuse, and durable fetch-failure flow
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.2 URL fetch contract`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.3 Persistence-first ingestion and exact deduplication`; `docs/plans/Plan_5.md > ## 9. Verification & Testing Plan > ### Failure handling`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.4 Transaction boundaries`; `docs/plans/Master_plan.md > ## 11. JD Ingestion Flow`
   - Source Requirements:
     - Commit a `received` URL placeholder with the original URL and null content/

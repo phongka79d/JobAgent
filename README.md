@@ -8,9 +8,10 @@ foundations), Batch02 (staged CV upload and profile proposal pipeline), Batch03
 (approved profile truth, Candidate sync, production profile tools, and
 profile/CV reads), and Batch04 (shared CV upload/sidebar and durable in-chat
 approval). Plan 5 / Master Phase 4 Batch01 (Job contracts and durable input
-primitives) is also complete. The repository contains a pinned backend core
-(including Phase 2
-LangGraph/LangChain pins), the complete SQLite/Alembic source-of-truth schema,
+primitives) and Batch02 (validated extraction, locked embeddings, and
+persistence-first text/URL ingestion) are also complete. The repository contains
+a pinned backend core (including Phase 2 LangGraph/LangChain pins), the complete
+SQLite/Alembic source-of-truth schema,
 validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
 replay and history-hydration services, bounded Agent state/context with compact
 approved candidate memory, a verified ShopAIKey ChatOpenAI adapter and
@@ -26,12 +27,15 @@ primitives plus idempotent Candidate/Skill graph sync, exact Candidate Profile /
 skill / preference / draft Pydantic contracts, the sole skill taxonomy loader and
 normalizer, focused attachment/profile/Job repositories over the existing schema,
 strict Job extraction contracts, deterministic JD quality classification,
-bounded HTTP/HTTPS JD acquisition with pinned Trafilatura, a single production
-pypdf extraction and meaningful-text owner, structured CV
+bounded HTTP/HTTPS JD acquisition with pinned Trafilatura, fake-testable
+structured JD extraction over one shared bounded provider-retry owner, one
+locked ShopAIKey embedding adapter plus deterministic v1 Job text, durable
+SQLite-first text/URL ingestion with exact-hash return/retry semantics, a single
+production pypdf extraction and meaningful-text owner, structured CV
 extraction/draft proposal and interrupt-guarded commit tools (three production
 profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
-runtime. End-to-end Job processing, production Job tools/graph/UI, and matching
+runtime. Production Job tools, Job graph sync/rebuild, saved-job UI, and matching
 remain later batches/plans.
 
 ## Repository layout
@@ -47,14 +51,16 @@ remain later batches/plans.
   (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup and
   Candidate/Skill sync under `app/graph/`, `GET /api/health`, Phase 2
   chat/tool/SSE Pydantic contracts, Plan 4 profile/skill/draft and attachment
-  response contracts plus Plan 5 Job extraction contracts under `app/schemas/`,
-  focused chat/run/tool and attachment/profile/Job repositories, history/tool
+  response contracts plus Plan 5 Job extraction and embedding contracts under
+  `app/schemas/`, focused chat/run/tool and attachment/profile/Job repositories,
+  history/tool
   services, skill normalizer, deterministic JD quality classification, bounded
-  URL text acquisition, pypdf extraction, CV upload, profile extraction, draft
-  proposal, and SQLite-
-  first profile approval owners under `app/services/`, Agent state/context
-  loader (compact approved candidate memory), ShopAIKey chat adapter/prompt,
-  production registry of exactly three profile tools under `app/tools/`, one
+  URL text acquisition, structured JD extraction, deterministic embedding text,
+  persistence-first JD ingestion, pypdf extraction, CV upload, profile
+  extraction, draft proposal, and SQLite-first profile approval owners under
+  `app/services/`, Agent state/context
+  loader (compact approved candidate memory), ShopAIKey chat and locked embedding
+  adapters, production registry of exactly three profile tools under `app/tools/`, one
   StateGraph factory, request-scoped checkpoint/runner lifecycle, chat-turn/
   resume orchestration with interrupt-guarded commit, thin public chat history/
   turn/resume routes, `POST /api/attachments/cv`, and `GET /api/profile` plus
@@ -215,8 +221,10 @@ python infrastructure/scripts/diagnose_shopaikey.py
 
 This command calls the real provider. It checks model discovery, chat, function
 calling, the tool-result round trip, structured schema output, ordered terminal
-streaming, and scalar/batch 1536-dimensional embeddings. Output is sanitized and
-must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases use the contract.
+streaming, and scalar/batch 1536-dimensional embeddings. Its embedding checks
+reuse the production locked model/dimension and finite-vector validators. Output
+is sanitized and must end with `SHOPAIKEY_COMPATIBILITY=PASS` before later phases
+use the contract.
 
 ## Phase status
 
@@ -300,8 +308,17 @@ timeout, streamed size cap, MIME allowlist, no redirects/cookies/auth, and the
 direct `trafilatura==2.1.0` pin; plus focused flush-only `job_posts` creation,
 exact-hash/ID reads, legal transitions, failed-row retry clearing, protected
 temporary URL-placeholder deletion, terminal writes, and compact deterministic
-queries. End-to-end extraction/embedding orchestration, production Job tools,
-Neo4j Job sync, saved-job UI, and matching remain later batches/plans.
+queries.
+
+Plan 5 Batch02 is complete: the profile and JD domains share one sanitized,
+hard-capped provider retry/error owner while retaining separate prompts and
+schema repair; structured JD extraction validates and normalizes every skill;
+the sole production embedding adapter enforces `text-embedding-3-small`, 1536
+finite floats, float encoding, and ordered scalar/batch results; deterministic
+v1 Job text has one whitespace owner; and raw-text/URL ingestion commits input
+before external work, performs exact-hash return or same-row failed retry, and
+retains durable source data on later failure. Production Job tools, Neo4j Job
+sync/rebuild, saved-job UI, and matching remain later batches/plans.
 
 ## Plan 3 progress and constraints
 
@@ -444,6 +461,27 @@ Plan 5 Batch01 establishes Job input contracts and persistence primitives only:
   Neo4j Job synchronization, production Job tools/routes, saved-job UI, and
   matching/ranking.
 
+## Plan 5 Batch02 progress and constraints
+
+Plan 5 Batch02 completes extraction, embeddings, and persistence-first Job
+ingestion without exposing a new public route or production tool:
+
+- Extraction: `app/services/provider_retry.py` owns the sanitized one-retry
+  timeout/rate-limit policy used by profile and JD extraction; each domain keeps
+  its own prompt, schema, coercion, and one-repair path. JD skills are resolved
+  only through the existing `SkillNormalizer`.
+- Embeddings: `app/adapters/shopaikey_embeddings.py` is the sole production
+  transport; `app/schemas/embeddings.py` owns the locked model/dimension and
+  finite ordered-vector contract; `app/services/embedding_text.py` owns the
+  deterministic `build_job_embedding_text_v1` representation.
+- Ingestion: `app/services/jd_ingestion.py` uses the database-owned
+  `session_scope` with optional test injection, commits accepted text or a URL
+  placeholder before external work, and reuses one downstream processor for
+  exact-hash create/return/retry behavior. URL acquisition failures retain the
+  placeholder and return the shared paste-text instruction.
+- Out of scope: production Job tools/routes, Neo4j Job sync/rebuild, saved-job
+  UI, site-specific/browser fetching, near-duplicate matching, and ranking.
+
 ## Job contracts and durable input verification (Plan 5 Batch01)
 
 From `backend/` after `python -m pip install -e .\backend` from the repository
@@ -458,6 +496,23 @@ python -m mypy app
 
 These tests use fake HTTP and migrated temporary SQLite databases; no live
 provider, public URL, Neo4j, or browser call is required for Batch01 acceptance.
+
+## Persistence-first Job extraction and embedding verification (Plan 5 Batch02)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/unit/test_jd_extraction.py tests/unit/test_skill_normalization.py tests/unit/test_profile_extraction.py -q
+python -m pytest tests/unit/test_embedding_adapter.py tests/unit/test_embedding_text.py -q
+python -m pytest tests/unit/test_url_fetch.py tests/integration/test_job_ingestion.py tests/integration/test_jobs_repository.py tests/integration/test_database_pragmas.py -q
+python -m ruff check app/services/provider_retry.py app/services/jd_extraction.py app/services/profile_extraction.py app/adapters/shopaikey_embeddings.py app/schemas/embeddings.py app/services/embedding_text.py app/db/session.py app/services/jd_ingestion.py tests/unit/test_jd_extraction.py tests/unit/test_profile_extraction.py tests/unit/test_embedding_adapter.py tests/unit/test_embedding_text.py tests/integration/test_job_ingestion.py tests/integration/test_database_pragmas.py
+python -m mypy app
+```
+
+These gates use fake structured-output, embedding, and URL adapters plus migrated
+temporary SQLite databases. They require no live provider, public URL, Neo4j,
+browser, production tool registration, or public Job route.
 
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 

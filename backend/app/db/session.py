@@ -124,12 +124,23 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def session_scope() -> AsyncIterator[AsyncSession]:
+async def session_scope(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> AsyncIterator[AsyncSession]:
     """Yield a short-lived session; commit on success, roll back on error.
 
     Do not perform external I/O while this context is open.
+
+    Parameters
+    ----------
+    session_factory:
+        Optional async session factory. When omitted, uses the process-wide
+        factory from :func:`get_session_factory`. Tests inject a temporary
+        factory; production callers keep the zero-arg form.
     """
-    factory = get_session_factory()
+    factory = (
+        session_factory if session_factory is not None else get_session_factory()
+    )
     async with factory() as session:
         try:
             yield session

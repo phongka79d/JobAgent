@@ -32,7 +32,7 @@ from app.db.session import (
 )
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 T = TypeVar("T")
 
@@ -271,6 +271,61 @@ def test_session_scope_commits_and_rolls_back() -> None:
                 )
             ).scalar_one_or_none()
             assert missing is None
+
+    _run(_check())
+
+
+def test_session_scope_accepts_injected_factory(tmp_path: Path) -> None:
+    """Injected factory path commits/rolls back without using process-wide factory."""
+
+    async def _check() -> None:
+        db = tmp_path / "injected-session-scope.db"
+        engine = build_async_engine(db)
+        factory = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("CREATE TABLE note (id TEXT PRIMARY KEY NOT NULL)")
+                )
+
+            async with session_scope(factory) as session:
+                await session.execute(
+                    text("INSERT INTO note (id) VALUES (:id)"),
+                    {"id": "injected-ok"},
+                )
+
+            async with factory() as session:
+                value = (
+                    await session.execute(
+                        text("SELECT id FROM note WHERE id = :id"),
+                        {"id": "injected-ok"},
+                    )
+                ).scalar_one()
+                assert value == "injected-ok"
+
+            with pytest.raises(RuntimeError, match="injected-fail"):
+                async with session_scope(factory) as session:
+                    await session.execute(
+                        text("INSERT INTO note (id) VALUES (:id)"),
+                        {"id": "injected-nope"},
+                    )
+                    raise RuntimeError("injected-fail")
+
+            async with factory() as session:
+                missing = (
+                    await session.execute(
+                        text("SELECT id FROM note WHERE id = :id"),
+                        {"id": "injected-nope"},
+                    )
+                ).scalar_one_or_none()
+                assert missing is None
+        finally:
+            await engine.dispose()
 
     _run(_check())
 

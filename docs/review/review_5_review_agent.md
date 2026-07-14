@@ -362,3 +362,475 @@ ACCEPTED
 - repairs verified: generic `delete` is absent; `delete_url_placeholder` requires URL source, received status, null raw content, and null hash before deletion; migrated-SQLite tests reject and retain text, filled URL, failed, and processed rows.
 - remaining issues: none.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 02A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Persistence-First Extraction and Embeddings
+- Task ID: 02A
+- Task title: Implement validated structured JD extraction, repair, and shared skill normalization
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `backend/app/services/provider_retry.py`, `backend/app/services/jd_extraction.py`, `backend/app/services/profile_extraction.py`, `backend/tests/unit/test_jd_extraction.py`, `backend/tests/unit/test_profile_extraction.py`, and the Task 02A execution report block
+- cached diff: empty
+
+## Files Reviewed
+- `backend/app/services/provider_retry.py`: in scope - one shared classifier/sanitized failure owner with an internal one-retry hard cap and no public retry-count override.
+- `backend/app/services/jd_extraction.py`: in scope - locked structured extraction, original-value Pydantic validation, one schema repair, SkillNormalizer identity, transient raw text, and no persistence/embedding/quality/tool shaping.
+- `backend/app/services/profile_extraction.py`: in scope - existing domain prompts/schema repair remain local and provider classification/retry delegates to the shared owner.
+- `backend/tests/unit/test_jd_extraction.py`: in scope - covers valid normalization, one repair/exhaustion, provider failures, invalid confidence/blank-name repair, and non-overridable two-attempt retry behavior.
+- `backend/tests/unit/test_profile_extraction.py`: in scope - retained profile behavior passes; the registry assertion now matches the already-committed Plan 4 three-tool truth and still rejects Job tools.
+- `backend/app/schemas/jobs.py`, `backend/app/services/skill_normalization.py`, `backend/app/adapters/shopaikey_chat.py`: dependency/contract owners reviewed.
+- Task 02A, Plan 5 sections 7.1/7.4, Master Plan sections 16.2/20, and the matching A1 report/handoff: source/evidence reviewed.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_jd_extraction.py tests/unit/test_skill_normalization.py tests/unit/test_profile_extraction.py -q`
+- Required: yes
+- Reported result: passed after repair
+- Rerun result: passed, 79 tests
+- Status: passed
+- Notes: fake-backed profile/JD/normalizer paths and the new repair/hard-cap cases are green.
+
+- Command/check: `Set-Location backend; python -m ruff check app/services/provider_retry.py app/services/jd_extraction.py app/services/profile_extraction.py tests/unit/test_jd_extraction.py tests/unit/test_profile_extraction.py; python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; Ruff clean and MyPy clean over 69 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: required provider/repair/normalizer ownership search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed as an ownership search
+- Status: passed
+- Notes: provider classification/retry has one current owner and both domains call it.
+
+- Command/check: direct full-validation probe with skill confidence `-4.0`, extraction confidence `7.0`, and a whitespace-only required skill name
+- Required: yes, derived from full Pydantic validation and normalization of every extracted skill
+- Reported result: passed after repair with focused repair/exhaustion tests
+- Rerun result: passed; original confidences reach `JobSkill`/`JobPostExtraction` bounds and blank names raise through SkillNormalizer, so each invalid output enters the one-repair path
+- Status: passed
+- Notes: no silent confidence clamp or blank-skill drop remains.
+
+- Command/check: direct provider-retry hard-cap probe calling `invoke_with_provider_retry(..., max_retries=3)`
+- Required: yes, derived from the exact at-most-one timeout/rate-limit retry contract
+- Reported result: passed after repair
+- Rerun result: passed; the signature has no `max_retries` parameter and an exhausted timeout made exactly two total attempts
+- Status: passed
+- Notes: `MAX_PROVIDER_RETRIES=1` is enforced inside the sole owner.
+
+- Command/check: `rg -n "compact_jd_summary" backend/app backend/tests`
+- Required: repository YAGNI/scope review
+- Reported result: removed during repair
+- Rerun result: no matches
+- Status: passed
+- Notes: no replacement presentation/ToolResult helper was added.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: the normalized extraction boundary, shared provider retry/error owner, exact one-repair/one-retry limits, original-value validation, sanitization, and retained profile behavior all pass the source and validation gates.
+
+## Architecture and Scope Review
+- Shared provider classification and retry logic now has one owner; profile and JD prompts/schemas remain separate.
+- The unused compact JD summary was removed; no future presentation/tool shaping remains.
+- No SQLite, embedding, graph, route, ToolResult, or quality-classification work was otherwise introduced.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T09:24:00+07:00
+- what was re-checked: all prior 02A findings, repaired source/tests/report, every provider-retry/JD extraction caller, the complete required test/lint/type gates, and direct hard-cap/absence probes.
+- repairs verified: invalid confidences and blank skill names enter the one-repair path; retry count cannot be overridden and exhausted timeout stops after two attempts; `compact_jd_summary` is absent.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 02B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Persistence-First Extraction and Embeddings
+- Task ID: 02B
+- Task title: Implement the sole production embedding adapter and versioned Job representation
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- changed files from Task 02B: new embedding schema/adapter/text/test files; diagnostic validator refactor; adapter package docstring; matching execution report block
+- cached diff: empty
+
+## Files Reviewed
+- `backend/app/schemas/embeddings.py`: in scope - one shared guard enforces the locked model/dimension contract; ordered validators always require exactly 1536 finite values with no override.
+- `backend/app/adapters/shopaikey_embeddings.py`: in scope - configuration is rejected before client work when it differs from the locked contract, and every request emits the locked model/dimensions/float encoding.
+- `backend/app/services/embedding_text.py`: in scope - exact approved field order, canonical display names, shared whitespace normalization, deterministic separators, and no E5 prefix.
+- `infrastructure/scripts/shopaikey_diag/embeddings.py`: in scope - consumes production vector validation and retains locked live diagnostic checks/sanitized mapping.
+- `backend/tests/unit/test_embedding_adapter.py`: in scope - covers locked defaults, alternate settings rejection before calls, no dimension override, wire fields, response errors, ordering, and diagnostic reuse.
+- `backend/tests/unit/test_embedding_text.py`: in scope - covers representation version, order, whitespace, canonical display names, exclusions, and determinism.
+- `backend/app/adapters/__init__.py`: in scope incidental documentation - one-line package description now accurately includes embeddings.
+- Task 02B, Plan 5 section 7.5, Master Plan sections 16.1/17.1/17.3, A1 report/handoff, and current settings defaults were reviewed.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_embedding_adapter.py tests/unit/test_embedding_text.py -q`
+- Required: yes
+- Reported result: passed, 48 tests after repair
+- Rerun result: passed, 48 tests
+- Status: passed
+- Notes: fake-backed adapter/text and alternate-contract rejection cases are green.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; Ruff clean and MyPy clean over 72 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: required adapter/vector/text/diagnostic ownership search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed as an ownership search
+- Status: passed
+- Notes: one current production adapter and one current vector/whitespace owner exist.
+
+- Command/check: direct alternate-contract probe using settings `EMBEDDING_MODEL='alternate-model'`, `EMBEDDING_DIMENSIONS=2`, a two-value fake response, and `validate_finite_vector(..., dimensions=2)`
+- Required: yes, derived from the locked model/exact-1536/no-fallback requirements
+- Reported result: passed after repair
+- Rerun result: passed; adapter and builder returned sanitized `EMBEDDING_INVALID_RESPONSE`, the fake create function was never called, the dimension keyword is absent, and a short vector fails `DIMENSION_MISMATCH`
+- Status: passed
+- Notes: model/dimension substitution now fails closed at the shared boundary.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: the exact model/dimension/encoding contract, ordered finite-vector validation, stable errors, deterministic v1 text, whitespace ownership, and diagnostic reuse all pass required and direct gates.
+
+## Architecture and Scope Review
+- Transport, vector validation, whitespace, and text building are separated into focused owners; no persistence/ingestion/graph/tool/UI scope was introduced.
+- The shared guard now fails closed before construction/calls and is reused by the diagnostic without duplicating the rule.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T09:38:00+07:00
+- what was re-checked: the prior lock failure, shared guard and every model/dimension/vector caller, repaired tests/report, all required gates, and the original alternate-contract probe.
+- repairs verified: alternate settings fail before client construction/calls; wire properties use locked constants; validators cannot accept a dimensions override; diagnostic consumes the shared guard/validators.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 02C
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+orchestrated
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Persistence-First Extraction and Embeddings
+- Task ID: 02C
+- Task title: Implement raw-text persistence-first selection, processing, and exact retry
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- Task 02C changes: shared session context extension, new raw-text ingestion owner, migrated-SQLite ingestion tests, session injection regression test, and matching execution report block
+- cached diff: empty
+
+## Files Reviewed
+- `backend/app/db/session.py`: in scope - `session_scope` accepts one optional injected factory while preserving zero-argument production callers and commit/rollback ownership.
+- `backend/app/services/jd_ingestion.py`: in scope - exact hash selection, short persistence/terminal transactions, external extraction/embedding outside sessions, same-row retry, locked embedding coupling, and compact result without raw body.
+- `backend/tests/integration/test_job_ingestion.py`: in scope - migrated-SQLite/fake coverage for creation, duplicates, retry, quality branches, durable failures, terminal protection, exact hashing, and transaction ownership.
+- `backend/tests/integration/test_database_pragmas.py`: in scope - injected factory commit/rollback coverage plus retained zero-argument session behavior.
+- `backend/app/repositories/jobs.py`, accepted 02A/02B owners, Job ORM constraints, and existing session callers: dependency/caller evidence reviewed.
+- Task 02C, Plan 5 sections 7.3/7.4/9, Master Plan sections 11.3/11.4, and the matching A1 report/handoff: source/evidence reviewed.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_job_ingestion.py tests/integration/test_jobs_repository.py -q`
+- Required: yes
+- Reported result: passed, 34 tests
+- Rerun result: passed, 34 tests
+- Status: passed
+- Notes: migrated-SQLite ingestion/repository behavior is green; only existing aiosqlite datetime deprecation warnings appeared.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; Ruff clean and MyPy clean over 73 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_database_pragmas.py -q`
+- Required: yes
+- Reported result: passed, 10 tests
+- Rerun result: passed, 10 tests
+- Status: passed
+- Notes: injected and global session-scope paths retain commit/rollback behavior.
+
+- Command/check: required hash/status/transaction/extract/embed ownership search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed as a source/caller inspection
+- Status: passed
+- Notes: no local `_short_transaction`, URL flow, force-new, or near-duplicate path was added.
+
+- Command/check: independent migrated-SQLite visibility probe from inside the extraction invoker
+- Required: derived from persistence-before-external-work acceptance
+- Reported result: source/tests claimed satisfied
+- Rerun result: observed `('processing', 'persist first probe')` before extraction returned, followed by terminal `processed/unscorable`
+- Status: passed
+- Notes: the diagnostic temp-directory cleanup hit a Windows handle race after the product assertions; required repository/session tests were rerun separately and passed.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: raw text is exact-hashed and committed before external work; non-failed duplicates return unchanged; failed rows retry in place; quality/embedding terminal coupling and durable failure retention match the source contract.
+
+## Architecture and Scope Review
+- Ingestion coordinates accepted focused owners and the database-owned session context without duplicating hash, repository, extraction, quality, text, vector, or transport logic.
+- No URL fetching, Neo4j, production tool, route, UI, matching, or local transaction-helper scope was introduced.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+---
+
+# Task Review Report - 02D
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch02 - Persistence-First Extraction and Embeddings
+- Task ID: 02D
+- Task title: Complete URL placeholder, fetched-hash reuse, and durable fetch-failure flow
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- Task 02D changes: URL path extension in the existing ingestion owner/tests and a matching execution report block
+- cached diff: empty
+
+## Files Reviewed
+- `backend/app/services/jd_ingestion.py`: in scope and complete - URL acquisition failures expose the optional result-only `paste_instruction`, reuse the shared fallback message, and import the URL failure-code constants from their existing owner.
+- `backend/tests/integration/test_job_ingestion.py`: in scope and complete - unavailable, unsupported-scheme, and empty-text paths assert the exact returned shared paste instruction alongside durable failed-placeholder state.
+- `backend/app/services/url_fetch.py`: accepted dependency owner - defines the stable URL codes and exact `PASTE_JD_FALLBACK_MESSAGE` on failed `UrlFetchResult`.
+- `backend/app/repositories/jobs.py`: accepted dependency owner - guarded pristine-placeholder deletion and URL content attachment were reused.
+- Task 02D, Plan 5 sections 7.2/7.3/9, Master Plan sections 6.4/11, and the matching A1 report/handoff were reviewed.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_url_fetch.py tests/integration/test_job_ingestion.py -q`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed, 92 tests
+- Status: passed
+- Notes: fake URL/SQLite placeholder, dedup, retry, retention, downstream, and exact paste-instruction paths are green.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; Ruff clean and MyPy clean over 73 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: required URL/placeholder/hash/delete/paste/fetch ownership search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; the required paths are reviewable and a quoted-literal scan found no duplicated `URL_FETCH_UNAVAILABLE` or `URL_EMPTY_TEXT` code strings in `jd_ingestion.py`
+- Status: passed
+- Notes: the accepted URL fetch module remains the single owner of the shared failure vocabulary and paste message.
+
+- Command/check: inspect `JdIngestResult` fields and the fetch-failure return path
+- Required: yes, derived from "fetch failure ... asks for pasted text"
+- Reported result: passed after same-task repair
+- Rerun result: passed; `JdIngestResult.paste_instruction` defaults to `None`, and each URL acquisition failure snapshot receives the exact shared fallback while success, raw-text, and later non-fetch failures retain the default
+- Status: passed
+- Notes: the instruction is exposed at the service boundary and is not persisted as free text on the Job row.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: persistence-before-fetch, exact hash reuse/retry, safe placeholder deletion, unique-row processing, acquired-content retention, and the exact result-level paste fallback all match Task 02D and its cited plan contracts.
+
+## Architecture and Scope Review
+- URL/text share one downstream processor and repository guards remain authoritative; no route/tool/graph/UI/security-expansion scope was introduced.
+- Stable URL error vocabulary and the paste instruction are reused from `url_fetch`; no second result type, persistence field, or user-facing route was introduced.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14
+- what was re-checked: the updated A1 execution report/handoff, Task 02D and cited plan contracts, current git evidence, repaired ingestion result path, exact integration assertions, and every required Task 02D validation.
+- repairs verified: the prior rejection is resolved by returning the exact shared paste instruction on unavailable, unsupported-scheme, and empty-text acquisition failures; retaining `None` elsewhere; reusing the shared URL-code constants; and replacing the vacuous assertion with exact result assertions.
+- remaining issues: none.
+- updated outcome: ACCEPTED.

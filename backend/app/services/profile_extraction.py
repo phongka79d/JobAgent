@@ -44,17 +44,23 @@ from app.services.pdf_extraction import (
     PdfMalformedError,
     extract_pdf_text,
 )
+from app.services.provider_retry import (
+    FAILURE_PROVIDER_ERROR,
+    FAILURE_PROVIDER_RATE_LIMIT,
+    FAILURE_PROVIDER_TIMEOUT,
+    ProviderRetryError,
+    classify_provider_error,
+    invoke_with_provider_retry,
+)
 from app.services.skill_normalization import SkillNormalizer
 
 logger = logging.getLogger(__name__)
 
 # Stable failure codes (attachment / tool surfaces).
+# Provider codes are owned by provider_retry; re-exported for callers/tests.
 FAILURE_NO_EXTRACTABLE_TEXT: Final[str] = NO_EXTRACTABLE_TEXT
 FAILURE_MALFORMED_PDF: Final[str] = "MALFORMED_PDF"
-FAILURE_PROVIDER_TIMEOUT: Final[str] = "PROVIDER_TIMEOUT"
-FAILURE_PROVIDER_RATE_LIMIT: Final[str] = "PROVIDER_RATE_LIMIT"
 FAILURE_INVALID_STRUCTURED_OUTPUT: Final[str] = "INVALID_STRUCTURED_OUTPUT"
-FAILURE_PROVIDER_ERROR: Final[str] = "PROVIDER_ERROR"
 
 STRUCTURED_OUTPUT_METHOD: Final[str] = "json_schema"
 STRUCTURED_OUTPUT_STRICT: Final[bool] = True
@@ -62,7 +68,6 @@ EXTRACTION_SCHEMA_STRATEGY: Final[str] = "strict_json_schema"
 
 _MAX_EVIDENCE_SNIPPET_LEN: Final[int] = 240
 _MAX_REPAIR_ATTEMPTS: Final[int] = 1
-_MAX_PROVIDER_RETRIES: Final[int] = 1
 
 _SYSTEM_PROMPT: Final[str] = (
     "You extract a Candidate Profile from CV text. Return only structured JSON "
@@ -220,38 +225,6 @@ def build_draft_from_extracted(
     )
 
 
-def _is_rate_limit_error(exc: BaseException) -> bool:
-    name = type(exc).__name__
-    if name in {"RateLimitError", "APIRateLimitError"}:
-        return True
-    module = type(exc).__module__ or ""
-    if "openai" in module and "rate" in name.lower():
-        return True
-    status = getattr(exc, "status_code", None)
-    return status == 429
-
-
-def _is_timeout_error(exc: BaseException) -> bool:
-    if isinstance(exc, TimeoutError):
-        return True
-    name = type(exc).__name__
-    if name in {"APITimeoutError", "TimeoutException", "ReadTimeout", "ConnectTimeout"}:
-        return True
-    module = type(exc).__module__ or ""
-    return "timeout" in name.lower() and (
-        "openai" in module or "httpx" in module or "httpcore" in module
-    )
-
-
-def classify_provider_error(exc: BaseException) -> str:
-    """Map a provider exception to a stable failure code."""
-    if _is_rate_limit_error(exc):
-        return FAILURE_PROVIDER_RATE_LIMIT
-    if _is_timeout_error(exc):
-        return FAILURE_PROVIDER_TIMEOUT
-    return FAILURE_PROVIDER_ERROR
-
-
 def _coerce_extracted(raw: Any) -> ExtractedCandidateProfile:
     if isinstance(raw, ExtractedCandidateProfile):
         return raw
@@ -323,29 +296,16 @@ def _invoke_with_provider_retry(
     *,
     is_repair: bool,
 ) -> tuple[ExtractedCandidateProfile, int]:
-    """Call structured invoker; retry once on timeout/rate-limit only."""
-    retries_used = 0
-    last_code = FAILURE_PROVIDER_ERROR
-    last_message = "provider call failed"
-    for attempt in range(_MAX_PROVIDER_RETRIES + 1):
-        try:
-            raw = invoker.invoke_structured(messages, is_repair=is_repair)
-            return _coerce_extracted(raw), retries_used
-        except (ValidationError, json.JSONDecodeError, TypeError, ValueError):
-            # Schema/parse failures are handled by the repair path, not provider retry.
-            raise
-        except Exception as exc:
-            code = classify_provider_error(exc)
-            last_code = code
-            last_message = f"provider error: {type(exc).__name__}"
-            if code in (
-                FAILURE_PROVIDER_TIMEOUT,
-                FAILURE_PROVIDER_RATE_LIMIT,
-            ) and attempt < _MAX_PROVIDER_RETRIES:
-                retries_used += 1
-                continue
-            raise ProfileExtractionError(code, last_message) from exc
-    raise ProfileExtractionError(last_code, last_message)
+    """Call structured invoker via shared provider retry; map domain errors."""
+
+    def _call() -> ExtractedCandidateProfile:
+        raw = invoker.invoke_structured(messages, is_repair=is_repair)
+        return _coerce_extracted(raw)
+
+    try:
+        return invoke_with_provider_retry(_call)
+    except ProviderRetryError as exc:
+        raise ProfileExtractionError(exc.code, exc.message) from exc
 
 
 def extract_profile_from_pdf(
