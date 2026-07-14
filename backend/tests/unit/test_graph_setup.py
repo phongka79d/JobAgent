@@ -194,7 +194,7 @@ def test_schema_statements_contain_no_runtime_secrets_or_parameters() -> None:
     assert "$" not in joined  # no Cypher parameters in fixed DDL
     assert _FAKE_PASSWORD not in joined
     assert "password" not in joined.lower()
-    # No later-phase domain write / relationship / rebuild vocabulary in DDL.
+    # Fixed DDL must not own domain writes, relationships, or rebuild logic.
     forbidden = (
         "HAS_SKILL",
         "REQUIRES",
@@ -211,41 +211,91 @@ def test_schema_statements_contain_no_runtime_secrets_or_parameters() -> None:
         assert token not in joined
 
 
-def test_graph_modules_have_no_later_phase_behavior() -> None:
+def test_base_ddl_modules_own_only_constraints_and_driver_lifecycle() -> None:
+    """Precise ownership: constraints/driver stay free of domain graph writes."""
     graph_dir = Path(__file__).resolve().parents[2] / "app" / "graph"
-    text = ""
-    for path in sorted(graph_dir.glob("*.py")):
-        text += path.read_text(encoding="utf-8")
-    for token in (
+    base_modules = ("constraints.py", "driver.py", "__init__.py")
+    domain_tokens = (
         "HAS_SKILL",
         "REQUIRES",
         "PREFERS",
         "RELATED_TO",
         "source_updated_at",
-        "rebuild",
-    ):
-        assert token not in text
+        "rebuild_neo4j",
+        "sync_job",
+        "sync_candidate",
+    )
+    for name in base_modules:
+        text = (graph_dir / name).read_text(encoding="utf-8")
+        for token in domain_tokens:
+            assert token not in text, f"{name} must not contain {token!r}"
+
+    # Domain sync owners may project relationships; fixed DDL stays in constraints.
+    sync_shared = (graph_dir / "sync_shared.py").read_text(encoding="utf-8")
+    sync_candidate = (graph_dir / "sync_candidate.py").read_text(encoding="utf-8")
+    sync_job = (graph_dir / "sync_job.py").read_text(encoding="utf-8")
+    assert "RELATED_TO" in sync_shared
+    assert "HAS_SKILL" in sync_candidate
+    assert "REQUIRES" in sync_job and "PREFERS" in sync_job
+    # constraints remains the sole SCHEMA_STATEMENTS owner.
+    assert "SCHEMA_STATEMENTS" in (graph_dir / "constraints.py").read_text(
+        encoding="utf-8"
+    )
+    assert "SCHEMA_STATEMENTS" not in sync_job
+    assert "SCHEMA_STATEMENTS" not in sync_candidate
 
 
-def test_graph_modules_do_not_import_sqlite_or_domain_writers() -> None:
+def test_graph_modules_do_not_import_sqlite_sessions_or_http_writers() -> None:
+    """Precise ownership: only approved rebuild modules open SQLite seams.
+
+    Always forbidden for every graph module: storage/API/FastAPI/ingestion.
+    SQLAlchemy session factories and repository packages are allowed only in:
+    * ``rebuild_snapshot.py`` — read-only SQLite snapshot + embedding preflight
+    * ``rebuild.py`` — public service/CLI session-factory wiring
+
+    ``app.db`` model/constant imports remain allowed for domain sync owners
+    (prior Plan 4/03A boundary) but stay forbidden for base DDL modules and for
+    ``rebuild_ops.py`` / ``rebuild_target.py`` (no SQLite ownership there).
+    """
     graph_dir = Path(__file__).resolve().parents[2] / "app" / "graph"
-    forbidden_prefixes = (
-        "app.db",
-        "sqlalchemy",
+    always_forbidden = (
         "app.storage",
         "app.api",
         "fastapi",
+        "app.services.jd_ingestion",
+        "app.services.profile_approval",
+    )
+    # Exact approved modules for sqlalchemy / repositories (SQLite I/O seams).
+    sqlite_io_allowed = frozenset({"rebuild.py", "rebuild_snapshot.py"})
+    # Base DDL + rebuild ops/target must not import app.db at all.
+    app_db_forbidden = frozenset(
+        {
+            "constraints.py",
+            "driver.py",
+            "__init__.py",
+            "rebuild_ops.py",
+            "rebuild_target.py",
+        }
     )
     for path in sorted(graph_dir.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        prefixes = list(always_forbidden)
+        if path.name not in sqlite_io_allowed:
+            prefixes.extend(("sqlalchemy", "app.repositories"))
+        if path.name in app_db_forbidden:
+            prefixes.append("app.db")
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    for prefix in forbidden_prefixes:
-                        assert not alias.name.startswith(prefix), path.name
+                    for prefix in prefixes:
+                        assert not alias.name.startswith(prefix), (
+                            f"{path.name} must not import {alias.name}"
+                        )
             elif isinstance(node, ast.ImportFrom) and node.module:
-                for prefix in forbidden_prefixes:
-                    assert not node.module.startswith(prefix), path.name
+                for prefix in prefixes:
+                    assert not node.module.startswith(prefix), (
+                        f"{path.name} must not import {node.module}"
+                    )
 
 
 def test_password_not_in_settings_repr_used_by_driver() -> None:

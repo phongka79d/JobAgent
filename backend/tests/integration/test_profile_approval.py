@@ -1187,6 +1187,8 @@ def test_propose_update_tool_compact_and_no_preference_tool() -> None:
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     ]
     assert "match_jobs" not in names
     assert "propose_profile_update" in names
@@ -2591,8 +2593,9 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
     run_async(_body())
 
 
-def test_production_registry_exactly_three_profile_tools_static() -> None:
-    """Production registry is the three profile tools; no match_jobs/synthetic."""
+def test_production_registry_exactly_five_tools_static() -> None:
+    """Production registry is five tools; no match_jobs/synthetic."""
+    from app.tools.jobs import QUERY_JOBS_NAME, SAVE_JOB_NAME
     from app.tools.profile import (
         COMMIT_PROFILE_DRAFT_NAME,
         PROPOSE_PROFILE_FROM_CV_NAME,
@@ -2605,6 +2608,8 @@ def test_production_registry_exactly_three_profile_tools_static() -> None:
         PROPOSE_PROFILE_FROM_CV_NAME,
         PROPOSE_PROFILE_UPDATE_NAME,
         COMMIT_PROFILE_DRAFT_NAME,
+        SAVE_JOB_NAME,
+        QUERY_JOBS_NAME,
     ]
     assert "match_jobs" not in names
     assert "synthetic_interrupt" not in names
@@ -2614,11 +2619,378 @@ def test_production_registry_exactly_three_profile_tools_static() -> None:
     ).read_text(encoding="utf-8")
     assert "match_jobs" not in reg_src
     assert "build_synthetic" not in reg_src
+    assert "build_production_job_tools" in reg_src
     profile_src = (
         Path(__file__).resolve().parents[2] / "app" / "tools" / "profile.py"
     ).read_text(encoding="utf-8")
     assert "interrupt(" in profile_src
     assert "allow_running_reentry" in profile_src
     assert "execute_tool" in profile_src
+    assert "InjectedToolCallId" in profile_src
+    assert "InjectedState" in profile_src
     assert "save_profile" in profile_src
     assert "request_changes" in profile_src
+    # Every production profile tool factory routes through the one executor.
+    for factory_name in (
+        "build_propose_profile_from_cv_tool",
+        "build_propose_profile_update_tool",
+        "build_commit_profile_draft_tool",
+    ):
+        fn = getattr(
+            __import__("app.tools.profile", fromlist=[factory_name]),
+            factory_name,
+        )
+        src = inspect.getsource(fn)
+        assert "execute_tool" in src
+        assert "InjectedToolCallId" in src
+        assert "InjectedState" in src
+    jobs_src = (
+        Path(__file__).resolve().parents[2] / "app" / "tools" / "jobs.py"
+    ).read_text(encoding="utf-8")
+    assert "execute_tool" in jobs_src
+    for factory_name in ("build_save_job_tool", "build_query_jobs_tool"):
+        fn = getattr(
+            __import__("app.tools.jobs", fromlist=[factory_name]),
+            factory_name,
+        )
+        src = inspect.getsource(fn)
+        assert "execute_tool" in src
+        assert "InjectedToolCallId" in src
+        assert "InjectedState" in src
+
+
+def test_five_production_tools_durable_status_and_proposal_replay(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """All five tools create one durable execution + ordered tool_status path.
+
+    Proposal-tool same-identity replay must not re-extract, re-call the
+    provider, or mutate the draft a second time.
+    """
+    import json
+
+    from app.core.ids import new_uuid
+    from app.db.models.chat import (
+        CHAT_MESSAGE_ROLE_USER,
+        TOOL_EXECUTION_STATUS_COMPLETED,
+    )
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import chat_messages as messages_repo
+    from app.repositories import tool_executions as tool_repo
+    from app.schemas.tools import ToolResult
+    from app.services.skill_normalization import SkillNormalizer
+    from app.services.tool_execution import tool_status_publication_scope
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.jobs import (
+        QUERY_JOBS_NAME,
+        SAVE_JOB_NAME,
+        build_query_jobs_tool,
+        build_save_job_tool,
+    )
+    from app.tools.profile import (
+        COMMIT_PROFILE_DRAFT_NAME,
+        PROPOSE_PROFILE_FROM_CV_NAME,
+        PROPOSE_PROFILE_UPDATE_NAME,
+        build_commit_profile_draft_tool,
+        build_propose_profile_from_cv_tool,
+        build_propose_profile_update_tool,
+    )
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    invoker = _ScriptedInvoker([_fake_valid_extracted()])
+    pdf = _cv_fixture("digital_cv_01.pdf")
+
+    async def _ainvoke(
+        tool_fn: Any,
+        *,
+        run_id: str,
+        tool_call_id: str,
+        args: dict[str, Any],
+    ) -> ToolResult:
+        raw = await tool_fn.ainvoke(
+            {
+                "type": "tool_call",
+                "id": tool_call_id,
+                "name": tool_fn.name,
+                "args": {**args, "state": {"run_id": run_id}},
+            }
+        )
+        if isinstance(raw, str):
+            payload = json.loads(raw)
+        elif hasattr(raw, "content"):
+            content = raw.content
+            payload = (
+                json.loads(content) if isinstance(content, str) else content
+            )
+        else:
+            payload = raw
+        return ToolResult.model_validate(payload)
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                user = await messages_repo.insert_message(
+                    session,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="five-tool durable status",
+                )
+                run = await runs_repo.create_run(
+                    session, user_message_id=user.id
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="five-tool-cv",
+                    original_name="cv.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await session.commit()
+                run_id = run.id
+
+            propose_cv = build_propose_profile_from_cv_tool(
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=normalizer,
+            )
+            propose_upd = build_propose_profile_update_tool(
+                session_factory=factory,
+                normalizer=normalizer,
+            )
+            commit_fn = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+            )
+            save_fn = build_save_job_tool(
+                session_factory=factory,
+                normalizer=normalizer,
+            )
+            query_fn = build_query_jobs_tool(session_factory=factory)
+
+            # LLM-visible schemas stay public-only (injected identity hidden).
+            from langchain_core.utils.function_calling import (
+                convert_to_openai_tool,
+            )
+
+            cv_props = set(
+                (
+                    convert_to_openai_tool(propose_cv)
+                    .get("function", {})
+                    .get("parameters", {})
+                    .get("properties")
+                    or {}
+                ).keys()
+            )
+            assert cv_props == {"attachment_id"}
+            upd_props = set(
+                (
+                    convert_to_openai_tool(propose_upd)
+                    .get("function", {})
+                    .get("parameters", {})
+                    .get("properties")
+                    or {}
+                ).keys()
+            )
+            assert "tool_call_id" not in upd_props
+            assert "state" not in upd_props
+            assert "run_id" not in upd_props
+            assert upd_props <= {
+                "profile_changes",
+                "preference_changes",
+                "skill_corrections",
+            }
+
+            pubs: list[Any] = []
+            with tool_status_publication_scope(pubs.append):
+                first_cv = await _ainvoke(
+                    propose_cv,
+                    run_id=run_id,
+                    tool_call_id="call_five_propose_cv",
+                    args={"attachment_id": att_id},
+                )
+            assert first_cv.ok is True
+            assert invoker.calls == 1
+            assert [p.status for p in pubs] == [
+                "pending",
+                "running",
+                "completed",
+            ]
+            assert all(p.tool_name == PROPOSE_PROFILE_FROM_CV_NAME for p in pubs)
+            exec_id_cv = pubs[0].tool_execution_id
+            assert all(p.tool_execution_id == exec_id_cv for p in pubs)
+            assert all(p.tool_call_id == "call_five_propose_cv" for p in pubs)
+            assert pubs[-1].duration_ms is not None
+            assert pubs[-1].summary
+
+            async with factory() as session:
+                draft_before = await prof_repo.get_current_draft(session)
+                assert draft_before is not None
+                draft_json_before = json.dumps(
+                    draft_before.draft_json, sort_keys=True
+                )
+                draft_updated_before = draft_before.updated_at
+
+            pubs.clear()
+            with tool_status_publication_scope(pubs.append):
+                replay_cv = await _ainvoke(
+                    propose_cv,
+                    run_id=run_id,
+                    tool_call_id="call_five_propose_cv",
+                    args={"attachment_id": att_id},
+                )
+            assert replay_cv.model_dump(mode="json") == first_cv.model_dump(
+                mode="json"
+            )
+            assert invoker.calls == 1  # no second PDF/provider extraction
+            assert [p.status for p in pubs] == ["completed"]
+            assert pubs[0].tool_execution_id == exec_id_cv
+
+            async with factory() as session:
+                draft_after = await prof_repo.get_current_draft(session)
+                assert draft_after is not None
+                assert (
+                    json.dumps(draft_after.draft_json, sort_keys=True)
+                    == draft_json_before
+                )
+                assert draft_after.updated_at == draft_updated_before
+
+            pubs.clear()
+            with tool_status_publication_scope(pubs.append):
+                first_upd = await _ainvoke(
+                    propose_upd,
+                    run_id=run_id,
+                    tool_call_id="call_five_propose_upd",
+                    args={
+                        "profile_changes": {
+                            "summary": "Corrected summary once."
+                        }
+                    },
+                )
+            assert first_upd.ok is True
+            assert [p.status for p in pubs] == [
+                "pending",
+                "running",
+                "completed",
+            ]
+            assert all(p.tool_name == PROPOSE_PROFILE_UPDATE_NAME for p in pubs)
+            exec_id_upd = pubs[0].tool_execution_id
+
+            async with factory() as session:
+                draft_mid = await prof_repo.get_current_draft(session)
+                assert draft_mid is not None
+                mid_json = json.dumps(draft_mid.draft_json, sort_keys=True)
+                mid_updated = draft_mid.updated_at
+                summary = draft_mid.draft_json["candidate_profile"]["summary"]
+                assert summary == "Corrected summary once."
+
+            pubs.clear()
+            with tool_status_publication_scope(pubs.append):
+                replay_upd = await _ainvoke(
+                    propose_upd,
+                    run_id=run_id,
+                    tool_call_id="call_five_propose_upd",
+                    args={
+                        "profile_changes": {
+                            "summary": "Would mutate if re-invoked"
+                        }
+                    },
+                )
+            assert replay_upd.model_dump(mode="json") == first_upd.model_dump(
+                mode="json"
+            )
+            assert [p.status for p in pubs] == ["completed"]
+            assert pubs[0].tool_execution_id == exec_id_upd
+
+            async with factory() as session:
+                draft_final = await prof_repo.get_current_draft(session)
+                assert draft_final is not None
+                assert (
+                    json.dumps(draft_final.draft_json, sort_keys=True)
+                    == mid_json
+                )
+                assert draft_final.updated_at == mid_updated
+                assert (
+                    draft_final.draft_json["candidate_profile"]["summary"]
+                    == "Corrected summary once."
+                )
+
+            # query_jobs is a full durable path without Job side-effect fakes.
+            pubs.clear()
+            with tool_status_publication_scope(pubs.append):
+                q = await _ainvoke(
+                    query_fn,
+                    run_id=run_id,
+                    tool_call_id="call_five_query",
+                    args={},
+                )
+            assert q.ok is True
+            assert [p.status for p in pubs] == [
+                "pending",
+                "running",
+                "completed",
+            ]
+            assert all(p.tool_name == QUERY_JOBS_NAME for p in pubs)
+
+            # Remaining registered tools share the same execute_tool owner.
+            assert commit_fn.name == COMMIT_PROFILE_DRAFT_NAME
+            assert save_fn.name == SAVE_JOB_NAME
+            assert "execute_tool" in inspect.getsource(
+                build_commit_profile_draft_tool
+            )
+            assert "execute_tool" in inspect.getsource(build_save_job_tool)
+
+            async with factory() as session:
+                rows = await tool_repo.list_for_run_ids(session, [run_id])
+                by_call = {r.tool_call_id: r for r in rows}
+                for call_id, tool_name in (
+                    ("call_five_propose_cv", PROPOSE_PROFILE_FROM_CV_NAME),
+                    ("call_five_propose_upd", PROPOSE_PROFILE_UPDATE_NAME),
+                    ("call_five_query", QUERY_JOBS_NAME),
+                ):
+                    row = by_call[call_id]
+                    assert row.tool_name == tool_name
+                    assert row.status == TOOL_EXECUTION_STATUS_COMPLETED
+                    assert row.duration_ms is not None
+                    assert row.result_json is not None
+                # Exactly one durable row per proposal identity (replay reuse).
+                assert (
+                    sum(
+                        1
+                        for r in rows
+                        if r.tool_call_id == "call_five_propose_cv"
+                    )
+                    == 1
+                )
+                assert (
+                    sum(
+                        1
+                        for r in rows
+                        if r.tool_call_id == "call_five_propose_upd"
+                    )
+                    == 1
+                )
+                # Compact arguments summaries only (IDs / keys, never bodies).
+                cv_args = by_call["call_five_propose_cv"].arguments_summary_json
+                assert cv_args == {"attachment_id": att_id}
+                upd_args = by_call[
+                    "call_five_propose_upd"
+                ].arguments_summary_json
+                assert upd_args is not None
+                assert upd_args.get("profile_change_keys") == ["summary"]
+                assert "Corrected summary" not in json.dumps(upd_args)
+                assert "%PDF" not in json.dumps(
+                    first_cv.model_dump(mode="json")
+                )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())

@@ -53,6 +53,10 @@ JOB_JD_QUALITIES: frozenset[str] = frozenset(
     }
 )
 
+# Compact list_compact query bounds (repository + tool validation share these).
+JOB_COMPACT_QUERY_LIMIT_MIN = 1
+JOB_COMPACT_QUERY_LIMIT_MAX = 50
+
 _SCORABLE_PROCESSED = (
     (column("processing_status") == JOB_PROCESSING_STATUS_PROCESSED)
     & column("jd_quality").in_((JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL))

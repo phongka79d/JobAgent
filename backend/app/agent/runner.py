@@ -6,10 +6,15 @@ durable-terminal callback confirms commit, deletes only this run's checkpoint
 for completed/failed outcomes. Interrupted checkpoints are retained.
 
 No application transaction is held open during graph execution or event yield.
+
+Live ``tool_status`` merges a request-scoped async publication queue with the
+graph stream so pending/running events yield while a tool side effect still
+runs (no SQLite polling, second executor, or store).
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -41,7 +46,14 @@ from app.core.ids import new_uuid
 from app.core.settings import Settings
 from app.core.time import utc_now
 from app.schemas.sse import SseEvent, parse_sse_event
+from app.services.tool_execution import (
+    ToolStatusPublication,
+    tool_status_publication_scope,
+)
 from app.tools.registry import ToolRegistry
+
+# Sentinel placed on the merge queue when the graph stream ends.
+_GRAPH_END: object = object()
 
 # Stable runner-level failure when the graph raises unexpectedly.
 ERROR_AGENT_EXECUTION: str = "AGENT_EXECUTION_FAILED"
@@ -87,6 +99,23 @@ def _envelope(event: str, run_id: str, payload: dict[str, Any]) -> SseEvent:
             "payload": payload,
         }
     )
+
+
+def _tool_status_envelope(run_id: str, pub: ToolStatusPublication) -> SseEvent:
+    """Frame one compact durable tool_status event (no raw args/result data)."""
+    payload: dict[str, Any] = {
+        "tool_execution_id": pub.tool_execution_id,
+        "tool_call_id": pub.tool_call_id,
+        "tool_name": pub.tool_name,
+        "status": pub.status,
+    }
+    if pub.duration_ms is not None:
+        payload["duration_ms"] = pub.duration_ms
+    if pub.summary is not None:
+        payload["summary"] = pub.summary
+    if pub.error_code is not None:
+        payload["error_code"] = pub.error_code
+    return _envelope("tool_status", run_id, payload)
 
 
 def _message_text(message: BaseMessage | Any) -> str:
@@ -256,6 +285,13 @@ async def stream_agent_run(
         graph_error: str | None = None
         assistant_parts: list[str] = []
         pending_approval: dict[str, Any] | None = None
+        # Request-scoped merge queue: durable publications race with graph chunks
+        # so pending/running can yield while a blocking tool is still inside
+        # its side effect (no storage poll, second executor, or store).
+        merge_q: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+        def _on_tool_status(pub: ToolStatusPublication) -> None:
+            merge_q.put_nowait(("tool_status", pub))
 
         stream_input: AgentGraphState | Command[Any] | None
         if input_state is not None:
@@ -277,45 +313,89 @@ async def stream_agent_run(
                 attachment_ids=attachment_ids,
             )
 
-        try:
+        with tool_status_publication_scope(_on_tool_status):
             stream = compiled.astream(
                 stream_input,
                 config,
                 stream_mode="updates",
                 version="v1",
             )
-            async for chunk in stream:
-                if not isinstance(chunk, dict):
-                    continue
-                interrupt_pa = _pending_approval_from_interrupt_chunk(chunk)
-                if interrupt_pa is not None:
-                    pending_approval = interrupt_pa
-                    continue
-                err = _error_from_update(chunk)
-                if err is not None:
-                    graph_error = err
-                for delta in _extract_text_deltas_from_update(chunk):
-                    assistant_parts.append(delta)
-                    yield _envelope(
-                        "text_delta",
-                        run_id,
-                        {"delta": delta},
-                    )
-        except Exception:
-            graph_error = ERROR_AGENT_EXECUTION
 
-        if graph_error is None:
+            async def _pump_graph() -> None:
+                try:
+                    async for chunk in stream:
+                        await merge_q.put(("graph", chunk))
+                except Exception:
+                    await merge_q.put(("graph_error", ERROR_AGENT_EXECUTION))
+                finally:
+                    await merge_q.put(("graph_end", _GRAPH_END))
+
+            pump = asyncio.create_task(_pump_graph())
             try:
-                snap = await compiled.aget_state(config)
-                values = snap.values if snap is not None else None
-                if isinstance(values, dict):
-                    err_val = values.get("error")
-                    if isinstance(err_val, str) and err_val.strip():
-                        graph_error = err_val
-                if pending_approval is None:
-                    pending_approval = _pending_approval_from_snapshot(snap)
-            except Exception:
-                pass
+                while True:
+                    msg_kind, item = await merge_q.get()
+                    if msg_kind == "tool_status":
+                        assert isinstance(item, ToolStatusPublication)
+                        yield _tool_status_envelope(run_id, item)
+                        continue
+                    if msg_kind == "graph_error":
+                        graph_error = (
+                            item if isinstance(item, str) else ERROR_AGENT_EXECUTION
+                        )
+                        continue
+                    if msg_kind == "graph_end":
+                        break
+                    if msg_kind != "graph" or not isinstance(item, dict):
+                        continue
+                    interrupt_pa = _pending_approval_from_interrupt_chunk(item)
+                    if interrupt_pa is not None:
+                        pending_approval = interrupt_pa
+                        continue
+                    err = _error_from_update(item)
+                    if err is not None:
+                        graph_error = err
+                    for delta in _extract_text_deltas_from_update(item):
+                        assistant_parts.append(delta)
+                        yield _envelope(
+                            "text_delta",
+                            run_id,
+                            {"delta": delta},
+                        )
+                # Drain any statuses published between last graph item and end.
+                while True:
+                    try:
+                        msg_kind, item = merge_q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if msg_kind == "tool_status":
+                        assert isinstance(item, ToolStatusPublication)
+                        yield _tool_status_envelope(run_id, item)
+                    elif msg_kind == "graph_error" and graph_error is None:
+                        graph_error = (
+                            item if isinstance(item, str) else ERROR_AGENT_EXECUTION
+                        )
+            finally:
+                if not pump.done():
+                    pump.cancel()
+                    try:
+                        await pump
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    await pump
+
+            if graph_error is None:
+                try:
+                    snap = await compiled.aget_state(config)
+                    values = snap.values if snap is not None else None
+                    if isinstance(values, dict):
+                        err_val = values.get("error")
+                        if isinstance(err_val, str) and err_val.strip():
+                            graph_error = err_val
+                    if pending_approval is None:
+                        pending_approval = _pending_approval_from_snapshot(snap)
+                except Exception:
+                    pass
 
         assistant_text = "".join(assistant_parts) if assistant_parts else None
 

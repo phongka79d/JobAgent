@@ -45,8 +45,17 @@ def test_fixture_loads_through_same_parser_path() -> None:
 
 def test_production_path_constant_is_repo_infrastructure_seed() -> None:
     path = production_skills_seed_path()
-    assert path == repo_root() / PRODUCTION_SKILLS_SEED_RELATIVE
+    monorepo = repo_root() / PRODUCTION_SKILLS_SEED_RELATIVE
+    # Sole production owner — no package-data or app/resources fallback.
+    assert path == monorepo
     assert path.as_posix().endswith("infrastructure/neo4j/skills_seed.yaml")
+    assert monorepo.is_file()
+    assert not (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "resources"
+        / "skills_seed.yaml"
+    ).is_file()
 
 
 def test_unicode_whitespace_case_punctuation_alias_resolution(

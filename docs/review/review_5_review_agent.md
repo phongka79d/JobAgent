@@ -834,3 +834,683 @@ ACCEPTED
 - repairs verified: the prior rejection is resolved by returning the exact shared paste instruction on unavailable, unsupported-scheme, and empty-text acquisition failures; retaining `None` elsewhere; reusing the shared URL-code constants; and replacing the vacuous assertion with exact result assertions.
 - remaining issues: none.
 - updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Derived Job Graph, Tools, and Rebuild
+- Task ID: 03A
+- Task title: Synchronize scorable Job/Skill graph data idempotently after SQLite commit
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- changed files from git: `backend/app/graph/sync_shared.py`, `backend/app/graph/sync_candidate.py`, `backend/app/graph/sync_job.py`, `backend/app/services/jd_ingestion.py`, `backend/tests/integration/test_job_sync.py`, `backend/tests/integration/test_job_ingestion.py`, `backend/tests/integration/test_candidate_sync.py`, `backend/tests/unit/test_graph_setup.py`, and the matching execution report block
+- cached diff: empty
+
+## Files Reviewed
+- `backend/app/graph/sync_shared.py`: in scope and complete - one shared driver/failure/timestamp/result/Skill/seed projection owner works without a Candidate.
+- `backend/app/graph/sync_candidate.py`: in scope and complete - consumes shared graph primitives and reuses `CANDIDATE_PROFILE_ID` for the singleton identity.
+- `backend/app/graph/sync_job.py`: in scope and complete - parameterized scoped projection accepts only `full|partial`, reuses `validate_finite_vector`, preserves evidence/confidence, and exposes sanitized sync failure.
+- `backend/app/services/jd_ingestion.py`: in scope and complete - sync occurs only after a durable scorable terminal commit; duplicate/unscorable/failed branches skip graph I/O, and graph failure leaves SQLite processed.
+- `backend/tests/integration/test_job_sync.py`: in scope and complete - covers Cypher parameters, relationship scope, seed/unknown skills, repeat behavior, fail-closed quality/vector boundaries, and shared ownership.
+- `backend/tests/integration/test_job_ingestion.py`: in scope - covers post-commit success/failure, unscorable exclusion, and duplicate no-op.
+- `backend/tests/integration/test_candidate_sync.py`: in scope - retained Candidate behavior and authoritative identity reuse are covered.
+- `backend/tests/unit/test_graph_setup.py`: in scope - fixed DDL and domain projection ownership are checked precisely.
+- Task 03A, Plan 5 sections 7.3/7.7, Master Plan sections 8/21, root README, A1 handoff, and matching execution report were reviewed.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_job_sync.py tests/integration/test_job_ingestion.py tests/integration/test_candidate_sync.py tests/unit/test_graph_setup.py -q`
+- Required: yes
+- Reported result: passed, 58 tests after repair
+- Rerun result: passed, 58 tests
+- Status: passed
+- Notes: fake-driver and migrated-SQLite coverage includes every original rejection path.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; Ruff clean and MyPy clean over 75 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: required MERGE/relationship/revision/failure ownership search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed as a source-ownership search
+- Status: passed
+- Notes: Cypher remains parameterized and target-Job relationship clearing is scoped.
+
+- Command/check: direct `sync_job` probe with `jd_quality="unscorable"` and a valid locked vector
+- Required: yes, derived from "Unscorable/failed Jobs are never synced"
+- Reported result: passed after repair
+- Rerun result: passed; stable `NEO4J_SYNC_FAILED`, zero session entries, and zero graph statements
+- Status: passed
+- Notes: the reusable graph owner now fails closed before driver I/O.
+
+- Command/check: reuse/duplication scan for the locked vector validator and Candidate singleton ID
+- Required: yes, from repository anti-duplication and shared-owner rules
+- Reported result: passed after repair
+- Rerun result: passed; `sync_job` calls `validate_finite_vector` with no local `_validate_embedding`, while Candidate sync binds `CANDIDATE_PROFILE_ID` with no `_CANDIDATE_ID` alias
+- Status: passed
+- Notes: existing owners remain authoritative.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: scorable post-commit Jobs project idempotently with exact identity/revision/vector and scoped current relationships; unscorable/duplicate/failure paths preserve SQLite truth and the approved failure contract.
+
+## Architecture and Scope Review
+- Shared graph failure/seed primitives have one owner, domain relationship Cypher stays in Candidate/Job modules, and fixed DDL remains in `constraints.py`.
+- No tool/registry/SSE/rebuild/frontend/route/matching scope was introduced.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T10:39:00+07:00
+- what was re-checked: all prior 03A findings, repaired graph owners/tests/report, current git evidence, every required validation, the original unscorable direct probe, and ownership scans.
+- repairs verified: non-scorable/unknown quality fails before graph I/O; locked vector validation delegates to `validate_finite_vector`; Candidate identity delegates to `CANDIDATE_PROFILE_ID`; all retained Candidate/ingestion behavior passes.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03B
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Derived Job Graph, Tools, and Rebuild
+- Task ID: 03B
+- Task title: Expose compact replay-safe Job tools and register exactly five production tools
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- cached diff reviewed: yes; empty
+- changed files from Task 03B: `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/tools/registry.py`, `backend/app/api/dependencies.py`, `backend/app/agent/graph.py`, `backend/app/db/models/jobs.py`, `backend/app/repositories/jobs.py`, `backend/app/services/jd_ingestion.py`, `backend/tests/integration/test_job_tools.py`, `backend/tests/integration/test_interrupt_resume.py`, `backend/tests/integration/test_profile_approval.py`, `backend/tests/unit/test_agent_graph.py`, `backend/tests/unit/test_profile_extraction.py`, and the matching execution-report block
+- other dirty files: previously A2-accepted 03A changes and the approved 03B contract clarification remain uncommitted in Batch03 and were not attributed to this execution.
+
+## Files Reviewed
+- `backend/app/schemas/jobs.py`: in scope and complete; status/quality Literals are asserted against ORM owners, ingest outcome is single-owned here, and query bounds import the shared owner.
+- `backend/app/tools/jobs.py`: in scope; real compact tools use the existing durable `execute_tool` identity and Job repository.
+- `backend/app/tools/registry.py`, `backend/app/api/dependencies.py`, `backend/app/agent/graph.py`: in scope; preserve one registry/graph and register the exact five-tool order.
+- `backend/app/db/models/jobs.py`, `backend/app/repositories/jobs.py`, `backend/app/services/jd_ingestion.py`: in repair scope; one shared limit owner and one schema-owned ingest-outcome type replace the rejected parallel contracts without changing accepted persistence/sync behavior.
+- `backend/tests/integration/test_job_tools.py`: in scope and complete; covers ownership, all four authorization states, every query filter, replay, durable history privacy, and the existing strict SSE schema.
+- affected profile/interrupt/agent tests: in scope; stale registry assertions were updated without weakening retained behavior.
+- Task 03B, its cited Plan/Master sections, root README, A1 handoff/report, Job repository/query owner, tool execution owner, and current history/SSE projection owners were reviewed.
+
+## Validations Reviewed
+- Command/check: exact required Task 03B pytest suite
+- Required: yes
+- Reported result: passed, 146 tests after repair
+- Rerun result: passed, 146 tests
+- Status: passed
+- Notes: includes all prior repair conditions plus retained Job/profile/chat behavior.
+
+- Command/check: `python -m pytest tests/integration/test_jobs_repository.py tests/integration/test_job_ingestion.py -q`
+- Required: yes for the repair's shared-owner refactor
+- Reported result: passed, 48 tests
+- Rerun result: passed, 48 tests
+- Status: passed
+- Notes: retained repository, ingestion, duplicate, and post-commit graph behavior remain green.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed; Ruff clean and MyPy clean over 76 source files
+- Rerun result: passed; Ruff clean and MyPy clean over 76 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: required Job-tool ownership/privacy search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; status/quality mirrors are linked by `get_args` assertions, `JobIngestOutcome` has one type owner, and `JOB_COMPACT_QUERY_LIMIT_*` is imported by both repository and schema with no private limit pair
+- Status: passed
+- Notes: the rejected independent owners are removed and guarded by a regression test.
+
+- Command/check: required route search
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; no `/api/jobs` and only the existing health/attachment/profile/chat routers
+- Status: passed
+- Notes: no public Job route was added.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: production behavior is real, compact, replay-safe, correctly ordered, authorized in every Master state, registered as tools four/five, and proven raw/embedding-free across durable history and the current strict SSE contract.
+
+## Architecture and Scope Review
+- One Agent graph, one registry, one durable executor, and the existing query ordering owner are preserved; no matching tool, second idempotency key, Job route, status alias, or 03C implementation was introduced.
+- Shared status/quality/outcome/query-bound contracts now have linked authoritative owners, and every affected repository/ingestion caller was revalidated.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T11:05:03+07:00
+- what was checked: first 03B A2 review, including source contracts, README, A1 evidence, full git/file evidence, shared owners, and every required validation.
+- repairs verified: not applicable; first review.
+- remaining issues: duplicated contracts and incomplete state/filter/privacy coverage.
+- updated outcome: REJECTED.
+
+### 2026-07-14T11:19:59+07:00
+- what was re-checked: the three prior findings, updated A1 report/handoff, current git evidence, shared owners/callers, authorization/status/history/SSE tests, and every required plus retained validation.
+- repairs verified: shared contracts now have linked single owners; all four authorization states and `processing_status` are covered; durable history and current SSE schema exclude raw/hash/extraction/embedding data without adding 03C emission.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03C
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Derived Job Graph, Tools, and Rebuild
+- Task ID: 03C
+- Task title: Repair the unmet durable tool-status prerequisite on the existing SSE path
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- cached diff reviewed: yes; empty
+- changed files from Task 03C: backend/app/services/tool_execution.py, backend/app/agent/runner.py, backend/tests/fakes/synthetic_tool.py, backend/tests/integration/test_agent_runner.py, backend/tests/integration/test_tool_replay.py, backend/tests/integration/test_interrupt_resume.py, and the matching execution-report block
+- other dirty files: A2-accepted 03A/03B changes remain uncommitted in Batch03 and were not attributed to this execution.
+
+## Files Reviewed
+- backend/app/services/tool_execution.py: in scope and repaired; publications now follow successful durable commits.
+- backend/app/agent/runner.py: in scope and repaired; the async merge queue yields status while a side effect is running.
+- backend/tests/fakes/synthetic_tool.py: in scope; interrupt/resume uses the shared executor.
+- backend/tests/integration/test_agent_runner.py: in scope; live blocking and same-ToolNode overlapping identities are covered.
+- backend/tests/integration/test_tool_replay.py: in scope; durable visibility, gather concurrency, replay, and failure coupling are covered.
+- backend/tests/integration/test_interrupt_resume.py: in scope; same execution identity across interrupt/resume is covered.
+- backend/app/tools/profile.py: in scope and complete; all three profile tools use hidden durable identity and the shared execute_tool owner while preserving public schemas.
+- Task 03C, cited source contracts, README, A1 evidence, durable/runner/SSE owners, all production tool callers, and frontend parser/reducer were reviewed.
+
+## Validations Reviewed
+- Command/check: exact required Task 03C pytest suite
+- Required: yes
+- Reported result: passed, 127 tests after repair
+- Rerun result: passed, 127 tests
+- Status: passed
+- Notes: includes live blocking, post-commit visibility, concurrency, interrupt, replay, privacy, Job, and retained profile tests.
+
+- Command/check: focused Ruff plus python -m mypy app
+- Required: yes
+- Reported result: passed; Ruff clean and MyPy clean over 76 source files
+- Rerun result: passed; Ruff clean and MyPy clean over 76 source files
+- Status: passed
+- Notes: no lint or typing failure.
+
+- Command/check: blocking-tool live-stream probe
+- Required: yes
+- Reported result: passed after repair
+- Rerun result: passed; pending/running arrive before release and completed only afterward
+- Status: passed
+- Notes: resolves the original delayed-flush failure.
+
+- Command/check: publication-vs-persisted-state probe
+- Required: yes
+- Reported result: passed after repair
+- Rerun result: passed; published and persisted states match for pending, running, and completed
+- Status: passed
+- Notes: each advertised state is committed first.
+
+- Command/check: actual overlapping identity coverage
+- Required: yes
+- Reported result: passed after repair
+- Rerun result: passed; same-ToolNode and asyncio.gather tests prove per-identity order, distinct IDs, and replay no-op
+- Status: passed
+- Notes: replaces the original sequential-only evidence.
+
+- Command/check: production profile/Job durable-owner scan
+- Required: yes, from the shared Job/profile owner acceptance condition
+- Reported result: passed after the second repair
+- Rerun result: passed; each of the three profile factories and both Job factories calls execute_tool with hidden injected identity
+- Status: passed
+- Notes: proposal replay reuses one durable row with no second provider/extraction or draft mutation, and public LLM schemas exclude injected fields.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: live post-commit status, compact payload, failure coupling, interrupt/resume, replay, concurrency, exact event vocabulary, and all five production tool callers now share one durable execution/publication owner.
+
+## Architecture and Scope Review
+- One executor, one SSE event name, one durable identity, and no polling store/client redesign are preserved.
+- All five production tools now enter the same owner; profile proposal services and compact arguments-summary helpers remain their existing business-logic owners.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T11:37:20+07:00
+- what was checked: first 03C A2 review, including source contracts, README, A1 evidence, git/file evidence, service/runner/frontend owners, required validations, live timing, durable visibility, and concurrency claims.
+- repairs verified: not applicable; first review.
+- remaining issues: pre-commit publication, delayed SSE flushing, and missing real concurrency coverage.
+- updated outcome: REJECTED.
+
+### 2026-07-14T11:51:39+07:00
+- what was re-checked: first-review findings, repaired service/runner/tests/report, 127-test suite, Ruff/MyPy, post-commit visibility, live timing, real concurrency, and every production tool caller.
+- repairs verified: post-commit publication, live queue merge, and overlapping identity coverage pass.
+- remaining issues: both profile proposal tools still bypass the sole durable execution/publication owner.
+- updated outcome: REJECTED.
+
+### 2026-07-14T12:05:11+07:00
+- what was re-checked: remaining profile-caller repair, hidden OpenAI tool schemas, durable rows/statuses for all five factories, proposal replay side effects, required 128-test suite, focused 19-test profile suite, Ruff/MyPy, ownership scan, and all previously verified 03C probes.
+- repairs verified: both proposal tools use execute_tool with compact summaries and hidden identity; replay performs no second extraction/provider/draft mutation; prior live/durable/concurrency behavior remains green.
+- remaining issues: none.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - 03D
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Derived Job Graph, Tools, and Rebuild
+- Task ID: 03D
+- Task title: Complete the safe provider-free Neo4j rebuild service and thin CLI
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- cached diff reviewed: yes; empty
+- repaired files attributed to 03D: `backend/app/graph/rebuild.py`, `backend/app/graph/rebuild_target.py`, `backend/app/graph/rebuild_snapshot.py`, `backend/app/graph/rebuild_ops.py`, `infrastructure/scripts/rebuild_neo4j.py`, `backend/tests/integration/test_graph_rebuild.py`, `backend/tests/integration/test_graph_rebuild_cli.py`, `backend/tests/unit/test_graph_setup.py`, `backend/tests/unit/test_skill_normalization.py`, `backend/app/services/skill_normalization.py`, `infrastructure/docker-compose.yml`, `infrastructure/docker/backend.Dockerfile`, `README.md`, and the matching execution-report block; the rejected duplicate seed and package-data entry are gone
+- other dirty files: previously A2-accepted 03A/03B/03C changes and their task/report/review evidence remain uncommitted in Batch03 and were not attributed to 03D.
+
+## Files Reviewed
+- `backend/app/graph/rebuild.py`, `rebuild_target.py`, `rebuild_snapshot.py`, `rebuild_ops.py`: in scope and repaired; production responsibilities are focused at 266/101/166/140 lines, choice C is exact, SQLite preflight precedes clear, and counts are endpoint-scoped.
+- `infrastructure/scripts/rebuild_neo4j.py`: in scope and repaired; help/version only, while no-arg and bogus arguments refuse without importing the application rebuild or touching stores.
+- `infrastructure/docker-compose.yml`, `infrastructure/docker/backend.Dockerfile`, `backend/app/services/skill_normalization.py`, `backend/tests/unit/test_skill_normalization.py`: in scope and repaired; one build-only named context copies the sole tracked infrastructure seed to its authoritative container path without runtime topology, environment, mount, volume, or hostname changes.
+- `backend/tests/integration/test_graph_rebuild_cli.py`: in scope and focused; 218 lines cover exact target acceptance/refusal and host-wrapper safety.
+- `backend/tests/fakes/graph_rebuild.py`, `backend/tests/support/graph_rebuild.py`, and `backend/tests/integration/test_graph_rebuild_contracts.py`, `test_graph_rebuild_preflight.py`, `test_graph_rebuild_behavior.py`: in scope and repaired; shared fake/setup owners are singular, all prior assertions remain, and the focused files are 185/261/91/168/247 lines. The oversized `test_graph_rebuild.py` is removed.
+- `backend/tests/unit/test_graph_setup.py`: in scope and repaired; repository/database imports are limited to the exact public/snapshot rebuild modules while ops/target/base DDL remain isolated.
+- `README.md`: in scope and repaired; it documents the exact Compose target, wrapper refusal, sole-seed packaging, and endpoint-scoped counts.
+- `docs/reports/report_5_execute_agent.md`: one updated 03D block accurately distinguishes cumulative production work from the final test-only repair and records both repair logs.
+- The selected task/source contracts, both prior A2 findings, final repair handoff/report, every split test/support/fake owner, current README, Compose/Docker build inputs, and current git evidence were re-reviewed.
+
+## Validations Reviewed
+- Command/check: full required repair pytest suite including rebuild, CLI, sync, Compose, graph setup, and normalization
+- Required: yes
+- Reported result: passed, 79 tests
+- Rerun result: passed, 79 tests; aiosqlite datetime deprecation warnings only
+- Status: passed
+- Notes: all 79 retained tests pass after the focused split; an A2 rerun also emitted a non-failing aiosqlite event-loop cleanup warning recorded below.
+
+- Command/check: focused Ruff plus `python -m mypy app`
+- Required: yes
+- Reported result: passed; Ruff clean and MyPy clean over 80 source files
+- Rerun result: passed; Ruff clean and MyPy clean over 80 source files
+- Status: passed
+- Notes: all repaired production modules and tests are clean.
+
+- Command/check: wrapper `--help` and no-argument refusal
+- Required: yes
+- Reported result: passed; help exit 0, no-arg exit 1
+- Rerun result: passed; exact canonical command printed and no success summary/store path entered
+- Status: passed
+- Notes: prior host execution gap is fixed.
+
+- Command/check: Compose config, sole-seed/build-context, target, and count ownership checks
+- Required: yes
+- Reported result: passed
+- Rerun result: passed; config quiet, duplicate resource absent, one production seed owner, exact target constants, and endpoint-scoped count Cypher
+- Status: passed
+- Notes: prior single-owner, target, and count findings are fixed.
+
+- Command/check: `docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild`
+- Required: yes, explicitly user-authorized choice C
+- Reported result: passed after rebuilt image, Skill 18 / RELATED_TO 4 with zero Candidate/Job
+- Rerun result: passed; Candidate 0, Job 0, Skill 18, HAS_SKILL 0, REQUIRES 0, PREFERS 0, RELATED_TO 4
+- Status: passed
+- Notes: the exact authorized context passes; only empty-relationship Neo4j warnings remain.
+
+## Acceptance Review
+- Task acceptance: satisfied.
+- Status: satisfied
+- Evidence: exclusive choice C, safe preflight/clear, sole seed ownership, endpoint-scoped counts, focused production and test modules, provider/SQLite prohibitions, repeat behavior, exact counts, report accuracy, and the authorized live command all pass.
+
+## Architecture and Scope Review
+- Production SQLite, graph, provider, target, configuration, count, and module boundaries are aligned and real.
+- Test fake/support/contracts/preflight/behavior/CLI concerns now have focused single owners with no copied helpers.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- The live empty-relationship count queries emit Neo4j UNRECOGNIZED relationship-type warnings; this is noisy but did not change exit status or the acceptance outcome.
+- A2's full-suite reruns exited zero but intermittently emitted `PytestUnhandledThreadExceptionWarning` from an aiosqlite worker after an event loop closed; no test or acceptance behavior failed, but future test-harness cleanup may explicitly dispose per-test engines.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T12:37:33+07:00
+- what was checked: first 03D A2 review, including all source/task contracts, current README, A1 report/handoff, complete 03D diff and files, accepted seed ownership, Compose/Docker packaging, required fake/lint/type/help/live gates, target safety, scoped deletion/count behavior, module boundaries, and progress state.
+- repairs verified: not applicable; first review.
+- remaining issues: exclusive choice-C enforcement, sole seed ownership, exact scoped counts, focused module/test ownership, and report accuracy.
+- updated outcome: REJECTED.
+
+### 2026-07-14T12:52:34+07:00
+- what was re-checked: all five first-review findings, repaired production modules/tests/docs/packaging/report, the 79-test suite, Ruff/MyPy, wrapper help/refusal, sole-seed and Compose evidence, endpoint-scoped counts, exact target guard, and the authorized live command.
+- repairs verified: exclusive choice C, sole tracked seed/build packaging, endpoint-scoped counts, focused production modules, precise graph import guards, README, and live behavior all pass.
+- remaining issues: the required oversized-test split and corresponding report accuracy; `test_graph_rebuild.py` remains 901 lines.
+- updated outcome: REJECTED.
+
+### 2026-07-14T13:12:00+07:00
+- what was re-checked: the sole remaining test-modularity/report finding, every new fake/support/contracts/preflight/behavior file, exact line counts and test inventory, current A1 report, git state, the full 79-test suite, Ruff, and MyPy.
+- repairs verified: the 901-line owner is removed; six focused files are 91Ã¢â‚¬â€œ261 lines; shared helpers are single-owned; all prior assertions and 79 tests remain; the report accurately separates test-only repair from preserved production behavior.
+- remaining issues: none; non-blocking aiosqlite/empty-relationship warnings are recorded above.
+- updated outcome: ACCEPTED.
+
+---
+
+# Task Review Report - batch_scope
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+batch_scope_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch03 - Derived Job Graph, Tools, and Rebuild
+- Task ID: batch_scope
+- Task title: Post-A3 Batch03 repository-wide Ruff repairs
+- Executor status reported: complete
+- Accepted task IDs preserved: 03A, 03B, 03C, 03D
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- cached diff reviewed: yes; empty
+- changed files from git: 46 current paths; all 45 prior A3 paths remain and the sole additional path is the explicitly repaired committed-baseline file `backend/tests/unit/test_storage.py`.
+- repair-touched files reported by latest A1: `backend/tests/unit/test_storage.py` and `docs/reports/report_5_execute_agent.md`; the first repair's `backend/tests/fakes/synthetic_tool.py` remains preserved.
+
+## Files Reviewed
+- `backend/tests/fakes/synthetic_tool.py`: in scope first repair - the existing `app` imports precede langchain/langgraph/sqlalchemy with no separating blank line; no repair-scope behavior change.
+- `backend/tests/unit/test_storage.py`: in scope second repair - the exact pre-existing boolean assertion is wrapped in parentheses across lines; operands, operators, calls, and evaluation order are unchanged.
+- `docs/reports/report_5_execute_agent.md`: in scope - exactly one `batch_scope` execution block remains at EOF; it preserves the import repair and records the E501 repair in a second Repair Log entry without rewriting 01A-03D history.
+- `.agent/handoff/a1_response.json`: in scope evidence - latest identity, complete status, two repair-touched files, five passing checks, report update, and no progress update agree with repository evidence.
+- `.agent/handoff/a3_response.json`: in scope evidence - prior rerun PASS records the original 45 paths and all four accepted, checked task IDs; the added storage path now requires fresh A3 classification.
+- `README.md`, `docs/tasks/task_5.md`, and existing review evidence: context/progress evidence - README was read, Batch03 remains 03A-03D checked, and this existing review block was updated in place.
+
+## Validations Reviewed
+- Command/check: `Set-Location backend; python -m ruff check tests/fakes/synthetic_tool.py`
+- Required: yes
+- Reported result: passed; `All checks passed!`
+- Rerun result: passed in the first A2 review.
+- Status: passed
+- Notes: the first post-A3 I001 finding remains fixed.
+
+- Command/check: inspect the repaired synthetic-tool import block against the prescribed pre-repair Ruff diff
+- Required: yes
+- Reported result: import-order only.
+- Rerun result: current import block matches Ruff ordering; body unchanged by that repair.
+- Status: passed
+- Notes: formatting-only.
+
+- Command/check: `Set-Location backend; python -m ruff check tests/unit/test_storage.py`
+- Required: yes
+- Reported result: passed; `All checks passed!`
+- Rerun result: passed; `All checks passed!`
+- Status: passed
+- Notes: the exact E501 reproduction is repaired.
+
+- Command/check: `Set-Location backend; python -m pytest tests/unit/test_storage.py -q`
+- Required: yes
+- Reported result: passed; 22 passed and 1 skipped.
+- Rerun result: passed; exit 0 with one expected skip marker.
+- Status: passed
+- Notes: line wrapping changed no storage behavior.
+
+- Command/check: `Set-Location backend; python -m ruff check .`
+- Required: yes
+- Reported result: passed; repository-wide `All checks passed!`
+- Rerun result: passed; repository-wide `All checks passed!`
+- Status: passed
+- Notes: both post-A3 Ruff findings are clear.
+
+- Command/check: inspect `backend/tests/unit/test_storage.py` repair delta and origin evidence
+- Required: yes
+- Reported result: layout-only wrap; committed baseline originated in `081817e P4B2: Complete`.
+- Rerun result: Git diff contains only parentheses and line breaks around the exact original expression; no hidden pre-repair working-tree change existed.
+- Status: passed
+- Notes: the minimal root-cause repair preserves semantics and user work.
+
+- Command/check: `git status --short`, `git diff --stat`, `git diff`, and current-path comparison with prior A3 `batchCommitFiles`
+- Required: yes
+- Reported result: prior Batch03 dirty tree preserved; one explicit baseline-lint repair path added.
+- Rerun result: 46 current paths; all 45 prior A3 paths remain and the only additional path is `backend/tests/unit/test_storage.py`.
+- Status: passed
+- Notes: A2 accepts the repair itself but does not decide commit scope; A3 must classify the added path on rerun.
+
+- Command/check: `git diff --cached`
+- Required: yes
+- Reported result: empty.
+- Rerun result: empty.
+- Status: passed
+- Notes: nothing is staged.
+
+## Acceptance Review
+- Task acceptance: both exact post-A3 Ruff findings are repaired and the latest repair stayed inside its explicit two-file boundary.
+- Status: satisfied
+- Evidence: targeted and repository-wide Ruff pass; storage tests pass; the assertion delta is layout-only; the A1 execution report is materially accurate; no task checkbox, batch status, README, runtime behavior, staging, commit, or live graph state was changed by A1.
+
+## Progress Tracking
+- Selected task checkbox before review: n/a; synthetic `batch_scope` has no checkbox, and 03A-03D were checked before repair.
+- Checkbox updated by reviewer: no
+- Checkbox final state: n/a; 03A-03D remain checked.
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: no
+- Batch can be marked complete by A2: no
+- A3 can rerun: yes
+- Next action: rerun_a3
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T13:22:44+07:00
+- what was checked: the first import-order A1 repair, current import block, targeted Ruff, exact 45-path comparison, unchanged checkboxes, and empty index.
+- repairs verified: I001 was fixed by import ordering only; no path outside the original A3 list was added.
+- remaining issues: none at that review.
+- updated outcome: ACCEPTED; A3 rerun authorized.
+
+### 2026-07-14T13:35:00+07:00
+- what was re-checked: the second post-A3 A1 handoff/report update, committed-baseline origin, exact storage diff, all current dirty paths, unchanged checkboxes, empty index, targeted storage Ruff, storage unit tests, and repository-wide Ruff.
+- repairs verified: the 95-character assertion is only parenthesized and wrapped; its exact expression and evaluation order remain; 22 tests pass with one expected skip; full Ruff passes; the first import-order repair remains intact.
+- remaining issues: none for A2; the added storage path requires fresh A3 scope classification.
+- updated outcome: ACCEPTED; `a3CanRerun=true`, `nextAction=rerun_a3`.

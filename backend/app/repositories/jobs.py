@@ -16,6 +16,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.time import utc_now
 from app.db.models.jobs import (
+    JOB_COMPACT_QUERY_LIMIT_MAX,
+    JOB_COMPACT_QUERY_LIMIT_MIN,
     JOB_JD_QUALITIES,
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
@@ -42,7 +44,6 @@ _ALLOWED: dict[str, frozenset[str]] = {
     JOB_PROCESSING_STATUS_PROCESSED: frozenset(),
 }
 _SCORABLE = frozenset({JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL})
-_LIMIT_MIN, _LIMIT_MAX = 1, 50
 
 
 class JobRepositoryError(Exception):
@@ -324,9 +325,10 @@ async def list_compact(
     """Newest-first compact rows; *limit* required in ``1..50`` (no default)."""
     if not isinstance(limit, int) or isinstance(limit, bool):
         raise JobRepositoryError("limit must be an int in 1..50")
-    if limit < _LIMIT_MIN or limit > _LIMIT_MAX:
+    if limit < JOB_COMPACT_QUERY_LIMIT_MIN or limit > JOB_COMPACT_QUERY_LIMIT_MAX:
         raise JobRepositoryError(
-            f"limit must be in {_LIMIT_MIN}..{_LIMIT_MAX}, got {limit!r}"
+            f"limit must be in {JOB_COMPACT_QUERY_LIMIT_MIN}.."
+            f"{JOB_COMPACT_QUERY_LIMIT_MAX}, got {limit!r}"
         )
     if (
         processing_status is not None

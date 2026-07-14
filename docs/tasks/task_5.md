@@ -67,18 +67,21 @@ production-security scope beyond the approved local-demo limits.
 - The deterministic quality table is recorded in (01A). For (01B), the user
   approved rejecting only absent or whitespace-only acquired text; every other
   non-empty result, including short or contact-only text, proceeds unchanged to
-  later quality classification and may become processed `unscorable`. Any
-  remaining `query_jobs` default/tie-break decision stays with its owning task
-  and must not be silently invented.
+  later quality classification and may become processed `unscorable`.
+- For `query_jobs`, the user approved default `limit=10` and deterministic
+  newest ordering `(created_at DESC, id DESC)` on 2026-07-14. The existing Job
+  repository already owns that exact ordering; Task (03B) must reuse it.
 - Compact Job output uses the existing repository `outcome` naming convention.
   Exact URL dedup hashes the final plain text stored as `raw_content`, without
   whitespace normalization; this is recorded as the smallest neutral reading
   of the Plan's fetched-content hash and persisted-content requirements.
-- The source-required host rebuild command conflicts with current Compose
-  runtime values: `/data/jobagent.db` is a named-volume path and
-  `bolt://neo4j:7687` is Docker DNS, neither reachable from host Python. Task
-  (03D) records this as an explicit run-context blocker rather than adding a
-  second `.env`, copying live data, or silently changing prior runtime ownership.
+- On 2026-07-14 the user selected rebuild run-context choice C: the canonical
+  live command executes `python -m app.graph.rebuild` inside the existing
+  backend Compose container, where `/data/jobagent.db` and
+  `bolt://neo4j:7687` already share the authoritative root environment boundary.
+  The user separately authorized clearing and rebuilding only JobAgent-managed
+  `Candidate`, `Job`, and `Skill` data in that local Compose Neo4j target; no
+  unrelated graph data, second `.env`, data copy, or Compose remap is authorized.
 - The user-supplied agent rules apply throughout: search all existing owners and
   callers before writing, reuse/refactor instead of duplicating logic, keep
   modules single-purpose, prefer the shortest source-aligned implementation,
@@ -185,9 +188,14 @@ production-security scope beyond the approved local-demo limits.
   registration becomes exactly five tools; `match_jobs` remains absent.
 - Tool/history/card payloads are compact and never contain raw JD text,
   authorization headers, secrets, provider bodies, filesystem paths, or ranking.
+- The approved rebuild context is choice C only. Its canonical live command is
+  `docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild`, and its destructive authority is limited
+  to JobAgent-managed `Candidate`, `Job`, and `Skill` data in the local Compose
+  Neo4j target.
 - Normal tests use fake HTTP, structured-output, embedding, and Neo4j adapters
-  plus temporary migrated SQLite. Real ShopAIKey, public network, Docker, and
-  live Neo4j checks are optional and never block mandatory task acceptance.
+  plus temporary migrated SQLite. Real ShopAIKey and public-network checks stay
+  optional; the user-authorized choice-C Compose rebuild in (03D) is the one
+  required live Docker/Neo4j acceptance gate for this batch.
 
 ## Batch Map
 
@@ -629,7 +637,7 @@ workers/queues/ledgers, alternate models, or frontend rendering.
 
 ### Tasks
 
-- [ ] (03A): Synchronize scorable Job/Skill graph data idempotently after SQLite commit
+- [x] (03A): Synchronize scorable Job/Skill graph data idempotently after SQLite commit
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.7 Direct Job graph synchronization`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.3 Persistence-first ingestion and exact deduplication`; `docs/plans/Master_plan.md > ## 8. Neo4j Derived Model`; `docs/plans/Master_plan.md > ## 21. Direct SQLite-to-Neo4j Synchronization > ### 21.1 Direct sync rule`; `docs/plans/Master_plan.md > ## 21. Direct SQLite-to-Neo4j Synchronization > ### 21.2 Local failure behavior`
   - Source Requirements:
     - After a processed `full|partial` SQLite commit, parameterized idempotent
@@ -677,7 +685,7 @@ workers/queues/ledgers, alternate models, or frontend rendering.
   - Blocked Condition: None.
   - Files: `backend/app/graph/sync_shared.py`, `backend/app/graph/sync_candidate.py`, `backend/app/graph/sync_job.py`, `backend/app/services/jd_ingestion.py`, `backend/tests/integration/test_job_sync.py`, `backend/tests/integration/test_job_ingestion.py`, `backend/tests/integration/test_candidate_sync.py`, `backend/tests/unit/test_graph_setup.py`
 
-- [ ] (03B): Expose compact replay-safe Job tools and register exactly five production tools
+- [x] (03B): Expose compact replay-safe Job tools and register exactly five production tools
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.6 Job tools`; `docs/plans/Plan_5.md > ## 4. Scope`; `docs/plans/Plan_5.md > ## 5. Out of Scope`; ``docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.4 `save_job```; ``docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.5 `query_jobs```; `docs/plans/Master_plan.md > ## 13. Agent-Facing Tool Contracts > ### 13.7 Tool authorization matrix`
   - Source Requirements:
     - `save_job` validates exactly one of `url|text`, requires no approval or
@@ -688,24 +696,27 @@ workers/queues/ledgers, alternate models, or frontend rendering.
       truthful SQLite/sync state. A post-commit sync failure is a failed
       ToolResult with `NEO4J_SYNC_FAILED`, `sqlite_committed=true`, and no raw JD.
     - `query_jobs` is read-only, validates optional ID/status/quality plus limit
-      `1..50`, and returns compact newest deterministic rows without raw
-      content/embeddings. The source does not select its default or tie-breaker.
+      `1..50`, defaults omitted `limit` to exactly `10`, and returns compact rows
+      ordered exactly by `created_at DESC, id DESC` without raw content or
+      embeddings. Reuse the existing repository ordering owner.
     - Production registration becomes exactly the three profile tools followed
       by `save_job` and `query_jobs`; `match_jobs` and synthetic tools remain absent.
   - Dependencies: (03A); existing ToolResult/tool-execution/replay, registry,
     dependency injection, Agent graph, prompt, and history owners.
-  - User Action: Approve the exact `query_jobs` default limit and deterministic
-    newest tie-break order, then revise this task to record both before A1
-    defines the public tool schema/query tests.
+  - User Action: Satisfied on 2026-07-14. The user approved default `limit=10`
+    and deterministic newest order `created_at DESC, id DESC`; no remaining
+    action is required before A1 execution.
   - Agent Work:
-    1. Search all profile tool factories, `execute_tool`/replay callers,
-       registry/dependency construction, prompt tool-name projection, compact
-       result schemas, authorization tests, and every assertion about production
-       tool count before defining the Job tool boundary.
+    1. Search all profile tool factories, `execute_tool`/replay callers, the
+       existing Job compact-query owner, registry/dependency construction,
+       prompt tool-name projection, compact result schemas, authorization tests,
+       and every assertion about production tool count before defining the Job
+       tool boundary.
     2. Add tests for exactly-one input, all profile/draft authorization states,
        compact created/returned/retried and failed/sync-failed results, query
-       filters/approved default/order, raw-data exclusion, same-call replay, and
-       exact five production tool names/order.
+       filters, omitted-limit default `10`, exact `created_at DESC, id DESC`
+       order including tied timestamps, raw-data exclusion, same-call replay,
+       and exact five production tool names/order.
     3. Implement strict compact Job input/output models and focused tool
        factories that close over existing service dependencies, call the one
        execution/replay owner, and never call FastAPI routes or add idempotency.
@@ -725,8 +736,10 @@ workers/queues/ledgers, alternate models, or frontend rendering.
       fetch/extraction/embedding/SQLite/Neo4j side effect.
     - ToolResult success/failure coupling is exact; sync-failed output reports
       committed processed truth without false graph success.
-    - Query validation/order/filtering follows the approved exact contract and all result,
-      arguments-summary, history, and SSE surfaces exclude raw JD/embedding data.
+    - Query validation/filtering enforces `limit in 1..50`, defaults to `10`,
+      and orders by `created_at DESC, id DESC` including deterministic timestamp
+      ties; all result, arguments-summary, history, and SSE surfaces exclude raw
+      JD and embedding data.
     - No job route, second registry/executor/idempotency key, approval, matching
       tool, or status alias is introduced.
   - Validation:
@@ -734,11 +747,11 @@ workers/queues/ledgers, alternate models, or frontend rendering.
     - Required: `Set-Location backend; python -m ruff check app/schemas/jobs.py app/tools/jobs.py app/tools/registry.py app/api/dependencies.py app/agent/graph.py tests/integration/test_job_tools.py tests/unit/test_agent_graph.py tests/unit/test_profile_extraction.py; python -m mypy app` -> tool/registry integration lint and application typing pass.
     - Required: `rg -n "save_job|query_jobs|match_jobs|production_registry|raw_content|embedding_json|outcome|sqlite_committed|sync_ok" backend/app backend/tests` -> exact tool set, compact contract, replay path, and prohibited data are reviewable.
     - Required: `rg -n "@router\.(get|post|put|patch|delete)|include_router|/api/jobs" backend/app` -> Plan 5 registers no public Job route and leaves the existing endpoint boundary unchanged.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` until the query default and
-    deterministic tie-break order are approved and written into this task.
+  - Blocked Condition: None. The required query default and tie-break contract
+    are approved and recorded above.
   - Files: `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/tools/registry.py`, `backend/app/api/dependencies.py`, `backend/app/agent/graph.py`, `backend/tests/integration/test_job_tools.py`, `backend/tests/integration/test_tool_replay.py`, `backend/tests/integration/test_chat_api.py`, `backend/tests/integration/test_interrupt_resume.py`, `backend/tests/integration/test_profile_approval.py`, `backend/tests/unit/test_agent_graph.py`, `backend/tests/unit/test_profile_extraction.py`
 
-- [ ] (03C): Repair the unmet durable tool-status prerequisite on the existing SSE path
+- [x] (03C): Repair the unmet durable tool-status prerequisite on the existing SSE path
   - Source of Truth: `docs/plans/Plan_5.md > ## 3. Prerequisites from Prior Phases`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.6 Job tools`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.9 Frontend saved-job display`; ``docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.2 Application table schemas > #### `tool_executions```; `docs/plans/Master_plan.md > ## 14. Public FastAPI Boundary > ### 14.2 SSE contract`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.4 Tool activity display`
   - Source Requirements:
     - Repository evidence shows the Plan 5 prerequisite is not operational: the
@@ -796,7 +809,7 @@ workers/queues/ledgers, alternate models, or frontend rendering.
     version evidence; do not add parallel execution or client state.
   - Files: `backend/app/services/tool_execution.py`, `backend/app/agent/runner.py`, `backend/app/services/chat_turns.py`, `backend/app/schemas/sse.py`, `backend/app/tools/profile.py`, `backend/app/tools/jobs.py`, `backend/app/tools/registry.py`, `backend/app/api/dependencies.py`, `backend/tests/integration/test_agent_runner.py`, `backend/tests/integration/test_tool_replay.py`, `backend/tests/integration/test_interrupt_resume.py`, `backend/tests/integration/test_chat_api.py`, `backend/tests/integration/test_chat_history.py`, `backend/tests/integration/test_job_tools.py`, `backend/tests/integration/test_profile_approval.py`
 
-- [ ] (03D): Complete the safe provider-free Neo4j rebuild service and thin CLI
+- [x] (03D): Complete the safe provider-free Neo4j rebuild service and thin CLI
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.8 Rebuild command`; `docs/plans/Plan_5.md > ## 9. Verification & Testing Plan > ### Backend commands`; `docs/plans/Master_plan.md > ## 21. Direct SQLite-to-Neo4j Synchronization > ### 21.3 Rebuild command`; `docs/plans/Master_plan.md > ## 22. Local Demo Safeguards`; `docs/plans/Master_plan.md > ## 24. Local Testing Strategy > ### 24.5 Local verification commands`
   - Source Requirements:
     - Before deleting graph data, validate every processed `full|partial` stored
@@ -807,34 +820,36 @@ workers/queues/ledgers, alternate models, or frontend rendering.
       recreate existing constraints/index, then rebuild optional Candidate,
       every scorable Job, normalized Skills, and approved relationships through
       the existing sync/seed owners using stored embeddings.
-    - The thin `python infrastructure/scripts/rebuild_neo4j.py` wrapper imports
-      one application rebuild service, prints Candidate/Job/Skill and each
-      relationship count, and exits non-zero on any failure.
+    - One application rebuild service is executable as
+      `python -m app.graph.rebuild`; the thin
+      `python infrastructure/scripts/rebuild_neo4j.py` wrapper imports that
+      owner and exposes its non-destructive help contract without duplicating
+      rebuild logic. The approved live Compose execution prints Candidate/Job/
+      Skill and each relationship count and exits non-zero on any failure.
   - Dependencies: (03A); existing profile/Job repositories, graph driver/schema,
     Candidate/Job/shared skill sync, settings, and root environment boundary.
-  - User Action: Select exactly one run-context resolution and revise this task's
-    authority/files/commands before A1 starts: (A) keep the exact host command
-    but authorize it to delegate execution to a backend-container module that
-    imports/calls the rebuild service; (B) authorize a host-accessible SQLite/
-    loopback-Neo4j remap while retaining one root environment boundary; or (C)
-    authorize replacing the Plan's host command with an explicit Compose-exec
-    command. Each choice relaxes a different current source/runtime constraint;
-    separately confirm the named local Neo4j target may be cleared/rebuilt
-    before the required live command is run.
+  - User Action: Satisfied on 2026-07-14. The user selected choice C and approved
+    the exact canonical live command
+    `docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild`. The user separately authorized clearing
+    and rebuilding only JobAgent-managed `Candidate`, `Job`, and `Skill` data in
+    the local Compose Neo4j target; unrelated graph data remains out of scope.
   - Agent Work:
     1. Search all graph clear/setup/sync/count helpers, settings/database engine
        construction, infrastructure wrappers, Compose volumes/hostnames, and
        README commands before implementing; reuse shared sync/schema primitives.
-    2. Apply only the recorded A, B, or C run-context choice and its revised
-       exact file/command scope. Do not add a second env, copy live data, broaden
-       mounts, or mix approaches.
+    2. Implement only approved choice C: make the application rebuild owner
+       runnable as `python -m app.graph.rebuild` in the existing backend
+       container and retain the thin host wrapper for import/help compatibility.
+       Do not change Compose mounts/hostnames, add a second env, copy live data,
+       or implement the rejected A/B approaches.
     3. Add fake-driver/migrated-SQLite tests for mismatch preflight before clear,
        label-scoped deletion, empty Candidate, all scorable Jobs, excluded rows,
        schema recreation, seed-only rebuild, exact counts, provider prohibition,
        SQLite immutability, repeat safety, and non-zero errors.
     4. Implement one focused rebuild service and thin import-only CLI, then
-       document the approved operational command, no-provider behavior, and
-       URL/local-demo limitations in the root README without duplicating logic.
+       document the exact approved Compose command, label-scoped destructive
+       boundary, no-provider behavior, and URL/local-demo limitations in the
+       root README without duplicating logic.
   - Output: One safe, repeatable, stored-embedding graph rebuild command with an
     explicit runnable local/Compose context.
   - Acceptance:
@@ -846,19 +861,21 @@ workers/queues/ledgers, alternate models, or frontend rendering.
       rebuild; with a Candidate, the same Candidate sync owner is reused.
     - Rebuild makes no embedding/ShopAIKey call and no SQLite write, prints exact
       entity/relationship counts, is repeat-safe, and returns non-zero on failure.
-    - The user-approved canonical command is runnable against the documented
-      authoritative store/graph context and the approved single configuration boundary.
+    - The exact user-approved Compose command is runnable against the existing
+      backend container's authoritative SQLite volume and Neo4j service, without
+      changing the single root configuration boundary or deleting unrelated data.
   - Validation:
     - Required: `Set-Location backend; python -m pytest tests/integration/test_graph_rebuild.py tests/integration/test_job_sync.py tests/integration/test_candidate_sync.py tests/unit/test_graph_setup.py -q` -> preflight, scoped clear, reuse, counts, and no-provider behavior pass with fakes.
     - Required: `Set-Location backend; python -m ruff check app/graph/rebuild.py app/graph/sync_job.py app/graph/sync_candidate.py app/graph/sync_shared.py tests/integration/test_graph_rebuild.py; python -m mypy app` -> rebuild/shared graph lint and application typing pass.
     - Required: `python infrastructure/scripts/rebuild_neo4j.py --help` -> the thin CLI imports successfully and documents its exact non-secret execution contract without touching stores.
     - Required: `rg -n "DETACH DELETE|MATCH \(n\)|ShopAIKey|embed|commit\(|Candidate|Job|Skill|HAS_SKILL|REQUIRES|PREFERS|RELATED_TO" backend/app/graph/rebuild.py infrastructure/scripts/rebuild_neo4j.py backend/tests/integration/test_graph_rebuild.py` -> scoped deletion, provider/SQLite prohibition, and complete counts are reviewable.
-    - Required after choice A or B: `python infrastructure/scripts/rebuild_neo4j.py` -> exits zero against the actual authoritative SQLite/Neo4j context, makes no provider call/SQLite mutation, and prints all required counts.
-    - Required after choice C: `docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild` -> exits zero inside the authoritative Compose context, makes no provider call/SQLite mutation, and prints all required counts.
-  - Blocked Condition: `BLOCKED_BY_USER_ACTION` while no approved execution
-    choice and matching task revision reconcile the command with the Compose-only
-    `/data` volume and `neo4j` service hostname. A1 must not implement only the
-    fake-tested subset or treat `--help` as rebuild acceptance.
+    - Required live (approved choice C): `docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild` -> exits zero inside the authoritative Compose context, makes no provider call/SQLite mutation, preserves unrelated graph data, and prints all required counts.
+  - Blocked Condition: The required live command cannot reach the existing
+    authoritative Compose SQLite/Neo4j context, the target cannot be proven to
+    be the authorized local Compose Neo4j instance, or preflight cannot prove
+    deletion is limited to JobAgent-managed `Candidate`, `Job`, and `Skill`
+    data. A1 must not implement only the fake-tested subset, treat `--help` as
+    rebuild acceptance, change runtime topology, or perform a broader clear.
   - Files: `backend/app/graph/rebuild.py`, `infrastructure/scripts/rebuild_neo4j.py`, `backend/tests/integration/test_graph_rebuild.py`, `README.md`
 
 ## Mandatory Batch04 - Durable Saved-Job Chat Display

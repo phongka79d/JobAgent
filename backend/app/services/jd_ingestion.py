@@ -1,4 +1,4 @@
-"""Persistence-first JD ingestion orchestration (Plan 5 §7.3 / §7.4).
+"""Persistence-first JD ingestion orchestration (Plan 5 §7.3 / §7.4 / §7.7).
 
 Raw-text path (Task 02C): exact SHA-256 selection, short SQLite transactions,
 extraction/embedding outside transactions, one terminal processed/failed write.
@@ -7,7 +7,9 @@ URL path (Task 02D): commit received placeholder before fetch; fetch outside
 transactions; exact fetched-hash return/retry with pure-placeholder deletion;
 reuse the same downstream processor as raw text.
 
-Graph sync and tool shaping are Batch03.
+After a processed scorable (``full|partial``) SQLite commit, optionally runs
+direct Job graph sync outside any transaction. Graph failure never changes the
+processed row; exact non-failed duplicate return never calls sync.
 
 Reuses ``app.db.session.session_scope`` with an optional injected session
 factory for tests; does not define a private short-transaction helper.
@@ -19,7 +21,7 @@ import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final, Literal, Protocol
+from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -32,9 +34,17 @@ from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
     JOB_PROCESSING_STATUS_FAILED,
+    JOB_PROCESSING_STATUS_PROCESSED,
     JobPost,
 )
 from app.db.session import session_scope
+from app.graph.sync_job import (
+    NEO4J_REBUILD_INSTRUCTION,
+    NEO4J_SYNC_FAILED,
+    AsyncGraphDriver,
+    JobSyncError,
+    sync_job,
+)
 from app.repositories import jobs as jobs_repo
 from app.schemas.embeddings import (
     LOCKED_EMBEDDING_DIMENSIONS,
@@ -42,7 +52,14 @@ from app.schemas.embeddings import (
     EmbeddingVectorError,
     validate_finite_vector,
 )
-from app.schemas.jobs import JobPostExtraction
+from app.schemas.jobs import (
+    JOB_INGEST_OUTCOME_CREATED,
+    JOB_INGEST_OUTCOME_RETRIED,
+    JOB_INGEST_OUTCOME_RETURNED,
+    JobIngestOutcome,
+    JobPostExtraction,
+    parse_job_post_extraction,
+)
 from app.services.embedding_text import build_job_embedding_text_v1
 from app.services.jd_extraction import (
     JdExtractionError,
@@ -67,8 +84,10 @@ _SCORABLE_QUALITIES: Final[frozenset[str]] = frozenset(
     {JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL}
 )
 
-IngestOutcome = Literal["created", "returned", "retried"]
+# Re-export schema-owned outcome type for existing ingestion callers.
+IngestOutcome = JobIngestOutcome
 UrlFetcher = Callable[[str], Awaitable[UrlFetchResult]]
+JobSyncFn = Callable[..., Awaitable[None]]
 
 
 class JdIngestionError(Exception):
@@ -96,6 +115,10 @@ class JdIngestResult:
     fallback on URL acquisition failures only. It is None for successful
     acquisition, non-fetch failures, and all raw-text outcomes. The instruction
     is never persisted as free text on the Job row.
+
+    Graph fields are set only when a scorable terminal commit attempted direct
+    sync (``sync_ok`` True/False). Non-scorable, failed, and exact-duplicate
+    returns leave ``sync_ok`` as None (no graph call).
     """
 
     job_id: str
@@ -107,6 +130,9 @@ class JdIngestResult:
     raw_content_hash: str | None
     source_url: str | None = None
     paste_instruction: str | None = None
+    sync_ok: bool | None = None
+    sync_code: str | None = None
+    rebuild_instruction: str | None = None
 
 
 def compute_raw_content_hash(raw_content: str) -> str:
@@ -137,6 +163,9 @@ def _snapshot(
     *,
     outcome: IngestOutcome,
     paste_instruction: str | None = None,
+    sync_ok: bool | None = None,
+    sync_code: str | None = None,
+    rebuild_instruction: str | None = None,
 ) -> JdIngestResult:
     return JdIngestResult(
         job_id=row.id,
@@ -148,7 +177,77 @@ def _snapshot(
         raw_content_hash=row.raw_content_hash,
         source_url=row.source_url,
         paste_instruction=paste_instruction,
+        sync_ok=sync_ok,
+        sync_code=sync_code,
+        rebuild_instruction=rebuild_instruction,
     )
+
+
+def _is_scorable_processed(row: JobPost) -> bool:
+    return (
+        row.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+        and row.jd_quality in _SCORABLE_QUALITIES
+    )
+
+
+async def _maybe_sync_scorable_job(
+    row: JobPost,
+    *,
+    normalizer: SkillNormalizer,
+    graph_driver: AsyncGraphDriver | None,
+    job_sync_fn: JobSyncFn | None,
+) -> tuple[bool | None, str | None, str | None]:
+    """Run direct Job sync after scorable terminal commit when a graph seam exists.
+
+    Returns ``(sync_ok, sync_code, rebuild_instruction)``. When no driver/sync
+    function is injected, returns ``(None, None, None)`` without graph I/O
+    (tests that only exercise SQLite paths). Exact-duplicate and unscorable
+    callers must not invoke this helper.
+    """
+    if not _is_scorable_processed(row):
+        return None, None, None
+    if job_sync_fn is None and graph_driver is None:
+        return None, None, None
+
+    if row.extraction_json is None or row.embedding_json is None:
+        # Scorable processed rows always carry both under repository constraints.
+        return (
+            False,
+            NEO4J_SYNC_FAILED,
+            NEO4J_REBUILD_INSTRUCTION,
+        )
+
+    extraction = parse_job_post_extraction(row.extraction_json)
+    embedding = list(row.embedding_json)
+    source_updated_at = row.updated_at
+
+    async def _default_sync() -> None:
+        if graph_driver is None:
+            raise JobSyncError("Neo4j driver not configured for Job sync")
+        await sync_job(
+            graph_driver,
+            job_id=row.id,
+            extraction=extraction,
+            jd_quality=str(row.jd_quality),
+            embedding=embedding,
+            source_updated_at=source_updated_at,
+            normalizer=normalizer,
+        )
+
+    do_sync = job_sync_fn if job_sync_fn is not None else _default_sync
+    try:
+        await do_sync()
+    except JobSyncError as exc:
+        logger.info(
+            "jd ingestion neo4j sync failed job_id=%s code=%s",
+            row.id,
+            exc.code,
+        )
+        return False, exc.code, exc.rebuild_instruction
+    except Exception:
+        logger.info("jd ingestion neo4j sync failed job_id=%s", row.id)
+        return False, NEO4J_SYNC_FAILED, NEO4J_REBUILD_INSTRUCTION
+    return True, None, None
 
 
 def _default_url_fetcher(url: str) -> Awaitable[UrlFetchResult]:
@@ -172,10 +271,10 @@ async def _select_raw_text_for_processing(
         if existing is not None:
             if existing.processing_status != JOB_PROCESSING_STATUS_FAILED:
                 # Non-failed exact match: return unchanged (no reprocess).
-                return existing.id, "returned", False
+                return existing.id, JOB_INGEST_OUTCOME_RETURNED, False
 
             retried = await jobs_repo.retry_failed_as_processing(session, existing.id)
-            return retried.id, "retried", True
+            return retried.id, JOB_INGEST_OUTCOME_RETRIED, True
 
         created = await jobs_repo.create_text_job(
             session,
@@ -183,7 +282,7 @@ async def _select_raw_text_for_processing(
             raw_content_hash=raw_content_hash,
         )
         processing = await jobs_repo.mark_processing(session, created.id)
-        return processing.id, "created", True
+        return processing.id, JOB_INGEST_OUTCOME_CREATED, True
 
 
 async def _commit_url_placeholder(
@@ -219,7 +318,7 @@ async def _dispose_url_after_fetch(
             await jobs_repo.delete_url_placeholder(session, placeholder_id)
             if existing.processing_status != JOB_PROCESSING_STATUS_FAILED:
                 stored = existing.raw_content or raw_content
-                return existing.id, "returned", False, stored
+                return existing.id, JOB_INGEST_OUTCOME_RETURNED, False, stored
 
             retried = await jobs_repo.retry_failed_as_processing(session, existing.id)
             # Same hash ⇒ same exact stored text as the acquired body.
@@ -228,7 +327,7 @@ async def _dispose_url_after_fetch(
                 if retried.raw_content is not None
                 else raw_content
             )
-            return retried.id, "retried", True, body
+            return retried.id, JOB_INGEST_OUTCOME_RETRIED, True, body
 
         await jobs_repo.set_url_raw_content(
             session,
@@ -237,7 +336,7 @@ async def _dispose_url_after_fetch(
             raw_content_hash=raw_content_hash,
         )
         processing = await jobs_repo.mark_processing(session, placeholder_id)
-        return processing.id, "created", True, raw_content
+        return processing.id, JOB_INGEST_OUTCOME_CREATED, True, raw_content
 
 
 async def _load_row(
@@ -259,6 +358,9 @@ async def _load_row(
             row.raw_content_hash,
             row.raw_content,
             row.source_url,
+            row.extraction_json,
+            row.embedding_json,
+            row.updated_at,
         )
         return row
 
@@ -389,6 +491,8 @@ async def ingest_raw_text(
     normalizer: SkillNormalizer,
     embedding_client: EmbeddingClient | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    graph_driver: AsyncGraphDriver | None = None,
+    job_sync_fn: JobSyncFn | None = None,
 ) -> JdIngestResult:
     """Ingest pasted JD text with persistence-first exact-hash semantics.
 
@@ -400,8 +504,11 @@ async def ingest_raw_text(
     4. Outside transactions: extract, classify, embed full|partial only.
     5. Short transaction: one terminal ``processed`` or ``failed`` write.
        Accepted raw text is never rolled back.
+    6. After scorable processed commit only: direct Job graph sync outside
+       transactions when ``graph_driver`` / ``job_sync_fn`` is provided. Exact
+       non-failed duplicate return never syncs.
 
-    Does not call Neo4j, tools, routes, or URL fetch.
+    Does not call tools or public routes.
     """
     raw_content = _require_pasted_text(text)
     raw_hash = compute_raw_content_hash(raw_content)
@@ -418,6 +525,7 @@ async def ingest_raw_text(
     )
 
     if not needs_processing:
+        # Exact non-failed duplicate: no extraction/embedding/sync.
         row = await _load_row(job_id, session_factory=session_factory)
         return _snapshot(row, outcome=outcome)
 
@@ -429,7 +537,21 @@ async def ingest_raw_text(
         embedding_client=embedder,
         session_factory=session_factory,
     )
-    return _snapshot(terminal, outcome=outcome)
+    # Reload after commit so sync sees durable SQLite truth + updated_at.
+    terminal = await _load_row(terminal.id, session_factory=session_factory)
+    sync_ok, sync_code, rebuild = await _maybe_sync_scorable_job(
+        terminal,
+        normalizer=normalizer,
+        graph_driver=graph_driver,
+        job_sync_fn=job_sync_fn,
+    )
+    return _snapshot(
+        terminal,
+        outcome=outcome,
+        sync_ok=sync_ok,
+        sync_code=sync_code,
+        rebuild_instruction=rebuild,
+    )
 
 
 async def ingest_url(
@@ -440,6 +562,8 @@ async def ingest_url(
     embedding_client: EmbeddingClient | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     url_fetcher: UrlFetcher | None = None,
+    graph_driver: AsyncGraphDriver | None = None,
+    job_sync_fn: JobSyncFn | None = None,
 ) -> JdIngestResult:
     """Ingest a public URL with placeholder-before-fetch and exact-hash reuse.
 
@@ -449,14 +573,16 @@ async def ingest_url(
     3. Fetch outside any SQLite transaction (injected or production fetcher).
     4. Fetch failure: mark that placeholder ``failed`` with stable code; URL kept.
     5. Hash exact acquired text; disposition:
-       - non-failed match → delete placeholder, return existing (no process)
+       - non-failed match → delete placeholder, return existing (no process/sync)
        - failed match → delete placeholder, retry that row in place
        - unique → attach content/hash to placeholder, mark processing
     6. Reuse the same downstream processor as raw text. Provider/embedding
        failure retains URL, acquired text, and hash on the selected row.
+    7. After scorable processed commit only: direct Job graph sync outside
+       transactions when a graph seam is provided.
 
-    Does not call Neo4j, tools, or public routes. Does not delete any row other
-    than a pristine temporary placeholder when another exact row is selected.
+    Does not call public routes. Does not delete any row other than a pristine
+    temporary placeholder when another exact row is selected.
     """
     source_url = _require_url(url)
     embedder: EmbeddingClient = (
@@ -491,7 +617,9 @@ async def ingest_url(
             placeholder_id, code, session_factory=session_factory
         )
         return _snapshot(
-            failed, outcome="created", paste_instruction=instruction
+            failed,
+            outcome=JOB_INGEST_OUTCOME_CREATED,
+            paste_instruction=instruction,
         )
 
     acquired = fetch_result.text
@@ -503,7 +631,7 @@ async def ingest_url(
         )
         return _snapshot(
             failed,
-            outcome="created",
+            outcome=JOB_INGEST_OUTCOME_CREATED,
             paste_instruction=PASTE_JD_FALLBACK_MESSAGE,
         )
 
@@ -518,6 +646,7 @@ async def ingest_url(
     )
 
     if not needs_processing:
+        # Exact non-failed duplicate: no extraction/embedding/sync.
         row = await _load_row(job_id, session_factory=session_factory)
         return _snapshot(row, outcome=outcome)
 
@@ -529,16 +658,32 @@ async def ingest_url(
         embedding_client=embedder,
         session_factory=session_factory,
     )
-    return _snapshot(terminal, outcome=outcome)
+    terminal = await _load_row(terminal.id, session_factory=session_factory)
+    sync_ok, sync_code, rebuild = await _maybe_sync_scorable_job(
+        terminal,
+        normalizer=normalizer,
+        graph_driver=graph_driver,
+        job_sync_fn=job_sync_fn,
+    )
+    return _snapshot(
+        terminal,
+        outcome=outcome,
+        sync_ok=sync_ok,
+        sync_code=sync_code,
+        rebuild_instruction=rebuild,
+    )
 
 
 __all__ = [
     "FAILURE_EMPTY_TEXT",
     "FAILURE_EMPTY_URL",
+    "NEO4J_REBUILD_INSTRUCTION",
+    "NEO4J_SYNC_FAILED",
     "EmbeddingClient",
     "IngestOutcome",
     "JdIngestResult",
     "JdIngestionError",
+    "JobSyncFn",
     "UrlFetcher",
     "compute_raw_content_hash",
     "ingest_raw_text",

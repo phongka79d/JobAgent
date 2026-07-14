@@ -1141,3 +1141,164 @@ def test_url_and_text_share_one_downstream_processor() -> None:
     assert "delete_url_placeholder" in source
     assert "create_url_placeholder" in source
     assert "set_url_raw_content" in source
+
+
+# ---------------------------------------------------------------------------
+# Direct Job graph sync after scorable terminal commit (03A)
+# ---------------------------------------------------------------------------
+
+
+def test_scorable_processed_calls_job_sync_after_sqlite_commit(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            sync_calls: list[dict[str, Any]] = []
+
+            async def _sync(**kwargs: Any) -> None:
+                del kwargs
+                # SQLite must already show processed scorable truth.
+                async with factory() as session:
+                    rows = (
+                        await session.execute(select(JobPost))
+                    ).scalars().all()
+                    assert len(rows) == 1
+                    row = rows[0]
+                    assert row.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+                    assert row.jd_quality == JOB_JD_QUALITY_FULL
+                    assert row.embedding_json is not None
+                    sync_calls.append({"job_id": row.id})
+
+            result = await ingest_raw_text(
+                "Scorable JD for post-commit sync.",
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(vector=_vector(0.04)),
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert result.outcome == "created"
+            assert result.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert result.sync_ok is True
+            assert result.sync_code is None
+            assert result.rebuild_instruction is None
+            assert len(sync_calls) == 1
+            assert sync_calls[0]["job_id"] == result.job_id
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_unscorable_processed_never_calls_job_sync(db_path: Path) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            sync_calls = 0
+
+            async def _sync(**kwargs: Any) -> None:
+                nonlocal sync_calls
+                del kwargs
+                sync_calls += 1
+
+            result = await ingest_raw_text(
+                "Contact only.",
+                invoker=FakeJdInvoker([_unscorable_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert result.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert result.jd_quality == JOB_JD_QUALITY_UNSCORABLE
+            assert result.sync_ok is None
+            assert sync_calls == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_exact_duplicate_return_does_not_call_job_sync(db_path: Path) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            body = "Duplicate body for no-sync return."
+            sync_calls = 0
+
+            async def _sync(**kwargs: Any) -> None:
+                nonlocal sync_calls
+                del kwargs
+                sync_calls += 1
+
+            first = await ingest_raw_text(
+                body,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert first.sync_ok is True
+            assert sync_calls == 1
+
+            again = await ingest_raw_text(
+                body,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert again.outcome == "returned"
+            assert again.job_id == first.job_id
+            assert again.sync_ok is None
+            assert sync_calls == 1  # no second sync
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_graph_failure_after_commit_returns_neo4j_sync_failed_row_unchanged(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            from app.graph.sync_job import (
+                NEO4J_REBUILD_INSTRUCTION,
+                NEO4J_SYNC_FAILED,
+                JobSyncError,
+            )
+
+            async def _fail(**kwargs: Any) -> None:
+                del kwargs
+                raise JobSyncError("simulated graph failure")
+
+            result = await ingest_raw_text(
+                "Scorable JD whose graph projection fails.",
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(vector=_vector(0.05)),
+                session_factory=factory,
+                job_sync_fn=_fail,
+            )
+            assert result.outcome == "created"
+            assert result.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert result.jd_quality == JOB_JD_QUALITY_FULL
+            assert result.failure_code is None  # SQLite not marked failed
+            assert result.sync_ok is False
+            assert result.sync_code == NEO4J_SYNC_FAILED
+            assert result.rebuild_instruction == NEO4J_REBUILD_INSTRUCTION
+
+            row = await _get_job(factory, result.job_id)
+            assert row.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert row.jd_quality == JOB_JD_QUALITY_FULL
+            assert row.failure_code is None
+            assert row.embedding_json is not None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())

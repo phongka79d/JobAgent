@@ -11,9 +11,11 @@ text never appears in arguments summaries, ToolResult data, or logs.
 There is no separate preference tool; ``propose_profile_update`` covers both
 Candidate Profile facts and Job Preferences and never writes active singletons.
 
-``commit_profile_draft`` reuses Plan 3 ``(run_id, tool_call_id)`` replay via
-:func:`~app.services.tool_execution.execute_tool` with running re-entry so one
-tool_executions row stays ``running`` across interrupt and terminalizes once.
+All three tools use Plan 3 ``(run_id, tool_call_id)`` replay via
+:func:`~app.services.tool_execution.execute_tool`. Hidden
+``InjectedToolCallId`` / ``InjectedState`` identity matches Job tools.
+``commit_profile_draft`` enables running re-entry so one tool_executions row
+stays ``running`` across interrupt and terminalizes once.
 """
 
 from __future__ import annotations
@@ -89,13 +91,20 @@ def build_propose_profile_from_cv_tool(
 ) -> Any:
     """Build the compact ``propose_profile_from_cv`` LangChain tool.
 
-    Dependencies are closed over (injected) so they do not appear in the
-    LLM-visible tool schema. Resolve process defaults only at invoke time when
+    Dependencies and ``run_id`` / ``tool_call_id`` identity are closed over or
+    injected so they do not appear in the LLM-visible tool schema (only
+    ``attachment_id``). Resolve process defaults only at invoke time when
     omitted so registry construction stays free of eager provider/IO work.
+    Durable execution and ``tool_status`` publication go through
+    :func:`~app.services.tool_execution.execute_tool`.
     """
 
     @tool(PROPOSE_PROFILE_FROM_CV_NAME)
-    async def propose_profile_from_cv_tool(attachment_id: str) -> dict[str, Any]:
+    async def propose_profile_from_cv_tool(
+        tool_call_id: Annotated[str, InjectedToolCallId],
+        state: Annotated[dict[str, Any], InjectedState],
+        attachment_id: str,
+    ) -> dict[str, Any]:
         """Propose a Candidate Profile draft from a staged CV attachment.
 
         Input is only ``attachment_id``. Active attachments return the approved
@@ -111,25 +120,59 @@ def build_propose_profile_from_cv_tool(
             if session_factory is not None
             else get_session_factory()
         )
-        store = (
-            storage
-            if storage is not None
-            else AttachmentStorage(get_settings().FILES_DIR)
-        )
-        inv = invoker if invoker is not None else ShopAIKeyStructuredProfileInvoker()
-        norm = normalizer if normalizer is not None else SkillNormalizer.production()
+        run_id = state.get("run_id") if isinstance(state, dict) else None
+        if not isinstance(run_id, str) or run_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="propose_profile_from_cv requires run_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
 
-        _ = arguments_summary_for_propose_cv(attachment_id)
+        if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="propose_profile_from_cv requires tool_call_id",
+                data=None,
+            ).model_dump(mode="json")
 
-        result = await propose_profile_from_cv(
-            attachment_id=attachment_id,
+        args_summary = arguments_summary_for_propose_cv(attachment_id)
+
+        async def _invoke() -> ToolResult:
+            store = (
+                storage
+                if storage is not None
+                else AttachmentStorage(get_settings().FILES_DIR)
+            )
+            inv = (
+                invoker
+                if invoker is not None
+                else ShopAIKeyStructuredProfileInvoker()
+            )
+            norm = (
+                normalizer
+                if normalizer is not None
+                else SkillNormalizer.production()
+            )
+            result = await propose_profile_from_cv(
+                attachment_id=attachment_id,
+                session_factory=factory,
+                storage=store,
+                invoker=inv,
+                normalizer=norm,
+                extract_text_fn=extract_text_fn,
+            )
+            return result.tool_result
+
+        tool_result = await execute_tool(
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+            tool_name=PROPOSE_PROFILE_FROM_CV_NAME,
+            invoke=_invoke,
+            arguments_summary_json=args_summary,
             session_factory=factory,
-            storage=store,
-            invoker=inv,
-            normalizer=norm,
-            extract_text_fn=extract_text_fn,
         )
-        tool_result: ToolResult = result.tool_result
         return tool_result.model_dump(mode="json")
 
     return propose_profile_from_cv_tool
@@ -142,13 +185,17 @@ def build_propose_profile_update_tool(
 ) -> Any:
     """Build the compact ``propose_profile_update`` LangChain tool.
 
-    Covers profile facts and Job Preferences in one tool. Dependencies are
-    injected and absent from the LLM-visible schema. Never writes active
-    profile/preferences.
+    Covers profile facts and Job Preferences in one tool. Dependencies and
+    ``run_id`` / ``tool_call_id`` identity are injected and absent from the
+    LLM-visible schema (update fields only). Never writes active
+    profile/preferences. Durable execution uses the shared
+    :func:`~app.services.tool_execution.execute_tool` owner.
     """
 
     @tool(PROPOSE_PROFILE_UPDATE_NAME)
     async def propose_profile_update_tool(
+        tool_call_id: Annotated[str, InjectedToolCallId],
+        state: Annotated[dict[str, Any], InjectedState],
         profile_changes: dict[str, Any] | None = None,
         preference_changes: dict[str, Any] | None = None,
         skill_corrections: list[dict[str, Any]] | None = None,
@@ -165,26 +212,56 @@ def build_propose_profile_update_tool(
             if session_factory is not None
             else get_session_factory()
         )
-        norm = normalizer if normalizer is not None else SkillNormalizer.production()
+        run_id = state.get("run_id") if isinstance(state, dict) else None
+        if not isinstance(run_id, str) or run_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="propose_profile_update requires run_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
+
+        if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
+            return ToolResult(
+                ok=False,
+                code=ERROR_MISSING_RUN_ID,
+                summary="propose_profile_update requires tool_call_id",
+                data=None,
+            ).model_dump(mode="json")
 
         profile_map: Mapping[str, Any] | None = profile_changes
         prefs_map: Mapping[str, Any] | None = preference_changes
         skills_seq: Sequence[Mapping[str, Any]] | None = skill_corrections
 
-        _ = arguments_summary_for_propose_update(
+        args_summary = arguments_summary_for_propose_update(
             profile_changes=profile_map,
             preference_changes=prefs_map,
             skill_corrections=skills_seq,
         )
 
-        result = await propose_profile_update(
+        async def _invoke() -> ToolResult:
+            norm = (
+                normalizer
+                if normalizer is not None
+                else SkillNormalizer.production()
+            )
+            result = await propose_profile_update(
+                session_factory=factory,
+                normalizer=norm,
+                profile_changes=profile_map,
+                preference_changes=prefs_map,
+                skill_corrections=skills_seq,
+            )
+            return result.tool_result
+
+        tool_result = await execute_tool(
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+            tool_name=PROPOSE_PROFILE_UPDATE_NAME,
+            invoke=_invoke,
+            arguments_summary_json=args_summary,
             session_factory=factory,
-            normalizer=norm,
-            profile_changes=profile_map,
-            preference_changes=prefs_map,
-            skill_corrections=skills_seq,
         )
-        tool_result: ToolResult = result.tool_result
         return tool_result.model_dump(mode="json")
 
     return propose_profile_update_tool

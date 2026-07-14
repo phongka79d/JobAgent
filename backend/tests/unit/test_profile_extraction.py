@@ -666,21 +666,56 @@ def test_exhausted_provider_failure_no_success_claim(
 def test_tool_boundary_compact_and_not_production_registered(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
+    import json
+
+    from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import chat_messages as messages_repo
+
     storage = AttachmentStorage(files_root)
     invoker = FakeStructuredInvoker([_valid_extracted()])
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
 
-    # Plan 4 production registry: exactly three profile tools; no job tools yet.
+    # Production registry: three profile tools then save_job and query_jobs.
     prod_names = production_registry().tool_names()
     assert PROPOSE_PROFILE_FROM_CV_NAME in prod_names
     assert prod_names == [
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     ]
-    assert "save_job" not in prod_names
-    assert "query_jobs" not in prod_names
+    assert "match_jobs" not in prod_names
+
+    async def _ainvoke_with_identity(
+        tool_fn: Any,
+        *,
+        run_id: str,
+        tool_call_id: str,
+        attachment_id: str,
+    ) -> ToolResult:
+        """ToolCall shape so InjectedToolCallId / InjectedState resolve."""
+        raw = await tool_fn.ainvoke(
+            {
+                "type": "tool_call",
+                "id": tool_call_id,
+                "name": tool_fn.name,
+                "args": {
+                    "attachment_id": attachment_id,
+                    "state": {"run_id": run_id},
+                },
+            }
+        )
+        if isinstance(raw, str):
+            payload = json.loads(raw)
+        elif hasattr(raw, "content"):
+            content = raw.content
+            payload = json.loads(content) if isinstance(content, str) else content
+        else:
+            payload = raw
+        return ToolResult.model_validate(payload)
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
@@ -689,6 +724,14 @@ def test_tool_boundary_compact_and_not_production_registered(
             att_id = new_uuid()
             rel = _write_pdf(storage, att_id, pdf)
             async with factory() as session:
+                user = await messages_repo.insert_message(
+                    session,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="propose from cv",
+                )
+                run = await runs_repo.create_run(
+                    session, user_message_id=user.id
+                )
                 await att_repo.create_staged(
                     session,
                     file_hash="h-tool",
@@ -699,6 +742,7 @@ def test_tool_boundary_compact_and_not_production_registered(
                     attachment_id=att_id,
                 )
                 await session.commit()
+                run_id = run.id
 
             tool_fn = build_propose_profile_from_cv_tool(
                 session_factory=factory,
@@ -707,15 +751,38 @@ def test_tool_boundary_compact_and_not_production_registered(
                 normalizer=normalizer,
             )
             assert tool_fn.name == PROPOSE_PROFILE_FROM_CV_NAME
-            raw = await tool_fn.ainvoke({"attachment_id": att_id})
-            tr = ToolResult.model_validate(raw)
+            # LLM-visible schema remains attachment_id only (injected hidden).
+            from langchain_core.utils.function_calling import (
+                convert_to_openai_tool,
+            )
+
+            oai = convert_to_openai_tool(tool_fn)
+            props = (
+                oai.get("function", {}).get("parameters", {}).get("properties")
+                or {}
+            )
+            assert set(props) == {"attachment_id"}
+            assert "tool_call_id" not in props
+            assert "state" not in props
+            assert "run_id" not in props
+
+            tr = await _ainvoke_with_identity(
+                tool_fn,
+                run_id=run_id,
+                tool_call_id="call_propose_cv_ok",
+                attachment_id=att_id,
+            )
             assert tr.ok is True
             assert tr.data is not None
             assert tr.data["draft_id"] == PROFILE_DRAFT_ID
             assert "raw" not in tr.data
-            # Missing attachment
-            raw_miss = await tool_fn.ainvoke({"attachment_id": new_uuid()})
-            tr_miss = ToolResult.model_validate(raw_miss)
+            # Missing attachment (distinct tool_call_id → new durable execution)
+            tr_miss = await _ainvoke_with_identity(
+                tool_fn,
+                run_id=run_id,
+                tool_call_id="call_propose_cv_miss",
+                attachment_id=new_uuid(),
+            )
             assert tr_miss.ok is False
             assert tr_miss.code == ERROR_ATTACHMENT_NOT_FOUND
         finally:

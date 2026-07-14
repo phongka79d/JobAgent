@@ -97,8 +97,8 @@ def _bundle(
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_has_exactly_three_profile_tools() -> None:
-    """Plan 4 production registry owns the three profile tools (not empty)."""
+def test_production_registry_has_exactly_five_tools() -> None:
+    """Production registry: three profile tools then save_job and query_jobs."""
     reg = production_registry()
     assert not reg.is_empty()
     names = reg.tool_names()
@@ -106,6 +106,8 @@ def test_production_registry_has_exactly_three_profile_tools() -> None:
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     ]
     assert "match_jobs" not in names
     assert "synthetic_interrupt" not in names
@@ -236,6 +238,8 @@ def test_injected_tools_without_changing_graph_construction() -> None:
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     ]
     assert not injected.registry.is_empty()
     assert injected.registry.tool_names() == ["echo_tool"]
@@ -349,6 +353,7 @@ def test_graph_and_registry_source_has_no_transport_or_persistence() -> None:
         assert banned not in registry_text
     assert "production_registry" in registry_text
     assert "build_production_profile_tools" in registry_text
+    assert "build_production_job_tools" in registry_text
     assert "ToolRegistry" in registry_text
 
 
@@ -413,7 +418,7 @@ def test_empty_registry_model_prompt_has_no_tools() -> None:
     assert "synthetic" not in str(system.content).lower()
 
 
-def test_production_registry_model_prompt_lists_three_profile_tools() -> None:
+def test_production_registry_model_prompt_lists_five_tools() -> None:
     model = FakeChatModel(responses=[_ai_text("ok")])
     bundle = build_agent_graph(model=model, registry=production_registry())
     bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="hi"))
@@ -421,4 +426,6 @@ def test_production_registry_model_prompt_lists_three_profile_tools() -> None:
     assert "propose_profile_from_cv" in system
     assert "propose_profile_update" in system
     assert "commit_profile_draft" in system
+    assert "save_job" in system
+    assert "query_jobs" in system
     assert "match_jobs" not in system

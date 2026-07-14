@@ -1,5 +1,7 @@
 # JobAgent backend: pinned Python, non-interactive install, migrate then serve.
-# Build context: backend/. No source bind mounts at runtime.
+# Build context: backend/. Additional named context neo4j_seed supplies the sole
+# production skills seed (infrastructure/neo4j/skills_seed.yaml). No source bind
+# mounts at runtime; root .env is never part of the build context.
 
 FROM python:3.13.7-slim-bookworm
 
@@ -15,6 +17,10 @@ COPY pyproject.toml /app/pyproject.toml
 COPY app /app/app
 COPY migrations /app/migrations
 COPY alembic.ini /app/alembic.ini
+
+# Sole production taxonomy at the authoritative relative path under repo_root()
+# (/infrastructure/neo4j/skills_seed.yaml when code lives at /app/app/...).
+COPY --from=neo4j_seed skills_seed.yaml /infrastructure/neo4j/skills_seed.yaml
 
 # Use the base image pip as-is (no floating pip upgrade) for reproducible builds.
 RUN python -m pip install --no-cache-dir .

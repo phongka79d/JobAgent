@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph import sync_candidate as sync_mod
 from app.graph.sync_candidate import (
     NEO4J_REBUILD_INSTRUCTION,
@@ -213,6 +214,8 @@ def test_sync_merges_candidate_has_skill_and_seed_related() -> None:
     # Parameters carry runtime values — no interpolation of secrets/raw CV.
     assert driver.parameters
     first = driver.parameters[0]
+    # Identity must come from the SQLite profile constant owner, not a local literal.
+    assert first["candidate_id"] == CANDIDATE_PROFILE_ID
     assert first["candidate_id"] == "active"
     assert "2024-06-01" in first["source_updated_at"]
 
@@ -321,3 +324,34 @@ def test_sync_source_has_no_raw_cv_and_uses_parameters() -> None:
     # No secrets / password interpolation.
     assert "NEO4J_PASSWORD" not in src
     assert "get_secret_value" not in src
+
+
+def test_candidate_sync_reuses_profile_id_constant_owner() -> None:
+    """Candidate id must bind CANDIDATE_PROFILE_ID, not a local literal."""
+    src = inspect.getsource(sync_mod)
+    assert "CANDIDATE_PROFILE_ID" in src
+    assert "_CANDIDATE_ID" not in src
+    # No local string literal for the singleton id in the production owner.
+    assert ' = "active"' not in src
+    assert " = 'active'" not in src
+
+    driver = FakeNeo4jDriver()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    profile = _profile_with_skills(include_excluded=False)
+    updated = datetime(2024, 8, 1, tzinfo=UTC)
+
+    async def _body() -> None:
+        await sync_candidate(
+            driver,
+            profile=profile,
+            source_updated_at=updated,
+            normalizer=normalizer,
+        )
+
+    from tests.support.db_migration import run_async
+
+    run_async(_body())
+    assert driver.parameters
+    bound_id = driver.parameters[0]["candidate_id"]
+    assert bound_id == CANDIDATE_PROFILE_ID
+    assert sync_mod.CANDIDATE_PROFILE_ID is CANDIDATE_PROFILE_ID

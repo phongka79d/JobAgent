@@ -143,6 +143,21 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
             assert "run_completed" not in names
             assert counter["n"] == 0
 
+            # 03C: interrupt keeps one durable row running; emit pending+running.
+            interrupt_statuses = [e for e in events if e.event == "tool_status"]
+            assert [s.payload.status for s in interrupt_statuses] == [
+                "pending",
+                "running",
+            ]
+            durable_exec_id = interrupt_statuses[0].payload.tool_execution_id
+            assert all(
+                s.payload.tool_execution_id == durable_exec_id
+                for s in interrupt_statuses
+            )
+            assert all(
+                s.payload.tool_name == SYNTHETIC_TOOL_NAME for s in interrupt_statuses
+            )
+
             approval = events[-1]
             assert approval.event == "approval_required"
             assert approval.payload.state == "interrupted"
@@ -162,6 +177,7 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
                 assert len(tools) == 1
                 assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
                 assert tools[0].result_json is None
+                assert tools[0].id == durable_exec_id
 
             async with open_checkpointer(db_path) as saver:
                 assert await thread_has_checkpoints(saver, run_id) is True
@@ -197,6 +213,16 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
             assert "approval_required" not in rnames
             assert counter["n"] == 1
 
+            # 03C: resume terminalizes the same execution id (no second pending).
+            resume_statuses = [
+                e for e in resume_events if e.event == "tool_status"
+            ]
+            assert [s.payload.status for s in resume_statuses] == ["completed"]
+            assert resume_statuses[0].payload.tool_execution_id == durable_exec_id
+            assert resume_statuses[0].payload.duration_ms is not None
+            assert resume_statuses[0].payload.summary == "synthetic approval accepted"
+            assert resume_statuses[0].payload.error_code is None
+
             async with factory() as session:
                 run = await runs_repo.get_run(session, run_id)
                 assert run is not None
@@ -207,6 +233,7 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
                 assert len(tools) == 1
                 assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
                 assert tools[0].error_code is None
+                assert tools[0].id == durable_exec_id
                 stored = tool_repo.load_stored_result(tools[0])
                 assert stored.ok is True
                 assert stored.data is not None
@@ -563,18 +590,18 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_three_profile_tools_and_synthetic_is_test_only() -> None:
+def test_production_registry_five_tools_and_synthetic_is_test_only() -> None:
     reg = production_registry()
     names = reg.tool_names()
     assert names == [
         "propose_profile_from_cv",
         "propose_profile_update",
         "commit_profile_draft",
+        "save_job",
+        "query_jobs",
     ]
     assert SYNTHETIC_TOOL_NAME not in names
     assert "match_jobs" not in names
-    assert "save_job" not in names
-    assert "query_jobs" not in names
 
     prod_registry = (BACKEND_ROOT / "app" / "tools" / "registry.py").read_text(
         encoding="utf-8"
@@ -583,6 +610,7 @@ def test_production_registry_three_profile_tools_and_synthetic_is_test_only() ->
     assert "build_synthetic" not in prod_registry
     assert "interrupt(" not in prod_registry
     assert "match_jobs" not in prod_registry
+    assert "build_production_job_tools" in prod_registry
 
     synth_path = BACKEND_ROOT / "tests" / "fakes" / "synthetic_tool.py"
     assert synth_path.is_file()

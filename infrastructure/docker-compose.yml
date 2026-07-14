@@ -35,6 +35,10 @@ services:
     build:
       context: ../backend
       dockerfile: ../infrastructure/docker/backend.Dockerfile
+      # Build-only: expose the sole tracked seed owner to the backend image.
+      # Does not change runtime mounts, volumes, env, ports, or services.
+      additional_contexts:
+        neo4j_seed: ./neo4j
     environment:
       APP_ENV: ${APP_ENV}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}

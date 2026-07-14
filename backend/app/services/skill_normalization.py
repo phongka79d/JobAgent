@@ -74,7 +74,13 @@ class SkillTaxonomy:
 
 
 def production_skills_seed_path() -> Path:
-    """Absolute path of the sole production taxonomy file."""
+    """Absolute path of the sole production taxonomy file.
+
+    Always resolves to ``infrastructure/neo4j/skills_seed.yaml`` under
+    :func:`repo_root` (monorepo host checkout or Compose image layout where the
+    Dockerfile copies the same owner path to ``/infrastructure/neo4j/``).
+    There is no package-data fallback or second tracked seed.
+    """
     return repo_root() / PRODUCTION_SKILLS_SEED_RELATIVE
 
 

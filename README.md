@@ -35,8 +35,9 @@ production pypdf extraction and meaningful-text owner, structured CV
 extraction/draft proposal and interrupt-guarded commit tools (three production
 profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
-runtime. Production Job tools, Job graph sync/rebuild, saved-job UI, and matching
-remain later batches/plans.
+runtime. Plan 5 Batch03 is complete with direct Job/Skill graph sync, five production Agent
+tools with live tool status, and a provider-free Neo4j rebuild command. Saved-job
+UI and matching remain later batches/plans.
 
 ## Repository layout
 
@@ -48,8 +49,9 @@ remain later batches/plans.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage
-  (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup and
-  Candidate/Skill sync under `app/graph/`, `GET /api/health`, Phase 2
+  (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup,
+  Candidate/Job/Skill sync, and provider-free rebuild under `app/graph/`,
+  `GET /api/health`, Phase 2
   chat/tool/SSE Pydantic contracts, Plan 4 profile/skill/draft and attachment
   response contracts plus Plan 5 Job extraction and embedding contracts under
   `app/schemas/`, focused chat/run/tool and attachment/profile/Job repositories,
@@ -60,8 +62,9 @@ remain later batches/plans.
   extraction, draft proposal, and SQLite-first profile approval owners under
   `app/services/`, Agent state/context
   loader (compact approved candidate memory), ShopAIKey chat and locked embedding
-  adapters, production registry of exactly three profile tools under `app/tools/`, one
-  StateGraph factory, request-scoped checkpoint/runner lifecycle, chat-turn/
+  adapters, production registry of exactly five tools (three profile plus
+  `save_job` / `query_jobs`) under `app/tools/`, one StateGraph factory,
+  request-scoped checkpoint/runner lifecycle, chat-turn/
   resume orchestration with interrupt-guarded commit, thin public chat history/
   turn/resume routes, `POST /api/attachments/cv`, and `GET /api/profile` plus
   `GET /api/profile/cv`.
@@ -129,6 +132,55 @@ the seven Master endpoints: health, Plan 4 `POST /api/attachments/cv`,
 `GET /api/profile`, `GET /api/profile/cv`, and Plan 3 chat history/turn/resume.
 Live Neo4j/Compose integration tests skip when the stack or process credentials
 are unavailable.
+
+## Neo4j graph rebuild (provider-free, choice C)
+
+Neo4j is a derived index. After restoring Neo4j or when direct Candidate/Job
+sync fails, rebuild JobAgent graph data from SQLite **stored embeddings only**.
+Rebuild does **not** call ShopAIKey, does **not** re-embed, and does **not**
+mutate SQLite. Before any delete it validates every processed `full|partial`
+embedding against the locked model/dimensions and exact finite vector length;
+mismatch exits non-zero with configuration-restoration guidance.
+
+**Destructive boundary:** only JobAgent labels `Candidate`, `Job`, and `Skill`
+(and their relationships) are cleared. There is no unrestricted
+`MATCH (n) DETACH DELETE n`. Unrelated labels in the same database are
+preserved. Printed relationship counts are endpoint-scoped
+(`Candidate→Skill`, `Job→Skill`, `Skill→Skill`) so unrelated same-type edges
+do not inflate totals.
+
+**Exclusive runtime contract (choice C only):** rebuild is authorized only
+inside the Compose backend container with `APP_ENV=local`,
+`NEO4J_URI=bolt://neo4j:7687`, and `SQLITE_PATH=/data/jobagent.db`. Host
+loopback Bolt targets and host-side destructive invocation are refused.
+
+**Canonical live command** (repository root; stack already up; uses the backend
+container’s authoritative `/data` SQLite volume and Compose `neo4j` service):
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild
+```
+
+Expected: exit `0`, printed counts for `Candidate`, `Job`, `Skill`,
+`HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO`. Failures exit non-zero.
+
+Thin host wrapper (help/version only; never runs rebuild; no-arg exits
+non-zero and prints the canonical Compose command):
+
+```powershell
+python infrastructure/scripts/rebuild_neo4j.py --help
+```
+
+Fake-backed rebuild gates (from `backend/`):
+
+```powershell
+python -m pytest tests/integration/test_graph_rebuild_contracts.py tests/integration/test_graph_rebuild_preflight.py tests/integration/test_graph_rebuild_behavior.py tests/integration/test_graph_rebuild_cli.py tests/integration/test_job_sync.py tests/integration/test_candidate_sync.py tests/unit/test_graph_setup.py -q
+```
+
+**Local-demo limitations:** single-user Compose on loopback ports; no production
+auth, multi-tenant isolation, or SSRF/URL threat model. Public URL JD fetch and
+provider diagnostics remain separate optional flows and are never invoked by
+rebuild.
 
 ## Astryx and conversation client verification
 
@@ -317,8 +369,16 @@ the sole production embedding adapter enforces `text-embedding-3-small`, 1536
 finite floats, float encoding, and ordered scalar/batch results; deterministic
 v1 Job text has one whitespace owner; and raw-text/URL ingestion commits input
 before external work, performs exact-hash return or same-row failed retry, and
-retains durable source data on later failure. Production Job tools, Neo4j Job
-sync/rebuild, saved-job UI, and matching remain later batches/plans.
+retains durable source data on later failure.
+
+Plan 5 Batch03 is complete: scorable terminal Jobs synchronize idempotently to
+derived Neo4j Job/Skill state after SQLite commits; `save_job` and `query_jobs`
+bring the production registry to exactly five replay-safe tools; all five tools
+publish durable post-commit `pending|running|completed|failed` status live over
+the existing SSE path; and the choice-C Compose rebuild restores scoped
+Candidate/Job/Skill state from stored SQLite embeddings without provider calls
+or SQLite writes. Saved-job UI remains Batch04, and matching/ranking remains
+Plan 6.
 
 ## Plan 3 progress and constraints
 
@@ -482,6 +542,29 @@ ingestion without exposing a new public route or production tool:
 - Out of scope: production Job tools/routes, Neo4j Job sync/rebuild, saved-job
   UI, site-specific/browser fetching, near-duplicate matching, and ranking.
 
+## Plan 5 Batch03 progress and constraints
+
+Plan 5 Batch03 completes derived graph projection, production Job tools, live
+durable tool status, and the safe local rebuild boundary:
+
+- Graph sync: `app/graph/sync_job.py` reuses focused shared seed/Skill
+  primitives and runs only after a scorable SQLite terminal commit; sync failure
+  preserves processed SQLite truth and returns `NEO4J_SYNC_FAILED`.
+- Tools/status: production registration is exactly the three profile tools plus
+  `save_job` and `query_jobs`. Every production tool uses the same durable
+  `(run_id, tool_call_id)` execution/publication owner; live status is emitted
+  only after its matching SQLite commit and carries no raw Job/profile data.
+- Rebuild: focused `app/graph/rebuild*` modules preflight every stored scorable
+  embedding before label-scoped deletion, reuse Candidate/Job sync, and print
+  endpoint-scoped entity/relationship counts. The sole production skill seed
+  remains `infrastructure/neo4j/skills_seed.yaml` and enters the backend image
+  through a build-only named context.
+- Runtime: destructive execution is restricted to the documented choice-C
+  Compose command with `bolt://neo4j:7687` and `/data/jobagent.db`; the host
+  wrapper is help/version only.
+- Out of scope: public Job routes, matching/retrieval/ranking, workers/queues,
+  alternate embeddings, and the Batch04 saved-job card.
+
 ## Job contracts and durable input verification (Plan 5 Batch01)
 
 From `backend/` after `python -m pip install -e .\backend` from the repository
@@ -513,6 +596,24 @@ python -m mypy app
 These gates use fake structured-output, embedding, and URL adapters plus migrated
 temporary SQLite databases. They require no live provider, public URL, Neo4j,
 browser, production tool registration, or public Job route.
+
+## Derived Job graph, tools, status, and rebuild verification (Plan 5 Batch03)
+
+From `backend/`:
+
+```powershell
+python -m pytest tests/integration/test_job_sync.py tests/integration/test_job_ingestion.py tests/integration/test_candidate_sync.py tests/unit/test_graph_setup.py -q
+python -m pytest tests/integration/test_job_tools.py tests/integration/test_tool_replay.py tests/integration/test_interrupt_resume.py tests/integration/test_profile_approval.py tests/unit/test_agent_graph.py tests/unit/test_profile_extraction.py -q
+python -m pytest tests/unit/test_sse_contract.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py tests/integration/test_chat_history.py -q
+python -m pytest tests/integration/test_graph_rebuild_contracts.py tests/integration/test_graph_rebuild_preflight.py tests/integration/test_graph_rebuild_behavior.py tests/integration/test_graph_rebuild_cli.py tests/integration/test_compose_runtime.py tests/unit/test_skill_normalization.py -q
+python -m ruff check app/graph app/tools app/services/tool_execution.py app/agent/runner.py tests/fakes/graph_rebuild.py tests/support/graph_rebuild.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_graph_rebuild_preflight.py tests/integration/test_graph_rebuild_behavior.py tests/integration/test_graph_rebuild_cli.py
+python -m mypy app
+```
+
+These gates use migrated temporary SQLite and fake provider/Neo4j/tool seams.
+The only required destructive live check is the explicitly authorized choice-C
+command in `Neo4j graph rebuild (provider-free, choice C)` above; it targets the
+local Compose stores and makes no ShopAIKey call or SQLite mutation.
 
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 
@@ -564,7 +665,8 @@ python -m mypy app
 These tests use temporary migrated SQLite, fakes, and injected Neo4j drivers.
 Live Neo4j is optional and does not block Batch03 acceptance. Public surface is
 exactly health, CV upload, profile/profile-CV reads, and the three Plan 3 chat
-endpoints; production registry contains exactly three profile tools.
+endpoints. At the Plan 4 gate the registry contained three profile tools; the
+current registry contains five after Plan 5 Batch03.
 
 ## React and Astryx CV approval workflow verification (Plan 4 Batch04)
 

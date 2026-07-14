@@ -272,7 +272,10 @@ def test_create_temp_promote_and_discard(
     """Streaming temp is never a UUID path; promote is atomic; discard cleans."""
     temp = store.create_temp_file()
     assert temp.is_file()
-    assert temp.parent == files_root.resolve() or temp.parent.resolve() == files_root.resolve()
+    assert (
+        temp.parent == files_root.resolve()
+        or temp.parent.resolve() == files_root.resolve()
+    )
     assert not _UUID_V4_RE.fullmatch(temp.name)
     temp.write_bytes(b"%PDF-1.4 streamed")
     attachment_id = new_uuid()
