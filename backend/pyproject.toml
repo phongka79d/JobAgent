@@ -12,6 +12,8 @@ dependencies = [
     "pypdf==6.14.2",
     "httpx==0.28.1",
     "pydantic==2.12.5",
+    # Plan 5 / Master Phase 4: public HTML main-text extraction (Phase 0 approved pin)
+    "trafilatura==2.1.0",
     # Phase 1 / Plan 2 runtime (Phase 0 intended versions)
     "pydantic-settings==2.14.2",
     "fastapi==0.139.0",

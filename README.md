@@ -7,7 +7,9 @@ through React/Astryx CV approval UI): Batch01 (profile domain and extraction
 foundations), Batch02 (staged CV upload and profile proposal pipeline), Batch03
 (approved profile truth, Candidate sync, production profile tools, and
 profile/CV reads), and Batch04 (shared CV upload/sidebar and durable in-chat
-approval). The repository contains a pinned backend core (including Phase 2
+approval). Plan 5 / Master Phase 4 Batch01 (Job contracts and durable input
+primitives) is also complete. The repository contains a pinned backend core
+(including Phase 2
 LangGraph/LangChain pins), the complete SQLite/Alembic source-of-truth schema,
 validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
 replay and history-hydration services, bounded Agent state/context with compact
@@ -22,12 +24,15 @@ restart-safe Save Profile / Request Changes approval cards, UUID-rooted
 attachment storage with bounded multipart CV staging, Neo4j foundation
 primitives plus idempotent Candidate/Skill graph sync, exact Candidate Profile /
 skill / preference / draft Pydantic contracts, the sole skill taxonomy loader and
-normalizer, focused attachment and profile repositories over the existing schema,
-a single production pypdf extraction and meaningful-text owner, structured CV
+normalizer, focused attachment/profile/Job repositories over the existing schema,
+strict Job extraction contracts, deterministic JD quality classification,
+bounded HTTP/HTTPS JD acquisition with pinned Trafilatura, a single production
+pypdf extraction and meaningful-text owner, structured CV
 extraction/draft proposal and interrupt-guarded commit tools (three production
 profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
-runtime. Job/matching tools remain later plans.
+runtime. End-to-end Job processing, production Job tools/graph/UI, and matching
+remain later batches/plans.
 
 ## Repository layout
 
@@ -42,9 +47,11 @@ runtime. Job/matching tools remain later plans.
   (including stream-to-temp then UUID promote), Neo4j lifecycle/schema setup and
   Candidate/Skill sync under `app/graph/`, `GET /api/health`, Phase 2
   chat/tool/SSE Pydantic contracts, Plan 4 profile/skill/draft and attachment
-  response contracts under `app/schemas/`, focused chat/run/tool and
-  attachment/profile repositories, history/tool services, skill normalizer,
-  pypdf extraction, CV upload, profile extraction, draft proposal, and SQLite-
+  response contracts plus Plan 5 Job extraction contracts under `app/schemas/`,
+  focused chat/run/tool and attachment/profile/Job repositories, history/tool
+  services, skill normalizer, deterministic JD quality classification, bounded
+  URL text acquisition, pypdf extraction, CV upload, profile extraction, draft
+  proposal, and SQLite-
   first profile approval owners under `app/services/`, Agent state/context
   loader (compact approved candidate memory), ShopAIKey chat adapter/prompt,
   production registry of exactly three profile tools under `app/tools/`, one
@@ -284,8 +291,17 @@ state, upload/replace, view/download via public Astryx), composer PDF token with
 attachment-ID-only turns, and durable `ApprovalCard` (Save Profile / Request
 Changes) wired through ChatMessages/ChatPage with single `streamChatResume`,
 composer focus on request-changes, sidebar refresh on save, and history
-hydration of pending approval. Plan 4 / Master Phase 3 is complete. Job/matching
-tools remain later plans.
+hydration of pending approval. Plan 4 / Master Phase 3 is complete.
+
+Plan 5 / Master Phase 4 Batch01 is complete: strict `JobSkill` and
+`JobPostExtraction` contracts; one deterministic `full|partial|unscorable`
+quality owner; bounded HTTP/HTTPS text acquisition with a controlled total
+timeout, streamed size cap, MIME allowlist, no redirects/cookies/auth, and the
+direct `trafilatura==2.1.0` pin; plus focused flush-only `job_posts` creation,
+exact-hash/ID reads, legal transitions, failed-row retry clearing, protected
+temporary URL-placeholder deletion, terminal writes, and compact deterministic
+queries. End-to-end extraction/embedding orchestration, production Job tools,
+Neo4j Job sync, saved-job UI, and matching remain later batches/plans.
 
 ## Plan 3 progress and constraints
 
@@ -411,6 +427,37 @@ upload/profile/resume contracts without duplicating them:
 - Out of scope for Batch04: full profile editor, CV history/version list, raw
   PDF preview, profile write CRUD, JD/Job/match UI, second stream store, custom
   design system, and internal Astryx imports.
+
+## Plan 5 Batch01 progress and constraints
+
+Plan 5 Batch01 establishes Job input contracts and persistence primitives only:
+
+- Contracts: `app/schemas/jobs.py` owns strict Job facts and reuses `SkillRef`;
+  `app/services/jd_quality.py` is the sole deterministic quality classifier.
+- URL acquisition: `app/services/url_fetch.py` accepts only HTTP/HTTPS HTML or
+  plain text, streams within root settings, uses pinned Trafilatura for HTML,
+  and returns sanitized paste-text fallbacks without browser/auth/cookie scope.
+- Persistence: `app/repositories/jobs.py` is flush-only and caller-transaction-
+  owned; compact queries exclude raw content, extraction bodies, hashes, and
+  embeddings; deletion is limited to pristine received URL placeholders.
+- Out of scope: provider extraction/repair, embeddings, end-to-end ingestion,
+  Neo4j Job synchronization, production Job tools/routes, saved-job UI, and
+  matching/ranking.
+
+## Job contracts and durable input verification (Plan 5 Batch01)
+
+From `backend/` after `python -m pip install -e .\backend` from the repository
+root:
+
+```powershell
+python -m pytest tests/unit/test_jd_extraction.py tests/unit/test_jd_quality.py tests/unit/test_url_fetch.py -q
+python -m pytest tests/integration/test_jobs_repository.py tests/unit/test_job_post_model.py -q
+python -m ruff check app/schemas/jobs.py app/services/jd_quality.py app/services/url_fetch.py app/repositories/jobs.py tests/unit/test_jd_extraction.py tests/unit/test_jd_quality.py tests/unit/test_url_fetch.py tests/integration/test_jobs_repository.py
+python -m mypy app
+```
+
+These tests use fake HTTP and migrated temporary SQLite databases; no live
+provider, public URL, Neo4j, or browser call is required for Batch01 acceptance.
 
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 
