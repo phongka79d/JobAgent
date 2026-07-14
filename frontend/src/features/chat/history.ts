@@ -2,8 +2,10 @@
  * Durable history hydration and chronological merge for chat state.
  * History is authoritative: completed-turn tool activity replaces transient stream tools.
  * Interrupted profile_commit pending_approval is recovered for restart-safe cards.
+ * Compact ToolResult.data is preserved as ClientToolActivity.resultData (stream keeps null).
  */
 
+import {projectCompactResultData} from '../jobs/types';
 import type {
   AgentRunView,
   ApprovalRequiredPayload,
@@ -20,6 +22,7 @@ import type {
 
 /** Map a durable tool execution into client tool activity (history source). */
 export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity {
+  const rawData = tool.result?.data ?? null;
   return {
     toolExecutionId: tool.id,
     toolCallId: tool.tool_call_id,
@@ -29,6 +32,8 @@ export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity 
     summary: tool.result?.summary ?? null,
     errorCode: tool.error_code,
     source: 'history',
+    // Exact save_job allowlist only — unrelated tools retain no resultData.
+    resultData: projectCompactResultData(tool.tool_name, rawData),
   };
 }
 
@@ -131,6 +136,68 @@ export function replaceTransientToolsFromHistory(
 }
 
 /**
+ * Terminal runs whose history page includes a durable assistant sibling after
+ * the initiating user turn (canonical card host after rehydrate).
+ */
+function terminalRunsWithDurableAssistant(
+  historyItems: readonly ChatMessageView[],
+): ReadonlySet<string> {
+  const withAssistant = new Set<string>();
+  for (let i = 0; i < historyItems.length; i += 1) {
+    const item = historyItems[i];
+    if (
+      item.role !== 'user' ||
+      !item.run ||
+      (item.run.state !== 'completed' && item.run.state !== 'failed')
+    ) {
+      continue;
+    }
+    const runId = item.run.id;
+    for (let j = i + 1; j < historyItems.length; j += 1) {
+      const next = historyItems[j];
+      if (next.role === 'assistant') {
+        withAssistant.add(runId);
+        break;
+      }
+      if (next.role === 'user') {
+        break;
+      }
+    }
+  }
+  return withAssistant;
+}
+
+/**
+ * Drop stream-shaped assistant hosts (`assistant:<run_id>`) when durable
+ * history already provides a terminal assistant for that run. Prevents two
+ * saved-job cards when stream and durable message IDs differ or timestamps tie.
+ * Interrupted runs are never collapsed (profile approval stays on stream host).
+ */
+export function dropSupersededStreamAssistants(
+  messages: readonly ClientMessage[],
+  historyItems: readonly ChatMessageView[],
+): ClientMessage[] {
+  const durableHosts = terminalRunsWithDurableAssistant(historyItems);
+  if (durableHosts.size === 0) {
+    return [...messages];
+  }
+  return messages.filter((msg) => {
+    if (msg.role !== 'assistant' || !msg.run) {
+      return true;
+    }
+    const runId = msg.run.id;
+    if (!durableHosts.has(runId)) {
+      return true;
+    }
+    // Ephemeral stream assistants use id/clientKey `assistant:<run_id>`.
+    if (msg.id === `assistant:${runId}` || msg.clientKey === `assistant:${runId}`) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * Recover a single pending profile/approval interrupt from durable messages.
  * Used after history load/restart so the approval card and composer lock return.
  */
@@ -210,14 +277,15 @@ export function mergeOlderHistoryPage(
     page.items,
   );
   return {
-    messages: withDurableTools,
+    messages: dropSupersededStreamAssistants(withDurableTools, page.items),
     nextCursor: page.next_cursor,
   };
 }
 
 /**
  * Re-hydrate after reconnect: merge page and force durable tools for
- * completed turns over any in-memory stream tool state.
+ * completed turns over any in-memory stream tool state. Collapses stream
+ * assistant hosts when durable terminal assistants exist for the same run.
  */
 export function rehydrateWithDurableTruth(
   currentMessages: readonly ClientMessage[],
@@ -228,8 +296,9 @@ export function rehydrateWithDurableTruth(
 } {
   const incoming = page.items.map(messageViewToClient);
   const merged = mergeMessagesChronological(currentMessages, incoming);
+  const withDurable = replaceTransientToolsFromHistory(merged, page.items);
   return {
-    messages: replaceTransientToolsFromHistory(merged, page.items),
+    messages: dropSupersededStreamAssistants(withDurable, page.items),
     nextCursor: page.next_cursor,
   };
 }

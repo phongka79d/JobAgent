@@ -21,8 +21,21 @@ import {Text} from '@astryxdesign/core/Text';
 import type {ClientToolActivity} from '../reducer';
 import type {ToolStatus} from '../types';
 
+/** Explicit friendly labels for production tools (Master §15.4). */
+const FRIENDLY_TOOL_LABELS: Readonly<Record<string, string>> = {
+  save_job: 'Save Job',
+  query_jobs: 'Query Jobs',
+  propose_profile_from_cv: 'Propose Profile From Cv',
+  propose_profile_update: 'Propose Profile Update',
+  commit_profile_draft: 'Commit Profile Draft',
+};
+
 /** Friendly label: snake/kebab tool names → title-like words. */
 export function friendlyToolLabel(toolName: string): string {
+  const known = FRIENDLY_TOOL_LABELS[toolName];
+  if (known) {
+    return known;
+  }
   const spaced = toolName.replace(/[_-]+/g, ' ').trim();
   if (spaced === '') {
     return toolName;

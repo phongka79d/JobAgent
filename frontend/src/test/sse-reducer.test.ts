@@ -573,6 +573,8 @@ describe('History hydration and load-older', () => {
     expect(nextCursor).toBe('cursor-older');
     expect(messages[0].run?.tools[0].status).toBe('completed');
     expect(messages[0].run?.tools[0].source).toBe('history');
+    // Stream path keeps resultData null; history may carry compact data or null.
+    expect(messages[0].run?.tools[0].resultData).toBeNull();
   });
 
   it('load-older merges without duplicates and updates cursor', () => {
@@ -623,6 +625,7 @@ describe('History hydration and load-older', () => {
     const before = state.messages.find((m) => m.role === 'assistant')?.run?.tools;
     expect(before?.[0].source).toBe('stream');
     expect(before?.[0].status).toBe('running'); // stale transient if stream ended early
+    expect(before?.[0].resultData).toBeNull();
 
     // Attach the streamed run id onto a user message for merge identity,
     // then rehydrate with durable completed tool.
@@ -634,6 +637,8 @@ describe('History hydration and load-older', () => {
     expect(userFromHistory?.run?.tools[0].source).toBe('history');
     expect(userFromHistory?.run?.tools[0].status).toBe('completed');
     expect(userFromHistory?.run?.tools[0].summary).toBe('durable summary');
+    // data was null in this fixture — still explicit, not stream-shaped.
+    expect(userFromHistory?.run?.tools[0].resultData).toBeNull();
 
     // Assistant message that shared RUN_ID should have tools replaced if present.
     const asstWithRun = messages.find(

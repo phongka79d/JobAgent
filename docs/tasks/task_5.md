@@ -904,7 +904,7 @@ Astryx imports.
 
 ### Tasks
 
-- [ ] (04A): Render a durable compact saved-job card through the single chat state path
+- [x] (04A): Render a durable compact saved-job card through the single chat state path
   - Source of Truth: `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.9 Frontend saved-job display`; `docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.6 Job tools`; `docs/plans/Plan_5.md > ## 9. Verification & Testing Plan > ### Frontend commands`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.3 Chat components`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.4 Tool activity display`
   - Source Requirements:
     - Strictly parse the compact `save_job` ToolResult projection and render ID,

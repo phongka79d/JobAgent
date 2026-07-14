@@ -1701,3 +1701,163 @@ complete
 - changes made: wrapped the existing assertion at former line 275 across lines inside parentheses so each physical line is ≤88 characters; preserved exact expression `temp.parent == files_root.resolve() or temp.parent.resolve() == files_root.resolve()`; no other lines or files changed except this report
 - validations rerun: `python -m ruff check tests/unit/test_storage.py` passed; `python -m pytest tests/unit/test_storage.py -q` passed (22 passed, 1 skipped); `python -m ruff check .` passed; layout-only diff confirmed; `git diff --cached` empty
 - outcome: complete; ready for A2 re-review
+
+---
+
+# Task Execution Report - 04A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Report File
+docs/reports/report_5_execute_agent.md
+
+## Mode
+same_task_repair
+
+## Batch
+Batch04 - Durable Saved-Job Chat Display
+
+## Task
+04A - Render a durable compact saved-job card through the single chat state path
+
+## Status
+complete
+
+## Selected Scope
+- Batch: Batch04 - Durable Saved-Job Chat Display
+- Task ID: 04A
+- Task title: Render a durable compact saved-job card through the single chat state path
+- Files allowed / repair scope: A2-04A-20260714T162211+0700 findings only — types.ts allowlist/parser, history.ts projection + stream-host collapse, ChatMessageRow canonical tool host, SavedJobCard Badge boundary, saved-job-card tests, report correction
+
+## Source of Truth Used
+- docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.9 Frontend saved-job display
+- docs/plans/Plan_5.md > ## 7. Technical Specifications > ### 7.6 Job tools
+- docs/plans/Plan_5.md > ## 9. Verification & Testing Plan > ### Frontend commands
+- docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.3 Chat components
+- docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.4 Tool activity display
+- frontend/AGENTS.md (Astryx discovery before UI; public components; no raw layout/internal imports)
+- Backend compact contract: app/schemas/jobs.py SaveJobResultData; app/tools/jobs.py ToolResult mapping
+- A2 review: docs/review/review_5_review_agent.md (04A REJECTED; repair instructions)
+
+## Supplemental Documents Used
+- README.md (project context; Plan 5 Batch03 complete; saved-job UI this batch)
+- docs/tasks/task_5.md (04A full entry)
+- Existing chat owners: history.ts, reducer.ts, ChatPage, ChatMessages, ChatToolActivity
+- Profile ApprovalCard pattern for Card composition reference
+
+## Dependency and User Action Check
+- Dependencies: (03A), (03B), (03C), (03D) A2-accepted; HEAD 9ad9d02 P5B3 Complete — satisfied
+- User Action: None for required frontend tests — satisfied
+
+## Files Inspected Before Editing
+- docs/review/review_5_review_agent.md (complete latest 04A REJECTED block)
+- docs/reports/report_5_execute_agent.md (existing 04A block)
+- frontend/src/features/jobs/{types.ts,SavedJobCard.tsx}
+- frontend/src/features/chat/{history.ts,reducer.ts,ChatPage.tsx,components/ChatMessageRow.tsx,ChatMessages.tsx,ChatToolActivity.tsx}
+- frontend/src/test/{saved-job-card,chat-page,sse-reducer,approval-card}.test.tsx
+- backend/app/schemas/jobs.py SaveJobResultData field set
+
+## Completed Work
+- Initial 04A implementation (prior orchestrated run): features/jobs types + SavedJobCard; history resultData; terminal history/rehydrate; ChatMessageRow extraction; friendly Job tool labels; focused tests.
+- Same-task repair (A2-04A-20260714T162211+0700):
+  1. Replaced generic blacklist `projectCompactResultData` with exact `save_job` / SaveJobResultData allowlist at durable history boundary; unrelated tools retain `resultData=null`. Single `parseSaveJobResultData` now requires all contract keys (including present nullable `sync_ok`) and rejects unexpected keys; projection allowlists then re-validates via that parser.
+  2. Terminal rehydrate drops superseded stream assistants (`assistant:<run_id>`) when durable history supplies a terminal assistant for the same run; `toolsForAssistantDisplay` canonically selects one host by run/tool-execution identity. Exact-one card assertions at reducer, ChatMessages, and ChatPage paths; restart/profile approval paths retained.
+  3. Removed outcome Badge; outcome is plain MetadataList text only. Badge remains only for processing status and JD quality.
+  4. Corrected this report (whitelist, Badge, exact-one-card claims); adversarial tests for secrets/storage/nested raw/raw JD/embeddings/arguments/stacks/malformed/missing/unexpected fields.
+
+## Files Created or Modified
+- frontend/src/features/jobs/types.ts (created; repair: allowlist + exact parser)
+- frontend/src/features/jobs/SavedJobCard.tsx (created; repair: no outcome Badge)
+- frontend/src/features/chat/history.ts (modified — allowlist projection + dropSupersededStreamAssistants)
+- frontend/src/features/chat/reducer.ts (modified — resultData on ClientToolActivity; stream null)
+- frontend/src/features/chat/ChatPage.tsx (modified — terminal history/rehydrate)
+- frontend/src/features/chat/components/ChatMessages.tsx (modified — list/notices only)
+- frontend/src/features/chat/components/ChatMessageRow.tsx (created; repair: canonical tool host selection)
+- frontend/src/features/chat/components/ChatToolActivity.tsx (modified — friendly Job tool labels)
+- frontend/src/test/saved-job-card.test.tsx (created; repair: adversarial allowlist, exact-one card, Badge boundary)
+- frontend/src/test/sse-reducer.test.ts (modified — resultData assertions; retained green after repair)
+- frontend/src/test/chat-page.test.tsx (not modified; retained suite still passes)
+- frontend/src/test/approval-card.test.tsx (not modified; retained suite still passes)
+
+## Tests or Validations Run
+- command/check: Set-Location frontend; npx astryx build "saved job result card in chat"; npx astryx docs layout; npx astryx docs tokens; npx astryx component Card; npx astryx component MetadataList; npx astryx component Badge; npx astryx component ChatToolCalls
+- required: yes
+- result: passed
+- evidence or reason: exit 0; public Card/MetadataList/Badge/ChatToolCalls APIs documented; no blocked public API (rerun after repair)
+
+- command/check: Set-Location frontend; npm test -- --run src/test/saved-job-card.test.tsx src/test/chat-page.test.tsx src/test/sse-reducer.test.ts src/test/approval-card.test.tsx; npm run lint; npm run typecheck; npm run build
+- required: yes
+- result: passed
+- evidence or reason: 71 tests passed (21 saved-job + 14 chat-page + 25 sse-reducer + 11 approval); eslint clean; tsc --noEmit clean; vite build succeeded (dist built)
+
+- command/check: Set-Location backend; python -m pytest tests/integration/test_job_tools.py tests/integration/test_chat_history.py tests/integration/test_chat_api.py -q
+- required: yes
+- result: passed
+- evidence or reason: 40 tests passed (exit 0); durable compact ToolResult/history contracts intact; known aiosqlite datetime deprecation warnings only
+
+- command/check: rg -n "save_job|query_jobs|ToolResult|resultData|history/rehydrate|raw_content|embedding_json|NEO4J_SYNC_FAILED|@astryxdesign/.*/(src|dist)/|<div" frontend/src
+- required: yes
+- result: passed
+- evidence or reason: one durable resultData + history/rehydrate path; SAVE_JOB_RESULT_DATA_KEYS allowlist owner in features/jobs/types.ts; raw_content/embedding_json only in tests/strip paths; no internal @astryxdesign src/dist imports; no raw <div> in frontend/src
+
+- command/check: optional Docker/UI smoke
+- required: no
+- result: not_run
+- evidence or reason: optional; no user-managed live stack requested for acceptance
+
+## Acceptance Check
+- condition: A completed save_job displays exact compact fields/outcome after terminal durable rehydration and after restart; query_jobs remains concise tool result without invented ranking surface
+- status: satisfied
+- evidence: restart history load asserts exactly one card; terminal rehydrate collapses stream host and asserts cardHostCount===1 and getAllByTestId length 1; ChatPage production path exact-one card; query_jobs tool-only without jobagent-saved-job-card
+
+- condition: Failed fetch/extraction/embedding and committed-sync-failed results remain visibly failed with stable summary/code; processed SQLite truth not mislabeled as graph success
+- status: satisfied
+- evidence: failed URL_FETCH_FAILED card test; NEO4J_SYNC_FAILED card + history tests show processed badge + SQLite authoritative + no Synced label
+
+- condition: Tool/application statuses remain exact; Badge only for enumerated processing status and JD quality via public Astryx APIs
+- status: satisfied
+- evidence: exact completed/failed text in ChatToolActivity; Badges only for processing_status and jd_quality (jobagent-job-outcome-badge absent); outcome as MetadataList plain text; Astryx Card/MetadataList/Badge/Link imports
+
+- condition: Raw JD text, embeddings, arguments, secrets, storage paths, stack traces, score/rank claims, second reducer/store, SSE expansion, raw layout elements, internal Astryx imports, duplicated result parsing absent
+- status: satisfied
+- evidence: projectCompactResultData(toolName, data) is save_job allowlist + single parser; storage_path/api_secret/nested_raw/arguments/stack never retained; parse rejects missing sync_ok and unexpected keys; no second store; stream resultData null; rg shows no <div> or internal astryx paths
+
+- condition: Shared client owners remain focused; all callers of changed history/tool projection pass retained chat/profile tests
+- status: satisfied
+- evidence: ChatMessageRow keeps ChatMessages focused; chat-page + approval-card + sse-reducer + saved-job suites pass (71 total)
+
+## Progress Update
+- task checkbox updated: no
+- batch status updated: no
+- reason: mode is same_task_repair; A1 must not update checkboxes or batch status
+
+## Key Implementation Decisions
+- Durable history retains only exact SaveJobResultData allowlist for save_job; other tools keep resultData null (no generic blacklist).
+- Single parseSaveJobResultData owner is exact for required nullable fields (sync_ok present) and unexpected keys; projection reuses it after allowlist strip.
+- Terminal rehydrate drops stream `assistant:<run_id>` when durable assistant exists for the same completed/failed run; presentation layer also refuses dual projection by run/tool-execution identity — exact one card is required, not optional.
+- Badge restricted to processing status and JD quality; outcome is metadata/summary only.
+- Stream keeps resultData null; durable truth only via history/rehydrate (same as restart).
+- query_jobs intentionally has no card — Master ranking surfaces are out of scope.
+
+## Notes for Review Agent
+- changed files: listed above (approval-card.test.tsx and chat-page.test.tsx not modified; retained green)
+- validations to rerun: the four required checks above
+- risk areas: ensure interrupted profile approval still uses stream assistant host (collapse only for completed/failed runs with durable assistant)
+- next task readiness: can_review
+- repairOf: A2-04A-20260714T162211+0700
+
+## Repair Log
+
+### 2026-07-14T16:30:00+07:00
+- reason for repair: A2 REJECTED 04A (A2-04A-20260714T162211+0700) — generic blacklist projection retained secrets/storage/nested raw; parser accepted missing sync_ok and ignored extras; terminal rehydrate could render two saved-job cards; outcome used Badge contrary to processing/quality-only boundary; report misstated whitelist/Badge/duplicate-card acceptance.
+- changes made:
+  - types.ts: SAVE_JOB_RESULT_DATA_KEYS allowlist; projectCompactResultData(toolName, data) only for save_job; parseSaveJobResultData rejects unexpected keys and missing required nullable fields including sync_ok.
+  - history.ts: toolViewToActivity passes tool_name; dropSupersededStreamAssistants on rehydrate/load-older.
+  - ChatMessageRow.tsx: toolsForAssistantDisplay canonical host by run/tool-execution identity.
+  - SavedJobCard.tsx: removed outcome Badge; outcome remains MetadataList text.
+  - saved-job-card.test.tsx: adversarial projection/parser tests; exact-one cardHostCount and DOM length assertions; no outcome badge assertions.
+  - this report updated in place with corrected claims.
+- validations rerun: all four required 04A gates (Astryx discovery, frontend test+lint+typecheck+build, backend job_tools/chat_history/chat_api, rg boundary) — all passed (71 frontend tests; 40 backend tests).
+- outcome: complete; ready for A2 re-review.
+

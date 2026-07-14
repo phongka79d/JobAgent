@@ -7,9 +7,11 @@ through React/Astryx CV approval UI): Batch01 (profile domain and extraction
 foundations), Batch02 (staged CV upload and profile proposal pipeline), Batch03
 (approved profile truth, Candidate sync, production profile tools, and
 profile/CV reads), and Batch04 (shared CV upload/sidebar and durable in-chat
-approval). Plan 5 / Master Phase 4 Batch01 (Job contracts and durable input
-primitives) and Batch02 (validated extraction, locked embeddings, and
-persistence-first text/URL ingestion) are also complete. The repository contains
+approval). Plan 5 / Master Phase 4 is also complete: Batch01 (Job contracts and
+durable input primitives), Batch02 (validated extraction, locked embeddings,
+and persistence-first text/URL ingestion), Batch03 (derived graph sync,
+production Job tools, live status, and rebuild), and Batch04 (durable compact
+saved-job chat display). The repository contains
 a pinned backend core (including Phase 2 LangGraph/LangChain pins), the complete
 SQLite/Alembic source-of-truth schema,
 validated chat/ToolResult/SSE contracts, message/run/tool repositories, tool
@@ -20,8 +22,9 @@ six-pass loop guard, request-scoped `AsyncSqliteSaver` checkpoints and Agent
 runner streaming, atomic chat-turn/interrupt/resume services, thin public
 history/turn/resume SSE endpoints, a typed React/Astryx conversation client
 (SSE parser, single streaming reducer, history/load-older, concise tool
-activity, failure states) plus profile sidebar, shared multipart CV upload, and
-restart-safe Save Profile / Request Changes approval cards, UUID-rooted
+activity, failure states), durable compact saved-job cards, profile sidebar,
+shared multipart CV upload, and restart-safe Save Profile / Request Changes
+approval cards, UUID-rooted
 attachment storage with bounded multipart CV staging, Neo4j foundation
 primitives plus idempotent Candidate/Skill graph sync, exact Candidate Profile /
 skill / preference / draft Pydantic contracts, the sole skill taxonomy loader and
@@ -35,17 +38,19 @@ production pypdf extraction and meaningful-text owner, structured CV
 extraction/draft proposal and interrupt-guarded commit tools (three production
 profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
-runtime. Plan 5 Batch03 is complete with direct Job/Skill graph sync, five production Agent
-tools with live tool status, and a provider-free Neo4j rebuild command. Saved-job
-UI and matching remain later batches/plans.
+runtime. Plan 5 is complete through Batch04 with direct Job/Skill graph sync,
+five production Agent tools with live tool status, a provider-free Neo4j rebuild
+command, and restart-safe compact `save_job` results in chat. Matching remains
+Plan 6.
 
 ## Repository layout
 
 - `frontend/` - React, TypeScript, Vite, and Astryx 0.1.4 application with the
   Plan 3 conversation client (chat page, SSE/API client, reducer, UI tests),
   Plan 4 profile feature (`features/profile`: typed transport, `CvSidebar`,
-  `ApprovalCard`), shared CV attach/upload over the existing chat shell, lint,
-  type-check, test, and build commands.
+  `ApprovalCard`), Plan 5 saved-job feature (`features/jobs`: strict compact
+  result parsing and `SavedJobCard`), shared CV attach/upload over the existing
+  chat shell, lint, type-check, test, and build commands.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage
@@ -377,8 +382,14 @@ bring the production registry to exactly five replay-safe tools; all five tools
 publish durable post-commit `pending|running|completed|failed` status live over
 the existing SSE path; and the choice-C Compose rebuild restores scoped
 Candidate/Job/Skill state from stored SQLite embeddings without provider calls
-or SQLite writes. Saved-job UI remains Batch04, and matching/ranking remains
-Plan 6.
+or SQLite writes.
+
+Plan 5 Batch04 is complete: durable chat history strictly retains only the
+compact `save_job` result projection; terminal turns rehydrate the existing
+single reducer so live and restarted conversations share one truth path; and
+the public Astryx saved-job card shows truthful processing, quality, outcome,
+failure, and sync-failure details without raw JD, embeddings, or ranking UI.
+Plan 5 / Master Phase 4 is complete, while matching/ranking remains Plan 6.
 
 ## Plan 3 progress and constraints
 
@@ -614,6 +625,28 @@ These gates use migrated temporary SQLite and fake provider/Neo4j/tool seams.
 The only required destructive live check is the explicitly authorized choice-C
 command in `Neo4j graph rebuild (provider-free, choice C)` above; it targets the
 local Compose stores and makes no ShopAIKey call or SQLite mutation.
+
+## Durable saved-job chat display verification (Plan 5 Batch04)
+
+From `frontend/`:
+
+```powershell
+npm test -- --run src/test/saved-job-card.test.tsx src/test/chat-page.test.tsx src/test/sse-reducer.test.ts src/test/approval-card.test.tsx
+npm run lint
+npm run typecheck
+npm run build
+```
+
+From `backend/` (fake-backed durable Job tool/history contracts):
+
+```powershell
+python -m pytest tests/integration/test_job_tools.py tests/integration/test_chat_history.py tests/integration/test_chat_api.py -q
+```
+
+These gates require no live provider, public URL, browser, or Neo4j service.
+They verify strict compact result retention, exact-one terminal/restart card
+rendering, truthful failure and sync-failure display, and the existing single
+history/rehydrate state path.
 
 ## Profile domain and extraction foundations verification (Plan 4 Batch01)
 

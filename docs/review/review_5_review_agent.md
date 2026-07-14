@@ -1514,3 +1514,165 @@ ACCEPTED
 - repairs verified: the 95-character assertion is only parenthesized and wrapped; its exact expression and evaluation order remain; 22 tests pass with one expected skip; full Ruff passes; the first import-order repair remains intact.
 - remaining issues: none for A2; the added storage path requires fresh A3 scope classification.
 - updated outcome: ACCEPTED; `a3CanRerun=true`, `nextAction=rerun_a3`.
+
+---
+
+# Task Review Report - 04A
+
+## Source Task File
+docs/tasks/task_5.md
+
+## Execution Report Reviewed
+docs/reports/report_5_execute_agent.md
+
+## Review Report File
+docs/review/review_5_review_agent.md
+
+## Mode
+same_task_repair
+
+## Final Outcome
+ACCEPTED
+
+## Reviewed Scope
+- Batch: Batch04 - Durable Saved-Job Chat Display
+- Task ID: 04A
+- Task title: Render a durable compact saved-job card through the single chat state path
+- Executor status reported: complete
+
+## Git Diff Evidence
+- git status reviewed: yes
+- git diff stat reviewed: yes
+- git diff reviewed: yes
+- cached diff reviewed: yes; empty
+- base/HEAD reviewed: `9ad9d02` (`P5B3: Complete`), matching the A2 request
+- changed files from git: `docs/reports/report_5_execute_agent.md`, `frontend/src/features/chat/ChatPage.tsx`, `frontend/src/features/chat/components/ChatMessages.tsx`, `frontend/src/features/chat/components/ChatToolActivity.tsx`, `frontend/src/features/chat/history.ts`, `frontend/src/features/chat/reducer.ts`, `frontend/src/test/sse-reducer.test.ts`, untracked `frontend/src/features/chat/components/ChatMessageRow.tsx`, untracked `frontend/src/features/jobs/SavedJobCard.tsx`, untracked `frontend/src/features/jobs/types.ts`, and untracked `frontend/src/test/saved-job-card.test.tsx`
+
+## Files Reviewed
+- `README.md`: in scope - complete project context and Plan 5 Batch03 handoff read.
+- `docs/tasks/task_5.md`: in scope - complete 04A entry, dependencies, acceptance, validations, and checkbox reviewed and checked after acceptance.
+- `docs/plans/Plan_5.md`: in scope - sections 7.6, 7.9, and frontend verification reviewed.
+- `docs/plans/Master_plan.md`: in scope - sections 15.3 and 15.4 reviewed.
+- `frontend/AGENTS.md`: in scope - complete Astryx workflow and boundaries reviewed.
+- `.agent/handoff/a1_response.json`: in scope - live A1 identity, file, validation, and completion claims reviewed as evidence only.
+- `docs/reports/report_5_execute_agent.md`: in scope - matching 04A block, repair log, file claims, and validation claims are materially accurate.
+- `frontend/src/features/jobs/types.ts`: in scope - complete file reviewed; exact `save_job` allowlist, strict single parser, required nullable fields, unexpected-key rejection, and unrelated-tool null projection verified.
+- `frontend/src/features/jobs/SavedJobCard.tsx`: in scope - complete file reviewed; sync/failure truth is sound and Badge is restricted to processing status and JD quality.
+- `frontend/src/features/chat/history.ts`: in scope - complete file reviewed; durable data enters the one reducer, stream assistants are collapsed for terminal durable hosts, and interrupted profile behavior is retained.
+- `frontend/src/features/chat/reducer.ts`: in scope - complete file reviewed; stream data stays null and history rehydrate remains the sole reducer action.
+- `frontend/src/features/chat/ChatPage.tsx`: in scope - complete file reviewed; terminal events fetch durable history after the backend commit.
+- `frontend/src/features/chat/components/ChatMessages.tsx`: in scope - complete file reviewed; list/notices ownership is focused.
+- `frontend/src/features/chat/components/ChatMessageRow.tsx`: in scope - complete file reviewed; focused row ownership and canonical run/tool-execution host selection prevent duplicate durable card projection.
+- `frontend/src/features/chat/components/ChatToolActivity.tsx`: in scope - complete file reviewed; friendly Job labels, exact visible status, duration, and concise summaries are preserved.
+- `frontend/src/test/saved-job-card.test.tsx`: in scope - complete file reviewed; adversarial leak/malformed-contract probes and exact-one reducer, message, ChatPage, and restart assertions are present.
+- `frontend/src/test/sse-reducer.test.ts`: in scope - complete file reviewed; retained reducer coverage passes.
+- `frontend/src/test/chat-page.test.tsx` and `frontend/src/test/approval-card.test.tsx`: in scope - relevant unchanged terminal/history/profile callers reviewed and full retained suites rerun.
+- `frontend/src/features/chat/types.ts`, `frontend/src/features/profile/types.ts`, and `frontend/src/features/profile/ApprovalCard.tsx`: in scope - relevant unchanged parse/projection contracts reviewed.
+- `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/schemas/tools.py`, `backend/app/services/chat_history.py`, `backend/app/agent/runner.py`, and `backend/app/services/chat_turns.py`: in scope - exact compact result, history attachment, and durable-before-terminal contracts reviewed.
+- dependency reviews for 03A, 03B, 03C, and 03D: in scope - latest matching A2 outcomes are ACCEPTED and all four dependency checkboxes are checked.
+
+## Validations Reviewed
+- Command/check: required Astryx 0.1.4 discovery using `npx astryx build "saved job result card in chat"`, layout/tokens docs, and Card/MetadataList/Badge/ChatToolCalls component docs.
+- Required: yes
+- Reported result: passed.
+- Rerun result: passed; all required CLI commands exited 0 and documented the public APIs and Badge guidance.
+- Status: passed
+- Notes: public component availability is not blocked.
+
+- Command/check: `Set-Location frontend; npm test -- --run src/test/saved-job-card.test.tsx src/test/chat-page.test.tsx src/test/sse-reducer.test.ts src/test/approval-card.test.tsx; npm run lint; npm run typecheck; npm run build`
+- Required: yes
+- Reported result: passed; 71 tests.
+- Rerun result: passed; 4 files / 71 tests, ESLint, `tsc --noEmit`, and Vite build all exited 0.
+- Status: passed
+- Notes: includes 21 saved-job tests with strict allowlist/parser and exact-one production-path coverage.
+
+- Command/check: `Set-Location backend; python -m pytest tests/integration/test_job_tools.py tests/integration/test_chat_history.py tests/integration/test_chat_api.py -q`
+- Required: yes
+- Reported result: passed; 40 tests.
+- Rerun result: passed; 40 tests exited 0 with only known aiosqlite datetime deprecation warnings.
+- Status: passed
+- Notes: backend compact/durable contracts are intact.
+
+- Command/check: required `rg` boundary scan for Job tools, ToolResult/resultData, rehydrate, forbidden raw/embedding keys, sync failure, internal Astryx imports, and raw `<div`.
+- Required: yes
+- Reported result: passed.
+- Rerun result: command exited 0; no internal Astryx or raw `<div` match exists, and the result path is reviewable.
+- Status: passed
+- Notes: output shows one `SAVE_JOB_RESULT_DATA_KEYS` allowlist owner, one durable history projection path, no internal Astryx import, and no raw `<div`.
+
+- Command/check: targeted adversarial tests for `projectCompactResultData` and `parseSaveJobResultData` with storage paths, secrets, nested raw bodies, raw JD, embeddings, arguments, stacks, unexpected keys, and omitted `sync_ok`.
+- Required: targeted A2 check
+- Reported result: passed in the repaired saved-job suite.
+- Rerun result: passed; targeted saved-job and reducer suites completed 46/46 tests, and direct assertions prove extras are stripped at projection, rejected by the parser, malformed/missing contracts return null, and unrelated tools retain null.
+- Status: passed
+- Notes: the repaired durable boundary retains only exact valid `SaveJobResultData` keys for `save_job`.
+
+- Command/check: targeted terminal/restart exact-one probes through `rehydrateWithDurableTruth`, `toolsForAssistantDisplay`, `ChatMessages`, and `ChatPage` with differing stream/durable message IDs and tied timestamps.
+- Required: targeted A2 check
+- Reported result: passed with exact-one assertions.
+- Rerun result: passed; stream `assistant:<run_id>` is removed when the terminal durable assistant exists, `cardHostCount` is exactly 1, rendered card count is exactly 1, restart remains exactly 1, and retained profile approval tests pass.
+- Status: passed
+- Notes: no permissive saved-job card-count assertion remains in the production paths.
+
+## Acceptance Review
+- Task acceptance: strict compact `save_job` parsing and whitelisted durable `resultData` only.
+- Status: satisfied
+- Evidence: `SAVE_JOB_RESULT_DATA_KEYS` is the sole allowlist, `projectCompactResultData` returns null for unrelated tools and malformed contracts, and the single parser requires present nullable fields including `sync_ok` while rejecting extras.
+
+- Task acceptance: one durable terminal/restart truth path and one saved-job card.
+- Status: satisfied
+- Evidence: `history/rehydrate` remains the one durable path; terminal stream hosts are collapsed by run identity and presentation refuses a second host by run/tool-execution identity. Reducer, `ChatMessages`, `ChatPage`, and restart paths assert exactly one card.
+
+- Task acceptance: exact tool/application statuses, friendly labels, durations, and truthful failure/`NEO4J_SYNC_FAILED` display.
+- Status: satisfied
+- Evidence: visible status remains `pending|running|completed|failed`; backend and frontend suites pass; processed SQLite truth and failed graph projection are separately shown.
+
+- Task acceptance: `Badge` only for enumerated processing/quality state.
+- Status: satisfied
+- Evidence: only processing status and non-null JD quality render `Badge`; created/returned/retried is plain `MetadataList` outcome text.
+
+- Task acceptance: no raw JD, embeddings, arguments, secrets, storage paths, stack traces, ranking, second store, SSE expansion, raw layout, internal Astryx import, or duplicated result parsing.
+- Status: satisfied
+- Evidence: adversarial keys are absent from retained `resultData`; no second store/parser or SSE expansion exists; query results do not create ranking UI; required boundary scan found no raw layout or internal Astryx imports.
+
+- Task acceptance: focused shared owners and retained chat/profile callers.
+- Status: satisfied
+- Evidence: `ChatMessages` is reduced to list/notices, `ChatMessageRow` is under 300 lines, and all retained suites pass.
+
+## Progress Tracking
+- Selected task checkbox before review: unchecked
+- Checkbox updated by reviewer: yes
+- Checkbox final state: checked
+- Batch status updated by reviewer: no
+
+## Issues
+
+### Blocking
+- None.
+
+### Major
+- None.
+
+### Minor
+- None.
+
+## Decision
+- Accept selected task: yes
+- Repair required: no
+- Can next task proceed: yes
+- Batch can be marked complete by A2: no
+- A3 can rerun: no
+- Next action: close_task
+
+## Repair Instructions
+- None.
+
+## Re-Review / Repair Verification Log
+
+### 2026-07-14T16:41:12+07:00
+- prior outcome preserved: `REJECTED` under review ID `A2-04A-20260714T162211+0700` for generic blacklist retention/exact-parser gaps, duplicate terminal card hosts, outcome Badge misuse, and inaccurate execution-report claims.
+- what was re-checked: live A1 repair handoff, matching 04A execution report and repair log, complete repair diff, all affected frontend/backend callers, exact Badge boundary, checkbox integrity, and all required validations.
+- repairs verified: exact `save_job` allowlist with strict required-nullable/extras parser; unrelated tools retain null; terminal/restart canonical host produces exactly one card; outcome is plain metadata; report evidence is corrected and accurate.
+- validation evidence: targeted frontend probes 46/46 passed; required frontend suite 71/71 plus lint/typecheck/build passed; backend 40/40 passed; Astryx discovery and required `rg` scan passed.
+- remaining issues: none.
+- updated outcome: `ACCEPTED` (`A2-04A-20260714T164112+0700`).

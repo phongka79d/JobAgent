@@ -198,6 +198,20 @@ export function ChatPage({
     }
   }, [loadHistory]);
 
+  /**
+   * After a terminal turn, re-fetch durable history so ToolResult.data
+   * (including compact save_job cards) replaces stream-null resultData.
+   * Live and restart paths share history/rehydrate — no second store.
+   */
+  const rehydrateDurableHistory = useCallback(async () => {
+    try {
+      const page = await loadHistory({limit: 50});
+      dispatch({type: 'history/rehydrate', page});
+    } catch {
+      // Leave stream/reducer state; do not invent tool results.
+    }
+  }, [loadHistory]);
+
   const makeStreamCallbacks = useCallback(
     (opts?: {
       onTerminal?: (kind: 'completed' | 'failed' | 'interrupted') => void;
@@ -208,9 +222,11 @@ export function ChatPage({
           if (event.event === 'run_completed') {
             inFlightRef.current = false;
             opts?.onTerminal?.('completed');
+            void rehydrateDurableHistory();
           } else if (event.event === 'run_failed') {
             inFlightRef.current = false;
             opts?.onTerminal?.('failed');
+            void rehydrateDurableHistory();
           } else if (event.event === 'approval_required') {
             inFlightRef.current = false;
             opts?.onTerminal?.('interrupted');
@@ -227,7 +243,7 @@ export function ChatPage({
         },
       };
     },
-    [],
+    [rehydrateDurableHistory],
   );
 
   const runTurn = useCallback(

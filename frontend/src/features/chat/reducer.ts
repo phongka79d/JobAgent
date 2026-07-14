@@ -37,6 +37,11 @@ export interface ClientToolActivity {
   summary: string | null;
   errorCode: string | null;
   source: 'stream' | 'history';
+  /**
+   * Durable ToolResult.data projection only.
+   * Stream-shaped tools keep null until history/rehydrate supplies truth.
+   */
+  resultData: JsonObject | null;
 }
 
 export interface ClientRun {
@@ -314,6 +319,8 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         summary: event.payload.summary,
         errorCode: event.payload.error_code,
         source: 'stream',
+        // Live SSE carries status/summary only — compact data arrives via history.
+        resultData: null,
       };
       const messages = updateAssistantForRun(
         ensured.messages,
