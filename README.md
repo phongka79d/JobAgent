@@ -47,8 +47,11 @@ skill coverage, preference components, hybrid weight renormalization with qualit
 multipliers, unrounded ordering, and evidence-consistent match response schemas.
 Plan 6 Batch03 is complete: one read-only matching orchestrator composes those
 owners in consistency-first order, and replay-safe `match_jobs` is registered as
-the sixth production Agent tool. Match cards and manual JD acceptance remain
-Plan 6 Batch04.
+the sixth production Agent tool. Plan 6 Batch04 is complete: durable
+backend-ordered Astryx match cards with collapsible score breakdowns through the
+existing chat/history truth path, plus the disposable manual JD acceptance
+checklist under `docs/acceptance/manual_jd_checklist.md`. Plan 6 / Master Phase 5
+is complete.
 
 ## Repository layout
 
@@ -56,8 +59,10 @@ Plan 6 Batch04.
   Plan 3 conversation client (chat page, SSE/API client, reducer, UI tests),
   Plan 4 profile feature (`features/profile`: typed transport, `CvSidebar`,
   `ApprovalCard`), Plan 5 saved-job feature (`features/jobs`: strict compact
-  result parsing and `SavedJobCard`), shared CV attach/upload over the existing
-  chat shell, lint, type-check, test, and build commands.
+  result parsing and `SavedJobCard`), Plan 6 match cards (`matchResult.ts`,
+  `MatchCard`, `ScoreBreakdown` over durable `match_jobs` ToolResult data),
+  shared CV attach/upload over the existing chat shell, lint, type-check, test,
+  and build commands.
 - `backend/` - installable pinned Python application package with one settings
   boundary, shared UUID/UTC conventions, async SQLite sessions, nine SQLAlchemy
   tables, the explicit Alembic initial migration, atomic attachment storage
@@ -427,7 +432,16 @@ exposes replay-safe `match_jobs` through the existing `(run_id, tool_call_id)`
 executor; `production_registry` is exactly the three profile tools, `save_job`,
 `query_jobs`, then `match_jobs`. No new endpoint, SSE event/status, second
 registry/executor, graph repair, or dedicated score persistence outside
-`tool_executions.result_json` was added. Match-card UI remains Batch04.
+`tool_executions.result_json` was added.
+
+Plan 6 Batch04 is complete: strict frontend projection of durable `match_jobs`
+`ToolResult.data` (backend `schemas/matching.py` sole JSON authority), public
+Astryx `MatchCard` / collapsible `ScoreBreakdown` (≤10 cards, backend order,
+display-only rounding, `safeHttpUrl`, Token skill groups), thin history and
+single-assistant-host integration with friendly `Match Jobs` label, and
+`docs/acceptance/manual_jd_checklist.md` with dated Master §19 observations
+from isolated Compose project `jobagent-plan6-acceptance` (API-equivalent mode
+labeled; no weight tuning, benchmark, or product-code changes in 04B).
 
 ## Plan 6 Batch02 scoring verification
 
@@ -460,7 +474,32 @@ python -m mypy app
 These gates use migrated temporary SQLite, the shared counting
 `FakeEmbeddingClient`, and controlled Neo4j fakes. They require no live
 ShopAIKey, public URL, browser, or Neo4j service for Batch03 acceptance.
-Match-card frontend rendering remains Plan 6 Batch04.
+
+## Durable match cards and manual JD acceptance (Plan 6 Batch04)
+
+From `frontend/`:
+
+```powershell
+npm test -- --run src/test/match-card.test.tsx src/test/saved-job-card.test.tsx src/test/chat-page.test.tsx src/test/sse-reducer.test.ts src/test/approval-card.test.tsx
+npm run lint
+npm run typecheck
+npm run build
+```
+
+These gates verify strict `match_jobs` parsing (≤10, backend order, display-only
+rounding, safe/absent source URL, skill groups, unavailable components and
+effective weights), exact-one terminal/history host rendering, friendly Match
+Jobs label, and regression coverage for saved-job, approval, SSE, and chat page
+paths. No second client store, reducer, SSE event, or API path is added.
+
+Manual JD acceptance observations live only in
+`docs/acceptance/manual_jd_checklist.md` (disposable local checklist; not a
+dataset, metric, or evaluation report). Full live re-run needs a user-managed
+ignored root `.env`, Docker, free loopback ports, and an isolated Compose
+project such as `jobagent-plan6-acceptance` (tear down only that named project
+after observations). Automated Plan 6 backend representation/skill, component/
+order/explanation, and match revision/tool gates remain the fake-backed
+pre-live requirements.
 
 ## Plan 3 progress and constraints
 

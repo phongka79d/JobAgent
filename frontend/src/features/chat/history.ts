@@ -5,6 +5,7 @@
  * Compact ToolResult.data is preserved as ClientToolActivity.resultData (stream keeps null).
  */
 
+import {projectMatchJobsResultData} from '../jobs/matchResult';
 import {projectCompactResultData} from '../jobs/types';
 import type {
   AgentRunView,
@@ -20,6 +21,20 @@ import type {
   ClientToolActivity,
 } from './reducer';
 
+/**
+ * Durable ToolResult.data projection: save_job and match_jobs allowlists only.
+ * Unrelated tools retain null resultData (no second store or parser fork).
+ */
+export function projectToolResultData(
+  toolName: string,
+  data: JsonObject | null | undefined,
+): JsonObject | null {
+  return (
+    projectCompactResultData(toolName, data) ??
+    projectMatchJobsResultData(toolName, data)
+  );
+}
+
 /** Map a durable tool execution into client tool activity (history source). */
 export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity {
   const rawData = tool.result?.data ?? null;
@@ -32,8 +47,8 @@ export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity 
     summary: tool.result?.summary ?? null,
     errorCode: tool.error_code,
     source: 'history',
-    // Exact save_job allowlist only — unrelated tools retain no resultData.
-    resultData: projectCompactResultData(tool.tool_name, rawData),
+    // save_job + match_jobs allowlists only — unrelated tools retain no resultData.
+    resultData: projectToolResultData(tool.tool_name, rawData),
   };
 }
 

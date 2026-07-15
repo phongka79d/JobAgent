@@ -21,10 +21,11 @@ import {Text} from '@astryxdesign/core/Text';
 import type {ClientToolActivity} from '../reducer';
 import type {ToolStatus} from '../types';
 
-/** Explicit friendly labels for production tools (Master §15.4). */
+/** Explicit friendly labels for production tools (Master §15.4 / Plan 6 §7.9). */
 const FRIENDLY_TOOL_LABELS: Readonly<Record<string, string>> = {
   save_job: 'Save Job',
   query_jobs: 'Query Jobs',
+  match_jobs: 'Match Jobs',
   propose_profile_from_cv: 'Propose Profile From Cv',
   propose_profile_update: 'Propose Profile Update',
   commit_profile_draft: 'Commit Profile Draft',

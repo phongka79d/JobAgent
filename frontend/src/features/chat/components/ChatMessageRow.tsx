@@ -1,5 +1,5 @@
 /**
- * Per-message row owner: tools, approval card, and saved-job card projection.
+ * Per-message row owner: tools, approval card, saved-job, and match cards.
  * ChatMessages remains responsible for list/notices only.
  */
 
@@ -11,6 +11,12 @@ import {
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
+import {MatchCard} from '../../jobs/MatchCard';
+import {
+  isMatchJobsToolName,
+  parseMatchJobsResultData,
+  type CompactMatchJobsResult,
+} from '../../jobs/matchResult';
 import {SavedJobCard} from '../../jobs/SavedJobCard';
 import {
   isSaveJobToolName,
@@ -185,6 +191,26 @@ export function saveJobResultForTools(
   return null;
 }
 
+/**
+ * First durable match_jobs tool with a strict compact projection for this row.
+ * Preserves backend result order; at most 10 cards (parser-enforced).
+ */
+export function matchJobsResultForTools(
+  tools: readonly ClientToolActivity[],
+): CompactMatchJobsResult | null {
+  for (const tool of tools) {
+    if (!isMatchJobsToolName(tool.toolName)) {
+      continue;
+    }
+    const parsed = parseMatchJobsResultData(tool.resultData);
+    if (!parsed) {
+      continue;
+    }
+    return parsed;
+  }
+  return null;
+}
+
 function senderOf(
   role: ClientMessage['role'],
 ): 'user' | 'assistant' | 'system' {
@@ -221,6 +247,8 @@ export function ChatMessageRow({
 
   const savedJob =
     message.role === 'assistant' ? saveJobResultForTools(tools) : null;
+  const matchJobs =
+    message.role === 'assistant' ? matchJobsResultForTools(tools) : null;
 
   const showGenericInterrupted =
     runState === 'interrupted' && !showApprovalCard && parsed === null;
@@ -245,6 +273,11 @@ export function ChatMessageRow({
             errorCode={savedJob.errorCode}
           />
         ) : null}
+        {matchJobs
+          ? matchJobs.results.map((result) => (
+              <MatchCard key={result.jobId} data={result} />
+            ))
+          : null}
         {showApprovalCard && parsed && profileCommit ? (
           <ApprovalCard
             card={parsed.card}
