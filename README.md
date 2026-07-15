@@ -40,8 +40,12 @@ profile tools registered), constraint-safe SQLite-first approval, thin profile
 and active-CV read APIs, one health API, and a three-service local Docker Compose
 runtime. Plan 5 is complete through Batch04 with direct Job/Skill graph sync,
 five production Agent tools with live tool status, a provider-free Neo4j rebuild
-command, and restart-safe compact `save_job` results in chat. Matching remains
-Plan 6.
+command, and restart-safe compact `save_job` results in chat. Plan 6 / Master
+Phase 5 Batch01 is complete (Candidate v1 embedding text, revision consistency,
+and top-50 retrieval foundations). Plan 6 Batch02 is complete: pure deterministic
+skill coverage, preference components, hybrid weight renormalization with quality
+multipliers, unrounded ordering, and evidence-consistent match response schemas.
+Orchestration, the sixth tool, and match UI remain later Plan 6 batches.
 
 ## Repository layout
 
@@ -58,14 +62,17 @@ Plan 6.
   Candidate/Job/Skill sync, and provider-free rebuild under `app/graph/`,
   `GET /api/health`, Phase 2
   chat/tool/SSE Pydantic contracts, Plan 4 profile/skill/draft and attachment
-  response contracts plus Plan 5 Job extraction and embedding contracts under
-  `app/schemas/`, focused chat/run/tool and attachment/profile/Job repositories,
-  history/tool
-  services, skill normalizer, deterministic JD quality classification, bounded
-  URL text acquisition, structured JD extraction, deterministic embedding text,
-  persistence-first JD ingestion, pypdf extraction, CV upload, profile
-  extraction, draft proposal, and SQLite-first profile approval owners under
-  `app/services/`, Agent state/context
+  response contracts plus Plan 5 Job extraction and embedding contracts and Plan 6
+  compact match response contracts under `app/schemas/` (`matching.py`), focused
+  chat/run/tool and attachment/profile/Job repositories, history/tool
+  services, skill normalizer, pure skill matching and match component/score/
+  explanation owners (`skill_matching.py`, `match_components.py`,
+  `match_explanations.py`), revision consistency and top-50 retrieval under
+  `app/graph/`, deterministic JD quality classification, bounded
+  URL text acquisition, structured JD extraction, deterministic embedding text
+  (Job and Candidate v1), persistence-first JD ingestion, pypdf extraction, CV
+  upload, profile extraction, draft proposal, and SQLite-first profile approval
+  owners under `app/services/`, Agent state/context
   loader (compact approved candidate memory), ShopAIKey chat and locked embedding
   adapters, production registry of exactly five tools (three profile plus
   `save_job` / `query_jobs`) under `app/tools/`, one StateGraph factory,
@@ -389,7 +396,40 @@ compact `save_job` result projection; terminal turns rehydrate the existing
 single reducer so live and restarted conversations share one truth path; and
 the public Astryx saved-job card shows truthful processing, quality, outcome,
 failure, and sync-failure details without raw JD, embeddings, or ranking UI.
-Plan 5 / Master Phase 4 is complete, while matching/ranking remains Plan 6.
+Plan 5 / Master Phase 4 is complete.
+
+Plan 6 / Master Phase 5 Batch01 is complete: deterministic Candidate v1 embedding
+text reuses the shared whitespace/embedding-text owner; read-only SQLite/Neo4j
+revision snapshots reject unavailable or revision-inconsistent graph state; and
+top-50 Job vector retrieval hydrates authoritative SQLite Job facts without a
+second semantic model or reranker.
+
+Plan 6 Batch02 is complete: pure skill coverage over non-excluded Candidate skills
+with fixed strengths `1.0` (direct/canonical) / `0.6` (seed `RELATED_TO`) / `0.0`
+and `0.80/0.20` renormalization; exact seniority, minimum-experience, location
+(NFKC/whitespace/casefold membership), and work-mode components; hybrid base
+weights (`0.30/0.40/0.10/0.10/0.05/0.05`) with unavailable-component
+renormalization, full/partial quality multipliers (`1.00`/`0.85`), unrounded
+four-key order, and caller limit `1..10`; plus strict `extra="forbid"` match
+response schemas and a pure facts-to-explanation projector. Batch02 opens no
+database or graph connections, calls no provider/LLM for scores, registers no
+tools, renders no UI, and adds no score cache or ranking persistence.
+
+## Plan 6 Batch02 scoring verification
+
+From `backend/` after editable install (use `py -3` on hosts where `python` is
+not on PATH):
+
+```powershell
+python -m pytest tests/unit/test_skill_matching.py tests/unit/test_skill_normalization.py tests/unit/test_match_components.py tests/unit/test_match_ordering.py tests/unit/test_match_explanations.py -q
+python -m ruff check app/services/skill_matching.py app/services/match_components.py app/schemas/matching.py app/services/match_explanations.py tests/unit/test_skill_matching.py tests/unit/test_match_components.py tests/unit/test_match_ordering.py tests/unit/test_match_explanations.py
+python -m mypy app
+```
+
+These gates exercise skill strengths and empty-list renormalization, preference
+components, hybrid quality/order/limit behavior, and deterministic compact
+explanations without live ShopAIKey, Neo4j, or browser calls. Orchestration
+(`match_jobs` tool) and match cards remain later Plan 6 batches.
 
 ## Plan 3 progress and constraints
 

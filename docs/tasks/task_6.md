@@ -65,13 +65,10 @@ project. Compact ordered results and their scores persist only in the existing
   Candidate-to-Job; a seed edge's stored weight is explanation evidence while
   formula strength stays fixed at `0.6`; and timestamp parity compares UTC
   instants rather than raw `Z` versus `+00:00` strings.
-- Unresolved source conflict: Plan 6 requires truthful `direct` versus `alias`
-  match types/evidence, but the current normalizer resolves both to the same
-  stored `SkillRef` and preserves no alias provenance. Task (02A), and therefore
-  Batch02 onward, is `BLOCKED_BY_SOURCE_CONFLICT` until an explicit user/plan
-  decision defines truthful post-normalization labeling or authorizes the
-  required provenance/schema/reprocessing change. Taxonomy aliases alone do not
-  resolve this conflict.
+- Source resolution for (02A): post-normalization same-`canonical_key` skill
+  matches are truthful `direct`/canonical matches. Seed aliases remain
+  normalizer inputs only, not explanation provenance, and `alias` is not
+  reported as a distinct match type unless future schema provenance is added.
 - No-profile matching must reuse or safely consolidate the existing profile
   failure vocabulary after auditing its duplicate owners; it must not add a
   third constant definition.
@@ -222,7 +219,7 @@ This batch does not calculate match components, assemble explanations, register
 
 ### Tasks
 
-- [ ] (01A): Extend the shared embedding-text owner with the deterministic Candidate v1 representation
+- [x] (01A): Extend the shared embedding-text owner with the deterministic Candidate v1 representation
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.1 Candidate representation and embedding`; `docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.1 Locked embedding contract` through `### 17.3 Text representations`
   - Source Requirements:
     - Build from approved structured profile/preferences only, in source order:
@@ -259,7 +256,7 @@ This batch does not calculate match components, assemble explanations, register
   - Blocked Condition: None.
   - Files: `backend/app/services/embedding_text.py`, `backend/tests/unit/test_candidate_embedding_text.py`, `backend/tests/unit/test_embedding_text.py`
 
-- [ ] (01B): Implement read-only Candidate/Job revision snapshots and exact consistency rejection
+- [x] (01B): Implement read-only Candidate/Job revision snapshots and exact consistency rejection
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.2 Pre-match consistency check`; `docs/plans/Master_plan.md > ## 6. SQLite Database Contract > ### 6.1 Global conventions` and `## 21. Direct SQLite-to-Neo4j Synchronization > ### 21.2 Local failure behavior`
   - Source Requirements:
     - Compare the active SQLite Candidate and complete locked-scorable SQLite
@@ -311,7 +308,7 @@ This batch does not calculate match components, assemble explanations, register
     conflict and do not invent a new revision mechanism.
   - Files: `backend/app/graph/consistency.py`, `backend/app/graph/rebuild_snapshot.py`, `backend/app/graph/rebuild.py`, `backend/tests/fakes/matching.py`, `backend/tests/integration/test_match_revisions.py`, `backend/tests/integration/test_graph_rebuild_preflight.py`, `backend/tests/integration/test_graph_rebuild_behavior.py`
 
-- [ ] (01C): Query the existing Job vector index at top 50 and hydrate authoritative SQLite facts
+- [x] (01C): Query the existing Job vector index at top 50 and hydrate authoritative SQLite facts
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.3 Vector retrieval`; `docs/plans/Master_plan.md > ## 17. Embedding and Retrieval > ### 17.4 Retrieval flow`
   - Source Requirements:
     - Query `db.index.vector.queryNodes` against the existing configured Job
@@ -373,15 +370,17 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
 
 ### Tasks
 
-- [ ] (02A): Compute strongest direct, seed-alias, and seed-related skill evidence
+- [x] (02A): Compute strongest direct/canonical and seed-related skill evidence
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.4 Skill coverage`; `docs/plans/Master_plan.md > ## 18. Matching Formula > ### 18.1 Skill coverage`
   - Source Requirements:
     - Ignore Candidate skills with `excluded=true` and select each Job skill's
-      strongest deterministic Candidate match: direct canonical/seed alias
+      strongest deterministic Candidate match: same normalized canonical key
       `1.0`, seed `RELATED_TO` `0.6`, or none `0.0`.
-    - Alias and related evidence comes only from the authoritative seed; unknown
-      skills receive no inferred related match. Record the winning Candidate
-      skill, truthful match type, strength, and stored/seed evidence.
+    - Same-`canonical_key` matches are reported as `direct`/canonical matches;
+      seed aliases remain normalizer inputs only and are not explanation
+      provenance. Related evidence comes only from the authoritative seed;
+      unknown skills receive no inferred related match. Record the winning
+      Candidate skill, truthful match type, strength, and stored/seed evidence.
     - Under the recorded neutral relationship assumption, evaluate directed
       seed relationships from Candidate skill to Job skill and retain the seed
       edge weight as evidence metadata while matching strength remains the
@@ -393,14 +392,13 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
     `SkillNormalizer` and production taxonomy remain the only identity owners.
   - User Action: None.
   - Agent Work:
-    1. Before implementation, obtain an explicit user/plan resolution for the
-       lost alias-provenance conflict recorded in Project Context Notes; do not
-       treat taxonomy alias availability as provenance or fabricate an alias
-       label.
+    1. Apply the recorded source resolution: post-normalization same-key matches
+       are direct/canonical; do not treat taxonomy alias availability as
+       provenance or fabricate an alias label.
     2. After resolution, search the normalizer, taxonomy dataclasses,
        Candidate/Job skill schemas, graph sync, seed parser, stored records, and
        every exclusion/relationship caller.
-    3. Add failing table-driven tests for the approved direct/alias labeling,
+    3. Add failing table-driven tests for the approved direct/canonical labeling,
        related/competing strengths, directed edges, fixed `0.6` versus seed
        metadata weight, excluded/unknown skills, no matches, empty required or
        preferred lists, both empty, and deterministic ties.
@@ -413,7 +411,7 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
     renormalized `skill_score`.
   - Acceptance:
     - Strongest-match precedence and exact `1.0/0.6/0.0` strengths pass every
-      direct/alias/related/excluded/unknown case.
+      direct/canonical/related/excluded/unknown case.
     - Empty and zero-match lists remain distinguishable and renormalize exactly.
     - The implementation imports the existing taxonomy/normalizer contract and
       adds no alias table, fuzzy match, LLM call, or duplicate normalizer.
@@ -421,11 +419,9 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
     - Required (from `backend/`): `python -m pytest tests/unit/test_skill_matching.py tests/unit/test_skill_normalization.py -q` -> exact skill behavior and retained normalization pass.
     - Required (from `backend/`): `python -m ruff check app/services/skill_matching.py tests/unit/test_skill_matching.py` -> focused lint passes.
     - Required (from `backend/`): `python -m mypy app` -> backend typing passes.
-  - Blocked Condition: `BLOCKED_BY_SOURCE_CONFLICT` until explicit user/plan
-    authority defines how stored normalized skills truthfully distinguish
-    `direct` from `alias`, or authorizes provenance/schema/reprocessing scope.
-    Taxonomy alias exposure alone does not unblock the task. After resolution,
-    `BLOCKED_BY_DEPENDENCY` also applies until Batch01 is fully A2-accepted.
+  - Blocked Condition: None for source conflict after the recorded user/plan
+    resolution. `BLOCKED_BY_DEPENDENCY` applies only if Batch01 is not fully
+    A2-accepted.
   - Files: `backend/app/services/skill_matching.py`, `backend/tests/unit/test_skill_matching.py`, `backend/tests/unit/test_skill_normalization.py`
 
 - [ ] (02B): Implement exact seniority, experience, location, and work-mode components
