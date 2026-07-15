@@ -3,7 +3,7 @@
 Migrated temporary SQLite + injected fakes only. Covers exactly-one input,
 authorization-state independence, compact created/returned/retried and
 failed/sync-failed results, query filters/default/order/ties, raw-data
-exclusion, same-call replay, and exact five production tool names/order.
+exclusion, same-call replay, and exact six production tool names/order.
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ from app.tools.jobs import (
 from app.tools.registry import production_registry
 from sqlalchemy import func, select, text
 
+from tests.fakes.embeddings import FakeEmbeddingClient
 from tests.support.db_migration import run_async, session_factory
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -136,24 +137,6 @@ class FakeJdInvoker:
         if isinstance(item, BaseException):
             raise item
         return item
-
-
-class FakeEmbeddingClient:
-    def __init__(
-        self,
-        *,
-        vector: list[float] | None = None,
-        error: Exception | None = None,
-    ) -> None:
-        self.vector = vector if vector is not None else _vector()
-        self.error = error
-        self.calls: list[str] = []
-
-    def embed_text(self, text: str) -> list[float]:
-        self.calls.append(text)
-        if self.error is not None:
-            raise self.error
-        return list(self.vector)
 
 
 class RecordingSync:
@@ -395,7 +378,7 @@ def test_job_tool_contract_ownership_no_parallel_vocabularies() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_exactly_five_tools_order() -> None:
+def test_production_registry_exactly_six_tools_order() -> None:
     names = production_registry().tool_names()
     assert names == [
         "propose_profile_from_cv",
@@ -403,8 +386,8 @@ def test_production_registry_exactly_five_tools_order() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
+        "match_jobs",
     ]
-    assert "match_jobs" not in names
     assert "synthetic_interrupt" not in names
 
 
@@ -416,16 +399,21 @@ def test_no_job_route_and_single_registry_owner() -> None:
     reg_src = (app_root / "tools" / "registry.py").read_text(encoding="utf-8")
     assert "build_production_job_tools" in reg_src
     assert "build_production_profile_tools" in reg_src
-    # Token must not appear as a registered name assignment/call (docstring OK
-    # elsewhere; registry source must not register matching tools).
-    assert "match_jobs" not in reg_src
+    assert "build_production_match_tools" in reg_src
     jobs_src = inspect.getsource(
         __import__("app.tools.jobs", fromlist=["jobs"])
     )
     assert "execute_tool" in jobs_src
     assert "APIRouter" not in jobs_src
     assert "include_router" not in jobs_src
+    # Job module stays free of match_jobs registration (matching owns it).
     assert "match_jobs" not in jobs_src
+    matching_src = inspect.getsource(
+        __import__("app.tools.matching", fromlist=["matching"])
+    )
+    assert "execute_tool" in matching_src
+    assert "APIRouter" not in matching_src
+    assert "include_router" not in matching_src
 
 
 # ---------------------------------------------------------------------------

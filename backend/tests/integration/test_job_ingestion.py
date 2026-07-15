@@ -59,6 +59,7 @@ from app.services.url_fetch import (
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 
+from tests.fakes.embeddings import FakeEmbeddingClient
 from tests.support.db_migration import run_async, session_factory
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -168,26 +169,6 @@ class FakeJdInvoker:
         if isinstance(item, BaseException):
             raise item
         return item
-
-
-class FakeEmbeddingClient:
-    """Deterministic embedding client recording call count and text."""
-
-    def __init__(
-        self,
-        *,
-        vector: list[float] | None = None,
-        error: Exception | None = None,
-    ) -> None:
-        self.vector = vector if vector is not None else _vector()
-        self.error = error
-        self.calls: list[str] = []
-
-    def embed_text(self, text: str) -> list[float]:
-        self.calls.append(text)
-        if self.error is not None:
-            raise self.error
-        return list(self.vector)
 
 
 def _factory(db_path: Path):

@@ -590,7 +590,7 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_five_tools_and_synthetic_is_test_only() -> None:
+def test_production_registry_six_tools_and_synthetic_is_test_only() -> None:
     reg = production_registry()
     names = reg.tool_names()
     assert names == [
@@ -599,9 +599,9 @@ def test_production_registry_five_tools_and_synthetic_is_test_only() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
+        "match_jobs",
     ]
     assert SYNTHETIC_TOOL_NAME not in names
-    assert "match_jobs" not in names
 
     prod_registry = (BACKEND_ROOT / "app" / "tools" / "registry.py").read_text(
         encoding="utf-8"
@@ -609,8 +609,8 @@ def test_production_registry_five_tools_and_synthetic_is_test_only() -> None:
     # Exclude docstring mentions of banned helpers by checking code tokens only.
     assert "build_synthetic" not in prod_registry
     assert "interrupt(" not in prod_registry
-    assert "match_jobs" not in prod_registry
     assert "build_production_job_tools" in prod_registry
+    assert "build_production_match_tools" in prod_registry
 
     synth_path = BACKEND_ROOT / "tests" / "fakes" / "synthetic_tool.py"
     assert synth_path.is_file()

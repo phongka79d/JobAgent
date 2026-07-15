@@ -4,9 +4,9 @@ Owns injectable seams for the chat Agent model, tool registry, and SQLite path
 so tests can override production defaults without registering synthetic tools
 in production. Routes stay free of construction and business logic.
 
-Production chat deps wire the five production tools (three profile + save_job
-+ query_jobs) through :func:`~app.tools.registry.production_registry` with
-request-scoped storage and Neo4j driver from app lifespan state.
+Production chat deps wire the six production tools (three profile + save_job
++ query_jobs + match_jobs) through :func:`~app.tools.registry.production_registry`
+with request-scoped storage and Neo4j driver from app lifespan state.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def get_settings_dep(request: Request) -> Settings:
 
 
 def get_chat_agent_deps(request: Request) -> ChatAgentDeps:
-    """Production chat deps: five tools, deferred model, SQLite path.
+    """Production chat deps: six tools, deferred model, SQLite path.
 
     Tools receive session factory, storage, and Neo4j driver from the process
     / lifespan seams. Model construction is deferred to the runner so this

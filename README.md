@@ -45,7 +45,10 @@ Phase 5 Batch01 is complete (Candidate v1 embedding text, revision consistency,
 and top-50 retrieval foundations). Plan 6 Batch02 is complete: pure deterministic
 skill coverage, preference components, hybrid weight renormalization with quality
 multipliers, unrounded ordering, and evidence-consistent match response schemas.
-Orchestration, the sixth tool, and match UI remain later Plan 6 batches.
+Plan 6 Batch03 is complete: one read-only matching orchestrator composes those
+owners in consistency-first order, and replay-safe `match_jobs` is registered as
+the sixth production Agent tool. Match cards and manual JD acceptance remain
+Plan 6 Batch04.
 
 ## Repository layout
 
@@ -67,15 +70,16 @@ Orchestration, the sixth tool, and match UI remain later Plan 6 batches.
   chat/run/tool and attachment/profile/Job repositories, history/tool
   services, skill normalizer, pure skill matching and match component/score/
   explanation owners (`skill_matching.py`, `match_components.py`,
-  `match_explanations.py`), revision consistency and top-50 retrieval under
+  `match_explanations.py`), read-only matching orchestrator
+  (`services/matching.py`), revision consistency and top-50 retrieval under
   `app/graph/`, deterministic JD quality classification, bounded
   URL text acquisition, structured JD extraction, deterministic embedding text
   (Job and Candidate v1), persistence-first JD ingestion, pypdf extraction, CV
   upload, profile extraction, draft proposal, and SQLite-first profile approval
   owners under `app/services/`, Agent state/context
   loader (compact approved candidate memory), ShopAIKey chat and locked embedding
-  adapters, production registry of exactly five tools (three profile plus
-  `save_job` / `query_jobs`) under `app/tools/`, one StateGraph factory,
+  adapters, production registry of exactly six tools (three profile plus
+  `save_job` / `query_jobs` / `match_jobs`) under `app/tools/`, one StateGraph factory,
   request-scoped checkpoint/runner lifecycle, chat-turn/
   resume orchestration with interrupt-guarded commit, thin public chat history/
   turn/resume routes, `POST /api/attachments/cv`, and `GET /api/profile` plus
@@ -415,6 +419,16 @@ response schemas and a pure facts-to-explanation projector. Batch02 opens no
 database or graph connections, calls no provider/LLM for scores, registers no
 tools, renders no UI, and adds no score cache or ranking persistence.
 
+Plan 6 Batch03 is complete: `app/services/matching.py` orchestrates profile
+precondition, revision consistency, Candidate embed/validate, top-50 retrieval,
+deterministic scoring/explanation, and top-limit projection (`1..10`, default
+10); failures return zero partial results and no score cache. `app/tools/matching.py`
+exposes replay-safe `match_jobs` through the existing `(run_id, tool_call_id)`
+executor; `production_registry` is exactly the three profile tools, `save_job`,
+`query_jobs`, then `match_jobs`. No new endpoint, SSE event/status, second
+registry/executor, graph repair, or dedicated score persistence outside
+`tool_executions.result_json` was added. Match-card UI remains Batch04.
+
 ## Plan 6 Batch02 scoring verification
 
 From `backend/` after editable install (use `py -3` on hosts where `python` is
@@ -428,8 +442,25 @@ python -m mypy app
 
 These gates exercise skill strengths and empty-list renormalization, preference
 components, hybrid quality/order/limit behavior, and deterministic compact
-explanations without live ShopAIKey, Neo4j, or browser calls. Orchestration
-(`match_jobs` tool) and match cards remain later Plan 6 batches.
+explanations without live ShopAIKey, Neo4j, or browser calls.
+
+## Matching orchestration and sixth tool verification (Plan 6 Batch03)
+
+From `backend/` after editable install (use `py -3` on hosts where `python` is
+not on PATH):
+
+```powershell
+python -m pytest tests/integration/test_match_revisions.py tests/integration/test_match_jobs.py -q
+python -m pytest tests/integration/test_tool_replay.py tests/integration/test_agent_runner.py tests/integration/test_chat_history.py -q
+python -m pytest tests/integration/test_job_tools.py tests/integration/test_interrupt_resume.py tests/integration/test_profile_approval.py tests/unit/test_agent_graph.py tests/unit/test_shopaikey_chat.py tests/unit/test_profile_extraction.py -q
+python -m ruff check app/services/matching.py app/tools/matching.py app/tools/registry.py app/api/dependencies.py app/agent/graph.py app/agent/prompt.py tests/fakes/embeddings.py tests/integration/test_match_jobs.py
+python -m mypy app
+```
+
+These gates use migrated temporary SQLite, the shared counting
+`FakeEmbeddingClient`, and controlled Neo4j fakes. They require no live
+ShopAIKey, public URL, browser, or Neo4j service for Batch03 acceptance.
+Match-card frontend rendering remains Plan 6 Batch04.
 
 ## Plan 3 progress and constraints
 
@@ -738,8 +769,9 @@ python -m mypy app
 These tests use temporary migrated SQLite, fakes, and injected Neo4j drivers.
 Live Neo4j is optional and does not block Batch03 acceptance. Public surface is
 exactly health, CV upload, profile/profile-CV reads, and the three Plan 3 chat
-endpoints. At the Plan 4 gate the registry contained three profile tools; the
-current registry contains five after Plan 5 Batch03.
+endpoints. At the Plan 4 gate the registry contained three profile tools; after
+Plan 5 Batch03 it contained five; the current registry contains six after Plan 6
+Batch03 (`match_jobs` last).
 
 ## React and Astryx CV approval workflow verification (Plan 4 Batch04)
 

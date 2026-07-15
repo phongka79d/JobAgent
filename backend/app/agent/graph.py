@@ -11,7 +11,7 @@ beyond ``TOOL_LOOP_LIMIT`` (default six) ends with a stable controlled failure.
 
 Graph nodes perform no SQLAlchemy writes, HTTP transport, hidden transactions, or
 provider construction. The factory may bind an injected model/tools; production
-defaults to the five production tools via :func:`production_registry`.
+defaults to the six production tools via :func:`production_registry`.
 """
 
 from __future__ import annotations
@@ -266,7 +266,7 @@ def build_agent_graph(
         Chat model used by the decision node. When omitted, constructed via the
         ShopAIKey adapter (not inside a graph node). Tests inject fakes.
     registry:
-        Tool registry. Defaults to :func:`production_registry` (five tools).
+        Tool registry. Defaults to :func:`production_registry` (six tools).
     tool_loop_limit:
         Max ToolNode passes per turn (default ``Settings.TOOL_LOOP_LIMIT`` = 6).
     settings:

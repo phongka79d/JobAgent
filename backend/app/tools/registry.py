@@ -1,11 +1,12 @@
-"""Injected tool registry for the single-Agent graph (Plan 3–5).
+"""Injected tool registry for the single-Agent graph (Plan 3–6).
 
-Production registers exactly five tools: three profile tools from
-:func:`app.tools.profile.build_production_profile_tools` followed by
+Production registers exactly six tools: three profile tools from
+:func:`app.tools.profile.build_production_profile_tools`, then
 ``save_job`` and ``query_jobs`` from
-:func:`app.tools.jobs.build_production_job_tools`. Tests inject
+:func:`app.tools.jobs.build_production_job_tools`, then ``match_jobs`` from
+:func:`app.tools.matching.build_production_match_tools`. Tests inject
 side-effect-free fakes through the same :class:`ToolRegistry` interface without
-changing graph construction. Matching tools and test-only interrupt helpers are
+changing graph construction. Synthetic or test-only interrupt helpers are
 never registered here.
 """
 
@@ -72,15 +73,16 @@ def production_registry(
     url_fetcher: UrlFetcher | None = None,
     job_sync_fn: JobSyncFn | None = None,
 ) -> ToolRegistry:
-    """Return the production registry: three profile tools then two Job tools.
+    """Return the production registry: three profile, two Job, then match_jobs.
 
     Optional dependencies are closed over by the tools (or resolved at invoke
-    time when omitted). Never registers matching tools, preference-only tools,
-    or test-only interrupt helpers.
+    time when omitted). Never registers preference-only tools or test-only
+    interrupt helpers.
     """
     # Local imports keep this module free of eager service construction and
     # avoid circular import at package load.
     from app.tools.jobs import build_production_job_tools
+    from app.tools.matching import build_production_match_tools
     from app.tools.profile import build_production_profile_tools
 
     profile_tools = build_production_profile_tools(
@@ -102,4 +104,10 @@ def production_registry(
         driver=driver,
         job_sync_fn=job_sync_fn,
     )
-    return ToolRegistry([*profile_tools, *job_tools])
+    match_tools = build_production_match_tools(
+        session_factory=session_factory,
+        driver=driver,
+        embedding_client=embedding_client,
+        normalizer=normalizer,
+    )
+    return ToolRegistry([*profile_tools, *job_tools, *match_tools])

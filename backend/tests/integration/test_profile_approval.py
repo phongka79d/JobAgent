@@ -1189,8 +1189,8 @@ def test_propose_update_tool_compact_and_no_preference_tool() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
+        "match_jobs",
     ]
-    assert "match_jobs" not in names
     assert "propose_profile_update" in names
 
 # ---------------------------------------------------------------------------
@@ -2593,9 +2593,10 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
     run_async(_body())
 
 
-def test_production_registry_exactly_five_tools_static() -> None:
-    """Production registry is five tools; no match_jobs/synthetic."""
+def test_production_registry_exactly_six_tools_static() -> None:
+    """Production registry is six tools; no synthetic helpers."""
     from app.tools.jobs import QUERY_JOBS_NAME, SAVE_JOB_NAME
+    from app.tools.matching import MATCH_JOBS_NAME
     from app.tools.profile import (
         COMMIT_PROFILE_DRAFT_NAME,
         PROPOSE_PROFILE_FROM_CV_NAME,
@@ -2610,16 +2611,16 @@ def test_production_registry_exactly_five_tools_static() -> None:
         COMMIT_PROFILE_DRAFT_NAME,
         SAVE_JOB_NAME,
         QUERY_JOBS_NAME,
+        MATCH_JOBS_NAME,
     ]
-    assert "match_jobs" not in names
     assert "synthetic_interrupt" not in names
 
     reg_src = (
         Path(__file__).resolve().parents[2] / "app" / "tools" / "registry.py"
     ).read_text(encoding="utf-8")
-    assert "match_jobs" not in reg_src
     assert "build_synthetic" not in reg_src
     assert "build_production_job_tools" in reg_src
+    assert "build_production_match_tools" in reg_src
     profile_src = (
         Path(__file__).resolve().parents[2] / "app" / "tools" / "profile.py"
     ).read_text(encoding="utf-8")
@@ -2657,6 +2658,17 @@ def test_production_registry_exactly_five_tools_static() -> None:
         assert "execute_tool" in src
         assert "InjectedToolCallId" in src
         assert "InjectedState" in src
+    matching_src = (
+        Path(__file__).resolve().parents[2] / "app" / "tools" / "matching.py"
+    ).read_text(encoding="utf-8")
+    assert "execute_tool" in matching_src
+    match_fn = __import__(
+        "app.tools.matching", fromlist=["build_match_jobs_tool"]
+    ).build_match_jobs_tool
+    match_src = inspect.getsource(match_fn)
+    assert "execute_tool" in match_src
+    assert "InjectedToolCallId" in match_src
+    assert "InjectedState" in match_src
 
 
 def test_five_production_tools_durable_status_and_proposal_replay(

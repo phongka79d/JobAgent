@@ -107,8 +107,31 @@ def revision_read_driver(
     )
 
 
+def orchestration_read_driver(
+    *,
+    candidates: Sequence[Mapping[str, Any]],
+    jobs: Sequence[Mapping[str, Any]],
+    vector_rows: Sequence[Mapping[str, Any]] | None = None,
+    failure: Exception | None = None,
+) -> ScriptedReadDriver:
+    """Build a read fake for consistency plus optional top-k vector retrieval.
+
+    *vector_rows* is optional so consistency-only failure cases need not script
+    a vector index response. When provided, scripts match the same query
+    substrings used by ``consistency`` and ``retrieval`` owners.
+    """
+    scripts: list[ScriptedRead] = [
+        ScriptedRead("MATCH (c:Candidate)", candidates),
+        ScriptedRead("MATCH (j:Job)", jobs),
+    ]
+    if vector_rows is not None:
+        scripts.append(ScriptedRead("db.index.vector.queryNodes", vector_rows))
+    return ScriptedReadDriver(tuple(scripts), failure=failure)
+
+
 __all__ = [
     "ScriptedRead",
     "ScriptedReadDriver",
+    "orchestration_read_driver",
     "revision_read_driver",
 ]
