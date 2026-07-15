@@ -16,6 +16,7 @@ from app.graph import constraints as constraints_mod
 from app.graph.constraints import (
     CANDIDATE_ID_UNIQUE,
     JOB_EMBEDDING_VECTOR_INDEX,
+    JOB_EMBEDDING_VECTOR_INDEX_NAME,
     JOB_ID_UNIQUE,
     SCHEMA_STATEMENTS,
     SKILL_CANONICAL_KEY_UNIQUE,
@@ -181,6 +182,8 @@ def test_schema_statements_exact_constraints_and_vector_index() -> None:
     assert "CREATE VECTOR INDEX job_embedding_vector IF NOT EXISTS" in (
         JOB_EMBEDDING_VECTOR_INDEX
     )
+    assert JOB_EMBEDDING_VECTOR_INDEX_NAME == "job_embedding_vector"
+    assert JOB_EMBEDDING_VECTOR_INDEX_NAME in JOB_EMBEDDING_VECTOR_INDEX
     assert "FOR (j:Job) ON (j.embedding)" in JOB_EMBEDDING_VECTOR_INDEX
     assert "`vector.dimensions`: 1536" in JOB_EMBEDDING_VECTOR_INDEX
     assert "`vector.similarity_function`: 'cosine'" in JOB_EMBEDDING_VECTOR_INDEX

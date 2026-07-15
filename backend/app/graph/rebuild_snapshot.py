@@ -7,7 +7,9 @@ Never mutates SQLite, opens ShopAIKey, or issues Neo4j statements.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -55,6 +57,41 @@ class ScorableJobRow:
     source_updated_at: Any
 
 
+@dataclass(frozen=True, slots=True)
+class ScorableJobFacts:
+    """SQLite-authoritative facts required after vector retrieval."""
+
+    job_id: str
+    extraction: JobPostExtraction
+    jd_quality: str
+    source_url: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRevision:
+    """Read-only source revision for Candidate/Job parity checks."""
+
+    id: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRevisionSnapshot:
+    """Active Candidate and complete scorable Job revision set from SQLite."""
+
+    candidate: SourceRevision | None
+    jobs: tuple[SourceRevision, ...]
+
+
+def _scorable_jobs_stmt() -> Any:
+    return (
+        select(JobPost)
+        .where(JobPost.processing_status == JOB_PROCESSING_STATUS_PROCESSED)
+        .where(JobPost.jd_quality.in_(tuple(_SCORABLE_QUALITIES)))
+        .order_by(JobPost.created_at.asc(), JobPost.id.asc())
+    )
+
+
 def validate_stored_embedding(
     *,
     job_id: str,
@@ -91,6 +128,58 @@ def validate_stored_embedding(
         ) from exc
 
 
+async def load_source_revision_snapshot(
+    session: AsyncSession,
+) -> SourceRevisionSnapshot:
+    """Read active Candidate and all scorable Job ID/revisions from SQLite."""
+    profile_row = await profile_repo.get_active_profile(session)
+    candidate = (
+        SourceRevision(profile_row.id, profile_row.updated_at)
+        if profile_row is not None
+        else None
+    )
+
+    result = await session.execute(_scorable_jobs_stmt())
+    jobs = tuple(
+        SourceRevision(row.id, row.updated_at) for row in result.scalars().all()
+    )
+    return SourceRevisionSnapshot(candidate=candidate, jobs=jobs)
+
+
+async def load_scorable_job_facts(
+    session: AsyncSession,
+    job_ids: Iterable[str],
+) -> dict[str, ScorableJobFacts]:
+    """Bulk-read current scorable Job facts by ID from SQLite."""
+    requested = frozenset(job_ids)
+    if not requested:
+        return {}
+
+    result = await session.execute(
+        _scorable_jobs_stmt().where(JobPost.id.in_(tuple(requested)))
+    )
+    facts: dict[str, ScorableJobFacts] = {}
+    for row in result.scalars().all():
+        try:
+            extraction = parse_job_post_extraction(row.extraction_json)
+        except Exception as exc:
+            raise RebuildError(
+                f"Job {row.id}: extraction_json failed validation; fix SQLite "
+                "Job data before rebuild.",
+                code="JOB_INVALID",
+            ) from exc
+        quality = row.jd_quality
+        if quality is None or quality not in _SCORABLE_QUALITIES:
+            continue
+        facts[row.id] = ScorableJobFacts(
+            job_id=row.id,
+            extraction=extraction,
+            jd_quality=quality,
+            source_url=row.source_url,
+        )
+    return facts
+
+
 async def load_rebuild_inputs(
     session: AsyncSession,
     *,
@@ -116,13 +205,7 @@ async def load_rebuild_inputs(
             ) from exc
         profile_updated_at = profile_row.updated_at
 
-    stmt = (
-        select(JobPost)
-        .where(JobPost.processing_status == JOB_PROCESSING_STATUS_PROCESSED)
-        .where(JobPost.jd_quality.in_(tuple(_SCORABLE_QUALITIES)))
-        .order_by(JobPost.created_at.asc(), JobPost.id.asc())
-    )
-    result = await session.execute(stmt)
+    result = await session.execute(_scorable_jobs_stmt())
     rows = list(result.scalars().all())
 
     scorable: list[ScorableJobRow] = []
@@ -160,7 +243,12 @@ async def load_rebuild_inputs(
 
 __all__ = [
     "CONFIGURATION_RESTORATION_GUIDANCE",
+    "ScorableJobFacts",
     "ScorableJobRow",
+    "SourceRevision",
+    "SourceRevisionSnapshot",
     "load_rebuild_inputs",
+    "load_scorable_job_facts",
+    "load_source_revision_snapshot",
     "validate_stored_embedding",
 ]

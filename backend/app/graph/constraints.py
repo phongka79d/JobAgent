@@ -17,6 +17,7 @@ from neo4j import AsyncDriver
 # Locked embedding dimension (Master embedding contract / settings default).
 VECTOR_DIMENSIONS = 1536
 VECTOR_SIMILARITY = "cosine"
+JOB_EMBEDDING_VECTOR_INDEX_NAME = "job_embedding_vector"
 
 # Fixed, idempotent DDL. Identifiers and options are source constants only —
 # never interpolate runtime values or secrets into these statements.
@@ -33,7 +34,7 @@ SKILL_CANONICAL_KEY_UNIQUE = (
     "FOR (s:Skill) REQUIRE s.canonical_key IS UNIQUE"
 )
 JOB_EMBEDDING_VECTOR_INDEX = (
-    "CREATE VECTOR INDEX job_embedding_vector IF NOT EXISTS "
+    f"CREATE VECTOR INDEX {JOB_EMBEDDING_VECTOR_INDEX_NAME} IF NOT EXISTS "
     "FOR (j:Job) ON (j.embedding) "
     "OPTIONS {indexConfig: {"
     "`vector.dimensions`: 1536, "

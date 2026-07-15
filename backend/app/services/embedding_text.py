@@ -10,9 +10,12 @@ from __future__ import annotations
 from typing import Final
 
 from app.schemas.jobs import JobPostExtraction
+from app.schemas.profile import CandidateProfile, JobPreferences
 
 # Explicit representation version (code/config migration, not silent change).
-JOB_EMBEDDING_TEXT_VERSION: Final[str] = "v1"
+EMBEDDING_TEXT_VERSION: Final[str] = "v1"
+JOB_EMBEDDING_TEXT_VERSION: Final[str] = EMBEDDING_TEXT_VERSION
+CANDIDATE_EMBEDDING_TEXT_VERSION: Final[str] = EMBEDDING_TEXT_VERSION
 
 # Deterministic separators (byte-stable across equivalent structured inputs).
 _SECTION_SEP: Final[str] = "\n"
@@ -74,5 +77,71 @@ def build_job_embedding_text_v1(extraction: JobPostExtraction) -> str:
         _section("responsibilities", _bullet_list(responsibilities)),
         _section("required_skills", _SKILL_SEP.join(required)),
         _section("preferred_skills", _SKILL_SEP.join(preferred)),
+    ]
+    return _SECTION_SEP.join(parts)
+
+
+def build_candidate_embedding_text_v1(
+    profile: CandidateProfile, preferences: JobPreferences
+) -> str:
+    """Build Candidate embedding text from approved structured state only.
+
+    Field order (exact)::
+
+        target roles + profile summary + normalized non-excluded skills
+        + experience titles + preferences
+
+    Preferences include preferred locations, acceptable work modes, and target
+    seniority in their provided deterministic list order. Does not include raw
+    CV text, evidence snippets, companies, education, languages, or E5 prefixes.
+    """
+    target_roles: list[str] = []
+    for raw in preferences.target_roles:
+        cleaned = normalize_embedding_whitespace(raw)
+        if cleaned:
+            target_roles.append(cleaned)
+
+    summary = normalize_embedding_whitespace(profile.summary)
+
+    skills: list[str] = []
+    for candidate_skill in profile.skills:
+        if candidate_skill.excluded:
+            continue
+        name = normalize_embedding_whitespace(candidate_skill.skill.display_name)
+        if name:
+            skills.append(name)
+
+    experience_titles: list[str] = []
+    for experience in profile.experiences:
+        title = normalize_embedding_whitespace(experience.title)
+        if title:
+            experience_titles.append(title)
+
+    preferred_locations: list[str] = []
+    for raw in preferences.preferred_locations:
+        cleaned = normalize_embedding_whitespace(raw)
+        if cleaned:
+            preferred_locations.append(cleaned)
+
+    acceptable_work_modes: list[str] = []
+    for raw in preferences.acceptable_work_modes:
+        cleaned = normalize_embedding_whitespace(raw)
+        if cleaned:
+            acceptable_work_modes.append(cleaned)
+
+    target_seniority: list[str] = []
+    for raw in preferences.target_seniority:
+        cleaned = normalize_embedding_whitespace(raw)
+        if cleaned:
+            target_seniority.append(cleaned)
+
+    parts = [
+        _section("target_roles", _bullet_list(target_roles)),
+        _section("profile_summary", summary),
+        _section("skills", _SKILL_SEP.join(skills)),
+        _section("experience_titles", _bullet_list(experience_titles)),
+        _section("preferred_locations", _bullet_list(preferred_locations)),
+        _section("acceptable_work_modes", _bullet_list(acceptable_work_modes)),
+        _section("target_seniority", _bullet_list(target_seniority)),
     ]
     return _SECTION_SEP.join(parts)
