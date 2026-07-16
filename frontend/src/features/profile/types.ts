@@ -64,6 +64,10 @@ export type ProfileReadResponse = {
   profile: CandidateProfileSummary | null;
   preferences: JobPreferencesSummary | null;
   active_attachment: AttachmentPublic | null;
+  /** True when an unapproved profile draft exists (Save Profile still needed). */
+  draft_present: boolean;
+  /** Staged attachment backing the draft, when any (safe metadata only). */
+  pending_attachment: AttachmentPublic | null;
 };
 
 /** Pending PDF attachment for the chat composer (ID + display name only). */
@@ -242,12 +246,20 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
   if (present === null) {
     throw new Error('profile.present must be boolean');
   }
+  const draft_present = asBoolean(raw.draft_present) ?? false;
+  const pending_attachment =
+    raw.pending_attachment === null || raw.pending_attachment === undefined
+      ? null
+      : parseAttachmentPublic(raw.pending_attachment);
+
   if (!present) {
     return {
       present: false,
       profile: null,
       preferences: null,
       active_attachment: null,
+      draft_present,
+      pending_attachment,
     };
   }
   if (!isObject(raw.profile)) {
@@ -308,5 +320,7 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
     profile,
     preferences,
     active_attachment,
+    draft_present,
+    pending_attachment,
   };
 }

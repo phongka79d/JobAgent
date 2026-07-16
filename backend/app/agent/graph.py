@@ -16,8 +16,10 @@ defaults to the six production tools via :func:`production_registry`.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, cast
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -39,6 +41,12 @@ from app.adapters.shopaikey_chat import bind_chat_tools, build_shopaikey_chat
 from app.agent.prompt import build_system_prompt
 from app.agent.state import AGENT_CONVERSATION_ID, AGENT_STATE_FIELDS
 from app.core.settings import Settings, get_settings
+from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.tools.profile import (
+    COMMIT_PROFILE_DRAFT_NAME,
+    PROPOSE_PROFILE_FROM_CV_NAME,
+    PROPOSE_PROFILE_UPDATE_NAME,
+)
 from app.tools.registry import ToolRegistry, production_registry
 
 # Stable controlled-failure code when the tool loop would exceed the limit.
@@ -206,17 +214,51 @@ def _format_candidate_context_block(
     )
 
 
+def _format_attachment_ids_block(
+    attachment_ids: Sequence[str] | None,
+) -> str | None:
+    """Serialize this-turn staged attachment UUID refs for the model.
+
+    Returns ``None`` when empty. Never includes filenames, paths, or file bytes.
+    ``propose_profile_from_cv`` requires an exact ``attachment_id``; without this
+    block the model only sees prose like "I uploaded my CV" and invents IDs.
+    """
+    ids: list[str] = []
+    seen: set[str] = set()
+    for raw in attachment_ids or ():
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+    if not ids:
+        return None
+    lines = "\n".join(f"- {attachment_id}" for attachment_id in ids)
+    return (
+        "Staged attachment IDs for this turn (UUID references only). "
+        "When calling propose_profile_from_cv, pass one of these exact values "
+        "as attachment_id. Never invent IDs, paths, or placeholders such as "
+        "'current' or 'latest':\n"
+        f"{lines}"
+    )
+
+
 def _build_model_messages(
     state: AgentGraphState,
     system_prompt: str,
 ) -> list[BaseMessage]:
-    """Assemble system + candidate_context + recent_context + turn messages."""
+    """Assemble system + candidate + attachment refs + context + turn messages."""
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     candidate_block = _format_candidate_context_block(
         state.get("candidate_context")
     )
     if candidate_block is not None:
         messages.append(SystemMessage(content=candidate_block))
+    attachment_block = _format_attachment_ids_block(state.get("attachment_ids"))
+    if attachment_block is not None:
+        messages.append(SystemMessage(content=attachment_block))
     for ctx_item in state.get("recent_context") or []:
         messages.append(_coerce_message(ctx_item))
     for turn_item in state.get("messages_for_this_turn") or []:
@@ -237,6 +279,100 @@ def _has_tool_calls(message: AIMessage | None) -> bool:
         return False
     calls = getattr(message, "tool_calls", None) or []
     return len(calls) > 0
+
+
+def _tool_call_name(call: Any) -> str:
+    if isinstance(call, dict):
+        name = call.get("name")
+        return name if isinstance(name, str) else ""
+    name = getattr(call, "name", None)
+    return name if isinstance(name, str) else ""
+
+
+def _parse_tool_result_payload(content: Any) -> dict[str, Any] | None:
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _tool_result_indicates_profile_draft(payload: dict[str, Any]) -> bool:
+    """True when a propose/update tool left an unapproved draft to commit."""
+    if payload.get("ok") is not True:
+        return False
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return False
+    kind = data.get("kind")
+    if kind in {"new_draft", "existing_draft", "current_draft", "active_context"}:
+        return True
+    return data.get("draft_id") == PROFILE_DRAFT_ID
+
+
+def _turn_already_requested_commit(messages: Sequence[Any]) -> bool:
+    for item in messages:
+        if not isinstance(item, AIMessage):
+            continue
+        for call in item.tool_calls or []:
+            if _tool_call_name(call) == COMMIT_PROFILE_DRAFT_NAME:
+                return True
+    return False
+
+
+def _auto_commit_after_draft_tool(
+    state: AgentGraphState,
+    *,
+    commit_available: bool,
+) -> AIMessage | None:
+    """Force commit_profile_draft after a successful draft propose/update.
+
+    Plan 4 flow is propose → commit interrupt. Live models often narrate the
+    draft and skip commit, so the UI never gets Save Profile. Deterministically
+    chain one commit tool call when a draft-producing tool just succeeded.
+    """
+    if not commit_available:
+        return None
+    messages = list(state.get(MESSAGES_KEY) or [])
+    if not messages or _turn_already_requested_commit(messages):
+        return None
+
+    draft_ready = False
+    for item in reversed(messages):
+        if isinstance(item, AIMessage) and _has_tool_calls(item):
+            # Stop at the previous model decision boundary.
+            break
+        if not isinstance(item, ToolMessage):
+            continue
+        tool_name = getattr(item, "name", None)
+        if tool_name not in {
+            PROPOSE_PROFILE_FROM_CV_NAME,
+            PROPOSE_PROFILE_UPDATE_NAME,
+        }:
+            continue
+        payload = _parse_tool_result_payload(item.content)
+        if payload is not None and _tool_result_indicates_profile_draft(payload):
+            draft_ready = True
+            break
+
+    if not draft_ready:
+        return None
+
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": COMMIT_PROFILE_DRAFT_NAME,
+                "args": {"draft_id": PROFILE_DRAFT_ID},
+                "id": f"auto-commit-{uuid4()}",
+                "type": "tool_call",
+            }
+        ],
+    )
 
 
 def _as_base_chat_model(
@@ -300,10 +436,24 @@ def build_agent_graph(
         messages_key=MESSAGES_KEY,
     )
 
+    commit_available = COMMIT_PROFILE_DRAFT_NAME in set(tool_names)
+
     def decision_node(state: AgentGraphState) -> dict[str, Any]:
         """LLM decision: append AIMessage; set controlled error if loop exhausted."""
         if state.get("error"):
             return {}
+
+        # After a successful draft propose/update, always open Save Profile.
+        auto_commit = _auto_commit_after_draft_tool(
+            state,
+            commit_available=commit_available,
+        )
+        if auto_commit is not None:
+            updates: dict[str, Any] = {MESSAGES_KEY: [auto_commit]}
+            count = int(state.get("tool_iteration_count") or 0)
+            if count >= limit:
+                updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
+            return updates
 
         prompt_messages = _build_model_messages(state, system_prompt)
         response_raw = chat.invoke(prompt_messages)
@@ -314,7 +464,7 @@ def build_agent_graph(
             text = content if isinstance(content, str) else str(content)
             response = AIMessage(content=text)
 
-        updates: dict[str, Any] = {MESSAGES_KEY: [response]}
+        updates = {MESSAGES_KEY: [response]}
         count = int(state.get("tool_iteration_count") or 0)
         if _has_tool_calls(response) and count >= limit:
             # Seventh (or further) pass would exceed the configured limit.

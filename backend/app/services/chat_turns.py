@@ -19,7 +19,12 @@ from langchain_core.runnables import Runnable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent.context import load_candidate_context, load_recent_context
+from app.agent.context import (
+    load_candidate_context,
+    load_profile_working_memory_messages,
+    load_recent_context,
+    merge_turn_attachment_ids,
+)
 from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
 from app.core.ids import new_uuid
@@ -389,15 +394,24 @@ async def stream_chat_turn(
 
     # Load bounded recent + approved candidate memory before graph execution.
     # Short read session only — never held open across provider/graph work.
-    # Candidate context is the approved profile only (not pending drafts).
+    # Candidate context is the approved profile only; draft/staged attachment
+    # working memory is injected as system ContextMessages so later turns still
+    # see source_attachment_id UUIDs (models otherwise invent "current").
     async with factory() as session:
         recent_loaded = await load_recent_context(
             session,
             exclude_ids=frozenset({turn.user_message_id}),
         )
         candidate_context = await load_candidate_context(session)
+        working_memory = await load_profile_working_memory_messages(session)
+        effective_attachment_ids = await merge_turn_attachment_ids(
+            session,
+            attachment_ids,
+        )
     # Graph state uses list[dict] channels; ContextMessage is a TypedDict.
-    recent_context: list[dict[str, Any]] = [dict(m) for m in recent_loaded]
+    recent_context: list[dict[str, Any]] = [
+        dict(m) for m in working_memory
+    ] + [dict(m) for m in recent_loaded]
 
     async def on_terminal(outcome: TerminalOutcome) -> bool:
         return await _on_durable_terminal(
@@ -411,7 +425,7 @@ async def stream_chat_turn(
         user_text=turn.content,
         recent_context=recent_context,
         candidate_context=candidate_context,
-        attachment_ids=attachment_ids,
+        attachment_ids=effective_attachment_ids,
         model=model,
         registry=registry,
         graph_bundle=graph_bundle,

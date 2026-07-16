@@ -337,6 +337,8 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         assert (files_dir / attachment_id).is_file()
 
         # --- 4. Attachment turn → propose_profile_from_cv → validated draft ---
+        # Propose auto-chains commit_profile_draft so the UI gets Save Profile
+        # without a second user turn or LLM cooperation.
         override_chat_deps(
             client,
             model=FakeChatModel(
@@ -346,7 +348,6 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                         call_id="call-demo-propose",
                         args={"attachment_id": attachment_id},
                     ),
-                    ai_text(PROPOSE_REPLY),
                 ]
             ),
             registry=registry,
@@ -364,8 +365,14 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         propose_names = _event_names(propose_events)
         assert propose_names[0] == "run_started"
         assert "tool_status" in propose_names
-        assert "approval_required" not in propose_names
-        assert propose_names[-1] == "run_completed"
+        assert propose_names[-1] == "approval_required"
+        assert "run_completed" not in propose_names
+        approval = propose_events[-1]
+        assert approval["payload"]["kind"] == PROFILE_COMMIT_KIND
+        assert approval["payload"]["allowed_actions"] == list(
+            PROFILE_COMMIT_ACTIONS
+        )
+        commit_run_id = approval["run_id"]
         _assert_no_false_success(propose.text)
         assert profile_invoker.call_count == 1
 
@@ -385,42 +392,6 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 assert await profile_repo.get_active_profile(session) is None
 
         run_async(_assert_draft())
-
-        # --- 5. Commit → approval_required ---
-        override_chat_deps(
-            client,
-            model=FakeChatModel(
-                responses=[
-                    ai_tool_call(
-                        COMMIT_PROFILE_DRAFT_NAME,
-                        call_id="call-demo-commit",
-                        args={"draft_id": PROFILE_DRAFT_ID},
-                    ),
-                ]
-            ),
-            registry=registry,
-            db_path=db_path,
-        )
-        commit_turn = client.post(
-            "/api/chat/turns",
-            json={
-                "message": "please commit my profile draft",
-                "attachment_ids": [],
-            },
-        )
-        assert commit_turn.status_code == 200, commit_turn.text
-        commit_events = parse_sse_wire(commit_turn.text)
-        commit_names = _event_names(commit_events)
-        assert commit_names[0] == "run_started"
-        assert commit_names[-1] == "approval_required"
-        assert "run_completed" not in commit_names
-        approval = commit_events[-1]
-        assert approval["payload"]["kind"] == PROFILE_COMMIT_KIND
-        assert approval["payload"]["allowed_actions"] == list(
-            PROFILE_COMMIT_ACTIONS
-        )
-        commit_run_id = approval["run_id"]
-        _assert_no_false_success(commit_turn.text)
 
         blocked = client.post(
             "/api/chat/turns",
@@ -475,10 +446,14 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 tools = await tool_repo.list_for_run_ids(
                     session, [commit_run_id]
                 )
-                assert len(tools) == 1
-                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
-                assert tools[0].tool_name == COMMIT_PROFILE_DRAFT_NAME
-                stored = tool_repo.load_stored_result(tools[0])
+                # Same run: propose_profile_from_cv then auto-chained commit.
+                assert len(tools) == 2
+                by_name = {t.tool_name: t for t in tools}
+                assert PROPOSE_PROFILE_FROM_CV_NAME in by_name
+                assert COMMIT_PROFILE_DRAFT_NAME in by_name
+                commit_row = by_name[COMMIT_PROFILE_DRAFT_NAME]
+                assert commit_row.status == TOOL_EXECUTION_STATUS_COMPLETED
+                stored = tool_repo.load_stored_result(commit_row)
                 assert stored.ok is True
                 assert stored.data is not None
                 assert stored.data.get("committed") is True
@@ -668,9 +643,9 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                         )
                     ).scalar_one()
                 )
-                # Greeting, continuation, propose, commit, JD, match turns.
-                assert msg_count >= 10
-                assert run_count >= 6
+                # Greeting, continuation, propose(+auto-commit), JD, match turns.
+                assert msg_count >= 8
+                assert run_count >= 5
                 assert tool_count >= 4
 
                 match_rows = (

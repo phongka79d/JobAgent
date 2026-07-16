@@ -36,6 +36,8 @@ function emptyProfile(): ProfileReadResponse {
     profile: null,
     preferences: null,
     active_attachment: null,
+    draft_present: false,
+    pending_attachment: null,
   };
 }
 
@@ -63,6 +65,8 @@ function activeProfile(
       state: 'active',
       failure_code: null,
     },
+    draft_present: false,
+    pending_attachment: null,
   };
 }
 

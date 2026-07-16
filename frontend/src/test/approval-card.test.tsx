@@ -638,6 +638,8 @@ describe('Save Profile refreshes sidebar', () => {
           profile: null,
           preferences: null,
           active_attachment: null,
+          draft_present: false,
+          pending_attachment: null,
         };
       }
       return {
@@ -661,6 +663,8 @@ describe('Save Profile refreshes sidebar', () => {
           state: 'active',
           failure_code: null,
         },
+        draft_present: false,
+        pending_attachment: null,
       };
     });
 

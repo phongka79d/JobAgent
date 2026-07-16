@@ -107,7 +107,9 @@ def build_propose_profile_from_cv_tool(
     ) -> dict[str, Any]:
         """Propose a Candidate Profile draft from a staged CV attachment.
 
-        Input is only ``attachment_id``. Active attachments return the approved
+        Input is only ``attachment_id``: use an exact staged attachment UUID
+        supplied for this turn (never invent IDs, paths, or placeholders like
+        ``current`` / ``latest``). Active attachments return the approved
         profile; a staged attachment already backing the current draft is
         reused; other staged attachments run extraction into
         ``profile_drafts('current')``. Never commits active profile/preferences.
@@ -137,9 +139,17 @@ def build_propose_profile_from_cv_tool(
                 data=None,
             ).model_dump(mode="json")
 
-        args_summary = arguments_summary_for_propose_cv(attachment_id)
+        turn_ids = (
+            list(state.get("attachment_ids") or [])
+            if isinstance(state, dict)
+            else []
+        )
 
         async def _invoke() -> ToolResult:
+            from app.services.attachment_resolve import (
+                resolve_attachment_id_for_propose,
+            )
+
             store = (
                 storage
                 if storage is not None
@@ -155,8 +165,25 @@ def build_propose_profile_from_cv_tool(
                 if normalizer is not None
                 else SkillNormalizer.production()
             )
+            # Resolve placeholders like "current" (draft_id) to a real staged UUID.
+            async with factory() as session:
+                resolved = await resolve_attachment_id_for_propose(
+                    session,
+                    attachment_id,
+                    turn_attachment_ids=turn_ids,
+                )
+            if resolved is None:
+                return ToolResult(
+                    ok=False,
+                    code="ATTACHMENT_NOT_FOUND",
+                    summary=(
+                        f"attachment {attachment_id!r} not found; upload a CV "
+                        "or pass a staged attachment UUID"
+                    ),
+                    data={"attachment_id": attachment_id},
+                )
             result = await propose_profile_from_cv(
-                attachment_id=attachment_id,
+                attachment_id=resolved,
                 session_factory=factory,
                 storage=store,
                 invoker=inv,
@@ -165,6 +192,9 @@ def build_propose_profile_from_cv_tool(
             )
             return result.tool_result
 
+        # Arguments summary uses the model-supplied value; durable result carries
+        # the resolved UUID after invoke.
+        args_summary = arguments_summary_for_propose_cv(attachment_id)
         tool_result = await execute_tool(
             run_id=run_id,
             tool_call_id=tool_call_id,

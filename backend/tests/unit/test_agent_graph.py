@@ -12,6 +12,8 @@ from app.agent.graph import (
     MESSAGES_KEY,
     TOOLS_NODE_NAME,
     AgentGraphBundle,
+    _build_model_messages,
+    _format_attachment_ids_block,
     build_agent_graph,
     initial_graph_state,
 )
@@ -146,6 +148,40 @@ def test_initial_graph_state_matches_agent_state_keys() -> None:
     assert isinstance(state["messages_for_this_turn"][0], HumanMessage)
 
 
+def test_format_attachment_ids_block_lists_exact_uuids_only() -> None:
+    att = "d4cae6c9-943c-4068-bd8a-5fad83ff0cff"
+    block = _format_attachment_ids_block([att, " ", att, "other-id"])
+    assert block is not None
+    assert att in block
+    assert "other-id" in block
+    assert block.count(att) == 1  # deduped
+    assert "storage_path" not in block
+    assert _format_attachment_ids_block([]) is None
+    assert _format_attachment_ids_block(None) is None
+
+
+def test_build_model_messages_includes_staged_attachment_ids() -> None:
+    att = "11111111-1111-4111-8111-111111111111"
+    state = initial_graph_state(
+        run_id=RUN_ID,
+        user_text="I uploaded my CV. Please process the attached PDF.",
+        attachment_ids=[att],
+    )
+    messages = _build_model_messages(state, "system prompt")
+    texts = [str(getattr(m, "content", "")) for m in messages]
+    assert any(att in t and "Staged attachment IDs" in t for t in texts)
+    assert any(
+        "I uploaded my CV. Please process the attached PDF." in t for t in texts
+    )
+
+
+def test_build_model_messages_omits_attachment_block_when_empty() -> None:
+    state = initial_graph_state(run_id=RUN_ID, user_text="hello")
+    messages = _build_model_messages(state, "system prompt")
+    texts = [str(getattr(m, "content", "")) for m in messages]
+    assert not any("Staged attachment IDs" in t for t in texts)
+
+
 # ---------------------------------------------------------------------------
 # Direct answer / tool round-trip
 # ---------------------------------------------------------------------------
@@ -166,6 +202,55 @@ def test_direct_response_terminates_without_tools() -> None:
     assert not (last.tool_calls or [])
     # No ToolMessages on a pure direct answer.
     assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+
+
+def test_auto_commit_helper_triggers_after_draft_propose() -> None:
+    """After propose_profile_from_cv draft success, chain commit_profile_draft."""
+    from app.agent.graph import _auto_commit_after_draft_tool
+
+    propose_result = {
+        "ok": True,
+        "code": None,
+        "summary": "created validated current profile draft from staged CV",
+        "data": {
+            "draft_id": "current",
+            "attachment_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "kind": "new_draft",
+        },
+    }
+    state = initial_graph_state(run_id=RUN_ID, user_text="process my cv")
+    state[MESSAGES_KEY] = [
+        _ai_tool_call(
+            "propose_profile_from_cv",
+            {"attachment_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"},
+            call_id="c-propose",
+        ),
+        ToolMessage(
+            content=str(propose_result).replace("'", '"'),
+            tool_call_id="c-propose",
+            name="propose_profile_from_cv",
+        ),
+    ]
+    # Use proper JSON content
+    state[MESSAGES_KEY][-1] = ToolMessage(
+        content=(
+            '{"ok": true, "code": null, '
+            '"summary": "created validated current profile draft from staged CV", '
+            '"data": {"draft_id": "current", "kind": "new_draft", '
+            '"attachment_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}}'
+        ),
+        tool_call_id="c-propose",
+        name="propose_profile_from_cv",
+    )
+    auto = _auto_commit_after_draft_tool(state, commit_available=True)
+    assert auto is not None
+    assert auto.tool_calls
+    assert auto.tool_calls[0]["name"] == "commit_profile_draft"
+    assert auto.tool_calls[0]["args"]["draft_id"] == "current"
+
+    # Second time (commit already requested) must not loop.
+    state[MESSAGES_KEY].append(auto)
+    assert _auto_commit_after_draft_tool(state, commit_available=True) is None
 
 
 def test_tool_round_trip_then_final_answer() -> None:

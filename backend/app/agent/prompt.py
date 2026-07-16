@@ -87,6 +87,24 @@ def build_system_prompt(
             "Use a listed tool only when the user request requires that "
             "capability; otherwise answer directly."
         )
+        if "propose_profile_from_cv" in names or "commit_profile_draft" in names:
+            sections.extend(
+                [
+                    "",
+                    "Profile / CV tools:",
+                    "- propose_profile_from_cv requires a staged attachment "
+                    "UUID from this turn or durable working memory. Never pass "
+                    "draft_id placeholders such as 'current' or 'latest' as "
+                    "attachment_id.",
+                    "- After a successful propose that creates or reuses a "
+                    "draft, call commit_profile_draft with draft_id='current' "
+                    "so the user can Save Profile or Request Changes. Without "
+                    "that call the sidebar stays empty (no approved profile).",
+                    "- Answer follow-up profile questions from the current "
+                    "unapproved draft or approved profile context when present; "
+                    "do not re-run propose with invented attachment IDs.",
+                ]
+            )
 
     return "\n".join(sections)
 

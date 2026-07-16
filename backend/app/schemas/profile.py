@@ -159,10 +159,12 @@ def parse_profile_draft_payload(payload: Any) -> ProfileDraftPayload:
 class ProfileReadResponse(BaseModel):
     """``GET /api/profile`` body: active profile state or explicit empty.
 
-    When ``present`` is false, profile/preferences/attachment are all null and
-    the client must not invent an approved CV. When true, all three nested
-    objects are validated and populated. Never carries PDF bytes or
-    ``storage_path``.
+    When ``present`` is false, profile/preferences/active_attachment are null
+    and the client must not invent an approved CV. ``draft_present`` and
+    ``pending_attachment`` may still describe an unapproved draft/staged CV so
+    the sidebar can show pending state. When ``present`` is true, the three
+    active nested objects are validated and populated. Never carries PDF bytes
+    or ``storage_path``.
     """
 
     model_config = StrictModelConfig
@@ -171,13 +173,21 @@ class ProfileReadResponse(BaseModel):
     profile: CandidateProfile | None = None
     preferences: JobPreferences | None = None
     active_attachment: AttachmentPublic | None = None
+    draft_present: bool = False
+    pending_attachment: AttachmentPublic | None = None
 
 
-def empty_profile_read_response() -> ProfileReadResponse:
-    """Explicit empty public profile state (no approved CV/profile)."""
+def empty_profile_read_response(
+    *,
+    draft_present: bool = False,
+    pending_attachment: AttachmentPublic | None = None,
+) -> ProfileReadResponse:
+    """Explicit empty/approved-absent public profile state."""
     return ProfileReadResponse(
         present=False,
         profile=None,
         preferences=None,
         active_attachment=None,
+        draft_present=draft_present,
+        pending_attachment=pending_attachment,
     )

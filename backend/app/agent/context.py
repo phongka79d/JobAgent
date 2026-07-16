@@ -296,6 +296,95 @@ async def load_candidate_context(
     return project_candidate_context(profile=profile, preferences=prefs_model)
 
 
+async def load_profile_working_memory_messages(
+    session: AsyncSession,
+) -> list[ContextMessage]:
+    """Build system messages for unapproved draft + durable attachment IDs.
+
+    Keeps later turns aware of a staged CV/draft without inventing attachment
+    IDs. Never includes raw CV text, storage paths, or full draft JSON.
+    """
+    from app.schemas.profile import parse_profile_draft_payload
+    from app.services.attachment_resolve import list_processable_attachment_ids
+    from app.services.profile_extraction import compact_draft_summary
+
+    messages: list[ContextMessage] = []
+    draft_row = await profile_repo.get_current_draft(session)
+    if draft_row is not None:
+        try:
+            draft = parse_profile_draft_payload(draft_row.draft_json)
+            summary = compact_draft_summary(draft)
+            source = draft_row.source_attachment_id or "(none)"
+            messages.append(
+                {
+                    "id": "working-profile-draft",
+                    "role": "system",
+                    "content": (
+                        "Unapproved profile draft is available in SQLite "
+                        f"(draft_id=current, source_attachment_id={source}). "
+                        "Answer profile questions from this draft when helpful. "
+                        "To show Save Profile / Request Changes, call "
+                        "commit_profile_draft with draft_id='current'. "
+                        "propose_profile_from_cv must use a staged attachment "
+                        f"UUID (for example {source}), never draft_id 'current'. "
+                        f"Draft compact facts: {summary!r}."
+                    ),
+                }
+            )
+        except Exception:
+            messages.append(
+                {
+                    "id": "working-profile-draft",
+                    "role": "system",
+                    "content": (
+                        "An unapproved profile draft exists (draft_id=current). "
+                        "Call commit_profile_draft with draft_id='current' to "
+                        "request Save Profile / Request Changes. Do not use "
+                        "'current' as attachment_id for propose_profile_from_cv."
+                    ),
+                }
+            )
+
+    processable = await list_processable_attachment_ids(session)
+    if processable:
+        lines = "\n".join(f"- {aid}" for aid in processable)
+        messages.append(
+            {
+                "id": "working-attachment-ids",
+                "role": "system",
+                "content": (
+                    "Durable processable attachment UUIDs (staged/active). "
+                    "Use these exact values as attachment_id for "
+                    "propose_profile_from_cv; never invent placeholders:\n"
+                    f"{lines}"
+                ),
+            }
+        )
+    return messages
+
+
+async def merge_turn_attachment_ids(
+    session: AsyncSession,
+    turn_attachment_ids: Sequence[str] | None,
+) -> list[str]:
+    """Union turn-scoped attachment IDs with durable staged/active IDs."""
+    from app.services.attachment_resolve import list_processable_attachment_ids
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in list(turn_attachment_ids or ()) + await list_processable_attachment_ids(
+        session
+    ):
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
 __all__ = [
     "CANDIDATE_CONTEXT_KIND_PREFERENCES",
     "CANDIDATE_CONTEXT_KIND_PROFILE",
@@ -306,6 +395,8 @@ __all__ = [
     "compact_preferences_card",
     "empty_candidate_context",
     "load_candidate_context",
+    "load_profile_working_memory_messages",
     "load_recent_context",
+    "merge_turn_attachment_ids",
     "project_candidate_context",
 ]

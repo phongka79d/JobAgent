@@ -48,14 +48,20 @@ function profileStateLabel(profile: ProfileReadResponse | null): {
   if (profile === null) {
     return {text: 'Loading…', variant: 'neutral'};
   }
-  if (!profile.present) {
-    return {text: 'No approved profile', variant: 'neutral'};
+  if (profile.present) {
+    const title = profile.profile?.current_title?.trim();
+    return {
+      text: title ? `Active · ${title}` : 'Active profile',
+      variant: 'success',
+    };
   }
-  const title = profile.profile?.current_title?.trim();
-  return {
-    text: title ? `Active · ${title}` : 'Active profile',
-    variant: 'success',
-  };
+  if (profile.draft_present) {
+    return {
+      text: 'Draft ready · click Save Profile in chat',
+      variant: 'warning',
+    };
+  }
+  return {text: 'No approved profile', variant: 'neutral'};
 }
 
 export function CvSidebar({
@@ -158,6 +164,8 @@ export function CvSidebar({
 
   const state = profileStateLabel(profile);
   const activeName = profile?.active_attachment?.original_name ?? null;
+  const pendingName = profile?.pending_attachment?.original_name ?? null;
+  const displayCvName = activeName ?? pendingName;
   const hasActive = Boolean(profile?.present && activeName);
   const uploadLabel = hasActive ? 'Replace CV' : 'Upload CV';
   const disabledReason = isUploadDisabled
@@ -202,7 +210,11 @@ export function CvSidebar({
             data-testid="jobagent-active-cv-filename"
             maxLines={2}
           >
-            {activeName ?? 'No active CV'}
+            {displayCvName
+              ? hasActive
+                ? displayCvName
+                : `${displayCvName} (staged · not saved)`
+              : 'No active CV'}
           </Text>
         </VStack>
 

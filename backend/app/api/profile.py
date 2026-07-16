@@ -61,17 +61,39 @@ def _attachment_public(row: Any) -> AttachmentPublic:
     )
 
 
+async def _pending_draft_attachment(
+    session: AsyncSession,
+) -> tuple[bool, AttachmentPublic | None]:
+    """Return draft presence and staged source attachment metadata when any."""
+    draft_row = await profile_repo.get_current_draft(session)
+    if draft_row is None:
+        return False, None
+    pending: AttachmentPublic | None = None
+    source_id = draft_row.source_attachment_id
+    if isinstance(source_id, str) and source_id.strip():
+        row = await att_repo.get_by_id(session, source_id)
+        if row is not None:
+            pending = _attachment_public(row)
+    return True, pending
+
+
 async def build_profile_read_response(
     session: AsyncSession,
 ) -> ProfileReadResponse:
-    """Assemble the public profile read body from approved SQLite truth.
+    """Assemble the public profile read body from SQLite truth.
 
-    Returns the explicit empty state when no active profile exists. Never
-    reads draft rows or file bytes.
+    Approved profile/attachment when present. Otherwise explicit empty approved
+    state, optionally with draft/staged pending attachment for sidebar display.
+    Never returns PDF bytes or storage paths.
     """
+    draft_present, pending_attachment = await _pending_draft_attachment(session)
+
     profile_row = await profile_repo.get_active_profile(session)
     if profile_row is None:
-        return empty_profile_read_response()
+        return empty_profile_read_response(
+            draft_present=draft_present,
+            pending_attachment=pending_attachment,
+        )
 
     try:
         profile = parse_candidate_profile(profile_row.profile_json)
@@ -111,6 +133,8 @@ async def build_profile_read_response(
         profile=profile,
         preferences=preferences,
         active_attachment=_attachment_public(attachment),
+        draft_present=draft_present,
+        pending_attachment=pending_attachment,
     )
 
 
