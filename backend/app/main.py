@@ -1,4 +1,4 @@
-"""FastAPI application entry: lifespan and exact seven public routes.
+"""FastAPI application entry: lifespan and public Master §14 routes.
 
 Startup opens shared resources once. The singleton-seed safeguard runs only
 after a successful SQLite availability check. Graph base-schema init runs
@@ -9,7 +9,8 @@ closes any opened Neo4j driver and disposes the SQLite engine on every exit
 path, including partial startup failures.
 
 Public functional surface (Master §14): health, CV upload, profile/profile-CV
-reads, and the three Plan 3 chat endpoints. No profile write CRUD.
+reads, the three Plan 3 chat endpoints, and Plan 8 read-only observability
+routes. No profile write CRUD.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from sqlalchemy import text
 from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.observability import router as observability_router
 from app.api.profile import router as profile_router
 from app.core.settings import Settings, get_settings
 from app.db.seed import ensure_singleton_seeds
@@ -91,7 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    """Build the FastAPI application with the exact seven public routes."""
+    """Build the FastAPI application with Master §14 public routes."""
     settings = get_settings()
     application = FastAPI(
         title="JobAgent",
@@ -109,6 +111,7 @@ def create_app() -> FastAPI:
     application.include_router(attachments_router, prefix="/api")
     application.include_router(profile_router, prefix="/api")
     application.include_router(chat_router, prefix="/api")
+    application.include_router(observability_router, prefix="/api")
     return application
 
 

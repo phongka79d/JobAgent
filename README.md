@@ -11,14 +11,17 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 8 Batch01):** retained-CV archival and canonical chunk
-persistence are implemented on the worktree under audit. Approved CV replacement
-archives the former active attachment (file and metadata retained; no restore
-path). Successful digital-PDF extraction persists the exact deterministic
-`"\n\n"`-joined chunk sequence in `attachment_text_chunks`. Migration head is
-`0002_add_attachment_text_chunks` under the configured single root
-`backend/migrations/versions/`. Observability APIs and sidebar tabs remain later
-Plan 8 batches.
+**Current status (Plan 8 Batch02):** Batch01 retention/chunks plus Batch02
+bounded read-only observability APIs are on the worktree under audit. Approved
+CV replacement archives the former active attachment (file and metadata
+retained; no restore path). Successful digital-PDF extraction persists the exact
+deterministic `"\n\n"`-joined chunk sequence in `attachment_text_chunks`.
+Migration head remains `0002_add_attachment_text_chunks` under the single root
+`backend/migrations/versions/`. Six typed `GET /api/observability/*` routes
+expose cursor-paginated CV history, retained-PDF stream, chunk list/detail,
+durable run history, and a cap-aware Neo4j Candidate/Job/Skill snapshot with
+`ready|stale|unavailable` states—no SQLite/Neo4j/chat/Agent mutation. Sidebar
+inspector tabs remain Plan 8 Batch03.
 
 ## Purpose and scope
 
@@ -30,6 +33,9 @@ JobAgent provides:
 - Immutable archived prior CVs after approved replacement (retained PDF bytes and
   metadata; not selectable profile versions) and canonical parsed-text chunks
   for successful digital-PDF extraction.
+- Read-only observability APIs for CV history, retained-file stream, selected
+  chunk text, durable Agent-run history, and a bounded Neo4j graph snapshot
+  (typed status, allowlisted labels/edges, hard caps, safe errors/redaction).
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
@@ -55,12 +61,12 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | Layer | Owns |
 |---|---|
 | `frontend/` | Astryx chat shell, CV sidebar, approval/saved-job/match cards, single SSE reducer, typed API clients |
-| `backend/app/api/` | Thin public routes only: health, CV upload, profile reads, chat history/turn/resume |
+| `backend/app/api/` | Thin public routes: health, CV upload, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
-| `backend/app/services/` | Domain orchestration (CV, profile approval/extraction/drafts, JD, matching, tool execution, history) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`) |
-| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild |
+| `backend/app/services/` | Domain orchestration (CV, profile approval/extraction/drafts, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`) and observability cross-table read projections |
+| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
 | `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
@@ -71,7 +77,7 @@ immutable `archived` history), attachment text chunks, jobs, messages, runs, and
 tool results. Neo4j is a derived Candidate/Job/Skill index and vector retrieval
 surface. ShopAIKey is the only external model provider.
 
-Public functional endpoints (seven):
+Public functional endpoints (Master §14 core plus Plan 8 observability):
 
 - `GET /api/health`
 - `POST /api/attachments/cv`
@@ -80,6 +86,12 @@ Public functional endpoints (seven):
 - `GET /api/chat/history`
 - `POST /api/chat/turns`
 - `POST /api/chat/runs/{run_id}/resume`
+- `GET /api/observability/cvs`
+- `GET /api/observability/cvs/{attachment_id}/file`
+- `GET /api/observability/cvs/{attachment_id}/chunks`
+- `GET /api/observability/cvs/{attachment_id}/chunks/{ordinal}`
+- `GET /api/observability/runs`
+- `GET /api/observability/graph`
 
 ## Repository layout
 
@@ -221,6 +233,17 @@ py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..
 git diff --check
+```
+
+Focused Plan 8 Batch02 observability read-contract gate (CV/chunk/run APIs +
+bounded graph snapshot + static checks):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_observability_graph.py tests/integration/test_observability_api.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
 ```
 
 `tests/e2e/test_demo_flow.py` is the disposable public-boundary smoke: greeting →

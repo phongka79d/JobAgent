@@ -133,7 +133,7 @@ Own read models, schemas, routes, graph projection, and direct tests. Exclude Ag
 
 ### Tasks
 
-- [ ] (02A): Implement typed read-only CV, chunk, and run observability APIs
+- [x] (02A): Implement typed read-only CV, chunk, and run observability APIs
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_8.md` > `## Mandatory Batch02 - Bounded Observability Read Contracts` > `(02A)`
@@ -176,7 +176,7 @@ Own read models, schemas, routes, graph projection, and direct tests. Exclude Ag
   - Blocked Condition: A needed write/Agent/graph change is `BLOCKED_SCOPE_CONFLICT`; unavailable API tooling is `BLOCKED_ENVIRONMENT`.
   - Files: listed observability modules, registration, and API test.
 
-- [ ] (02B): Add the bounded read-only Neo4j graph snapshot
+- [x] (02B): Add the bounded read-only Neo4j graph snapshot
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_8.md` > `## Mandatory Batch02 - Bounded Observability Read Contracts` > `(02B)`
