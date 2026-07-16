@@ -3,169 +3,19 @@
  */
 import {
   cleanup,
-  render,
   screen,
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {Theme} from '@astryxdesign/core';
-import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import type {ObservabilityApi} from '../features/observability/api';
-import type {
-  ChunkDetail,
-  ChunkListPage,
-  CvHistoryPage,
-  GraphSnapshot,
-  RunHistoryPage,
-} from '../features/observability/types';
-import {CvSidebar} from '../features/profile/CvSidebar';
-import type {ProfileReadResponse} from '../features/profile/types';
-
-const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-const RUN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
-const TOOL_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
-const MSG_ID = 'dddddddd-eeee-4fff-8aaa-111111111111';
-
-function emptyProfile(): ProfileReadResponse {
-  return {
-    present: false,
-    profile: null,
-    preferences: null,
-    active_attachment: null,
-    draft_present: false,
-    pending_attachment: null,
-  };
-}
-
-function cvHistoryPage(available = true): CvHistoryPage {
-  return {
-    items: [
-      {
-        id: ATTACHMENT_ID,
-        original_name: 'archived.pdf',
-        mime_type: 'application/pdf',
-        size_bytes: 2048,
-        page_count: 1,
-        state: 'archived',
-        failure_code: null,
-        file_hash_abbreviated: 'abcdef012345',
-        file_available: available,
-        created_at: '2024-07-01T12:00:00Z',
-        updated_at: '2024-07-01T12:00:00Z',
-      },
-    ],
-    next_cursor: null,
-  };
-}
-
-function chunkListPage(): ChunkListPage {
-  return {
-    items: [
-      {
-        attachment_id: ATTACHMENT_ID,
-        ordinal: 0,
-        preview: 'Preview only text',
-        char_count: 40,
-        token_estimate: 10,
-        created_at: '2024-07-01T12:00:00Z',
-      },
-    ],
-    next_cursor: null,
-  };
-}
-
-function chunkDetail(): ChunkDetail {
-  return {
-    attachment_id: ATTACHMENT_ID,
-    ordinal: 0,
-    text: 'Full expanded chunk body for inspection',
-    preview: 'Full expanded',
-    char_count: 40,
-    token_estimate: 10,
-    created_at: '2024-07-01T12:00:00Z',
-  };
-}
-
-function graphReady(): GraphSnapshot {
-  return {
-    status: 'ready',
-    code: null,
-    summary: 'Graph projection ready',
-    rebuild_instruction: null,
-    candidate: {id: 'cand-1', revision: 'r1'},
-    jobs: [{id: 'job-1', title: 'Engineer', company: 'Acme', revision: 'j1'}],
-    skills: [{canonical_name: 'python'}],
-    edges: [
-      {source_id: 'cand-1', target_id: 'python', type: 'HAS_SKILL'},
-    ],
-    nodes_truncated: true,
-    edges_truncated: false,
-    omitted_node_count: 2,
-    omitted_edge_count: 0,
-    checked_at: '2024-07-01T12:00:00Z',
-  };
-}
-
-function runsPage(): RunHistoryPage {
-  return {
-    items: [
-      {
-        id: RUN_ID,
-        user_message_id: MSG_ID,
-        state: 'completed',
-        error_code: null,
-        completed_at: '2024-07-01T12:01:00Z',
-        created_at: '2024-07-01T12:00:00Z',
-        updated_at: '2024-07-01T12:01:00Z',
-        related_attachment_ids: [ATTACHMENT_ID],
-        related_job_ids: [],
-        tool_executions: [
-          {
-            id: TOOL_ID,
-            tool_name: 'propose_profile_from_cv',
-            status: 'completed',
-            duration_ms: 12,
-            error_code: null,
-            summary: 'profile draft proposed',
-          },
-        ],
-      },
-    ],
-    next_cursor: null,
-  };
-}
-
-function mockApi(overrides: Partial<ObservabilityApi> = {}): ObservabilityApi {
-  return {
-    fetchCvHistory: vi.fn().mockResolvedValue(cvHistoryPage()),
-    fetchChunkList: vi.fn().mockResolvedValue(chunkListPage()),
-    fetchChunkDetail: vi.fn().mockResolvedValue(chunkDetail()),
-    fetchRunHistory: vi.fn().mockResolvedValue(runsPage()),
-    fetchGraphSnapshot: vi.fn().mockResolvedValue(graphReady()),
-    getRetainedCvUrl: (id: string) =>
-      `http://api.test/api/observability/cvs/${id}/file`,
-    ...overrides,
-  };
-}
-
-function renderSidebar(api: ObservabilityApi = mockApi()) {
-  const loadProfile = vi.fn().mockResolvedValue(emptyProfile());
-  return {
-    api,
-    loadProfile,
-    ...render(
-      <Theme theme={neutralTheme}>
-        <CvSidebar
-          isUploadDisabled={false}
-          onSidebarUploadSuccess={vi.fn()}
-          deps={{loadProfile, uploadCv: vi.fn(), observability: api}}
-        />
-      </Theme>,
-    ),
-  };
-}
+import {
+  ATTACHMENT_ID,
+  RUN_ID,
+  cvHistoryPage,
+  mockObservabilityApi,
+  renderObservabilitySidebar,
+} from './support/observability';
 
 afterEach(() => {
   cleanup();
@@ -191,8 +41,8 @@ beforeEach(() => {
 
 describe('ObservabilitySidebar composition', () => {
   it('defaults to Overview and does not fetch other tabs until selected', async () => {
-    const api = mockApi();
-    renderSidebar(api);
+    const api = mockObservabilityApi();
+    renderObservabilitySidebar(api);
 
     await waitFor(() => {
       expect(screen.getByTestId('jobagent-obs-overview')).toBeInTheDocument();
@@ -224,8 +74,8 @@ describe('ObservabilitySidebar composition', () => {
       .mockResolvedValueOnce(cvHistoryPage())
       .mockRejectedValueOnce(new ChatApiError(500, 'HTTP_ERROR', 'Server error'));
 
-    const api = mockApi({fetchCvHistory});
-    renderSidebar(api);
+    const api = mockObservabilityApi({fetchCvHistory});
+    renderObservabilitySidebar(api);
 
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
     await waitFor(() => {
@@ -251,9 +101,9 @@ describe('ObservabilitySidebar composition', () => {
   });
 
   it('requires selection for chunks, expands full text on demand, and gates file open', async () => {
-    const api = mockApi();
+    const api = mockObservabilityApi();
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    renderSidebar(api);
+    renderObservabilitySidebar(api);
 
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-chunks'));
     expect(
@@ -298,10 +148,10 @@ describe('ObservabilitySidebar composition', () => {
   });
 
   it('disables open/download when file_available is false', async () => {
-    const api = mockApi({
+    const api = mockObservabilityApi({
       fetchCvHistory: vi.fn().mockResolvedValue(cvHistoryPage(false)),
     });
-    renderSidebar(api);
+    renderObservabilitySidebar(api);
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
     await waitFor(() => {
       expect(screen.getByText('archived.pdf')).toBeInTheDocument();
@@ -311,8 +161,8 @@ describe('ObservabilitySidebar composition', () => {
   });
 
   it('renders graph semantic fallback with truncation metadata', async () => {
-    const api = mockApi();
-    renderSidebar(api);
+    const api = mockObservabilityApi();
+    renderObservabilitySidebar(api);
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-graph'));
     await waitFor(() => {
       expect(api.fetchGraphSnapshot).toHaveBeenCalledTimes(1);
@@ -326,8 +176,8 @@ describe('ObservabilitySidebar composition', () => {
   });
 
   it('loads runs and expands structured tool details', async () => {
-    const api = mockApi();
-    renderSidebar(api);
+    const api = mockObservabilityApi();
+    renderObservabilitySidebar(api);
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-runs'));
     await waitFor(() => {
       expect(api.fetchRunHistory).toHaveBeenCalledTimes(1);
@@ -339,7 +189,7 @@ describe('ObservabilitySidebar composition', () => {
   });
 
   it('collapse control exposes aria-expanded and toggles compact status', async () => {
-    renderSidebar();
+    renderObservabilitySidebar();
     await waitFor(() => {
       expect(screen.getByTestId('jobagent-obs-tabs')).toBeInTheDocument();
     });
@@ -360,7 +210,7 @@ describe('ObservabilitySidebar composition', () => {
 
   it('shows empty and error states for independent tabs', async () => {
     const {ChatApiError} = await import('../lib/api/chat');
-    const api = mockApi({
+    const api = mockObservabilityApi({
       fetchRunHistory: vi
         .fn()
         .mockRejectedValue(
@@ -368,7 +218,7 @@ describe('ObservabilitySidebar composition', () => {
         ),
       fetchCvHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
     });
-    renderSidebar(api);
+    renderObservabilitySidebar(api);
 
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
     expect(
