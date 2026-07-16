@@ -80,17 +80,29 @@ export function messageViewToClient(item: ChatMessageView): ClientMessage {
 
 /**
  * Merge history items chronologically by (createdAt, id).
- * Drops duplicates by durable message id.
+ * Drops duplicates by durable message id and replaces optimistic user turns
+ * when durable history confirms the same run id.
  */
 export function mergeMessagesChronological(
   existing: readonly ClientMessage[],
   incoming: readonly ClientMessage[],
 ): ClientMessage[] {
   const byId = new Map<string, ClientMessage>();
+  const userMessageIdByRun = new Map<string, string>();
   for (const m of existing) {
     byId.set(m.id, m);
+    if (m.role === 'user' && m.run) {
+      userMessageIdByRun.set(m.run.id, m.id);
+    }
   }
   for (const m of incoming) {
+    if (m.role === 'user' && m.run) {
+      const existingUserId = userMessageIdByRun.get(m.run.id);
+      if (existingUserId && existingUserId !== m.id) {
+        byId.delete(existingUserId);
+      }
+      userMessageIdByRun.set(m.run.id, m.id);
+    }
     byId.set(m.id, m);
   }
   return [...byId.values()].sort((a, b) => {

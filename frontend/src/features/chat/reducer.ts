@@ -249,10 +249,34 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         event.run_id,
         event.timestamp,
       );
+      let optimisticUserIndex = -1;
+      if (!event.payload.resumed) {
+        for (let i = ensured.messages.length - 1; i >= 0; i -= 1) {
+          const message = ensured.messages[i];
+          if (message?.role === 'user' && message.run === null) {
+            optimisticUserIndex = i;
+            break;
+          }
+        }
+      }
       return {
         ...state,
         seenEventIds,
-        messages: ensured.messages.map((m) => {
+        messages: ensured.messages.map((m, index) => {
+          if (index === optimisticUserIndex) {
+            return {
+              ...m,
+              run: {
+                id: event.run_id,
+                userMessageId: null,
+                state: 'running',
+                pendingApproval: null,
+                errorCode: null,
+                completedAt: null,
+                tools: [],
+              },
+            };
+          }
           if (m.clientKey !== ensured.streamingAssistantKey || !m.run) {
             return m;
           }

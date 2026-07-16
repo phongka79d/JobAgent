@@ -22,6 +22,7 @@ from app.agent.checkpoint import (
     thread_has_checkpoints,
 )
 from app.agent.graph import (
+    ERROR_PROFILE_UPDATE_FAILED,
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
     build_agent_graph,
     initial_graph_state,
@@ -30,15 +31,23 @@ from app.agent.runner import TerminalOutcome, stream_agent_run
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
     TOOL_EXECUTION_STATUS_COMPLETED,
+    TOOL_EXECUTION_STATUS_FAILED,
     AgentRun,
 )
 from app.db.session import build_async_engine
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
 from app.schemas.sse import SseEvent, parse_sse_event
 from app.schemas.tools import ToolResult
+from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
+from app.tools.profile import (
+    ERROR_INVALID_PROFILE_UPDATE,
+    PROPOSE_PROFILE_UPDATE_NAME,
+    build_propose_profile_update_tool,
+)
 from app.tools.registry import ToolRegistry
 from langchain_core.messages import AIMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -48,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.fakes.fake_chat_model import FakeChatModel
 from tests.support.db_migration import run_async, session_factory
+from tests.support.graph_rebuild import seed_candidate, skills_fixture
 
 RUN_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 RUN_B = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
@@ -58,13 +68,18 @@ def _ai_text(content: str) -> AIMessage:
     return AIMessage(content=content)
 
 
-def _ai_tool_call(name: str, call_id: str = "call-1") -> AIMessage:
+def _ai_tool_call(
+    name: str,
+    call_id: str = "call-1",
+    *,
+    args: dict[str, Any] | None = None,
+) -> AIMessage:
     return AIMessage(
         content="",
         tool_calls=[
             {
                 "name": name,
-                "args": {},
+                "args": args or {},
                 "id": call_id,
                 "type": "tool_call",
             }
@@ -252,6 +267,93 @@ def test_controlled_graph_failure_emits_run_failed(tmp_path: Path) -> None:
 
         async with open_checkpointer(db) as saver:
             assert await thread_has_checkpoints(saver, RUN_A) is False
+
+    run_async(_body())
+
+
+def test_invalid_profile_update_stops_before_matching(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """A real invalid preference update from an active profile stops the run."""
+    checkpoint_db = tmp_path / "profile-update-failure.db"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            await seed_candidate(factory)
+            await _seed_run_for_tools(factory, run_id=RUN_A)
+            profile_update = build_propose_profile_update_tool(
+                session_factory=factory,
+                normalizer=SkillNormalizer.from_path(skills_fixture()),
+            )
+            match_calls = {"n": 0}
+
+            @tool("match_jobs")
+            def match_jobs() -> str:
+                """Record an unrelated tool call the graph must suppress."""
+                match_calls["n"] += 1
+                return "unexpected match"
+
+            model = FakeChatModel(
+                responses=[
+                    _ai_tool_call(
+                        PROPOSE_PROFILE_UPDATE_NAME,
+                        call_id="update-1",
+                        args={
+                            "preference_changes": {
+                                "acceptable_work_modes": ["unsupported_mode"]
+                            }
+                        },
+                    ),
+                    _ai_tool_call("match_jobs", call_id="match-1"),
+                    _ai_text("This response must not be reached."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([profile_update, match_jobs]),
+            )
+            events = await _collect(
+                stream_agent_run(
+                    run_id=RUN_A,
+                    user_text="Update one saved preference.",
+                    graph_bundle=bundle,
+                    sqlite_path=checkpoint_db,
+                    include_assistant_status=False,
+                )
+            )
+
+            assert _names(events)[-1] == "run_failed"
+            failed = events[-1]
+            assert failed.payload.error_code == ERROR_PROFILE_UPDATE_FAILED
+            assert failed.payload.summary == "Profile update could not be completed"
+            assert match_calls["n"] == 0
+            assert model.invoke_count == 1
+
+            statuses = [event for event in events if event.event == "tool_status"]
+            assert [event.payload.status for event in statuses] == [
+                "pending",
+                "running",
+                "failed",
+            ]
+            assert {event.payload.tool_name for event in statuses} == {
+                PROPOSE_PROFILE_UPDATE_NAME
+            }
+            assert statuses[-1].payload.error_code == ERROR_INVALID_PROFILE_UPDATE
+
+            async with factory() as session:
+                active = await profile_repo.get_active_profile(session)
+                assert active is not None
+                assert await profile_repo.get_current_draft(session) is None
+                rows = await tool_repo.list_for_run_ids(session, [RUN_A])
+                assert len(rows) == 1
+                assert rows[0].tool_name == PROPOSE_PROFILE_UPDATE_NAME
+                assert rows[0].status == TOOL_EXECUTION_STATUS_FAILED
+                assert rows[0].error_code == ERROR_INVALID_PROFILE_UPDATE
+        finally:
+            await engine.dispose()
 
     run_async(_body())
 

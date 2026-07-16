@@ -35,6 +35,7 @@ from app.agent.checkpoint import (
 )
 from app.agent.graph import (
     DECISION_NODE_NAME,
+    ERROR_PROFILE_UPDATE_FAILED,
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
     MESSAGES_KEY,
     AgentGraphBundle,
@@ -59,6 +60,7 @@ _GRAPH_END: object = object()
 ERROR_AGENT_EXECUTION: str = "AGENT_EXECUTION_FAILED"
 
 _SAFE_ERROR_SUMMARIES: dict[str, str] = {
+    ERROR_PROFILE_UPDATE_FAILED: "Profile update could not be completed",
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED: "Tool loop limit exceeded for this run",
     ERROR_AGENT_EXECUTION: "Agent execution failed",
 }

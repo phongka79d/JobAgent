@@ -44,6 +44,7 @@ from app.core.settings import Settings, get_settings
 from app.db.models.profiles import PROFILE_DRAFT_ID
 from app.tools.profile import (
     COMMIT_PROFILE_DRAFT_NAME,
+    ERROR_INVALID_PROFILE_UPDATE,
     PROPOSE_PROFILE_FROM_CV_NAME,
     PROPOSE_PROFILE_UPDATE_NAME,
 )
@@ -51,6 +52,7 @@ from app.tools.registry import ToolRegistry, production_registry
 
 # Stable controlled-failure code when the tool loop would exceed the limit.
 ERROR_TOOL_LOOP_LIMIT_EXCEEDED: str = "TOOL_LOOP_LIMIT_EXCEEDED"
+ERROR_PROFILE_UPDATE_FAILED: str = "PROFILE_UPDATE_FAILED"
 
 # Graph node names — exactly one decision node and one ToolNode.
 DECISION_NODE_NAME: str = "agent"
@@ -378,6 +380,28 @@ def _auto_commit_after_draft_tool(
     )
 
 
+def _has_invalid_profile_update_result(state: AgentGraphState) -> bool:
+    """Return true when the latest profile update failed full-draft validation."""
+    raw_messages = state.get(MESSAGES_KEY)
+    messages: list[Any] = (
+        list(raw_messages) if isinstance(raw_messages, list) else []
+    )
+    for item in reversed(messages):
+        if isinstance(item, AIMessage) and _has_tool_calls(item):
+            break
+        if not isinstance(item, ToolMessage):
+            continue
+        if getattr(item, "name", None) != PROPOSE_PROFILE_UPDATE_NAME:
+            continue
+        payload = _parse_tool_result_payload(item.content)
+        return (
+            payload is not None
+            and payload.get("ok") is False
+            and payload.get("code") == ERROR_INVALID_PROFILE_UPDATE
+        )
+    return False
+
+
 def _as_base_chat_model(
     model: BaseChatModel | Runnable[Any, Any],
 ) -> BaseChatModel:
@@ -445,6 +469,9 @@ def build_agent_graph(
         """LLM decision: append AIMessage; set controlled error if loop exhausted."""
         if state.get("error"):
             return {}
+
+        if _has_invalid_profile_update_result(state):
+            return {"error": ERROR_PROFILE_UPDATE_FAILED}
 
         # After a successful draft propose/update, always open Save Profile.
         auto_commit = _auto_commit_after_draft_tool(

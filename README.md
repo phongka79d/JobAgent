@@ -352,6 +352,7 @@ not commit cleanup of real user CVs, JD text, or secrets.
 |---|---|---|
 | ShopAIKey timeout / rate limit | One bounded retry, then durable failure with safe summary | Fix network/key/quota; retry the user action |
 | Invalid structured LLM output | Exactly one schema repair attempt, then safe failure | Retry; do not add hidden model switching |
+| Invalid profile-update validation | One concise terminal profile-update failure; unrelated matching is not attempted | Correct the requested changes and retry |
 | Neo4j down during Candidate/Job sync | SQLite commit retained; result reports `NEO4J_SYNC_FAILED` | Restore Neo4j; run choice-C rebuild if graph is empty/stale |
 | Neo4j down during match | `NEO4J_UNAVAILABLE`; no partial ranking | Restore Neo4j; re-run match |
 | Candidate/Job revision mismatch | `NEO4J_REBUILD_REQUIRED`; no matching-path repair | Choice-C rebuild from SQLite embeddings |

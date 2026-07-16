@@ -804,6 +804,50 @@ describe('History hydration and load-older', () => {
     expect(state.nextCursor).toBeNull();
   });
 
+  it('reconciles an optimistic user turn with durable history without collapsing same-text turns', () => {
+    const message = 'Repeat this message';
+    let state = chatReducer(createInitialChatState(), {
+      type: 'turn/start',
+      clientKey: 'user:optimistic',
+      message,
+      createdAt: TS,
+    });
+    state = chatReducer(state, {
+      type: 'sse/event',
+      event: parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+    });
+
+    const durable = historyPage();
+    state = chatReducer(state, {
+      type: 'history/rehydrate',
+      page: {
+        ...durable,
+        items: [
+          {
+            id: MSG_OLD,
+            role: 'user',
+            content: message,
+            structured_payload: null,
+            created_at: TS_OLD,
+            updated_at: TS_OLD,
+            run: null,
+          },
+          {...durable.items[0], content: message},
+          durable.items[1],
+        ],
+      },
+    });
+
+    const users = state.messages.filter((item) => item.role === 'user');
+    expect(users.map((item) => item.id)).toEqual([MSG_OLD, MSG_USER]);
+    expect(users.map((item) => item.content)).toEqual([message, message]);
+    expect(users.find((item) => item.id === MSG_USER)?.run?.tools[0]?.source).toBe(
+      'history',
+    );
+  });
+
   it('durable history replaces transient stream tool state for completed turns', () => {
     let state = createInitialChatState();
     state = reduceAll(state, [

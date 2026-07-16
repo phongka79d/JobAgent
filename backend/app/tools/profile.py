@@ -35,6 +35,7 @@ from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
 from app.services.profile_approval import ApprovalCommitResult, commit_approved_draft
 from app.services.profile_drafts import (
+    ERROR_INVALID_PROFILE_UPDATE,
     arguments_summary_for_propose_cv,
     arguments_summary_for_propose_update,
     propose_profile_from_cv,
@@ -528,6 +529,7 @@ def build_production_profile_tools(
 
 __all__ = [
     "COMMIT_PROFILE_DRAFT_NAME",
+    "ERROR_INVALID_PROFILE_UPDATE",
     "ERROR_DRAFT_NOT_FOUND",
     "ERROR_INVALID_APPROVAL_ACTION",
     "ERROR_INVALID_DRAFT_ID",
