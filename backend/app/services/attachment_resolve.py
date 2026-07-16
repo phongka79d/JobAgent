@@ -81,6 +81,13 @@ async def list_processable_attachment_ids(session: AsyncSession) -> list[str]:
     return out
 
 
+async def _is_processable(session: AsyncSession, aid: str) -> bool:
+    row = await att_repo.get_by_id(session, aid)
+    if row is None:
+        return False
+    return row.state in {ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_ACTIVE}
+
+
 async def resolve_attachment_id_for_propose(
     session: AsyncSession,
     requested: str | None,
@@ -96,13 +103,20 @@ async def resolve_attachment_id_for_propose(
     4. Newest staged attachment
     5. Active attachment
 
+    A concrete non-placeholder UUID that is missing or not processable fails
+    closed (returns ``None``) without falling through to draft/newest staged.
+    Placeholders such as ``current`` still recover via steps 2–5.
+
     Returns ``None`` when nothing processable is available.
     """
-    candidates: list[str] = []
     raw = requested.strip() if isinstance(requested, str) else ""
     if raw and raw.lower() not in _PLACEHOLDER_IDS and looks_like_attachment_uuid(raw):
-        candidates.append(raw)
+        if await _is_processable(session, raw):
+            return raw
+        # Explicit UUID miss: do not rewrite to another attachment.
+        return None
 
+    candidates: list[str] = []
     for item in turn_attachment_ids or ():
         if not isinstance(item, str):
             continue
@@ -126,10 +140,7 @@ async def resolve_attachment_id_for_propose(
             candidates.append(aid)
 
     for aid in candidates:
-        row = await att_repo.get_by_id(session, aid)
-        if row is None:
-            continue
-        if row.state in {ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_ACTIVE}:
+        if await _is_processable(session, aid):
             return aid
     return None
 

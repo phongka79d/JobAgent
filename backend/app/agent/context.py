@@ -303,14 +303,20 @@ async def load_profile_working_memory_messages(
 
     Keeps later turns aware of a staged CV/draft without inventing attachment
     IDs. Never includes raw CV text, storage paths, or full draft JSON.
+
+    When an approved active profile exists, draft compact facts are not
+    injected (approved candidate_context is the only profile truth). Draft
+    recovery messages apply only before first approval. Processable attachment
+    UUIDs are still listed so the model can re-propose from a staged CV.
     """
     from app.schemas.profile import parse_profile_draft_payload
     from app.services.attachment_resolve import list_processable_attachment_ids
     from app.services.profile_extraction import compact_draft_summary
 
     messages: list[ContextMessage] = []
+    approved = await profile_repo.get_active_profile(session)
     draft_row = await profile_repo.get_current_draft(session)
-    if draft_row is not None:
+    if approved is None and draft_row is not None:
         try:
             draft = parse_profile_draft_payload(draft_row.draft_json)
             summary = compact_draft_summary(draft)

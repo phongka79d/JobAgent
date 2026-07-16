@@ -1081,6 +1081,8 @@ def test_get_profile_empty_state(
             "profile": None,
             "preferences": None,
             "active_attachment": None,
+            "draft_present": False,
+            "pending_attachment": None,
         }
         assert "storage_path" not in response.text
         assert "%PDF" not in response.text
