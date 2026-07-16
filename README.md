@@ -6,8 +6,9 @@ job matches. JobAgent is intentionally narrow: one conversation, one active prof
 one root environment, and a three-service Docker Compose stack on loopback ports.
 
 This README is the Plan 7 local release guide. It is sufficient for a fresh clone
-plus one ignored root `.env`. Live release evidence is recorded separately in
-`docs/acceptance/local_release_checklist.md`.
+plus one ignored root `.env`. Plan 7 final current-output release verification is
+complete: dated PASS evidence for Automated Coverage through Final Rerun lives in
+`docs/acceptance/local_release_checklist.md` on product HEAD `1fdc93b`.
 
 ## Purpose and scope
 

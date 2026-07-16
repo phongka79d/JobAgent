@@ -1001,7 +1001,7 @@ unchecked until a fully fresh rerun.
 
 ### Tasks
 
-- [ ] (05A): Run the final complete release, repository, and scope audit
+- [x] (05A): Run the final complete release, repository, and scope audit
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch05 - Final Current-Output Release Gate` > `(05A)`

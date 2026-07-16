@@ -10,12 +10,20 @@ Rebuild, Manual Demo, Automated Coverage completion, and Final Rerun.
 
 ## Automated Coverage
 
-Automated unit/integration/e2e/frontend suite evidence is owned by later
-release batches after static safeguards. Rows are added only when re-run on the
-release revision.
+Final current-output suite on HEAD `1fdc93b` (05A attempt a3). Python:
+`.venv\Scripts\python.exe`. No real provider calls in pytest suites. Secrets
+never printed.
 
 | Requirement | Evidence | Status | Date (UTC) |
 |---|---|---|---|
+| Backend ruff | `Set-Location backend; python -m ruff check .` → All checks passed; exit 0 | PASS | 2026-07-16 |
+| Backend mypy | `python -m mypy app` → Success: no issues found in 89 source files; exit 0 | PASS | 2026-07-16 |
+| Backend unit suite | `python -m pytest tests/unit -q` exit 0 (528 collected; skips only for optional live deps) | PASS | 2026-07-16 |
+| Backend integration suite | `python -m pytest tests/integration -q` exit 0 (347 collected; optional live skips only) | PASS | 2026-07-16 |
+| Backend E2E demo-flow | `python -m pytest tests/e2e/test_demo_flow.py -q` exit 0; 1 passed | PASS | 2026-07-16 |
+| Frontend clean install + lint + typecheck + test + build | `Set-Location frontend; npm ci; npm run lint; npm run typecheck; npm test -- --run; npm run build` all exit 0; vitest 103 passed (7 files); vite 2269 modules | PASS | 2026-07-16 |
+| ShopAIKey provider diagnostic (sanitized) | `python infrastructure/scripts/diagnose_shopaikey.py` exit 0; ends `SHOPAIKEY_COMPATIBILITY=PASS`; no key/header dump | PASS | 2026-07-16 |
+| Graph rebuild host wrapper help | `python infrastructure/scripts/rebuild_neo4j.py --help` exit 0; non-destructive choice-C guidance only | PASS | 2026-07-16 |
 
 ## Static Safeguards
 
@@ -127,29 +135,44 @@ Restart hydration re-captured on attempt a3 after real backend restart.
 
 ## Final Scope Audit
 
-Static absence of Master §2.2 / Plan 7 §7.7 exclusions in implemented/configured
-source, manifests, Compose, migrations, and UI. Future-work mentions in docs are
-allowed only when labeled non-MVP (not implemented).
+Fresh 05A final re-audit of Master §2.2 / Plan 7 §7.7 exclusions in
+implemented/configured source (`backend/app`, `frontend/src`, `infrastructure`,
+`backend/migrations`). Future-work mentions in docs allowed only when labeled
+non-MVP (not implemented). HEAD `1fdc93b`.
 
 | Requirement | Evidence | Status | Date (UTC) |
 |---|---|---|---|
-| No auth / multi-user / roles / permissions subsystem | Code search: no oauth/jwt/login/rbac implementation; only OSError "permission denied" test string | PASS | 2026-07-16 |
-| No multiple conversations (singleton only) | Code uses fixed `CONVERSATION_ID`/`"main"` singleton; no multi-conversation product path | PASS | 2026-07-16 |
-| No profile/CV version history product | Code search for profile history / CV version: none implemented | PASS | 2026-07-16 |
-| No DOCX / image CV / OCR | PDF extractor tests ban OCR imports; `image_only_cv.pdf` is synthetic fixture proving no extractable text / no OCR | PASS | 2026-07-16 |
-| No crawler / browser automation / auto-apply / tracking | URL-fetch tests ban selenium/playwright/scrapy; no auto-apply or application-tracking modules | PASS | 2026-07-16 |
-| No cover letters / interview prep | Code search: none | PASS | 2026-07-16 |
-| No public cloud deployment | No k8s/terraform deploy manifests; aws/kubernetes/terraform appear only as skill seed / fixture skill labels | PASS | 2026-07-16 |
-| No Qdrant / reranking / alternate embeddings product | No qdrant dependency/service; README limitation only for second model/reranker | PASS | 2026-07-16 |
-| No Redis / Celery / Kafka / workers / outbox / queue / sync state machine | Code search in app/infra: none configured | PASS | 2026-07-16 |
-| No multiple agents / handoffs / 64K memory / LangSmith | Code search: none | PASS | 2026-07-16 |
-| No CI workflows / evaluation datasets or metrics / production security subsystem | No `.github/workflows`; no eval metrics/datasets as product; Master §22 limitations only (no auth/PII pipeline/SSRF product) | PASS | 2026-07-16 |
-| Compose service set remains frontend/backend/neo4j only | Exact three services; no extra worker/proxy/auth service | PASS | 2026-07-16 |
+| No auth / multi-user / roles / permissions subsystem | Final git-grep on product roots for oauth/jwt/login/rbac/multi-user: ABSENT as implemented/configured | PASS | 2026-07-16 |
+| No multiple conversations (singleton only) | Product uses fixed `CONVERSATION_ID`/`main` only (`backend/app/db/models/chat.py` + agent/state); no multi-conversation product path | PASS | 2026-07-16 |
+| No profile/CV version history product | Final search profile_history/cv_version/version_history: ABSENT | PASS | 2026-07-16 |
+| No DOCX / image CV / OCR | Final search docx/tesseract/ocr/PIL: ABSENT in product; synthetic `image_only_cv.pdf` fixture only | PASS | 2026-07-16 |
+| No crawler / browser automation / auto-apply / tracking | Final search selenium/playwright/scrapy/auto-apply: ABSENT in product | PASS | 2026-07-16 |
+| No cover letters / interview prep | Final search: ABSENT | PASS | 2026-07-16 |
+| No public cloud deployment | No k8s/terraform/helm deploy manifests; cloud names only as skill labels if any | PASS | 2026-07-16 |
+| No Qdrant / reranking / alternate embeddings product | Final search qdrant/rerank: ABSENT as product; no qdrant service | PASS | 2026-07-16 |
+| No Redis / Celery / Kafka / workers / outbox / queue / sync state machine | Final search redis/celery/kafka/outbox/worker: ABSENT in product/infra | PASS | 2026-07-16 |
+| No multiple agents / handoffs / 64K memory / LangSmith product | Final search multi-agent/handoff/langsmith/64k: ABSENT as product integration | PASS | 2026-07-16 |
+| No CI workflows / evaluation datasets or metrics / production security subsystem | `.github/workflows` absent; no eval dataset/metric product; limitations-only security text | PASS | 2026-07-16 |
+| Compose service set remains frontend/backend/neo4j only | `docker compose … config --services` → neo4j,backend,frontend exact three; loopback ports only | PASS | 2026-07-16 |
 
 ## Final Rerun
 
-Final same-revision automated and Compose re-run is owned by later Plan 7
-final batch. Rows are added only from fresh final-attempt output.
+Plan 7 Batch05 (05A) attempt a3 simultaneous final gate on HEAD
+`1fdc93bb609269c6cbbe6a24119fe9a31751da05` (owner repair of prior a2 B1–B3
+attachment/context/empty-profile drift). Named project `jobagent-plan7-final`
+only. Secrets never printed.
 
 | Requirement | Evidence | Status | Date (UTC) |
 |---|---|---|---|
+| HEAD + clean scope for gate | `git rev-parse HEAD` = `1fdc93b…`; tip `Fix 05A gate blockers from CV-flow product/test drift.`; tracked tree clean before checklist evidence write | PASS | 2026-07-16 |
+| Full backend automated suite (current output) | ruff All checks passed; mypy 89 files Success; unit exit 0; integration exit 0; e2e demo_flow 1 passed; no real provider in tests | PASS | 2026-07-16 |
+| Full frontend clean suite (current output) | `npm ci` + lint + typecheck + vitest 103/103 + vite build exit 0 | PASS | 2026-07-16 |
+| Provider diagnostic + rebuild help | `diagnose_shopaikey.py` → `SHOPAIKEY_COMPATIBILITY=PASS`; `rebuild_neo4j.py --help` exit 0 sanitized | PASS | 2026-07-16 |
+| Named project fresh before startup | `jobagent-plan7-final` containers/volumes/networks label query count 0 | PASS | 2026-07-16 |
+| Compose three-service config + healthy startup | `-p jobagent-plan7-final` services backend/frontend/neo4j; `config --quiet` ok; `up --build -d --wait --wait-timeout 180` exit 0; all running/healthy; `/api/health` overall=`available` | PASS | 2026-07-16 |
+| Choice-C in-container rebuild | `docker compose … -p jobagent-plan7-final exec -T backend python -m app.graph.rebuild` exit 0; seed-only empty SQLite graph (Candidate=0 Job=0 Skill=18 RELATED_TO=4); provider-free SQLite read-only; no secret output | PASS | 2026-07-16 |
+| Authorized named teardown | `docker compose … -p jobagent-plan7-final down -v --remove-orphans` exit 0; post-check 0 labeled resources | PASS | 2026-07-16 |
+| Repository git status / whitespace / tracked list | `git status --short` empty (pre-evidence); `git diff --check` exit 0; `git ls-files` 259 paths | PASS | 2026-07-16 |
+| 03A-style env/data/secret audit re-run | Only root `.env`+`.env.example`; `.env` ignored/untracked; template secrets empty; 19 names align Settings+Compose; no forbidden runtime/PDF/CI paths; 6 synthetic CV PDFs only; compose loopback ports exact; credential-pattern path disposition only (sk- hits 0); sanitization unit owners green | PASS | 2026-07-16 |
+| Final scope exclusion matrix (Plan 7 §7.7) | Fresh product-root search: all §7.7 exclusions ABSENT as implemented/configured; future-work docs only when labeled non-MVP | PASS | 2026-07-16 |
+| Checklist required sections + every evidence row dated PASS | Sections Automated Coverage through Final Rerun present; validation: every nonempty `\|` evidence row matches PASS + `YYYY-MM-DD` date cell | PASS | 2026-07-16 |
