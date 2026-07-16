@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_5.md` implements **Master Plan Phase 4**. It reuses the normalizer, tool runtime, SQLite ownership, and graph primitives established earlier.
 
-## 1. Objective
+## Objective
 
 Implement persistence-first ingestion of public HTTP/HTTPS Job Descriptions and pasted JD text, including constrained fetching, Trafilatura extraction, structured facts, exact content-hash reuse/retry, quality classification, production embeddings for scorable jobs, direct Job/Skill graph synchronization, compact Agent tools/UI, and a complete local Neo4j rebuild command.
 
 Every accepted input must leave a durable SQLite record representing success or failure. Exact processed content must not be reprocessed; failed exact content must retry in the same row. Neo4j remains derived and rebuildable, and no matching/ranking behavior begins in this phase.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 2–4: manual JD input, any job family, locked provider/embedding/graph stack, and SQLite-first ownership.
 - Sections 6.2 and 6.4: `job_posts` fields/invariants, scorable definition, state transitions, exact-hash placeholder transaction flow, and no score cache.
@@ -20,7 +20,13 @@ Every accepted input must leave a durable SQLite record representing success or 
 - Sections 20–23: failure/retry, direct sync, rebuild command, safeguards, and environment limits.
 - Sections 24 and 25, “Phase 4”: required tests, tasks, and exit gate.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 5 scope | Master Phase 4: JD Ingestion, Extraction, Exact Deduplication, and Graph Sync | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] `job_posts` schema/constraints/indexes exactly match Master Section 6.
 - [ ] Tool execution/replay, typed SSE, Agent registration, and concise tool activity are operational.
@@ -30,7 +36,7 @@ Every accepted input must leave a durable SQLite record representing success or 
 - [ ] Approved Candidate Profile may be absent; JD save/query must still work.
 - [ ] Root settings expose URL timeout/size and locked embedding model/dimensions.
 
-## 4. Scope
+## Scope
 
 - Define exact `JobPostExtraction` and `JobSkill` Pydantic contracts.
 - Implement `save_job` accepting exactly one public URL or raw text, with no approval.
@@ -47,7 +53,7 @@ Every accepted input must leave a durable SQLite record representing success or 
 - Render concise JD tool status and a compact saved-job card in chat.
 - Add unit/integration/frontend tests for all persistence, duplicate, failure, embedding, graph, and display rules.
 
-## 5. Out of Scope
+## Out of Scope
 
 - Automatic discovery/crawling, authenticated/paywalled/cookie-dependent/JavaScript-only pages, browser automation, or site-specific scrapers.
 - SSRF/IP-range defenses, redirect validation, production threat modeling, or other security expansion beyond the locked local limits.
@@ -57,7 +63,7 @@ Every accepted input must leave a durable SQLite record representing success or 
 - Background workers, outbox/retry queues, sync ledgers, score caches, or Neo4j repair inside reads.
 - Public job CRUD endpoints or raw JD bodies in tool/history/card payloads.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -105,7 +111,7 @@ JobAgent/
 
 The CLI wrapper imports `backend/app/graph/rebuild.py`; it must not duplicate rebuild logic. The embedding adapter and text normalizer are shared production components that Plan 6 extends for Candidate representation.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Job extraction contracts
 
@@ -259,7 +265,7 @@ Failed or unscorable rows are not vector-queryable Job nodes. Exact duplicates d
 
 Use pinned Astryx `Card`, `MetadataList`, `Badge`, and tool status components. A saved-job card may show ID, title, company, source URL, processing status, quality, and concise result/failure summary. It must not show full raw content or imply ranking.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Define failing Job schema/quality tests, then implement exact extraction models and deterministic classifier.
 - [ ] Implement bounded HTTP/HTTPS fetch and Trafilatura/plain-text extraction with fake HTTP tests.
@@ -275,7 +281,7 @@ Use pinned Astryx `Card`, `MetadataList`, `Badge`, and tool status components. A
 - [ ] Implement concise saved-job card/status UI.
 - [ ] Add unit/integration/frontend tests for URL/text paths, exact duplicates, failed retry, extraction/embedding failure, graph sync/rebuild, and compact output.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Backend commands
 
@@ -323,7 +329,18 @@ Normal tests must use fake HTTP/provider/embedding adapters. The real ShopAIKey 
 - Neo4j sync failure preserves processed SQLite data and returns `NEO4J_SYNC_FAILED` with rebuild instruction.
 - Embedding mismatch/non-finite response prevents a scorable terminal commit and is never silently corrected by changing configuration.
 
-## 10. Handoff Notes for Plan 6 / Master Phase 5
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 4: JD Ingestion, Extraction, Exact Deduplication, and Graph Sync artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_6.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 6 receives:
 

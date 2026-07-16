@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_6.md` implements **Master Plan Phase 5**. It computes current results on demand from the approved profile, stored Jobs, and revision-consistent Neo4j index.
 
-## 1. Objective
+## Objective
 
 Deliver transparent, deterministic matching: build/embed the approved Candidate representation, reject stale graph data, retrieve up to 50 scorable Jobs from Neo4j, compute exact skill and preference components, renormalize missing weights, apply quality, sort deterministically, explain evidence-backed matches/gaps, and return/render up to 10 results.
 
 The final numerical score must be code-defined, not LLM-generated. Matching must return no partial ranking when Neo4j is unavailable or revision-inconsistent, and no persisted score cache may be added.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 1–4: transparent matching objective, locked scope/stack, and SQLite/Neo4j ownership.
 - Sections 6.2 and 6.6: scorable Job definition, no score cache, and cross-store identities.
@@ -20,7 +20,13 @@ The final numerical score must be code-defined, not LLM-generated. Matching must
 - Sections 20–21: no-profile, Neo4j unavailable/stale behavior, O(n) revision check, and no repair inside matching.
 - Sections 24 and 25, “Phase 5”: matching tests, tasks, and exit gate.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 6 scope | Master Phase 5: Matching, Explanation, and Manual Acceptance | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] An approved Candidate Profile/Preferences can be loaded from SQLite and Candidate/Skill data is directly synchronized with `source_updated_at`.
 - [ ] Scorable Jobs are processed `full|partial` rows with locked finite 1536-dimensional embeddings and matching model metadata.
@@ -29,7 +35,7 @@ The final numerical score must be code-defined, not LLM-generated. Matching must
 - [ ] Rebuild restores the complete derived graph without provider calls.
 - [ ] Five production tools are registered; tool replay and compact SSE/UI status remain unchanged.
 
-## 4. Scope
+## Scope
 
 - Implement the versioned Candidate embedding text builder using approved structured profile/preferences.
 - Reuse the Plan 5 embedding adapter and exact whitespace normalization.
@@ -45,7 +51,7 @@ The final numerical score must be code-defined, not LLM-generated. Matching must
 - Implement Astryx match cards with score, matched/related/missing skills, source URL, and collapsible component breakdown.
 - Complete the small manual JD acceptance checklist and matching unit/integration/frontend tests.
 
-## 5. Out of Scope
+## Out of Scope
 
 - Changing ingestion, re-extracting/re-embedding Jobs, graph repair/upsert in matching, or a sync ledger.
 - Score persistence/cache/history, user-configurable weights, statistical weight optimization, LLM numerical scoring, reranking, or alternate models.
@@ -54,7 +60,7 @@ The final numerical score must be code-defined, not LLM-generated. Matching must
 - Application tracking, auto-apply, cover letters, interview preparation, or new public endpoints.
 - Fuzzy/LLM-invented skill relationships beyond canonical/seed alias/seed `RELATED_TO` behavior.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -95,7 +101,7 @@ JobAgent/
 
 Extend `backend/app/services/embedding_text.py` with `build_candidate_embedding_text_v1`; do not create a second whitespace normalizer. Keep each scoring concern focused so formula, skill matching, orchestration, and prose explanation do not form a God file.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Candidate representation and embedding
 
@@ -237,7 +243,7 @@ Each Astryx card shows title, company, location, work mode, final score, matched
 
 `docs/acceptance/manual_jd_checklist.md` is a disposable local checklist covering URL/text save, full/partial/unscorable classification, extracted fields, exact duplicate return/failed retry, plausible ranking, score/evidence agreement, and documented failures. It contains observations only—not a dataset, metric, or evaluation report.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Add failing Candidate representation tests, then extend the shared embedding-text module with the deterministic v1 builder.
 - [ ] Implement read-only SQLite/Neo4j revision snapshots and exact O(n) comparison with unavailable/stale error tests.
@@ -251,7 +257,7 @@ Each Astryx card shows title, company, location, work mode, final score, matched
 - [ ] Complete integration tests with fake embeddings and controlled Neo4j fixtures.
 - [ ] Execute and record the Section 19 manual acceptance checklist using disposable synthetic/representative inputs.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Backend commands
 
@@ -294,7 +300,18 @@ Do not convert these observations into a benchmark or tune weights statistically
 - Neo4j unavailable/stale returns no partial result and points to rebuild where appropriate.
 - A failed tool never leads the Agent/UI to claim a successful ranking.
 
-## 10. Handoff Notes for Plan 7 / Master Phase 6
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 5: Matching, Explanation, and Manual Acceptance artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_7.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 7 receives the complete MVP feature set:
 

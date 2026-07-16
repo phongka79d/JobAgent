@@ -49,7 +49,7 @@ Otherwise, it remains outside the MVP.
 - Natural general conversation without requiring a job-related intent.
 - React chat-first interface using Astryx.
 - Upload one active PDF CV.
-- No CV version history.
+- Read-only history of prior CV uploads and Agent runs for the single local user.
 - Candidate Profile draft and approval flow.
 - Structured long-term memory for profile corrections and job preferences.
 - Manual JD input through public URL or raw text.
@@ -68,7 +68,7 @@ Otherwise, it remains outside the MVP.
 
 - Multi-user accounts, login, roles, and permissions.
 - Multiple conversations.
-- CV version history.
+- Mutable CV/profile versioning or rollback.
 - DOCX, image CVs, or OCR.
 - Automatic job discovery or crawling.
 - Authenticated, paywalled, cookie-dependent, or JavaScript-only job pages.
@@ -224,7 +224,7 @@ The three runtime folders are `frontend`, `backend`, and `infrastructure`; `docs
 | `size_bytes` | `INTEGER` | No | `> 0` |
 | `page_count` | `INTEGER` | Yes | `> 0` after parsing; service enforces `MAX_PDF_PAGES` |
 | `storage_path` | `TEXT` | No | Unique path relative to `FILES_DIR` |
-| `state` | `TEXT` | No | `staged | active | failed`; defaults to `staged` |
+| `state` | `TEXT` | No | `staged | active | archived | failed`; defaults to `staged` |
 | `failure_code` | `TEXT` | Yes | Stable application error code |
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
@@ -232,7 +232,25 @@ Add `uq_attachments__file_hash`, `uq_attachments__storage_path`, and partial uni
 
 `failure_code` is required only for `state='failed'`. An active attachment must have a non-null `page_count`. Attachment/profile cross-row state is validated at the final Section 6.4 transaction boundary, not by a database `CHECK`.
 
-Allowed transitions are `staged → active`, `staged → failed`, and `failed → staged` for an explicit same-file retry. An active row is removed only by an approved replacement after the profile is repointed.
+Allowed transitions are `staged → active`, `staged → failed`, `failed → staged` for an explicit same-file retry, and `active → archived` after an approved replacement. Exactly one row may be active. Archived rows are immutable history: their metadata and stored PDF remain retained, cannot become active again, and cannot be edited or deleted through a product endpoint. If a retained file is missing from local storage, its metadata remains archived and observability reports `CV_FILE_UNAVAILABLE`.
+
+The unique hash rule remains global. Uploading a hash already held by an archived row returns `ARCHIVED_ATTACHMENT_EXISTS` with that row's safe metadata; it does not create a second row, reprocess the PDF, or restore the archived CV. This is upload history, not mutable CV/profile versioning or rollback.
+
+#### `attachment_text_chunks`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `attachment_id` | `TEXT` | No | FK to `attachments.id`; `ON DELETE RESTRICT` |
+| `ordinal` | `INTEGER` | No | Zero-based deterministic source order |
+| `text` | `TEXT` | No | Parsed CV text segment sent to the profile-extraction boundary |
+| `preview` | `TEXT` | No | Fixed bounded projection of `text` for list responses |
+| `char_count` | `INTEGER` | No | `> 0` |
+| `token_estimate` | `INTEGER` | No | Deterministic local estimate; not provider usage |
+| `created_at` | `DATETIME` | No | UTC |
+
+Add `uq_attachment_text_chunks__attachment_ordinal` on `(attachment_id, ordinal)`.
+Chunk rows are the canonical local projection of text sent to structured profile extraction. The deterministic chunker emits non-empty `text` values in ascending `ordinal`; the extraction service sends exactly `text[0] + "\n\n" + ... + text[n]` to the model. It persists the same ordered rows in the successful extraction/draft-input transaction, never stores PDF bytes or provider prompts, and keeps rows read only after creation.
 
 #### `candidate_profile`
 
@@ -369,6 +387,7 @@ Allowed transitions are `pending → running → completed | failed`. An interru
 | Parent | Child FK | On delete | Reason |
 |---|---|---|---|
 | `attachments` | `candidate_profile.active_attachment_id` | `RESTRICT` | Never delete the active CV metadata |
+| `attachments` | `attachment_text_chunks.attachment_id` | `RESTRICT` | Preserve auditable chunks with retained upload history |
 | `attachments` | `profile_drafts.source_attachment_id` | `CASCADE` | Removing a staged upload removes a CV-backed draft; null is allowed for text-only updates |
 | `conversation` | `chat_messages.conversation_id` | `CASCADE` | Test cleanup may remove the complete conversation |
 | `chat_messages` | `agent_runs.user_message_id` | `CASCADE` | A run cannot exist without its initiating turn |
@@ -379,7 +398,7 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 ### 6.4 Transaction boundaries
 
 - **CV upload:** write the PDF once to its UUID-based path under `FILES_DIR`, then create the staged `attachments` row. Approval changes database state; it does not move the file again.
-- **Profile approval:** validate the draft and, when it references a CV, the staged attachment and stored file before opening the transaction. In one SQLite transaction, upsert `candidate_profile('active')`, upsert `job_preferences('active')` when changed, and delete `profile_drafts('current')`. For a CV replacement, repoint the profile, remove the now-unreferenced previous attachment row, mark the new attachment active, and verify the final one-active-attachment invariant before commit. Previous-file cleanup and direct Neo4j synchronization occur after commit.
+- **Profile approval:** validate the draft and, when it references a CV, the staged attachment and stored file before opening the transaction. In one SQLite transaction, upsert `candidate_profile('active')`, upsert `job_preferences('active')` when changed, and delete `profile_drafts('current')`. For a CV replacement, repoint the profile, change the previous active attachment to `archived`, mark the new attachment active, and verify the final one-active-attachment invariant before commit. Archived metadata, PDF files, and chunk rows are retained; no previous-file cleanup occurs. Direct Neo4j synchronization occurs after commit.
 - **Approval decision:** both approval buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
 - **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
 - **Chat turn:** create the user message and `agent_runs` row together. Persist tool status transitions in short transactions. Persist the final assistant message and terminal run state together.
@@ -616,6 +635,7 @@ File-hash duplicate policy:
 - If the hash belongs to the active attachment, return that attachment/profile and do not extract again.
 - If the hash belongs to the current staged attachment, return the existing attachment/draft.
 - Uploading the same file again when its attachment is `failed` is the explicit retry signal: reuse the same file/row, change it to staged, clear `failure_code`, and process it again. Do not add a retry endpoint or flag.
+- If the hash belongs to an archived attachment, return `ARCHIVED_ATTACHMENT_EXISTS` and the archived metadata. Do not reprocess, duplicate, or restore it; a user must upload a different PDF to create a new candidate profile input.
 - Processing a different staged CV while a CV-backed draft exists replaces the singleton draft, removes the previous unreferenced staged row, and cleans up its file on a best-effort basis.
 - A parsing or extraction failure after staging changes the attachment to `failed` with a stable `failure_code`; the stored file is retained for an explicit retry or deletion.
 
@@ -626,6 +646,7 @@ attachment_id
 → file-hash duplicate check
 → pypdf layout text extraction
 → extractable-text validation
+→ deterministic chunking and chunk persistence
 → gpt-4o-mini structured extraction
 → Pydantic validation, with at most one JSON repair and revalidation when invalid
 → deterministic skill normalization
@@ -634,6 +655,12 @@ attachment_id
 ```
 
 If no meaningful digital text is available, return `NO_EXTRACTABLE_TEXT`. Do not add OCR fallback.
+
+The chunker owns the exact structured-extraction input. It emits ascending ordinals,
+joins persisted chunk text with exactly `\n\n`, and sends that joined string to the
+profile extractor. A failed parse, chunking operation, model call, repair, or draft
+validation writes no chunk rows. Historical attachments without rows remain visible
+but their chunk endpoint returns `CHUNKS_UNAVAILABLE`.
 
 ### 10.3 Chat approval
 
@@ -657,9 +684,9 @@ The assistant renders a profile summary card with Astryx `ButtonGroup`:
 The old active profile and CV remain usable until the new draft is approved. On approval:
 
 1. Confirm that the staged attachment and its UUID-based file already exist.
-2. Run the Section 6.4 SQLite transaction in constraint-safe order: repoint the profile, delete the old attachment row, mark the new attachment active, update preferences when present, and delete the draft. Before commit, verify that the new attachment is the only active attachment and is referenced by `candidate_profile('active')`.
+2. Run the Section 6.4 SQLite transaction in constraint-safe order: repoint the profile, change the old active attachment to immutable `archived`, mark the new attachment active, update preferences when present, and delete the draft. Before commit, verify that the new attachment is the only active attachment and is referenced by `candidate_profile('active')`.
 3. If the transaction fails, roll it back. The old profile remains active and the new attachment remains staged for retry or deletion.
-4. After commit, remove the previous PDF file on a best-effort basis. A cleanup failure is reported but does not invalidate the committed profile.
+4. After commit, retain the previous archived PDF and its chunk rows for local read-only history. Do not run automatic previous-file cleanup and do not offer restore/delete actions; a missing retained file is surfaced only as `CV_FILE_UNAVAILABLE`.
 5. Synchronize Candidate and Skill nodes directly to Neo4j.
 
 If the later Neo4j sync fails, the approved SQLite profile remains committed. Return `NEO4J_SYNC_FAILED` with the rebuild instruction instead of rolling the profile back.
@@ -882,7 +909,7 @@ Input: optional result limit in `1..10`; current approved `JobPreferences` are r
 
 ## 14. Public FastAPI Boundary
 
-Expose only seven public endpoints.
+Expose the seven chat/profile endpoints plus read-only local observability endpoints.
 
 ```text
 GET  /api/health
@@ -894,6 +921,13 @@ GET  /api/profile/cv
 GET  /api/chat/history?limit=50&before=<opaque_cursor>
 POST /api/chat/turns
 POST /api/chat/runs/{run_id}/resume
+
+GET  /api/observability/cvs?limit=<n>&before=<opaque_cursor>
+GET  /api/observability/cvs/{attachment_id}/file
+GET  /api/observability/cvs/{attachment_id}/chunks?limit=<n>&before=<opaque_cursor>
+GET  /api/observability/cvs/{attachment_id}/chunks/{ordinal}
+GET  /api/observability/runs?limit=<n>&before=<opaque_cursor>
+GET  /api/observability/graph
 ```
 
 ### 14.1 API rules
@@ -906,6 +940,10 @@ POST /api/chat/runs/{run_id}/resume
 - Resume also returns an SSE stream.
 - Chat history `limit` is `1..100`. The opaque `before` cursor encodes `(created_at, id)` from the oldest returned item. Query newest-first with `limit+1`, reverse the page for chronological output, and return `{items, next_cursor}`. A malformed cursor returns `422`.
 - While a run is interrupted for approval, both a new chat turn and a new CV upload return `APPROVAL_ACTION_REQUIRED` before persisting new input. The frontend disables the composer and upload controls until either approval action completes the run.
+- Observability endpoints are read-only, cursor-bounded, and validate each selected attachment, chunk, or run against the single local-user data set. They return safe summaries only: no PDF bytes, filesystem paths, prompts, checkpoints, stack traces, embeddings, credentials, arbitrary Cypher, or unrelated Neo4j labels.
+- `GET /api/observability/cvs/{attachment_id}/file` validates an `active` or `archived` attachment, checks retained local-file availability, and streams only `application/pdf` with a sanitized `Content-Disposition` filename. Unknown IDs return `CV_ATTACHMENT_NOT_FOUND`; a missing retained file returns `CV_FILE_UNAVAILABLE`. Both are safe JSON errors and never reveal a storage path.
+- Observability cursors have no expiry. A cursor is valid while its encoded tuple decodes and its row ordering remains queryable; malformed cursors return `422`, and a well-formed cursor past the final page returns an empty page with `next_cursor=null`.
+- `GET /api/observability/graph` exposes a bounded Candidate/Job/Skill snapshot and a typed unavailable or stale state. It never mutates the derived graph or accepts a client query. A `ready` response contains at most one Candidate (`id`, `revision`), 20 Jobs (`id`, `title`, `company`, `revision`) ordered by `id ASC`, and 40 Skills (`canonical_name`) ordered by `canonical_name ASC`; only `HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO` edges with `source_id`, `target_id`, and `type` are returned. Edges are sorted by `(type, source_id, target_id)` and capped at 100 after node selection. The response includes `nodes_truncated`, `edges_truncated`, `omitted_node_count`, and `omitted_edge_count`; no other node or edge properties are serialized. With no active Candidate, return `status='ready'`, an empty projection, and `NO_ACTIVE_PROFILE`.
 
 ### 14.2 SSE contract
 
@@ -938,14 +976,16 @@ FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may b
 
 ### 15.2 Sidebar
 
-Show only:
+The expanded sidebar contains `Overview`, `CV history`, `LLM chunks`, `Neo4j graph`, and `Agent runs` tabs.
 
-- Active CV filename.
-- Profile state.
-- Upload/replace CV action.
-- View/download active CV action.
+- `Overview` retains active-CV filename, profile state, upload/replace, and view/download actions.
+- `CV history` lists prior attachment metadata and retained-file availability without changing which CV is active. An available active or archived PDF may open/download through the dedicated stream route; unavailable files show the stable safe error state.
+- `LLM chunks` lists fixed previews for a selected attachment; full chunk text is fetched only after that row is expanded.
+- `Neo4j graph` renders a bounded read-only Candidate/Job/Skill snapshot and falls back to a typed stale/unavailable state.
+- `Agent runs` lists durable run/tool status and safe summaries, not arguments or internal traces.
+- Collapsed state retains a keyboard-accessible expand control and compact active-profile/CV status. Responsive behavior must not hide the chat composer or trap focus.
 
-Do not add a full profile editor.
+Do not add a full profile editor, mutable profile history, arbitrary graph-query UI, or a developer console.
 
 ### 15.3 Chat components
 
@@ -985,6 +1025,14 @@ Each top result shows:
 - Missing required skills.
 - Expandable component score breakdown.
 - Original source URL when available.
+
+### 15.6 Observability sidebar boundaries
+
+The observability tabs are sidebar-local read models. They load on tab selection,
+cache successful pages by query, and keep independent loading, empty, and error
+states. The graph panel renders the Master allowlisted bounded snapshot and its
+truncation metadata; it does not infer hidden properties or query for more nodes.
+They do not add a second chat/SSE store or change agent tool behavior.
 
 ---
 
@@ -1286,6 +1334,9 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Chat-history cursor pagination and malformed-cursor `422` behavior.
 - Database and SSE payloads accept only `pending | running | completed | failed` for tools.
 - Fake ShopAIKey adapter for tool calls and invalid schema.
+- Attachment chunk persistence, cursor pagination, detail authorization, preview
+  bounds, and redaction of PDF bytes/provider data from observability responses.
+- Bounded Neo4j graph snapshot with unavailable/stale typed states and no graph mutation.
 
 Normal automated tests must not call the real ShopAIKey API.
 
@@ -1300,6 +1351,8 @@ Normal automated tests must not call the real ShopAIKey API.
 - Load-older chat history pagination.
 - Match-card score breakdown.
 - Error and disconnected stream states.
+- Observability tabs: lazy load, cache, collapsed/expanded accessibility, chunk
+  preview-to-detail expansion, empty/loading/error states, and narrow layouts.
 
 ### 24.4 End-to-end smoke test
 
@@ -1492,6 +1545,27 @@ Exit gate:
 
 ---
 
+### Phase 7 - Read-only observability sidebar
+
+Tasks:
+
+- [ ] Persist deterministic parsed-CV chunk projections with an Alembic migration.
+- [ ] Add bounded read-only observability APIs for CV history, chunk list/detail,
+  Agent runs, and the derived Neo4j snapshot.
+- [ ] Extend the existing sidebar with accessible expanded/collapsed inspector tabs.
+- [ ] Verify redaction, pagination, Neo4j fallback, and direct local FE inspection.
+
+Exit gate:
+
+- Historical CV uploads and Agent runs are visible without changing source-of-truth
+  records or active-profile selection.
+- Full CV chunk text requires an explicit row expansion; list responses remain
+  bounded previews.
+- The graph view is bounded, read-only, and safely reports unavailable/stale data.
+- Existing chat, CV approval, matching, and local-release tests remain green.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -1505,6 +1579,7 @@ Recommended sequence for one intern developer:
 | Phase 4 | 3–5 days |
 | Phase 5 | 3–5 days |
 | Phase 6 | 2–4 days |
+| Phase 7 | 4–6 days |
 
 This is approximately 3–5 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
@@ -1525,6 +1600,8 @@ JobAgent MVP is done only when all conditions are true:
 - Scorable jobs synchronize to Neo4j.
 - Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
 - Tool activity is visible and concise.
+- The sidebar exposes bounded read-only CV upload history, opt-in chunk detail,
+  Agent-run history, and derived graph status without exposing internal data.
 - Failure paths do not report false success.
 - Automated functional tests pass and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.

@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_4.md` implements **Master Plan Phase 3**. It adds profile-domain behavior to the generic Agent/runtime contracts from Plan 3.
 
-## 1. Objective
+## Objective
 
 Implement the complete one-active-PDF/one-active-profile workflow: validated upload, exact file-hash reuse, pypdf extraction, structured Candidate/Profile/Preference proposals, deterministic skill normalization, in-chat human approval, constraint-safe replacement, sidebar state, and direct Candidate/Skill synchronization to Neo4j.
 
 No profile or preference write may reach the active singleton records without the existing LangGraph interrupt/resume path. Rejection must preserve the current draft for correction, replacement failures must preserve the previous active profile, and post-commit file/Neo4j failures must never corrupt SQLite truth.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 2.1–2.2: one active PDF, no version history, no OCR/DOCX/image CV, approval, corrections, and structured preferences.
 - Sections 6.2–6.4: attachment/profile/draft/preference tables, state transitions, duplicate handling, approval transaction, and cleanup boundaries.
@@ -20,7 +20,13 @@ No profile or preference write may reach the active singleton records without th
 - Sections 20–22 and 24: stable failure codes, direct sync, safeguards, and profile tests.
 - Section 25, “Phase 3 — CV, Candidate Profile, and approval workflow”: tasks and exit gate.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 4 scope | Master Phase 3: CV, Candidate Profile, and Approval Workflow | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] Attachment/profile/draft/preference tables and all constraints are at Alembic head.
 - [ ] Shared settings expose `FILES_DIR`, `MAX_PDF_SIZE_MB=10`, and `MAX_PDF_PAGES=10`.
@@ -30,7 +36,7 @@ No profile or preference write may reach the active singleton records without th
 - [ ] Neo4j driver/constraints exist; no Candidate sync implementation exists yet.
 - [ ] Pinned pypdf behavior and `NO_EXTRACTABLE_TEXT` quality rule are recorded by Plan 1.
 
-## 4. Scope
+## Scope
 
 - Implement `POST /api/attachments/cv`, `GET /api/profile`, and `GET /api/profile/cv`.
 - Apply the approval-pending guard before persisting any CV upload bytes or metadata.
@@ -48,7 +54,7 @@ No profile or preference write may reach the active singleton records without th
 - Implement sidebar upload/view/download state, chat attachment token behavior, approval card, disabled approval controls, and request-change composer focus.
 - Add profile/CV unit, integration, Agent, graph, and frontend tests.
 
-## 5. Out of Scope
+## Out of Scope
 
 - Multiple active CVs, CV/profile history, draft history/status tables, full profile editor, or public profile write CRUD.
 - DOCX, images, OCR, alternate PDF parsers, or real user fixtures in Git.
@@ -57,7 +63,7 @@ No profile or preference write may reach the active singleton records without th
 - Moving files during approval, deleting the old active profile before commit, rolling back SQLite because Neo4j/file cleanup failed, or continuously retrying graph sync.
 - Additional Agents, worker services, outbox/queue/sync-state tables, or a second idempotency mechanism.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -112,7 +118,7 @@ JobAgent/
 
 Use one authoritative runtime taxonomy file at `infrastructure/neo4j/skills_seed.yaml`. Test-specific seed data may be a smaller fixture, but production normalization and graph synchronization must load through the same parser/service rather than duplicate logic.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Profile and skill schemas
 
@@ -283,7 +289,7 @@ Neo4j never receives raw CV text and never becomes the profile source of truth. 
 - Approval card uses pinned Astryx `Card`, `ButtonGroup`, and `Button`; it summarizes profile/preferences and exposes exactly Save Profile/Request Changes.
 - While approval is pending, composer and upload controls are disabled. Request Changes re-enables/focuses composer after the terminal event.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Define failing schema/normalizer tests, then implement the exact profile, preference, skill, and draft Pydantic models.
 - [ ] Create the small authoritative skill taxonomy and one shared loader/normalizer; search before adding any normalization helper.
@@ -300,7 +306,7 @@ Neo4j never receives raw CV text and never becomes the profile source of truth. 
 - [ ] Implement sidebar, attachment token, approval card, disabled/idempotent controls, and request-change focus.
 - [ ] Add unit/integration/frontend tests for all state transitions, duplicates, approval branches, restart persistence, rollback, cleanup, and graph failure.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Backend commands
 
@@ -346,7 +352,18 @@ Expected: shared sidebar/chat upload pipeline, active filename/view action, exac
 - Unauthorized commit fails before side effects.
 - A failed provider/schema result never produces an approval card or success claim.
 
-## 10. Handoff Notes for Plan 5 / Master Phase 4
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 3: CV, Candidate Profile, and Approval Workflow artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_5.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 5 receives:
 

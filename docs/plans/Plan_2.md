@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_2.md` implements **Master Plan Phase 1**. It starts only after every Plan 1 / Master Phase 0 feasibility gate passes.
 
-## 1. Objective
+## Objective
 
 Establish the runnable local application foundation: pinned backend/frontend projects, one-root-environment configuration, Docker Compose, SQLite/Alembic as the complete source of truth, persistent file storage, and Neo4j as an initialized rebuildable index. This phase owns all application table definitions and infrastructure invariants, but no production Agent, CV, JD, approval, or matching behavior.
 
 At completion, the three services start locally, migrations work on fresh and initialized volumes, the health boundary reports SQLite/filesystem/Neo4j state, and database/graph constraints are proved idempotent.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 2–5: scope, locked stack, ownership rules, and repository structure.
 - Section 6 in full: SQLite conventions, all nine application tables, constraints, indexes, foreign keys, transaction boundaries, singleton seeds, migration/checkpoint ownership, and Neo4j identity mapping.
@@ -20,7 +20,13 @@ At completion, the three services start locally, migrations work on fresh and in
 - Sections 24.1–24.2 and 24.5: database/infrastructure tests and local commands.
 - Section 25, “Phase 1 — Foundation, Docker, and source-of-truth data”: tasks and exit gate.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 2 scope | Master Phase 1: Foundation, Docker, and Source-of-Truth Data | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] `docs/feasibility/phase_0_report.md` exists and every ShopAIKey, Astryx, pypdf, and embedding gate is PASS.
 - [ ] `frontend/package-lock.json` pins the verified Astryx version and the minimal frontend builds.
@@ -28,7 +34,7 @@ At completion, the three services start locally, migrations work on fresh and in
 - [ ] `.env.example` uses the Master Section 23 names and the developer’s root `.env` remains ignored.
 - [ ] The ShopAIKey diagnostic and PDF fixtures continue to pass; this phase does not replace them.
 
-## 4. Scope
+## Scope
 
 - Configure FastAPI, Pydantic v2 settings, SQLAlchemy 2 async sessions, aiosqlite, Alembic batch mode, and local lint/type/test commands.
 - Configure React, TypeScript, Vite, and the pinned Astryx neutral theme without building chat features.
@@ -44,7 +50,7 @@ At completion, the three services start locally, migrations work on fresh and in
 - Implement `GET /api/health` for SQLite, filesystem, and Neo4j component status.
 - Add focused unit/integration tests for settings, migrations, constraints, PRAGMAs, storage, graph setup, and container health.
 
-## 5. Out of Scope
+## Out of Scope
 
 - Chat history, SSE, LangGraph, Agent runs, tool execution services, or ShopAIKey production calls.
 - Public CV upload/profile endpoints beyond the health endpoint.
@@ -54,7 +60,7 @@ At completion, the three services start locally, migrations work on fresh and in
 - Application `create_all()`, database triggers, soft deletion, audit history, generic key-value state, score caches, outbox tables, workers, queues, or sync-state machines.
 - Authentication, public deployment, CI, and production security systems.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -120,7 +126,7 @@ JobAgent/
 
 Each source module has one responsibility. Keep domain model modules focused and ordinarily below 300 lines; do not consolidate all tables, services, or graph behavior into a single file.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Settings and local environment
 
@@ -251,7 +257,7 @@ SQLite health performs a trivial query through the configured application sessio
 - Backend depends on Neo4j health but treats Neo4j availability as a reported component state rather than changing SQLite ownership.
 - Load the single root `.env`; never mount `.env.example` as runtime configuration.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Expand the pinned backend project with settings, shared UUID/UTC utilities, FastAPI startup/shutdown, and local lint/type/test commands.
 - [ ] Expand the frontend project with TypeScript/Vite scripts and the pinned Astryx neutral theme, keeping the UI to a minimal app shell.
@@ -267,7 +273,7 @@ SQLite health performs a trivial query through the configured application sessio
 - [ ] Add unit/integration tests for settings, secrets masking, PRAGMAs, every constraint/index/FK, singleton seeding, storage, health, and idempotent graph setup.
 - [ ] Run all local backend/frontend/migration/Compose checks and fix only Phase 1 scope failures.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Automated commands
 
@@ -330,7 +336,18 @@ Expected: SQLite, filesystem, and Neo4j are `available` and overall health is su
 - Health may report an unavailable Neo4j instance, but SQLite must remain authoritative and usable.
 - Any secret exposure or non-loopback host publication blocks the phase.
 
-## 10. Handoff Notes for Plan 3 / Master Phase 2
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 1: Foundation, Docker, and Source-of-Truth Data artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_3.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 3 receives:
 

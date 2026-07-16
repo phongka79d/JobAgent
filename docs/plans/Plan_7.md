@@ -1,14 +1,14 @@
 # Plan 7 — Master Phase 6: Polish and Local Release
 
-> **Numbering:** `Plan_7.md` implements **Master Plan Phase 6**, the final phase. It may close verification/documentation defects but may not add product scope.
+> **Numbering:** `Plan_7.md` implements **Master Plan Phase 6** and records the completed local-release baseline. The later approved Plan 8 observability increment consumes this baseline; it does not rewrite or expand Plan 7's historical scope.
 
-## 1. Objective
+## Objective
 
-Prove and document a clean local MVP release. Complete remaining unit/integration/frontend/end-to-end coverage, exercise outage/invalid/disconnect/duplicate/idempotency paths, rebuild Neo4j from a fresh volume, audit environment/secrets/data/scope, and create the root README with exact setup, commands, architecture, demo, verification, and limitations.
+Prove and document the clean local MVP release baseline. Complete remaining unit/integration/frontend/end-to-end coverage, exercise outage/invalid/disconnect/duplicate/idempotency paths, rebuild Neo4j from a fresh volume, audit environment/secrets/data/scope, and create the root README with exact setup, commands, architecture, demo, verification, and limitations.
 
-The final state must start from a fresh clone plus one root `.env`, run the complete demo without database edits, preserve real data outside Git, report failures truthfully, and contain none of the Master’s excluded infrastructure or features.
+The completed baseline starts from a fresh clone plus one root `.env`, runs the complete demo without database edits, preserves real data outside Git, reports failures truthfully, and contains none of the Master’s excluded infrastructure or features. Plan 8 is the separately approved successor phase and owns only its read-only observability scope.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 1–5: product objective, complexity guardrail, locked scope/stack, ownership, and final repository shape.
 - Sections 6–21: all persisted contracts, tools/endpoints/events, UX, providers, matching, failure behavior, direct sync, and rebuild behavior to be verified rather than redesigned.
@@ -17,7 +17,13 @@ The final state must start from a fresh clone plus one root `.env`, run the comp
 - Section 25, “Phase 6 — Polish and local release”: final tasks and exit gate.
 - Sections 26–29: delivery guardrail, Definition of Done, future work exclusions, and final narrow product statement.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 7 scope | Master Phase 6: Polish and Local Release | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] Plans 1–6 exit gates pass with no unresolved implementation defect.
 - [ ] The six production tools, seven public endpoints, exact SSE statuses, and complete frontend demo flow exist.
@@ -26,7 +32,7 @@ The final state must start from a fresh clone plus one root `.env`, run the comp
 - [ ] Direct Candidate/Job graph sync and the non-provider rebuild command pass.
 - [ ] Manual JD acceptance is complete and contains no unresolved false-success/ranking inconsistency.
 
-## 4. Scope
+## Scope
 
 - Fill only missing test coverage from Master Section 24; reuse existing fixtures/fakes/helpers.
 - Add one automated local end-to-end smoke test for the locked greeting → CV → approval → JD → matching sequence.
@@ -40,7 +46,7 @@ The final state must start from a fresh clone plus one root `.env`, run the comp
 - Perform and record a final requirements/scope audit against Master Sections 2.2, 22, 27, and 28.
 - Repair only in-scope defects discovered by these checks, preserving earlier ownership/contracts.
 
-## 5. Out of Scope
+## Out of Scope
 
 - New product features, tools, endpoints, schemas, tables, Agent types, infrastructure services, or architectural refactors unrelated to a verified defect.
 - Authentication, multi-user/multi-conversation support, OCR/DOCX, discovery/crawling, browser automation, auto-apply, tracking, cover letters, interview preparation, or public cloud deployment.
@@ -48,7 +54,7 @@ The final state must start from a fresh clone plus one root `.env`, run the comp
 - Benchmark datasets, evaluation metrics/reports, statistical weight tuning, generalized memory, production security pipelines, or production threat modeling.
 - Real data committed as tests/demo assets or destructive cleanup of the developer’s normal volumes during release verification.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -76,7 +82,7 @@ JobAgent/
 
 Do not create a second test harness when existing fakes, fixtures, API clients, Compose services, or package scripts can cover a check. Production-file edits are allowed only for a reproduced in-scope defect and must remain in the owning focused module.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Final automated coverage matrix
 
@@ -193,7 +199,7 @@ CI workflows/evaluation datasets or metrics/production security subsystem
 
 Future-work documentation is allowed only when clearly labeled non-MVP and not implemented/configured.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Re-read Master Section 24 and map each required check to an existing test; add only the missing focused cases.
 - [ ] Implement the disposable full-flow E2E test using existing fakes/fixtures/API contracts.
@@ -207,7 +213,7 @@ Future-work documentation is allowed only when clearly labeled non-MVP and not i
 - [ ] Run the final explicit out-of-scope search/audit and remove any accidental scope expansion.
 - [ ] Re-run all backend/frontend/provider-diagnostic/Compose checks after the final repair; do not claim completion from stale output.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Full local automated suite
 
@@ -271,7 +277,18 @@ Review `docs/acceptance/local_release_checklist.md`: every item has dated PASS e
 - Repair the root cause in the owning module and grep/search all callers before concluding the fix is safe.
 - Do not weaken a test, suppress a provider/graph failure, or add excluded infrastructure to achieve PASS.
 
-## 10. Final Handoff and Completion Contract
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and all completed Plans 1-6 release artifacts.
+
+### Produces
+- The documented local-release baseline and verification matrix that Plan 8 consumes as historical completion evidence; Plan 8 alone owns the approved observability increment.
+
+### Next Consumer
+Plan_8.md consumes the released baseline and must add the approved observability sidebar without reimplementing prior phases.
+
+### Historical Completion Contract
 
 The JobAgent MVP is complete only when all of the following are simultaneously true:
 
@@ -285,4 +302,4 @@ The JobAgent MVP is complete only when all of the following are simultaneously t
 - Real data/secrets/runtime state remain outside Git, ports remain local-only, and README limitations make no production-security claim.
 - Every explicit out-of-scope item remains absent.
 
-No later implementation phase exists. Future work requires a separate approved Master Plan revision and must not be inferred from this completion handoff.
+This historical completion evidence remains valid for the Phase 6 baseline. The approved Master Phase 7 and `Plan_8.md` are its explicit successor; no other future work may be inferred from this handoff.

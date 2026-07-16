@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_3.md` implements **Master Plan Phase 2**. It consumes the source-of-truth schema and runtime foundation from Plan 2 without changing them.
 
-## 1. Objective
+## Objective
 
 Deliver one persistent conversation over a complete React–FastAPI–LangGraph–SSE path. The phase owns conversation/history persistence, per-turn run lifecycle, durable tool execution/replay, typed SSE, the single controlled Agent loop, ShopAIKey chat integration, a base Astryx chat interface, and generic interrupt/resume mechanics proved by a test-only synthetic tool.
 
 The result must answer greetings/general questions naturally without tool calls, stream validated events, survive an interrupt across a request boundary, replay durable terminal tool results idempotently, and remove terminal checkpoints while retaining application history.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 4.1 and 6.2–6.5: ownership, chat/run/tool tables, transactions, replay identity, history joins, and checkpoint ownership.
 - Sections 7.5 and 12.1–12.6: `ToolResult`, one controlled graph, per-turn runs, Agent state, bounded memory, conversation policy, and six-iteration limit.
@@ -19,7 +19,13 @@ The result must answer greetings/general questions naturally without tool calls,
 - Sections 20 and 24: controlled failure, local test cases, fake provider use, and no real provider calls in normal tests.
 - Section 25, “Phase 2 — Chat transport, Agent runtime, and persistence”: tasks and exit gate.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 3 scope | Master Phase 2: Chat Transport, Agent Runtime, and Persistence | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] Plan 1 compatibility report is PASS and identifies the exact ShopAIKey schema/tool/streaming mode and pinned Astryx APIs.
 - [ ] Plan 2 Docker Compose starts frontend, backend, and Neo4j; health reports the foundation state.
@@ -27,7 +33,7 @@ The result must answer greetings/general questions naturally without tool calls,
 - [ ] `conversation(id='main')` is seeded; async sessions have required PRAGMAs.
 - [ ] Shared settings, UUID, UTC, and Neo4j/session lifecycle modules exist and must be reused.
 
-## 4. Scope
+## Scope
 
 - Define Pydantic contracts for messages, history pages/cursors, run metadata, `ToolResult`, and every SSE event.
 - Implement repositories for one conversation, deterministic cursor history, Agent runs, and tool executions.
@@ -43,7 +49,7 @@ The result must answer greetings/general questions naturally without tool calls,
 - Implement base Astryx conversation layout, message list, composer, streaming reducer, tool activity, error/disconnected states, and history pagination.
 - Ensure general conversation creates no tool execution or JobAgent domain mutation.
 
-## 5. Out of Scope
+## Out of Scope
 
 - PDF upload, attachment state transitions, profile/draft schemas, profile approval UI, or Candidate graph synchronization.
 - The six production JobAgent tool implementations; the production Phase 2 registry is empty and the synthetic tool exists only in tests.
@@ -52,7 +58,7 @@ The result must answer greetings/general questions naturally without tool calls,
 - Persisted provider `ToolMessage` rows, duplicated tool results in chat messages, a second idempotency key, or permanent checkpoints.
 - WebSockets, provider-owned client streaming, public CRUD endpoints, background workers, or cloud tracing dependencies.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -120,7 +126,7 @@ JobAgent/
 
 Keep transport, orchestration, persistence, and UI rendering separate. Do not put Agent execution in the API route or database writes in graph nodes.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Durable result and status contracts
 
@@ -251,7 +257,7 @@ FastAPI owns framing and validates payloads before yielding. A normal direct-ans
 - Tool activity shows friendly label, exact status, duration, and short outcome only; no raw arguments, documents, or stack trace.
 - “Load older” uses `next_cursor`; disconnected/failed stream states are visible and do not falsely mark a run complete.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Define and unit-test `ToolResult`, chat/history, and all SSE Pydantic contracts before implementing routes.
 - [ ] Implement focused message, run, and tool-execution repositories using the existing async session factory.
@@ -267,7 +273,7 @@ FastAPI owns framing and validates payloads before yielding. A normal direct-ans
 - [ ] Add integration tests for direct conversation, streaming order, history pagination, malformed cursor, interrupt/resume both branches, replay, and checkpoint cleanup.
 - [ ] Run normal tests exclusively against fakes; rerun the real provider diagnostic separately only as a compatibility smoke check.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Backend commands
 
@@ -308,7 +314,18 @@ Start Compose and send a greeting through the UI. Expected: natural response in 
 - A new turn during interruption returns `APPROVAL_ACTION_REQUIRED` without persisting input.
 - Stream disconnect does not rewrite durable run/tool state; hydration reflects the database truth.
 
-## 10. Handoff Notes for Plan 4 / Master Phase 3
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 2: Chat Transport, Agent Runtime, and Persistence artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_4.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 4 receives:
 

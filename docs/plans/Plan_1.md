@@ -2,13 +2,13 @@
 
 > **Numbering:** `Plan_1.md` implements **Master Plan Phase 0**. Generated plan files are 1-based; Master Plan phase identities remain unchanged.
 
-## 1. Objective
+## Objective
 
 Create the minimal repository scaffold and retire the four uncertainties that could invalidate later implementation: Astryx component availability, ShopAIKey chat/tool/schema/streaming/embedding compatibility, pypdf extraction quality, and image-only PDF rejection. This phase produces evidence and locked dependency versions; it does not build production JobAgent flows.
 
 The phase is complete only when every Master Phase 0 exit gate passes. If a gate fails, revise only the affected adapter or documented composition path and rerun that gate. Do not add fallback providers, OCR, alternate embedding models, or another design system.
 
-## 2. Source of Truth
+## Source of Truth
 
 - `docs/plans/Master_plan.md` Sections 1–5: objective, scope guardrail, locked stack, ownership rules, and repository shape.
 - Sections 10.1–10.2: PDF validation, pypdf layout extraction, representative digital fixtures, and `NO_EXTRACTABLE_TEXT` without OCR.
@@ -18,14 +18,20 @@ The phase is complete only when every Master Phase 0 exit gate passes. If a gate
 - Section 25, “Phase 0 — Feasibility and compatibility gates”: tasks and exit gate.
 - Sections 27–29: MVP exclusions and the rule that failed feasibility changes the affected adapter rather than expanding the stack.
 
-## 3. Prerequisites from Prior Phases
+## Master Requirement Coverage
+
+| Requirement ID | Master section | Owned outcome | Verification evidence |
+|---|---|---|---|
+| Legacy Plan 1 scope | Master Phase 0: Feasibility and Compatibility Gates | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+
+## Prerequisites
 
 - [ ] No implementation-phase artifacts are required.
 - [ ] Python, Node.js/npm, Docker, and Git are available locally.
 - [ ] The developer supplies `SHOPAIKEY_API_KEY` only through the ignored root `.env`; the value is never copied into committed files or command output.
 - [ ] Six synthetic PDF fixtures can be committed: five digitally born representative CVs and one image-only PDF. They must contain no real personal data.
 
-## 4. Scope
+## Scope
 
 - Create the `frontend/`, `backend/`, and `infrastructure/` scaffold without implementing application behavior.
 - Create root configuration documentation through `.env.example`; preserve the existing ignored `.env` as user-managed runtime state.
@@ -38,7 +44,7 @@ The phase is complete only when every Master Phase 0 exit gate passes. If a gate
 - Verify image-only input produces `NO_EXTRACTABLE_TEXT` and does not trigger OCR.
 - Record the selected structured-output strategy and exact dependency versions for later phases.
 
-## 5. Out of Scope
+## Out of Scope
 
 - FastAPI endpoints, SQLAlchemy models, Alembic migrations, Docker runtime services, or Neo4j persistence.
 - Production chat orchestration, SSE, LangGraph checkpoints, or durable tool execution.
@@ -47,7 +53,7 @@ The phase is complete only when every Master Phase 0 exit gate passes. If a gate
 - OCR, browser automation, alternate providers/models, local embeddings, reranking, Qdrant, or broad fallback stacks.
 - Real CV/JD data, public deployment, authentication, CI, or production security work.
 
-## 6. Target Directory Structure
+## Target Directory Structure
 
 ```text
 JobAgent/
@@ -85,7 +91,7 @@ JobAgent/
 
 Do not add empty placeholder modules outside this tree. Later phases create directories when they first own real behavior.
 
-## 7. Technical Specifications
+## Technical Specifications
 
 ### 7.1 Scaffold and dependency lock
 
@@ -149,7 +155,7 @@ Undocumented props and internal package paths are forbidden. A missing component
 
 This report locks compatibility facts; it may not revise the Master’s architecture, model IDs, embedding dimensions, or MVP scope.
 
-## 8. Implementation Steps
+## Implementation
 
 - [ ] Create only the scaffold directories and minimal package manifests listed in Section 6.
 - [ ] Extend `.gitignore` only as needed to keep `.env`, uploaded/runtime data, caches, build output, and local Neo4j/SQLite volumes out of Git.
@@ -164,7 +170,7 @@ This report locks compatibility facts; it may not revise the Master’s architec
 - [ ] Complete `docs/feasibility/phase_0_report.md` with evidence and the selected schema mode.
 - [ ] Rerun every gate from a clean local environment and stop if any required result is not PASS.
 
-## 9. Verification & Testing Plan
+## Verification
 
 ### Automated/local commands
 
@@ -204,7 +210,18 @@ Run the exact pinned Astryx CLI documentation command recorded in the feasibilit
 - Fewer than four successful digital fixtures blocks Plan 2; do not add OCR or another parser stack.
 - Any embedding model/dimension mismatch blocks Plan 2; do not change the locked model or `1536` dimensions.
 
-## 10. Handoff Notes for Plan 2 / Master Phase 1
+## Handoff Contract
+
+### Consumes
+- docs/plans/Master_plan.md and the prior plan outputs named in Prerequisites.
+
+### Produces
+- The completed Master Phase 0: Feasibility and Compatibility Gates artifacts, scope decisions, and verification evidence preserved below.
+
+### Next Consumer
+Plan_2.md consumes the produced artifacts and must not reimplement this phase's owned work.
+
+### Historical Handoff Notes
 
 Plan 2 may consume only these Phase 0 outputs:
 
