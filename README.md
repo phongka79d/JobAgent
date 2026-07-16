@@ -57,10 +57,15 @@ CV/profile, matching, frontend, conversation/Agent/SSE, JD, rebuild, and
 write-tool/approval/terminal-resume idempotency map to named fake-backed tests;
 coverage gaps closed under `backend/tests/**` and `frontend/src/test/**` only
 (shared structured-output fake, matching/rebuild assertions, frontend
-disconnect/status cases, identity replay). No product feature, schema, endpoint,
-tool, or production `backend/app/**` change. Remaining Plan 7 work: Batch02
-public-boundary E2E smoke, Batch03 safeguards/README release guide, Batch04
-live release evidence, Batch05 final gate.
+disconnect/status cases, identity replay). Plan 7 Batch02 (disposable
+public-boundary demo flow) is complete: one fake-backed E2E smoke
+(`backend/tests/e2e/test_demo_flow.py`) exercises greeting → CV upload →
+profile draft/approval resume → JD save/extract/embed/sync → match_jobs with
+durable DB/file/checkpoint assertions through public FastAPI APIs only, plus
+shared `tests/support/public_api.py` SSE/client helpers. No product feature,
+schema, endpoint, tool, or production `backend/app/**` change. Remaining Plan 7
+work: Batch03 safeguards/README release guide, Batch04 live release evidence,
+Batch05 final gate.
 
 ## Repository layout
 
@@ -122,7 +127,12 @@ python -m ruff check .
 python -m mypy app
 python -m pytest tests/unit -q
 python -m pytest tests/integration -q
+python -m pytest tests/e2e/test_demo_flow.py -q
 ```
+
+Plan 7 Batch02 disposable public-boundary E2E is fake-backed only (dependency-
+overridden chat/extraction/embedding/graph fakes and temp SQLite/files). It must
+not read root `.env`, developer volumes, live Neo4j, network, or browser.
 
 ## SQLite and migration verification
 

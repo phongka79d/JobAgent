@@ -4,19 +4,15 @@ Fake-backed only (no real ShopAIKey). Covers exact URLs/shapes, direct-answer
 SSE order, durable user/assistant/run state, zero tools for greetings,
 malformed cursor 422, synthetic interrupt/resume through public endpoints,
 safe controlled errors, and CORS origin allow/deny.
+
+Public SSE/client helpers live in ``tests.support.public_api`` (shared with E2E).
 """
 
 from __future__ import annotations
 
-import json
-import re
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
-import pytest
 from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
-from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
 from app.core.ids import new_uuid
 from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
@@ -28,14 +24,10 @@ from app.db.models.chat import (
     ToolExecution,
 )
 from app.db.session import get_session_factory
-from app.main import create_app
 from app.repositories import agent_runs as runs_repo
 from app.repositories import tool_executions as tool_repo
 from app.schemas.chat import HistoryPage
-from app.schemas.sse import parse_sse_event
-from app.tools.registry import ToolRegistry, production_registry
-from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from app.tools.registry import ToolRegistry
 from sqlalchemy import func, select
 
 from tests.fakes.fake_chat_model import FakeChatModel
@@ -45,108 +37,35 @@ from tests.fakes.synthetic_tool import (
     SYNTHETIC_TOOL_NAME,
     build_synthetic_interrupt_tool,
 )
-from tests.support.db_migration import cleanup_isolated_sqlite, run_async
+from tests.support.db_migration import run_async
 from tests.support.health import (
     FAKE_SHOPAIKEY,
     FakeDriver,
     health_client,
-    install_fake_driver,
-    prepare_health_env,
     public_api_routes,
 )
-
-FRONTEND_ORIGIN = "http://127.0.0.1:5173"
-OTHER_ORIGIN = "http://evil.example:9999"
-
-
-def _ai_text(content: str) -> AIMessage:
-    return AIMessage(content=content)
-
-
-def _ai_tool_call(name: str, call_id: str = "call-api-1") -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": name,
-                "args": {},
-                "id": call_id,
-                "type": "tool_call",
-            }
-        ],
-    )
-
-
-def _parse_sse(body: str) -> list[dict[str, Any]]:
-    """Parse SSE wire text into validated event dicts (full data envelope)."""
-    events: list[dict[str, Any]] = []
-    # Split on blank line terminators.
-    for chunk in re.split(r"\n\n+", body.strip()):
-        if not chunk.strip() or chunk.strip().startswith(":"):
-            continue
-        event_name: str | None = None
-        data_lines: list[str] = []
-        event_id: str | None = None
-        for line in chunk.splitlines():
-            if line.startswith("event:"):
-                event_name = line[len("event:") :].strip()
-            elif line.startswith("data:"):
-                data_lines.append(line[len("data:") :].strip())
-            elif line.startswith("id:"):
-                event_id = line[len("id:") :].strip()
-        if not data_lines:
-            continue
-        data = json.loads("\n".join(data_lines))
-        typed = parse_sse_event(data)
-        assert typed.event == event_name or event_name is None
-        if event_id is not None:
-            assert typed.event_id == event_id
-        events.append(data)
-    return events
-
-
-@pytest.fixture
-def chat_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[tuple[Path, Path, FakeDriver]]:
-    """Migrated temp SQLite + FILES_DIR + fake Neo4j for API tests."""
-    db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
-    fake = install_fake_driver(monkeypatch)
-    yield db_path, files_dir, fake
-    cleanup_isolated_sqlite()
-
-
-def _direct_model(
-    text: str = "Hello! How can I help with your job search?",
-) -> FakeChatModel:
-    return FakeChatModel(responses=[_ai_text(text)])
-
-def _override_deps(
-    client: TestClient,
-    *,
-    model: FakeChatModel,
-    registry: ToolRegistry | None = None,
-    db_path: Path,
-) -> None:
-    deps = ChatAgentDeps(
-        model=model,
-        registry=registry if registry is not None else production_registry(),
-        sqlite_path=db_path,
-        include_assistant_status=False,
-    )
-    client.app.dependency_overrides[get_chat_agent_deps] = lambda: deps
-
-
-def _client_with_fake(
-    db_path: Path,
-    model: FakeChatModel,
-    registry: ToolRegistry | None = None,
-) -> TestClient:
-    app = create_app()
-    client = TestClient(app)
-    _override_deps(client, model=model, registry=registry, db_path=db_path)
-    return client
-
+from tests.support.public_api import (
+    FRONTEND_ORIGIN,
+    OTHER_ORIGIN,
+)
+from tests.support.public_api import (
+    ai_text as _ai_text,
+)
+from tests.support.public_api import (
+    ai_tool_call as _ai_tool_call,
+)
+from tests.support.public_api import (
+    client_with_fake_chat as _client_with_fake,
+)
+from tests.support.public_api import (
+    direct_model as _direct_model,
+)
+from tests.support.public_api import (
+    override_chat_deps as _override_deps,
+)
+from tests.support.public_api import (
+    parse_sse_wire as _parse_sse,
+)
 
 # ---------------------------------------------------------------------------
 # Route inventory and thinness

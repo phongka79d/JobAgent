@@ -613,7 +613,7 @@ for an owner-scoped Batch01 repair.
 
 ### Tasks
 
-- [ ] (02A): Add the complete fake-backed public-boundary E2E smoke
+- [x] (02A): Add the complete fake-backed public-boundary E2E smoke
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch02 - Disposable Public-Boundary Demo Flow` > `(02A)`

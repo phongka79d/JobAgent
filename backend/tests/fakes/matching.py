@@ -96,6 +96,18 @@ class ScriptedReadDriver:
         self.session_enter = 0
         self.session_exit = 0
 
+    def reconfigure(
+        self,
+        scripts: Sequence[ScriptedRead],
+        *,
+        failure: Exception | None = None,
+        fail_on_query_contains: str | None = None,
+    ) -> None:
+        """Replace read scripts (E2E: configure after SQLite ids/revisions exist)."""
+        self.scripts = tuple(scripts)
+        self.failure = failure
+        self.fail_on_query_contains = fail_on_query_contains
+
     def session(self, **config: Any) -> _ScriptedSession:
         del config
         return _ScriptedSession(self)
