@@ -833,7 +833,7 @@ developer volumes. Any implementation defect blocks for an owner-scoped repair.
 
 ### Tasks
 
-- [ ] (04A): Verify every README command from a disposable clean checkout
+- [x] (04A): Verify every README command from a disposable clean checkout
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch04 - Disposable Local Release Evidence` > `(04A)`
@@ -899,7 +899,7 @@ developer volumes. Any implementation defect blocks for an owner-scoped repair.
   - Blocked Condition: `BLOCKED_USER_ACTION` if credentials, Docker/network, free ports, or authorization are unavailable; `BLOCKED_ENVIRONMENT` if a documented command/tool cannot run; `BLOCKED_PERMISSION` if named worktree/project lifecycle is not permitted; `BLOCKED_SCOPE_CONFLICT` if a product/config/doc defect is found.
   - Files: `docs/acceptance/local_release_checklist.md`
 
-- [ ] (04B): Execute the manual demo, failure matrix, and fresh-volume rebuild
+- [x] (04B): Execute the manual demo, failure matrix, and fresh-volume rebuild
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch04 - Disposable Local Release Evidence` > `(04B)`
