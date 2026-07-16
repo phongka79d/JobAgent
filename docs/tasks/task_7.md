@@ -688,7 +688,7 @@ add a security subsystem, or repair product behavior.
 
 ### Tasks
 
-- [ ] (03A): Audit environment, secrets, tracked data, ports, and excluded scope
+- [x] (03A): Audit environment, secrets, tracked data, ports, and excluded scope
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch03 - Static Safeguards and Release Documentation` > `(03A)`
@@ -755,7 +755,7 @@ add a security subsystem, or repair product behavior.
   - Blocked Condition: `BLOCKED_USER_ACTION` immediately on a credential finding until external rotation/removal is confirmed; `BLOCKED_SCOPE_CONFLICT` if correction requires product/security architecture; `BLOCKED_ENVIRONMENT` if Git/rg/Python required for the audit is unavailable.
   - Files: `docs/acceptance/local_release_checklist.md` and only a demonstrated config/test owner named in `Allowed Files`
 
-- [ ] (03B): Revise the root README into the exact local release guide
+- [x] (03B): Revise the root README into the exact local release guide
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch03 - Static Safeguards and Release Documentation` > `(03B)`
