@@ -337,7 +337,10 @@ def _auto_commit_after_draft_tool(
     """
     if not commit_available:
         return None
-    messages = list(state.get(MESSAGES_KEY) or [])
+    raw_messages = state.get(MESSAGES_KEY)
+    messages: list[Any] = (
+        list(raw_messages) if isinstance(raw_messages, list) else []
+    )
     if not messages or _turn_already_requested_commit(messages):
         return None
 
