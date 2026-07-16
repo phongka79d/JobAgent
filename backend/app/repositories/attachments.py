@@ -16,21 +16,25 @@ from app.core.time import utc_now
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
+from app.repositories import attachment_text_chunks as chunk_repo
 
 # Approved transitions only (Master §6.2 attachments):
 # staged → active | failed
 # failed → staged  (explicit same-file retry)
-# active is terminal as a state; removal is delete after profile repoint.
+# active → archived  (approved replacement; never restore to active)
+# archived is terminal (immutable history).
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     ATTACHMENT_STATE_STAGED: frozenset(
         {ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_FAILED}
     ),
     ATTACHMENT_STATE_FAILED: frozenset({ATTACHMENT_STATE_STAGED}),
-    ATTACHMENT_STATE_ACTIVE: frozenset(),
+    ATTACHMENT_STATE_ACTIVE: frozenset({ATTACHMENT_STATE_ARCHIVED}),
+    ATTACHMENT_STATE_ARCHIVED: frozenset(),
 }
 
 
@@ -202,10 +206,30 @@ async def retry_as_staged(
     )
 
 
+async def mark_archived(
+    session: AsyncSession,
+    attachment_id: str,
+) -> Attachment:
+    """Transition ``active → archived`` (immutable retained history).
+
+    Clears no page_count; failure_code remains null. Archived rows cannot
+    transition back to active. Does not finalize the caller's unit of work
+    or touch storage/chunks.
+    """
+    return await _transition(
+        session,
+        attachment_id,
+        to_state=ATTACHMENT_STATE_ARCHIVED,
+        page_count=None,
+        failure_code=None,
+    )
+
+
 async def delete(session: AsyncSession, attachment_id: str) -> None:
     """Delete the attachment row by primary key after a successful flush.
 
-    Callers must ensure FK safety (e.g. profile already repointed). Raises
+    Removes child ``attachment_text_chunks`` first (FK RESTRICT). Callers
+    must ensure other FK safety (e.g. profile already repointed). Raises
     :class:`AttachmentNotFoundError` when the row is missing. Does not
     finalize the caller's unit of work or delete filesystem bytes.
     """
@@ -214,6 +238,11 @@ async def delete(session: AsyncSession, attachment_id: str) -> None:
         raise AttachmentNotFoundError(
             f"attachment {attachment_id!r} not found"
         )
+    if row.state == ATTACHMENT_STATE_ARCHIVED:
+        raise AttachmentRepositoryError(
+            "archived attachments are immutable history and cannot be deleted"
+        )
+    await chunk_repo.delete_for_attachment(session, attachment_id)
     await session.delete(row)
     await session.flush()
 
@@ -258,6 +287,9 @@ async def _transition(
         row.failure_code = failure_code
     elif to_state == ATTACHMENT_STATE_STAGED:
         # Explicit retry: clear failure; leave page_count as-is.
+        row.failure_code = None
+    elif to_state == ATTACHMENT_STATE_ARCHIVED:
+        # Immutable history: keep page_count/metadata; no failure_code.
         row.failure_code = None
     else:
         raise InvalidAttachmentTransitionError(

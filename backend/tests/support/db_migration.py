@@ -30,7 +30,7 @@ from tests.support.schema_parity import (  # noqa: F401
 T = TypeVar("T")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_HEAD = "0001_initial_schema"
+MIGRATION_HEAD = "0002_add_attachment_text_chunks"
 EXPECTED_FRESH_TABLES: frozenset[str] = APPLICATION_TABLE_NAMES | {
     "alembic_version"
 }

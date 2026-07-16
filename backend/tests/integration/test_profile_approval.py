@@ -1524,12 +1524,17 @@ def test_approved_profile_persists_across_engine_restart(
     assert (files_dir / att_id).is_file()
 
 
-def test_replacement_removes_old_attachment_row_and_file(
+def test_replacement_archives_old_attachment_and_retains_file(
     db_path: Path, tmp_path: Path
 ) -> None:
-    """Replacement: old attachment row gone, old PDF cleaned, new active."""
+    """Replacement: old attachment archived, PDF retained, one active."""
     from app.core.ids import new_uuid
-    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.db.models.attachments import (
+        ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_ARCHIVED,
+    )
+    from app.repositories import attachment_text_chunks as chunk_repo
+    from app.repositories.attachment_text_chunks import build_chunk_write
     from app.services.profile_approval import commit_approved_draft
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
@@ -1563,6 +1568,12 @@ def test_replacement_removes_old_attachment_row_and_file(
                     active_attachment_id=old_id,
                     profile_json=_approval_valid_profile_json(),
                 )
+                # Chunks on the soon-to-be-archived active CV must be retained.
+                await chunk_repo.replace_for_attachment(
+                    session,
+                    old_id,
+                    [build_chunk_write(0, "retained archived chunk text")],
+                )
                 await att_repo.create_staged(
                     session,
                     file_hash="new-appr",
@@ -1590,9 +1601,22 @@ def test_replacement_removes_old_attachment_row_and_file(
             assert result.previous_attachment_id == old_id
             assert result.active_attachment_id == new_id
             assert result.cleanup_ok is True
+            assert result.data.get("previous_attachment_archived") is True
 
             async with factory() as session:
-                assert await att_repo.get_by_id(session, old_id) is None
+                old_att = await att_repo.get_by_id(session, old_id)
+                assert old_att is not None
+                assert old_att.state == ATTACHMENT_STATE_ARCHIVED
+                # No restore path: archived cannot become active.
+                from app.repositories.attachments import (
+                    InvalidAttachmentTransitionError,
+                )
+
+                try:
+                    await att_repo.mark_active(session, old_id)
+                    raise AssertionError("archived must not restore to active")
+                except InvalidAttachmentTransitionError:
+                    pass
                 new_att = await att_repo.get_by_id(session, new_id)
                 assert new_att is not None
                 assert new_att.state == ATTACHMENT_STATE_ACTIVE
@@ -1600,13 +1624,21 @@ def test_replacement_removes_old_attachment_row_and_file(
                 assert profile is not None
                 assert profile.active_attachment_id == new_id
                 assert await prof_repo.get_current_draft(session) is None
-                n = (
+                active_n = (
                     await session.execute(
-                        text("SELECT COUNT(*) FROM attachments")
+                        text(
+                            "SELECT COUNT(*) FROM attachments "
+                            "WHERE state = 'active'"
+                        )
                     )
                 ).scalar_one()
-                assert int(n) == 1
-            assert not storage.exists(old_rel)
+                assert int(active_n) == 1
+                archived_chunks = await chunk_repo.list_for_attachment(
+                    session, old_id
+                )
+                assert len(archived_chunks) == 1
+                assert archived_chunks[0].text == "retained archived chunk text"
+            assert storage.exists(old_rel)
             assert storage.exists(new_rel)
         finally:
             await engine.dispose()
@@ -1930,15 +1962,19 @@ def test_cleanup_failure_reported_sqlite_valid(
             assert result.sqlite_committed is True
             assert result.cleanup_ok is False
             assert result.sync_ok is True
-            assert result.ok is True  # sync ok; cleanup failure is reported
+            assert result.ok is True  # sync ok; cleanup failpoint is reported
             assert result.active_attachment_id == new_id
 
             async with factory() as session:
-                assert await att_repo.get_by_id(session, old_id) is None
+                from app.db.models.attachments import ATTACHMENT_STATE_ARCHIVED
+
+                old = await att_repo.get_by_id(session, old_id)
+                assert old is not None
+                assert old.state == ATTACHMENT_STATE_ARCHIVED
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
                 assert profile.active_attachment_id == new_id
-            # File may still exist because cleanup was skipped by failpoint.
+            # Retained archive PDF always kept (no previous-file cleanup).
             assert storage.exists(old_rel)
         finally:
             await engine.dispose()
@@ -2070,8 +2106,9 @@ def test_approval_module_boundaries_static() -> None:
     assert "NEO4J_SYNC_FAILED" in src
     assert "commit" in src
     assert "rollback" in src
-    assert "delete(" in src or "storage.delete" in src
-    # Sync and storage cleanup happen after commit return path.
+    assert "mark_archived" in src
+    # Replacement retains archived CV; no previous-file cleanup path.
+    assert "storage.delete" not in src
     assert "sqlite_committed" in src
     # No raw CV extraction in approval.
     assert "extract_text" not in src

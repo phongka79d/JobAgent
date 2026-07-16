@@ -15,6 +15,7 @@ from app.core.ids import new_uuid
 from app.db.models.attachments import ATTACHMENT_STATE_FAILED
 from app.db.models.profiles import CANDIDATE_PROFILE_ID, PROFILE_DRAFT_ID
 from app.db.session import build_async_engine
+from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
@@ -29,6 +30,7 @@ from app.services.profile_drafts import (
     propose_profile_from_cv,
 )
 from app.services.profile_extraction import (
+    CHUNK_JOIN,
     EXTRACTION_SCHEMA_STRATEGY,
     FAILURE_INVALID_STRUCTURED_OUTPUT,
     FAILURE_NO_EXTRACTABLE_TEXT,
@@ -46,6 +48,7 @@ from app.services.profile_extraction import (
     empty_job_preferences,
     extract_profile_from_pdf,
     extracted_to_candidate_profile,
+    join_chunks_for_model,
 )
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
@@ -118,6 +121,7 @@ class FakeStructuredInvoker:
     def __init__(self, script: list[Any]) -> None:
         self.script = list(script)
         self.calls: list[dict[str, Any]] = []
+        self.last_human_content: str | None = None
 
     def invoke_structured(
         self,
@@ -125,10 +129,18 @@ class FakeStructuredInvoker:
         *,
         is_repair: bool = False,
     ) -> ExtractedCandidateProfile | dict[str, Any]:
+        msg_list = list(messages)
+        human = None
+        for m in msg_list:
+            content = getattr(m, "content", None)
+            if isinstance(content, str) and "CV TEXT START" in content:
+                human = content
+                break
+        self.last_human_content = human
         self.calls.append(
             {
                 "is_repair": is_repair,
-                "message_count": len(list(messages)),
+                "message_count": len(msg_list),
                 # Assert no accidental persistence of raw text via call log dumps
                 # in ToolResult — we only record counts.
             }
@@ -215,6 +227,170 @@ def test_valid_extraction_from_digital_fixture() -> None:
     assert outcome.draft.candidate_profile.summary
     assert len(invoker.calls) == 1
     assert invoker.calls[0]["is_repair"] is False
+    assert outcome.chunks
+    assert [c.ordinal for c in outcome.chunks] == list(
+        range(len(outcome.chunks))
+    )
+    assert outcome.model_input_text == join_chunks_for_model(outcome.chunks)
+    assert outcome.model_input_text == CHUNK_JOIN.join(
+        c.text for c in outcome.chunks
+    )
+    assert invoker.last_human_content is not None
+    assert outcome.model_input_text in invoker.last_human_content
+
+
+def test_extraction_failure_writes_no_chunk_rows(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    """Parse/model failure leaves attachment_text_chunks empty for the row."""
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    invoker = FakeStructuredInvoker([])  # never called on no-text
+    pdf = CV_DIR / "image_only_cv.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="no-text-hash",
+                    original_name="img.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=att_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == FAILURE_NO_EXTRACTABLE_TEXT
+
+            async with factory() as session:
+                assert await chunk_repo.count_for_attachment(session, att_id) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_successful_propose_persists_canonical_chunks(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    """Successful extraction stores exactly the model-input chunk sequence."""
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    invoker = FakeStructuredInvoker([_valid_extracted()])
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="ok-chunk-hash",
+                    original_name="cv.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=att_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is True
+            assert invoker.last_human_content is not None
+
+            async with factory() as session:
+                rows = await chunk_repo.list_for_attachment(session, att_id)
+                assert rows
+                assert [r.ordinal for r in rows] == list(range(len(rows)))
+                joined = CHUNK_JOIN.join(r.text for r in rows)
+                assert joined in invoker.last_human_content
+                # Historic no-row attachment remains empty (no backfill).
+                other = new_uuid()
+                await att_repo.create_staged(
+                    session,
+                    file_hash="hist-empty",
+                    original_name="h.pdf",
+                    size_bytes=10,
+                    storage_path=f"{other}.pdf",
+                    page_count=1,
+                    attachment_id=other,
+                )
+                await session.commit()
+                assert await chunk_repo.count_for_attachment(session, other) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_schema_repair_failure_does_not_persist_chunks(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    bad = ValidationError.from_exception_data(
+        "ExtractedCandidateProfile",
+        [{"type": "missing", "loc": ("summary",), "input": {}}],
+    )
+    invoker = FakeStructuredInvoker([bad, bad])
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="bad-schema-hash",
+                    original_name="cv.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=att_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == FAILURE_INVALID_STRUCTURED_OUTPUT
+            async with factory() as session:
+                assert await chunk_repo.count_for_attachment(session, att_id) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 def test_no_extractable_text_short_circuit() -> None:

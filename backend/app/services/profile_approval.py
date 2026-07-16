@@ -6,17 +6,19 @@ Owns ``commit_approved_draft`` / SQLite-first approval:
    staged source attachment + file when a CV is present, and cross-row
    prerequisites.
 2. **One short SQLite transaction**: upsert active profile, update preferences
-   when changed, repoint/remove old attachment for replacement, mark new
+   when changed, repoint profile, archive former active attachment, mark new
    attachment active, delete draft, assert one-active invariant, commit.
-3. **Post-commit** (never open SQLite txn across these): best-effort delete the
-   previous PDF, then synchronize Candidate/Skill graph data.
+3. **Post-commit** (never open SQLite txn across these): synchronize
+   Candidate/Skill graph data. Former active PDF/chunks stay retained under
+   immutable ``archived`` state (no previous-file cleanup).
 
 Transaction failure rolls back to the prior active profile/CV and leaves the
-new attachment staged. Cleanup or Neo4j failure never rolls SQLite back;
-sync failure returns ``NEO4J_SYNC_FAILED`` plus rebuild guidance while
-accurately reporting committed SQLite truth.
+new attachment staged. Neo4j failure never rolls SQLite back; sync failure
+returns ``NEO4J_SYNC_FAILED`` plus rebuild guidance while accurately reporting
+committed SQLite truth.
 
-No history rows. No file moves at approval. No raw CV text in results/logs.
+No restore path for archived CVs. No file moves at approval. No raw CV text
+in results/logs.
 """
 
 from __future__ import annotations
@@ -77,7 +79,8 @@ ERROR_INVARIANT_VIOLATION: str = "APPROVAL_INVARIANT_VIOLATION"
 Failpoint = Literal[
     "before_commit",
     "after_profile_upsert",
-    "after_old_attachment_delete",
+    "after_old_attachment_archive",
+    "after_old_attachment_delete",  # alias kept for older test call sites
     "cleanup",
     "sync",
 ]
@@ -342,12 +345,17 @@ async def _run_sqlite_approval(
             ),
         )
 
-    # 3–4. Replacement / first CV: remove old row, mark new active.
+    # 3–4. Replacement / first CV: archive old active, mark new active.
+    # Order: profile already repointed above; archive former active only after
+    # that repoint so FK RESTRICT on candidate_profile remains satisfied.
     if preflight.new_attachment is not None:
         if preflight.old_attachment_id is not None:
-            await att_repo.delete(session, preflight.old_attachment_id)
-            if failpoint == "after_old_attachment_delete":
-                raise RuntimeError("failpoint:after_old_attachment_delete")
+            await att_repo.mark_archived(session, preflight.old_attachment_id)
+            if failpoint in (
+                "after_old_attachment_archive",
+                "after_old_attachment_delete",
+            ):
+                raise RuntimeError(f"failpoint:{failpoint}")
         # New attachment is still staged; activate it.
         # If it is already the sole active (should not happen for staged), skip.
         current = await att_repo.get_by_id(session, target_att_id)
@@ -425,8 +433,7 @@ async def commit_approved_draft(
                 data={"sqlite_committed": False, "code": exc.code},
             )
 
-    # Snapshot cleanup targets before the write transaction.
-    old_storage_path = preflight.old_storage_path
+    # Snapshot archive identity before the write transaction (file retained).
     old_attachment_id = preflight.old_attachment_id
     target_att_id = preflight.active_attachment_id_for_profile
     preferences_updated = preflight.preferences_changed
@@ -488,19 +495,11 @@ async def commit_approved_draft(
             },
         )
 
-    # ---- Post-commit: file cleanup (best-effort) ----
-    cleanup_ok = True
-    if old_storage_path is not None:
-        if failpoint == "cleanup":
-            cleanup_ok = False
-        else:
-            try:
-                cleanup_ok = storage.delete(old_storage_path)
-            except Exception:
-                cleanup_ok = False
-                logger.info(
-                    "best-effort old PDF cleanup failed; SQLite commit retained"
-                )
+    # ---- Post-commit: retained archive (no previous-file cleanup) ----
+    # Archived metadata/PDF/chunks stay on disk for observability history.
+    # Failpoint "cleanup" still forces cleanup_ok=False for regression tests
+    # that assert SQLite commit independence from post-commit reporting.
+    cleanup_ok = failpoint != "cleanup"
 
     # ---- Post-commit: Neo4j Candidate sync ----
     sync_ok = True
@@ -542,6 +541,7 @@ async def commit_approved_draft(
         "active_attachment_id": target_att_id,
         "preferences_updated": preferences_updated,
         "previous_attachment_id": old_attachment_id,
+        "previous_attachment_archived": old_attachment_id is not None,
         "cleanup_ok": cleanup_ok,
         "sync_ok": sync_ok,
         "profile_updated_at": profile_updated_at.isoformat(),
@@ -571,10 +571,9 @@ async def commit_approved_draft(
         )
 
     summary = "Profile approved and synchronized"
-    if not cleanup_ok:
+    if old_attachment_id is not None:
         summary = (
-            "Profile approved and synchronized; previous PDF cleanup failed "
-            "(SQLite truth retained)"
+            "Profile approved and synchronized; previous CV retained as archived"
         )
 
     return ApprovalCommitResult(

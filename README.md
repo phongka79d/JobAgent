@@ -5,10 +5,20 @@ approve a profile, save job descriptions, and receive deterministic evidence-bac
 job matches. JobAgent is intentionally narrow: one conversation, one active profile,
 one root environment, and a three-service Docker Compose stack on loopback ports.
 
-This README is the Plan 7 local release guide. It is sufficient for a fresh clone
-plus one ignored root `.env`. Plan 7 final current-output release verification is
-complete: dated PASS evidence for Automated Coverage through Final Rerun lives in
-`docs/acceptance/local_release_checklist.md` on product HEAD `1fdc93b`.
+This README is the local release and maintainer guide. It is sufficient for a
+fresh clone plus one ignored root `.env`. Plan 7 final current-output release
+verification is complete: dated PASS evidence for Automated Coverage through
+Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
+HEAD `1fdc93b`.
+
+**Current status (Plan 8 Batch01):** retained-CV archival and canonical chunk
+persistence are implemented on the worktree under audit. Approved CV replacement
+archives the former active attachment (file and metadata retained; no restore
+path). Successful digital-PDF extraction persists the exact deterministic
+`"\n\n"`-joined chunk sequence in `attachment_text_chunks`. Migration head is
+`0002_add_attachment_text_chunks` under the configured single root
+`backend/migrations/versions/`. Observability APIs and sidebar tabs remain later
+Plan 8 batches.
 
 ## Purpose and scope
 
@@ -17,6 +27,9 @@ JobAgent provides:
 - Natural conversation through a React/Astryx chat UI over FastAPI SSE.
 - Multipart PDF CV upload (sidebar or chat), structured profile draft proposal,
   and interrupt-guarded Save Profile / Request Changes approval.
+- Immutable archived prior CVs after approved replacement (retained PDF bytes and
+  metadata; not selectable profile versions) and canonical parsed-text chunks
+  for successful digital-PDF extraction.
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
@@ -45,16 +58,18 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/api/` | Thin public routes only: health, CV upload, profile reads, chat history/turn/resume |
 | `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
-| `backend/app/services/` | Domain orchestration (CV, profile, JD, matching, tool execution, history) |
-| `backend/app/repositories/` | Flush-only SQLite persistence |
+| `backend/app/services/` | Domain orchestration (CV, profile approval/extraction/drafts, JD, matching, tool execution, history) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`) |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
+| `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
 | `infrastructure/` | Compose, Dockerfiles, Neo4j skills seed, host diagnostics and rebuild help wrapper |
 
-SQLite is the sole durable source of truth for profiles, attachments, jobs,
-messages, runs, and tool results. Neo4j is a derived Candidate/Job/Skill index
-and vector retrieval surface. ShopAIKey is the only external model provider.
+SQLite is the sole durable source of truth for profiles, attachments (including
+immutable `archived` history), attachment text chunks, jobs, messages, runs, and
+tool results. Neo4j is a derived Candidate/Job/Skill index and vector retrieval
+surface. ShopAIKey is the only external model provider.
 
 Public functional endpoints (seven):
 
@@ -194,6 +209,18 @@ python -m pytest tests/unit -q
 python -m pytest tests/integration -q
 python -m pytest tests/e2e/test_demo_flow.py -q
 Set-Location ..
+```
+
+Focused Plan 8 Batch01 retention/chunk gate (archive lifecycle + canonical
+chunks + migration head):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_attachment_text_chunks.py tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py tests/integration/test_migrations.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
 ```
 
 `tests/e2e/test_demo_flow.py` is the disposable public-boundary smoke: greeting →

@@ -71,7 +71,7 @@ Own attachment schema/lifecycle, chunk persistence, and direct tests only. Exclu
 
 ### Tasks
 
-- [ ] (01A): Archive replaced CVs and persist canonical successful-extraction chunks
+- [x] (01A): Archive replaced CVs and persist canonical successful-extraction chunks
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_8.md` > `## Mandatory Batch01 - Retained CV and Canonical Chunk Persistence` > `(01A)`

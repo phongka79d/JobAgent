@@ -1,16 +1,20 @@
-"""Structured CV profile extraction via ShopAIKey (Plan 4 §7.4).
+"""Structured CV profile extraction via ShopAIKey (Plan 4 §7.4 / Plan 8).
 
 Owns the LLM-backed Candidate Profile extraction path:
 
 * pypdf layout/normal text from :mod:`app.services.pdf_extraction`
+* pure deterministic chunking (``MAX_CHUNK_CHARS=1200``, zero overlap)
+* exact ``"\\n\\n"`` join of ascending chunks as the sole model document input
 * locked ``gpt-4o-mini`` via the ShopAIKey adapter and
   ``with_structured_output(..., method='json_schema', strict=True)``
 * at most one schema-repair request when structured output is invalid
 * at most one timeout/rate-limit retry
 * deterministic skill normalization through the sole normalizer
+* explicit canonical chunk persistence call for the successful draft-input txn
 
-Raw extracted CV text is transient: never logged, persisted, or returned in
-tool/public contracts. Callers pass file paths or openable sources only.
+Raw extracted CV text is transient outside canonical chunk rows: never logged
+or returned in tool/public contracts. Callers pass file paths or openable
+sources only.
 """
 
 from __future__ import annotations
@@ -25,8 +29,11 @@ from typing import Any, BinaryIO, Final, Literal, Protocol
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.shopaikey_chat import LOCKED_CHAT_MODEL, build_shopaikey_chat
+from app.repositories import attachment_text_chunks as chunk_repo
+from app.repositories.attachment_text_chunks import ChunkWrite
 from app.schemas.profile import (
     CandidateProfile,
     CandidateSkill,
@@ -61,10 +68,16 @@ logger = logging.getLogger(__name__)
 FAILURE_NO_EXTRACTABLE_TEXT: Final[str] = NO_EXTRACTABLE_TEXT
 FAILURE_MALFORMED_PDF: Final[str] = "MALFORMED_PDF"
 FAILURE_INVALID_STRUCTURED_OUTPUT: Final[str] = "INVALID_STRUCTURED_OUTPUT"
+FAILURE_EMPTY_CHUNKS: Final[str] = "EMPTY_CHUNKS"
 
 STRUCTURED_OUTPUT_METHOD: Final[str] = "json_schema"
 STRUCTURED_OUTPUT_STRICT: Final[bool] = True
 EXTRACTION_SCHEMA_STRATEGY: Final[str] = "strict_json_schema"
+
+# Deterministic chunker contract (Plan 8 Persistence And Extraction).
+MAX_CHUNK_CHARS: Final[int] = 1200
+CHUNK_OVERLAP: Final[int] = 0
+CHUNK_JOIN: Final[str] = "\n\n"
 
 _MAX_EVIDENCE_SNIPPET_LEN: Final[int] = 240
 _MAX_REPAIR_ATTEMPTS: Final[int] = 1
@@ -133,12 +146,38 @@ class StructuredProfileInvoker(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class CanonicalChunk:
+    """One nonempty source-ordered text segment for model input + persistence."""
+
+    ordinal: int
+    text: str
+
+    @property
+    def char_count(self) -> int:
+        return len(self.text)
+
+    @property
+    def token_estimate(self) -> int:
+        return chunk_repo.token_estimate_for_chars(self.char_count)
+
+    @property
+    def preview(self) -> str:
+        return chunk_repo.preview_for_text(self.text)
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionOutcome:
-    """Validated draft payload after extraction + normalization (no DB work)."""
+    """Validated draft payload after extraction + normalization (no DB work).
+
+    ``chunks`` is the exact ascending sequence joined with :data:`CHUNK_JOIN`
+    for the model input. Persistence is a separate explicit call.
+    """
 
     draft: ProfileDraftPayload
     schema_repairs_used: int
     provider_retries_used: int
+    chunks: tuple[CanonicalChunk, ...]
+    model_input_text: str
 
 
 def empty_job_preferences() -> JobPreferences:
@@ -266,7 +305,7 @@ class ShopAIKeyStructuredProfileInvoker:
 
 
 def _build_messages(cv_text: str, *, repair_error: str | None) -> list[Any]:
-    # Raw CV text appears only in this transient prompt; never in ToolResult/logs.
+    # Canonical joined chunk text appears only in this transient prompt.
     messages: list[Any] = [
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(
@@ -288,6 +327,158 @@ def _build_messages(cv_text: str, *, repair_error: str | None) -> list[Any]:
             )
         )
     return messages
+
+
+def _split_oversized_segment(segment: str, max_chars: int) -> list[str]:
+    """Split one oversized segment on whitespace into <= max_chars pieces."""
+    if len(segment) <= max_chars:
+        return [segment] if segment else []
+    parts: list[str] = []
+    remaining = segment
+    while remaining:
+        if len(remaining) <= max_chars:
+            parts.append(remaining)
+            break
+        window = remaining[:max_chars]
+        # Prefer last whitespace in the window; else hard-cut at max_chars.
+        split_at = max(window.rfind(" "), window.rfind("\t"), window.rfind("\n"))
+        if split_at <= 0:
+            split_at = max_chars
+        piece = remaining[:split_at].rstrip()
+        if not piece:
+            # No progress with whitespace trim — hard cut.
+            piece = remaining[:max_chars]
+            remaining = remaining[max_chars:]
+        else:
+            remaining = remaining[split_at:].lstrip()
+        if piece:
+            parts.append(piece)
+    return parts
+
+
+def chunk_parsed_text(
+    text: str,
+    *,
+    max_chars: int = MAX_CHUNK_CHARS,
+    overlap: int = CHUNK_OVERLAP,
+) -> list[CanonicalChunk]:
+    """Pure deterministic paragraph-then-whitespace chunker.
+
+    Emits nonempty ascending ordinals, max *max_chars* each, zero *overlap*.
+    Never calls a provider. Raises :class:`ProfileExtractionError` when no
+    nonempty chunks can be produced.
+    """
+    if overlap != 0:
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "CHUNK_OVERLAP must be 0 for canonical extraction chunks",
+        )
+    if max_chars <= 0:
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "MAX_CHUNK_CHARS must be > 0",
+        )
+    if not isinstance(text, str) or text.strip() == "":
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "parsed text produced no nonempty chunks",
+        )
+
+    # Paragraph split first (source order); empty paragraphs dropped.
+    paragraphs = [p.strip() for p in text.split("\n\n")]
+    paragraphs = [p for p in paragraphs if p]
+
+    packed: list[str] = []
+    current = ""
+    for para in paragraphs:
+        pieces = _split_oversized_segment(para, max_chars)
+        for piece in pieces:
+            if not piece:
+                continue
+            if not current:
+                current = piece
+                continue
+            candidate = f"{current}\n\n{piece}"
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                packed.append(current)
+                current = piece
+    if current:
+        packed.append(current)
+
+    chunks = [
+        CanonicalChunk(ordinal=i, text=body)
+        for i, body in enumerate(packed)
+        if body
+    ]
+    if not chunks:
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "parsed text produced no nonempty chunks",
+        )
+    for chunk in chunks:
+        if len(chunk.text) > max_chars:
+            raise ProfileExtractionError(
+                FAILURE_EMPTY_CHUNKS,
+                f"chunk ordinal {chunk.ordinal} exceeds MAX_CHUNK_CHARS",
+            )
+        if chunk.text == "":
+            raise ProfileExtractionError(
+                FAILURE_EMPTY_CHUNKS,
+                "empty chunk rejected",
+            )
+    return chunks
+
+
+def join_chunks_for_model(chunks: Sequence[CanonicalChunk]) -> str:
+    """Join ascending chunk texts with exactly :data:`CHUNK_JOIN`."""
+    if not chunks:
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "cannot join empty chunk sequence for model input",
+        )
+    ordered = sorted(chunks, key=lambda c: c.ordinal)
+    for i, chunk in enumerate(ordered):
+        if chunk.ordinal != i:
+            raise ProfileExtractionError(
+                FAILURE_EMPTY_CHUNKS,
+                "chunk ordinals must be contiguous ascending from 0",
+            )
+        if chunk.text == "":
+            raise ProfileExtractionError(
+                FAILURE_EMPTY_CHUNKS,
+                "empty chunk rejected in model join",
+            )
+    return CHUNK_JOIN.join(c.text for c in ordered)
+
+
+def chunks_to_writes(chunks: Sequence[CanonicalChunk]) -> list[ChunkWrite]:
+    """Map canonical chunks to repository write rows."""
+    return [chunk_repo.build_chunk_write(c.ordinal, c.text) for c in chunks]
+
+
+async def persist_canonical_chunks(
+    session: AsyncSession,
+    *,
+    attachment_id: str,
+    chunks: Sequence[CanonicalChunk],
+) -> list[Any]:
+    """Persist the exact canonical chunk sequence for *attachment_id*.
+
+    Call only inside the successful extraction/draft-input transaction after
+    draft validation succeeds. Replaces any prior rows for the attachment.
+    Does not finalize the caller's unit of work.
+    """
+    if not chunks:
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "refuse to persist empty chunk sequence",
+        )
+    writes = chunks_to_writes(chunks)
+    return await chunk_repo.replace_for_attachment(
+        session, attachment_id, writes
+    )
 
 
 def _invoke_with_provider_retry(
@@ -317,6 +508,11 @@ def extract_profile_from_pdf(
 ) -> ExtractionOutcome:
     """Extract + validate a ProfileDraftPayload from a PDF source.
 
+    Deterministically chunks preferred PDF text, joins with :data:`CHUNK_JOIN`,
+    and sends only that joined string to the structured model. Does **not**
+    write chunk rows; callers must invoke :func:`persist_canonical_chunks`
+    inside the successful draft-input transaction.
+
     Parameters
     ----------
     source:
@@ -343,12 +539,15 @@ def extract_profile_from_pdf(
             "PDF has no meaningful extractable digital text",
         )
 
-    cv_text = extraction.preferred_text
+    preferred = extraction.preferred_text
+    chunks = chunk_parsed_text(preferred)
+    cv_text = join_chunks_for_model(chunks)
     # Do not log cv_text or full extraction payloads.
     logger.debug(
-        "profile extraction starting pages=%s strategy=%s",
+        "profile extraction starting pages=%s strategy=%s chunks=%s",
         extraction.page_count,
         EXTRACTION_SCHEMA_STRATEGY,
+        len(chunks),
     )
 
     repairs_used = 0
@@ -368,6 +567,8 @@ def extract_profile_from_pdf(
                 draft=draft,
                 schema_repairs_used=repairs_used,
                 provider_retries_used=provider_retries_total,
+                chunks=tuple(chunks),
+                model_input_text=cv_text,
             )
         except ProfileExtractionError:
             raise
@@ -404,26 +605,35 @@ def compact_draft_summary(draft: ProfileDraftPayload) -> dict[str, Any]:
 
 
 __all__ = [
+    "CHUNK_JOIN",
+    "CHUNK_OVERLAP",
+    "CanonicalChunk",
     "EXTRACTION_SCHEMA_STRATEGY",
     "ExtractedCandidateProfile",
     "ExtractedSkillItem",
     "ExtractionOutcome",
+    "FAILURE_EMPTY_CHUNKS",
     "FAILURE_INVALID_STRUCTURED_OUTPUT",
     "FAILURE_MALFORMED_PDF",
     "FAILURE_NO_EXTRACTABLE_TEXT",
     "FAILURE_PROVIDER_ERROR",
     "FAILURE_PROVIDER_RATE_LIMIT",
     "FAILURE_PROVIDER_TIMEOUT",
+    "MAX_CHUNK_CHARS",
     "ProfileExtractionError",
     "STRUCTURED_OUTPUT_METHOD",
     "STRUCTURED_OUTPUT_STRICT",
     "ShopAIKeyStructuredProfileInvoker",
     "StructuredProfileInvoker",
     "build_draft_from_extracted",
+    "chunk_parsed_text",
+    "chunks_to_writes",
     "classify_provider_error",
     "compact_draft_summary",
     "compact_profile_summary",
     "empty_job_preferences",
     "extract_profile_from_pdf",
     "extracted_to_candidate_profile",
+    "join_chunks_for_model",
+    "persist_canonical_chunks",
 ]

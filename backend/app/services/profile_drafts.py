@@ -56,6 +56,7 @@ from app.services.profile_extraction import (
     compact_profile_summary,
     empty_job_preferences,
     extract_profile_from_pdf,
+    persist_canonical_chunks,
 )
 from app.services.skill_normalization import SkillNormalizer, SkillTaxonomyError
 from app.storage.attachments import AttachmentStorage
@@ -330,9 +331,16 @@ async def propose_profile_from_cv(
             draft_json=draft_json,
             source_attachment_id=attachment_id,
         )
+        # Canonical chunks used as model input — same successful draft txn.
+        await persist_canonical_chunks(
+            session,
+            attachment_id=attachment_id,
+            chunks=outcome.chunks,
+        )
 
         if prior_attachment_id is not None:
             # Remove prior unreferenced staged row only after new draft succeeds.
+            # att_repo.delete clears child chunks first (FK RESTRICT).
             await att_repo.delete(session, prior_attachment_id)
 
     if prior_storage_path is not None:

@@ -18,10 +18,11 @@ from app.core.time import utc_now
 from app.db.models.chat import CONVERSATION_ID
 from app.db.models.profiles import JOB_PREFERENCE_KEYS, JOB_PREFERENCES_ID
 
-# Application tables owned by Alembic (Master §6.2) — nine exact names.
+# Application tables owned by Alembic (Master §6.2) — ten exact names.
 APPLICATION_TABLE_NAMES: frozenset[str] = frozenset(
     {
         "attachments",
+        "attachment_text_chunks",
         "candidate_profile",
         "profile_drafts",
         "job_preferences",

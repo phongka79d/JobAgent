@@ -19,11 +19,13 @@ from app.db.base import Base
 # Single production owners for attachment state/MIME invariants.
 ATTACHMENT_STATE_STAGED = "staged"
 ATTACHMENT_STATE_ACTIVE = "active"
+ATTACHMENT_STATE_ARCHIVED = "archived"
 ATTACHMENT_STATE_FAILED = "failed"
 ATTACHMENT_STATES: frozenset[str] = frozenset(
     {
         ATTACHMENT_STATE_STAGED,
         ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_ARCHIVED,
         ATTACHMENT_STATE_FAILED,
     }
 )
@@ -32,7 +34,7 @@ ATTACHMENT_STATE_DEFAULT = ATTACHMENT_STATE_STAGED
 
 
 class Attachment(Base):
-    """One uploaded PDF attachment metadata row (staged, active, or failed)."""
+    """One uploaded PDF attachment metadata row (staged/active/archived/failed)."""
 
     __tablename__ = "attachments"
     __table_args__ = (
@@ -53,6 +55,7 @@ class Attachment(Base):
                 (
                     ATTACHMENT_STATE_STAGED,
                     ATTACHMENT_STATE_ACTIVE,
+                    ATTACHMENT_STATE_ARCHIVED,
                     ATTACHMENT_STATE_FAILED,
                 )
             ),

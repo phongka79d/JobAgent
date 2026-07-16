@@ -1,6 +1,6 @@
 """Migration-to-accepted-model SQLite schema parity helpers.
 
-Compares a migrated SQLite database against the nine-table SQLAlchemy
+Compares a migrated SQLite database against the application-table SQLAlchemy
 metadata: columns, named constraints, indexes (including partial WHERE),
 and foreign-key targets/delete actions.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import app.db.models  # noqa: F401  — register nine application tables
+import app.db.models  # noqa: F401  — register application tables
 from app.db.base import Base
 from app.db.seed import APPLICATION_TABLE_NAMES
 from sqlalchemy import (
@@ -46,13 +46,13 @@ def _sqlite_type_name(col_type: TypeEngine[Any]) -> str:
 
 
 def accepted_metadata() -> MetaData:
-    """Return the registered application metadata (nine tables)."""
+    """Return the registered application metadata (ten tables)."""
     assert set(Base.metadata.tables) == APPLICATION_TABLE_NAMES
     return Base.metadata
 
 
 def expected_named_constraints() -> frozenset[str]:
-    """All named PK/UQ/CK/FK constraints from accepted models (50)."""
+    """All named PK/UQ/CK/FK constraints from accepted models (56)."""
     names: set[str] = set()
     for table in accepted_metadata().tables.values():
         for constraint in table.constraints:
@@ -219,14 +219,15 @@ def assert_migrated_matches_accepted_models(
     *,
     exact_tables: frozenset[str] | None = None,
 ) -> None:
-    """Prove exact migration ↔ accepted model parity for nine tables.
+    """Prove exact migration ↔ accepted model parity for application tables.
 
     Checks: optional exact table set, every column name/nullability/type,
-    all 50 named constraints, all five indexes (columns/uniqueness/partial
-    WHERE), and every FK target/delete action.
+    all named constraints, all indexes (columns/uniqueness/partial WHERE),
+    and every FK target/delete action.
     """
     expected_constraints = expected_named_constraints()
-    assert len(expected_constraints) == 50
+    # 0001 baseline had 50; +pk/fk/uq + 3 checks on attachment_text_chunks = 56.
+    assert len(expected_constraints) == 56
     expected_cols = expected_columns()
     expected_fks = expected_foreign_keys()
     expected_ix = expected_indexes()
@@ -255,7 +256,7 @@ def assert_migrated_matches_accepted_models(
     }
     assert not missing_c, f"missing named constraints: {sorted(missing_c)}"
     assert not extra_app_c, f"unexpected named constraints: {sorted(extra_app_c)}"
-    assert len(expected_constraints & observed["named_constraints"]) == 50
+    assert len(expected_constraints & observed["named_constraints"]) == 56
 
     missing_fk = expected_fks - observed["foreign_keys"]
     extra_fk = observed["foreign_keys"] - expected_fks

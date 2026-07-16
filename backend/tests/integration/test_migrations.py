@@ -77,7 +77,7 @@ async def _counts(e: AsyncEngine) -> dict[str, int]:
     return out
 
 
-def test_fresh_upgrade_creates_nine_tables_and_singleton_seeds(
+def test_fresh_upgrade_creates_ten_tables_and_singleton_seeds(
     isolated_sqlite: Path,
 ) -> None:
     db = isolated_sqlite
@@ -90,6 +90,7 @@ def test_fresh_upgrade_creates_nine_tables_and_singleton_seeds(
             names = await _names(e)
             assert names == set(EXPECTED_FRESH_TABLES)
             assert APPLICATION_TABLE_NAMES <= names
+            assert "attachment_text_chunks" in names
             counts = await _counts(e)
             assert counts["conversation"] == 1
             assert counts["job_preferences"] == 1
@@ -113,6 +114,60 @@ def test_fresh_upgrade_creates_nine_tables_and_singleton_seeds(
                     )
 
                 await c.run_sync(_parity)
+                # archived accepted by CHECK; existing staged/failed untouched.
+                await c.execute(
+                    text(
+                        "INSERT INTO attachments ("
+                        "id, file_hash, original_name, mime_type, size_bytes, "
+                        "page_count, storage_path, state, failure_code, "
+                        "created_at, updated_at"
+                        ") VALUES ("
+                        "'a-arch', 'h-arch', 'a.pdf', 'application/pdf', 10, "
+                        "1, 'p/a.pdf', 'archived', NULL, "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "INSERT INTO attachments ("
+                        "id, file_hash, original_name, mime_type, size_bytes, "
+                        "page_count, storage_path, state, failure_code, "
+                        "created_at, updated_at"
+                        ") VALUES ("
+                        "'a-staged', 'h-staged', 's.pdf', 'application/pdf', "
+                        "10, NULL, 'p/s.pdf', 'staged', NULL, "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.commit()
+                states = {
+                    str(r[0]): str(r[1])
+                    for r in (
+                        await c.execute(
+                            text("SELECT id, state FROM attachments")
+                        )
+                    ).fetchall()
+                }
+                assert states["a-arch"] == "archived"
+                assert states["a-staged"] == "staged"
+                # chunk row with FK + ordinal unique
+                await c.execute(
+                    text(
+                        "INSERT INTO attachment_text_chunks ("
+                        "id, attachment_id, ordinal, text, preview, "
+                        "char_count, token_estimate, created_at"
+                        ") VALUES ("
+                        "'c1', 'a-arch', 0, 'hello chunk', 'hello chunk', "
+                        "11, 3, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.commit()
+                n_chunks = (
+                    await c.execute(
+                        text("SELECT COUNT(*) FROM attachment_text_chunks")
+                    )
+                ).scalar_one()
+                assert int(n_chunks) == 1
             assert row[0] == JOB_PREFERENCES_ID
             prefs = json.loads(row[1]) if isinstance(row[1], str) else row[1]
             assert set(prefs) == set(JOB_PREFERENCE_KEYS)
