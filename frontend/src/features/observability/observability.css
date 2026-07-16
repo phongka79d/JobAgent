@@ -1,0 +1,120 @@
+/**
+ * Observability sidebar layout (Plan 8).
+ * Token-based only; keeps chat composer visible; supports narrow widths.
+ */
+
+.jobagent-obs-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2, 8px);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.jobagent-obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1, 4px);
+  width: 100%;
+  min-width: 0;
+}
+
+.jobagent-obs-tab {
+  /* Focus ring visible for keyboard users */
+  outline-offset: 2px;
+}
+
+.jobagent-obs-tab:focus-visible {
+  outline: 2px solid var(--color-border-focus, currentColor);
+}
+
+.jobagent-obs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2, 8px);
+  width: 100%;
+  min-width: 0;
+  max-height: min(60vh, 28rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.jobagent-obs-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1, 4px);
+  padding: var(--spacing-2, 8px);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-background-surface, transparent);
+  min-width: 0;
+}
+
+.jobagent-obs-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1, 4px);
+}
+
+.jobagent-obs-meta {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.jobagent-obs-fulltext {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow-y: auto;
+  padding: var(--spacing-2, 8px);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-background-wash, rgba(0, 0, 0, 0.04));
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+}
+
+.jobagent-obs-graph-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1, 4px);
+}
+
+.jobagent-obs-graph-list li {
+  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
+  border-left: 2px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  min-width: 0;
+  word-break: break-word;
+}
+
+.jobagent-obs-collapsed-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-1, 4px);
+  padding: var(--spacing-2, 8px);
+  width: 100%;
+}
+
+.jobagent-obs-collapse-btn:focus-visible {
+  outline: 2px solid var(--color-border-focus, currentColor);
+  outline-offset: 2px;
+}
+
+/* Prevent sidebar content from forcing the shell wider than the chat column. */
+.jobagent-cv-sidebar-shell {
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  /* Mobile drawer must not trap the chat composer under fixed chrome. */
+  .jobagent-obs-panel {
+    max-height: min(50vh, 22rem);
+  }
+}

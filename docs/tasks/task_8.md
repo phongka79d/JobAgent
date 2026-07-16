@@ -232,7 +232,7 @@ Own sidebar composition, typed client/state, styles, and focused UI tests. Exclu
 
 ### Tasks
 
-- [ ] (03A): Compose the observability tabs into the existing accessible CV sidebar
+- [x] (03A): Compose the observability tabs into the existing accessible CV sidebar
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_8.md` > `## Mandatory Batch03 - Accessible Lazy Sidebar Inspector` > `(03A)`

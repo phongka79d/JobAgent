@@ -1,8 +1,7 @@
 /**
- * Approved-profile sidebar (Master §15.2).
- * Shows only: active CV filename, profile state, upload/replace, view/download.
- * Upload uses the shared POST /api/attachments/cv path; success notifies parent
- * so ChatPage can start one concise turn with the returned attachment_id only.
+ * Approved-profile sidebar (Master §15.2) with Plan 8 observability inspector.
+ * Shows Overview: active CV filename, profile state, upload/replace, view/download.
+ * Delegates inspector tabs/cache to ObservabilitySidebar; profile/upload state stays here.
  */
 
 import {useCallback, useEffect, useState} from 'react';
@@ -15,6 +14,8 @@ import {Text} from '@astryxdesign/core/Text';
 import {HStack} from '@astryxdesign/core/HStack';
 import {VStack} from '@astryxdesign/core/VStack';
 
+import type {ObservabilityApi} from '../observability/api';
+import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
 import {
   ChatApiError,
   fetchProfile,
@@ -27,6 +28,7 @@ export type CvSidebarDeps = {
   loadProfile?: typeof fetchProfile;
   uploadCv?: typeof uploadCv;
   getActiveCvUrl?: typeof getActiveCvUrl;
+  observability?: Partial<ObservabilityApi>;
 };
 
 export type CvSidebarProps = {
@@ -79,6 +81,7 @@ export function CvSidebar({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -172,96 +175,127 @@ export function CvSidebar({
     ? 'Upload is disabled while a run is active or waiting for approval'
     : undefined;
 
+  const overview = (
+    <VStack
+      gap={3}
+      padding={0}
+      width="100%"
+      data-testid="jobagent-cv-sidebar-body"
+    >
+      <VStack gap={1}>
+        <Text type="label" color="secondary">
+          Profile state
+        </Text>
+        <HStack gap={2} vAlign="center">
+          <StatusDot variant={state.variant} label={state.text} />
+          <Text type="body" data-testid="jobagent-profile-state">
+            {state.text}
+          </Text>
+        </HStack>
+      </VStack>
+
+      <VStack gap={1}>
+        <Text type="label" color="secondary">
+          Active CV
+        </Text>
+        <Text
+          type="body"
+          data-testid="jobagent-active-cv-filename"
+          maxLines={2}
+        >
+          {displayCvName
+            ? hasActive
+              ? displayCvName
+              : `${displayCvName} (staged · not saved)`
+            : 'No active CV'}
+        </Text>
+      </VStack>
+
+      {loadError ? (
+        <Banner
+          status="error"
+          title="Profile load failed"
+          description={loadError}
+          container="card"
+        />
+      ) : null}
+
+      {uploadError ? (
+        <Banner
+          status="error"
+          title="Upload failed"
+          description={uploadError}
+          container="card"
+          data-testid="jobagent-cv-upload-error"
+        />
+      ) : null}
+
+      <FileInput
+        label={uploadLabel}
+        value={selectedFile}
+        onChange={handleFileChange}
+        changeAction={handleUpload}
+        accept="application/pdf,.pdf"
+        maxSize={MAX_PDF_BYTES}
+        mode="input"
+        isDisabled={isUploadDisabled || isUploading}
+        disabledMessage={disabledReason}
+        isLoading={isUploading}
+        placeholder="Choose PDF…"
+        description="PDF only, up to 10 MB / 10 pages"
+        data-testid="jobagent-cv-upload"
+      />
+
+      <Button
+        label="View / download CV"
+        variant="secondary"
+        size="sm"
+        isDisabled={!hasActive}
+        onClick={handleViewDownload}
+        data-testid="jobagent-cv-download"
+      />
+    </VStack>
+  );
+
   return (
     <SideNav
-      collapsible
+      collapsible={{
+        isCollapsed,
+        onCollapsedChange: setIsCollapsed,
+        hasButton: false,
+      }}
+      className="jobagent-cv-sidebar-shell"
       header={
         <SideNavHeading
           heading="JobAgent"
           subheading="CV & profile"
         />
       }
+      footer={
+        <Button
+          label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          variant="ghost"
+          size="sm"
+          isIconOnly
+          aria-expanded={!isCollapsed}
+          className="jobagent-obs-collapse-btn"
+          onClick={() => setIsCollapsed((value) => !value)}
+          data-testid="jobagent-sidebar-collapse"
+        />
+      }
       data-testid="jobagent-cv-sidebar"
     >
-      <VStack
-        gap={3}
-        padding={3}
-        width="100%"
-        data-testid="jobagent-cv-sidebar-body"
-      >
-        <VStack gap={1}>
-          <Text type="label" color="secondary">
-            Profile state
-          </Text>
-          <HStack gap={2} vAlign="center">
-            <StatusDot variant={state.variant} label={state.text} />
-            <Text type="body" data-testid="jobagent-profile-state">
-              {state.text}
-            </Text>
-          </HStack>
-        </VStack>
-
-        <VStack gap={1}>
-          <Text type="label" color="secondary">
-            Active CV
-          </Text>
-          <Text
-            type="body"
-            data-testid="jobagent-active-cv-filename"
-            maxLines={2}
-          >
-            {displayCvName
-              ? hasActive
-                ? displayCvName
-                : `${displayCvName} (staged · not saved)`
-              : 'No active CV'}
-          </Text>
-        </VStack>
-
-        {loadError ? (
-          <Banner
-            status="error"
-            title="Profile load failed"
-            description={loadError}
-            container="card"
-          />
-        ) : null}
-
-        {uploadError ? (
-          <Banner
-            status="error"
-            title="Upload failed"
-            description={uploadError}
-            container="card"
-            data-testid="jobagent-cv-upload-error"
-          />
-        ) : null}
-
-        <FileInput
-          label={uploadLabel}
-          value={selectedFile}
-          onChange={handleFileChange}
-          changeAction={handleUpload}
-          accept="application/pdf,.pdf"
-          maxSize={MAX_PDF_BYTES}
-          mode="input"
-          isDisabled={isUploadDisabled || isUploading}
-          disabledMessage={disabledReason}
-          isLoading={isUploading}
-          placeholder="Choose PDF…"
-          description="PDF only, up to 10 MB / 10 pages"
-          data-testid="jobagent-cv-upload"
+      <div style={{padding: 'var(--spacing-2, 8px)', width: '100%', minWidth: 0}}>
+        <ObservabilitySidebar
+          overview={overview}
+          collapsedStatus={{
+            label: state.text,
+            variant: state.variant,
+            cvName: displayCvName,
+          }}
+          api={deps?.observability}
         />
-
-        <Button
-          label="View / download CV"
-          variant="secondary"
-          size="sm"
-          isDisabled={!hasActive}
-          onClick={handleViewDownload}
-          data-testid="jobagent-cv-download"
-        />
-      </VStack>
+      </div>
     </SideNav>
   );
 }

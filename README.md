@@ -11,17 +11,23 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 8 Batch02):** Batch01 retention/chunks plus Batch02
-bounded read-only observability APIs are on the worktree under audit. Approved
-CV replacement archives the former active attachment (file and metadata
-retained; no restore path). Successful digital-PDF extraction persists the exact
-deterministic `"\n\n"`-joined chunk sequence in `attachment_text_chunks`.
-Migration head remains `0002_add_attachment_text_chunks` under the single root
+**Current status (Plan 8 Batch03):** Batch01 retention/chunks, Batch02
+bounded read-only observability APIs, and Batch03 accessible lazy sidebar
+inspector are on the worktree under audit. Approved CV replacement archives the
+former active attachment (file and metadata retained; no restore path).
+Successful digital-PDF extraction persists the exact deterministic
+`"\n\n"`-joined chunk sequence in `attachment_text_chunks`. Migration head
+remains `0002_add_attachment_text_chunks` under the single root
 `backend/migrations/versions/`. Six typed `GET /api/observability/*` routes
 expose cursor-paginated CV history, retained-PDF stream, chunk list/detail,
 durable run history, and a cap-aware Neo4j Candidate/Job/Skill snapshot with
-`ready|stale|unavailable` states—no SQLite/Neo4j/chat/Agent mutation. Sidebar
-inspector tabs remain Plan 8 Batch03.
+`ready|stale|unavailable` states—no SQLite/Neo4j/chat/Agent mutation. The CV
+sidebar keeps Overview upload/replace/download and the interaction lock, and
+adds cached CV history / LLM chunks / Neo4j graph / Agent runs tabs that lazy-
+load on first select, retain safe prior data after failed refresh, expand full
+chunk text only on demand, and use an `aria-expanded` collapse control (mobile
+Escape via AppShell MobileNav). Synthetic local smoke and final regression
+checklist remain Plan 8 Batch04.
 
 ## Purpose and scope
 
@@ -35,7 +41,9 @@ JobAgent provides:
   for successful digital-PDF extraction.
 - Read-only observability APIs for CV history, retained-file stream, selected
   chunk text, durable Agent-run history, and a bounded Neo4j graph snapshot
-  (typed status, allowlisted labels/edges, hard caps, safe errors/redaction).
+  (typed status, allowlisted labels/edges, hard caps, safe errors/redaction),
+  with a matching accessible sidebar inspector (lazy tabs, query cache, safe
+  display, semantic graph list fallback—no graph visualization dependency).
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
@@ -60,7 +68,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar, approval/saved-job/match cards, single SSE reducer, typed API clients |
+| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**`), approval/saved-job/match cards, single SSE reducer, typed API clients |
 | `backend/app/api/` | Thin public routes: health, CV upload, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
@@ -244,6 +252,20 @@ py -3.13 -m pytest tests/unit/test_observability_graph.py tests/integration/test
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..
+```
+
+Focused Plan 8 Batch03 accessible lazy sidebar inspector gate (lazy tabs/cache,
+safe parsers, collapse a11y, overview regression, full FE suite + static/build):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/observability-sidebar.test.tsx src/test/observability-api.test.ts src/test/cv-sidebar.test.tsx
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+Set-Location ..
+git diff --check
 ```
 
 `tests/e2e/test_demo_flow.py` is the disposable public-boundary smoke: greeting →
