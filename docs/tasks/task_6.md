@@ -424,7 +424,7 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
     A2-accepted.
   - Files: `backend/app/services/skill_matching.py`, `backend/tests/unit/test_skill_matching.py`, `backend/tests/unit/test_skill_normalization.py`
 
-- [ ] (02B): Implement exact seniority, experience, location, and work-mode components
+- [x] (02B): Implement exact seniority, experience, location, and work-mode components
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.5 Other score components`; `docs/plans/Master_plan.md > ## 18. Matching Formula > ### 18.2 Initial hybrid seed`
   - Source Requirements:
     - Return only normalized `[0,1]` values or explicit unavailable state using
@@ -465,7 +465,7 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
   - Blocked Condition: `BLOCKED_BY_DEPENDENCY` if (02A) is not A2-accepted.
   - Files: `backend/app/services/match_components.py`, `backend/tests/unit/test_match_components.py`
 
-- [ ] (02C): Renormalize exact hybrid weights, apply quality, and sort without rounding
+- [x] (02C): Renormalize exact hybrid weights, apply quality, and sort without rounding
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.6 Hybrid score, missing fields, and order`; `docs/plans/Master_plan.md > ## 18. Matching Formula > ### 18.2 Initial hybrid seed` through `### 18.4 Fixed MVP weights`
   - Source Requirements:
     - Use exact base weights: semantic `0.30`, skill `0.40`, seniority `0.10`,
@@ -508,7 +508,7 @@ connections, call providers/LLMs, register tools, render UI, or persist scores.
     A2-accepted.
   - Files: `backend/app/services/match_components.py`, `backend/tests/unit/test_match_components.py`, `backend/tests/unit/test_match_ordering.py`
 
-- [ ] (02D): Define compact match response schemas and deterministic evidence explanations
+- [x] (02D): Define compact match response schemas and deterministic evidence explanations
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.7 Explanation and response schema`; `docs/plans/Master_plan.md > ## 7. Pydantic Data Contracts > ### 7.5 Tool execution result` and `## 24. Local Testing Strategy > ### 24.1 Backend unit tests`
   - Source Requirements:
     - Each result exposes compact authoritative Job metadata/source URL,
@@ -573,7 +573,7 @@ weight change.
 
 ### Tasks
 
-- [ ] (03A): Orchestrate consistency-first Candidate embedding, retrieval, scoring, and explanation
+- [x] (03A): Orchestrate consistency-first Candidate embedding, retrieval, scoring, and explanation
   - Source of Truth: `docs/plans/Plan_6.md` > `## 7. Technical Specifications` > ``### 7.8 `match_jobs` tool`` and `## 9. Verification & Testing Plan` > `### Failure handling`; `docs/plans/Master_plan.md` > `## 6. SQLite Database Contract` > `### 6.1 Global conventions`, `## 17. Embedding and Retrieval` > `### 17.4 Retrieval flow`, and `## 20. Failure and Recovery Policy`
   - Source Requirements:
     - Load the current approved profile/preferences, reject no-profile before
@@ -628,7 +628,7 @@ weight change.
     not A2-accepted.
   - Files: `backend/app/services/matching.py`, `backend/tests/fakes/matching.py`, `backend/tests/fakes/embeddings.py`, `backend/tests/integration/test_match_jobs.py`, `backend/tests/integration/test_match_revisions.py`, `backend/tests/integration/test_job_ingestion.py`, `backend/tests/integration/test_job_tools.py`
 
-- [ ] (03B): Register replay-safe `match_jobs` as the sixth and final production tool
+- [x] (03B): Register replay-safe `match_jobs` as the sixth and final production tool
   - Source of Truth: `docs/plans/Plan_6.md` > `## 7. Technical Specifications` > ``### 7.8 `match_jobs` tool``; `docs/plans/Master_plan.md` > `## 13. Agent-Facing Tool Contracts` > ``### 13.6 `match_jobs``` and `### 13.7 Tool authorization matrix`
   - Source Requirements:
     - Expose optional integer `limit` in `1..10` with default 10 and return the
@@ -701,7 +701,7 @@ or production deployment.
 
 ### Tasks
 
-- [ ] (04A): Render durable backend-ordered Astryx match cards and score breakdowns
+- [x] (04A): Render durable backend-ordered Astryx match cards and score breakdowns
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.9 Match UI and manual acceptance`; `docs/plans/Master_plan.md > ## 15. Frontend UX Plan > ### 15.5 Match result card` and `## 24. Local Testing Strategy > ### 24.3 Frontend tests`
   - Source Requirements:
     - Each card shows title, company, location, work mode, display-rounded final
@@ -760,7 +760,7 @@ or production deployment.
     without inventing a parallel JSON shape.
   - Files: `frontend/src/features/jobs/matchResult.ts`, `frontend/src/features/jobs/MatchCard.tsx`, `frontend/src/features/jobs/ScoreBreakdown.tsx`, `frontend/src/features/chat/history.ts`, `frontend/src/features/chat/components/ChatMessageRow.tsx`, `frontend/src/features/chat/components/ChatToolActivity.tsx`, `frontend/src/test/match-card.test.tsx`
 
-- [ ] (04B): Execute and record the disposable manual JD acceptance observations
+- [x] (04B): Execute and record the disposable manual JD acceptance observations
   - Source of Truth: `docs/plans/Plan_6.md > ## 7. Technical Specifications > ### 7.9 Match UI and manual acceptance` and `## 9. Verification & Testing Plan > ### Manual acceptance`; `docs/plans/Master_plan.md > ## 19. Manual JD Acceptance` and `## 25. Implementation Phases > ### Phase 5 — Matching, explanation, and manual acceptance`
   - Source Requirements:
     - Record observations for URL and pasted-text save; full, partial, and
