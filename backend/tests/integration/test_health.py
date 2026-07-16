@@ -222,10 +222,10 @@ def test_partial_startup_failure_cleans_up_resources(
     assert session_mod._session_factory is None
 
 
-def test_only_public_functional_routes_are_health_chat_and_cv_upload(
+def test_only_public_functional_routes_are_health_chat_cv_and_profile(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Public surface after 02A: health + chat + CV upload (profile reads later)."""
+    """Public surface: health, chat, CV upload, and profile reads (seven routes)."""
     with health_client() as client:
         assert sorted(public_api_routes(client.app)) == sorted(
             [
@@ -234,14 +234,15 @@ def test_only_public_functional_routes_are_health_chat_and_cv_upload(
                 ("GET", "/api/chat/history"),
                 ("POST", "/api/chat/turns"),
                 ("POST", "/api/chat/runs/{run_id}/resume"),
+                ("GET", "/api/profile"),
+                ("GET", "/api/profile/cv"),
             ]
         )
-        for path in (
-            "/api/profile",
-            "/api/jobs",
-        ):
-            assert client.get(path).status_code == 404
-            assert client.post(path).status_code == 404
+        # Jobs remain non-public; profile GETs exist (wrong method is 405, not 404).
+        assert client.get("/api/jobs").status_code == 404
+        assert client.post("/api/jobs").status_code == 404
+        assert client.post("/api/profile").status_code == 405
+        assert client.post("/api/profile/cv").status_code == 405
         # CV upload is POST-only (GET is method-not-allowed, not a read route).
         assert client.get("/api/attachments/cv").status_code == 405
 
@@ -251,6 +252,10 @@ def test_source_tree_has_no_other_route_decorators() -> None:
     history_dec = (
         "chat.py:get_chat_history:router.get("
         "'/chat/history', response_model=HistoryPage)"
+    )
+    profile_dec = (
+        "profile.py:get_profile:router.get("
+        "'/profile', response_model=ProfileReadResponse)"
     )
     assert matches == sorted(
         [
@@ -262,6 +267,8 @@ def test_source_tree_has_no_other_route_decorators() -> None:
             "chat.py:post_chat_turn:router.post('/chat/turns')",
             "chat.py:post_chat_resume:router.post("
             "'/chat/runs/{run_id}/resume')",
+            profile_dec,
+            "profile.py:get_profile_cv:router.get('/profile/cv')",
         ]
     )
 

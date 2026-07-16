@@ -35,6 +35,8 @@ dependencies = [
     "ruff==0.15.21",
     "mypy==1.18.2",
     "pytest==9.1.1",
+    # Required by @pytest.mark.asyncio unit tests on a clean pip install -e .
+    "pytest-asyncio==1.4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -61,3 +63,4 @@ disallow_untyped_defs = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+asyncio_mode = "auto"
