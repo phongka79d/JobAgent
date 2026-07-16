@@ -282,6 +282,71 @@ describe('ChatPage history and load-older', () => {
     );
   });
 
+  it('renders durable failed tool status text without complete/error aliases', async () => {
+    const failedToolHistory: HistoryPage = {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'Try a tool',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'failed',
+            pending_approval: null,
+            error_code: 'TOOL_ERROR',
+            completed_at: TS,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc-fail-1',
+                tool_name: 'lookup_status',
+                status: 'failed',
+                duration_ms: 11,
+                error_code: 'TOOL_ERROR',
+                result: {
+                  ok: false,
+                  code: 'TOOL_ERROR',
+                  summary: 'lookup failed durably',
+                  data: null,
+                },
+                arguments_summary: null,
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'Could not complete the lookup.',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+    const loadHistory = vi.fn().mockResolvedValueOnce(failedToolHistory);
+    renderChat({loadHistory, sendTurn: vi.fn()});
+
+    await waitFor(() => {
+      expect(screen.getByText('Try a tool')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Lookup Status')).toBeInTheDocument();
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.getByText('lookup failed durably')).toBeInTheDocument();
+    expect(screen.queryByText(/^complete$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^error$/)).not.toBeInTheDocument();
+  });
+
   it('loads older pages by next_cursor via scroll-to-top action', async () => {
     const loadHistory = vi
       .fn()
@@ -535,6 +600,54 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
       ).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('Partial')).toBeInTheDocument();
     });
+    // Disconnect never surfaces false success / completed run chrome.
+    expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument();
+  });
+
+  it('disconnect mid-tool leaves exact running status and never completed', async () => {
+    const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
+    const sendTurn = vi.fn(
+      async (
+        _body: {message: string},
+        cbs: StreamCallbacks,
+        _signal?: AbortSignal,
+      ) => {
+        cbs.onEvent(
+          sse(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+        );
+        cbs.onEvent(
+          sse(EVENT_B, 'tool_status', {
+            tool_execution_id: TOOL_EXEC,
+            tool_call_id: 'tc-disconnect',
+            tool_name: 'lookup_status',
+            status: 'running',
+            duration_ms: null,
+            summary: null,
+            error_code: null,
+          }),
+        );
+        cbs.onDisconnected?.();
+      },
+    );
+
+    const {container} = renderChat({loadHistory, sendTurn});
+    await waitFor(() => {
+      expect(screen.getByText('Start a conversation')).toBeInTheDocument();
+    });
+    await submitMessage(container, 'disconnect tools');
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(/Stream disconnected — run is not completed/)
+          .length,
+      ).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('Lookup Status')).toBeInTheDocument();
+      expect(screen.getByText('running')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^failed$/)).not.toBeInTheDocument();
   });
 
   it('shows interrupted state and locks the composer without approval cards for non-profile kinds', async () => {

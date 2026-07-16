@@ -5,6 +5,7 @@ These tests must not open SQLite or Neo4j stores for refusal and help paths.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from app.graph.rebuild import (
     assert_local_compose_neo4j_target,
     build_arg_parser,
     main,
+    rebuild_graph,
 )
 from app.graph.rebuild_target import (
     AUTHORIZED_NEO4J_URI,
@@ -25,6 +27,8 @@ from app.graph.rebuild_target import (
 )
 from app.schemas.embeddings import LOCKED_EMBEDDING_DIMENSIONS, LOCKED_EMBEDDING_MODEL
 from pydantic import AnyHttpUrl, SecretStr
+
+from tests.fakes.graph_rebuild import FakeNeo4jDriver
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER = _REPO_ROOT / "infrastructure" / "scripts" / "rebuild_neo4j.py"
@@ -85,6 +89,32 @@ def test_main_help_exit_zero_no_stores() -> None:
 
 def test_assert_local_target_accepts_exact_compose_contract() -> None:
     assert_local_compose_neo4j_target(_settings())
+
+
+def test_rebuild_graph_refuses_remote_before_any_clear() -> None:
+    """rebuild_graph choice-C guard must refuse before destructive Cypher."""
+    driver = FakeNeo4jDriver()
+    driver.seed_unrelated("cli-keep")
+
+    class _ForbiddenFactory:
+        def __call__(self, *args: object, **kwargs: object) -> object:
+            del args, kwargs
+            raise AssertionError("session_factory must not open after refusal")
+
+    async def _body() -> None:
+        await rebuild_graph(
+            driver,
+            session_factory=_ForbiddenFactory(),  # type: ignore[arg-type]
+            normalizer=object(),  # type: ignore[arg-type]
+            settings=_settings(uri="bolt://production.example:7687"),
+            enforce_local_target=True,
+        )
+
+    with pytest.raises(RebuildError) as exc:
+        asyncio.run(_body())
+    assert exc.value.code == "REBUILD_TARGET_REFUSED"
+    assert driver.queries == []
+    assert driver.other_nodes == {"cli-keep"}
 
 
 def test_assert_local_target_refuses_remote() -> None:

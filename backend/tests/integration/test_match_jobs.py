@@ -700,6 +700,183 @@ def test_match_jobs_stale_graph_rebuild_required_zero_partial(
     assert driver.write_queries == []
 
 
+def test_match_jobs_retrieval_inconsistency_rebuild_required_zero_partial(
+    sqlite_factory: Any,
+) -> None:
+    """Stale vector IDs fail as rebuild-required with zero partial ranking."""
+    run_async(_seed_match_profile(sqlite_factory))
+    job_id = run_async(
+        seed_scorable_job(sqlite_factory, raw_hash="match-retrieval-stale")
+    )
+    candidates, jobs = run_async(_revision_rows(sqlite_factory))
+    emb = FakeEmbeddingClient(vector=embedding_vector(0.41))
+    driver = orchestration_read_driver(
+        candidates=candidates,
+        jobs=jobs,
+        vector_rows=[{"id": "stale-vector-job", "score": 0.99}],
+    )
+    before = run_async(snapshot_sqlite(sqlite_factory))
+
+    result = _run_match(sqlite_factory, driver=driver, embedding_client=emb)
+
+    assert result.ok is False
+    assert result.error_code == NEO4J_REBUILD_REQUIRED
+    assert result.data.count == 0
+    assert result.data.results == []
+    assert result.rebuild_instruction is not None
+    assert CANONICAL_COMPOSE_REBUILD_COMMAND in result.rebuild_instruction
+    assert emb.call_count == 1
+    assert any("queryNodes" in q for q in driver.queries)
+    assert job_id not in {row.job_id for row in result.data.results}
+    assert run_async(snapshot_sqlite(sqlite_factory)) == before
+    assert driver.write_queries == []
+
+
+def test_match_jobs_vector_query_unavailable_zero_partial(
+    sqlite_factory: Any,
+) -> None:
+    """Consistency may pass while vector retrieval outage still yields zero results."""
+    run_async(_seed_match_profile(sqlite_factory))
+    run_async(seed_scorable_job(sqlite_factory, raw_hash="match-vector-down"))
+    candidates, jobs = run_async(_revision_rows(sqlite_factory))
+    emb = FakeEmbeddingClient(vector=embedding_vector(0.42))
+    driver = orchestration_read_driver(
+        candidates=candidates,
+        jobs=jobs,
+        vector_rows=[],
+        failure=OSError("bolt://neo4j:7687 password=super-secret"),
+        fail_on_query_contains="db.index.vector.queryNodes",
+    )
+    before = run_async(snapshot_sqlite(sqlite_factory))
+
+    result = _run_match(sqlite_factory, driver=driver, embedding_client=emb)
+
+    assert result.ok is False
+    assert result.error_code == NEO4J_UNAVAILABLE
+    assert result.data.count == 0
+    assert result.data.results == []
+    assert emb.call_count == 1
+    assert any("queryNodes" in q for q in driver.queries)
+    assert "password" not in result.message.lower()
+    assert "bolt://" not in result.message.lower()
+    assert run_async(snapshot_sqlite(sqlite_factory)) == before
+    assert driver.write_queries == []
+
+
+def test_match_jobs_all_components_quality_renorm_and_evidence(
+    sqlite_factory: Any,
+) -> None:
+    """Full/partial components, renormalization, and evidence stay SQLite-backed."""
+    run_async(_seed_match_profile(sqlite_factory))
+    full_id = run_async(
+        seed_scorable_job(sqlite_factory, raw_hash="match-comp-full", quality="full")
+    )
+    partial_id = run_async(
+        seed_scorable_job(
+            sqlite_factory, raw_hash="match-comp-partial", quality="partial"
+        )
+    )
+    candidates, jobs = run_async(_revision_rows(sqlite_factory))
+    driver = orchestration_read_driver(
+        candidates=candidates,
+        jobs=jobs,
+        vector_rows=[
+            {"id": full_id, "score": 0.95},
+            {"id": partial_id, "score": 0.95},
+        ],
+    )
+    emb = FakeEmbeddingClient(vector=embedding_vector(0.55))
+
+    result = _run_match(sqlite_factory, driver=driver, embedding_client=emb)
+
+    assert result.ok is True
+    assert result.data.count == 2
+    by_id = {row.job_id: row for row in result.data.results}
+    full = by_id[full_id]
+    partial = by_id[partial_id]
+
+    # Seed profile/job facts: mid/Berlin/hybrid + 4y vs min 3y → all components present.
+    for row in (full, partial):
+        assert row.components.semantic_similarity == pytest.approx(0.95)
+        assert row.components.skill_score == pytest.approx(0.92)
+        assert row.components.seniority_score == 1.0
+        assert row.components.experience_score == 1.0
+        assert row.components.location_score == 1.0
+        assert row.components.work_mode_score == 1.0
+        assert set(row.effective_weights) == {
+            "semantic_similarity",
+            "skill_score",
+            "seniority_score",
+            "experience_score",
+            "location_score",
+            "work_mode_score",
+        }
+        assert sum(row.effective_weights.values()) == pytest.approx(1.0)
+        assert row.matched_required_skills
+        direct = row.matched_required_skills[0]
+        assert direct.job_skill_key == "python"
+        assert direct.match_type == "direct"
+        assert direct.job_evidence == ["Required: Python 3+"]
+        assert direct.candidate_evidence == ["Python backend"]
+        assert any(s.job_skill_key == "fastapi" for s in row.related_skills)
+        assert row.title == "Backend Engineer"
+        assert row.company == "Acme"
+        assert row.location == "Berlin"
+        assert row.summary
+
+    assert full.quality_multiplier == 1.0
+    assert partial.quality_multiplier == 0.85
+    assert full.final_score == pytest.approx(0.953)
+    assert partial.final_score == pytest.approx(0.953 * 0.85)
+    # Unrounded quality order: full (0.953) before partial (0.81005).
+    assert [row.job_id for row in result.data.results] == [full_id, partial_id]
+
+    # Missing optional components renormalize weights over remaining components.
+    async def _clear_optional_preferences() -> None:
+        async with sqlite_factory() as session:
+            await prof_repo.upsert_job_preferences(
+                session,
+                preferences_json={
+                    "target_roles": ["Backend Engineer"],
+                    "preferred_locations": [],
+                    "acceptable_work_modes": [],
+                    "target_seniority": [],
+                },
+            )
+            await session.commit()
+
+    run_async(_clear_optional_preferences())
+    # Refresh revisions after preference update (candidate updated_at may change).
+    candidates2, jobs2 = run_async(_revision_rows(sqlite_factory))
+    driver2 = orchestration_read_driver(
+        candidates=candidates2,
+        jobs=jobs2,
+        vector_rows=[{"id": full_id, "score": 0.80}],
+    )
+    renorm = _run_match(
+        sqlite_factory,
+        driver=driver2,
+        embedding_client=FakeEmbeddingClient(vector=embedding_vector(0.56)),
+    )
+    assert renorm.ok is True
+    assert renorm.data.count == 1
+    top = renorm.data.results[0]
+    assert top.components.seniority_score is None
+    assert top.components.location_score is None
+    assert top.components.work_mode_score is None
+    assert top.components.skill_score == pytest.approx(0.92)
+    assert top.components.experience_score == 1.0
+    assert set(top.effective_weights) == {
+        "semantic_similarity",
+        "skill_score",
+        "experience_score",
+    }
+    assert sum(top.effective_weights.values()) == pytest.approx(1.0)
+    assert "seniority_score" not in top.effective_weights
+    assert driver.write_queries == []
+    assert driver2.write_queries == []
+
+
 def test_match_jobs_no_open_transaction_during_provider_call(
     sqlite_factory: Any,
     monkeypatch: pytest.MonkeyPatch,

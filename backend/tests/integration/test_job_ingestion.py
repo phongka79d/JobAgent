@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +59,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, text
 
 from tests.fakes.embeddings import FakeEmbeddingClient
+from tests.fakes.structured_output import FakeJdInvoker
 from tests.support.db_migration import run_async, session_factory
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -145,30 +145,6 @@ def _unscorable_extracted(**overrides: Any) -> ExtractedJobPost:
     }
     base.update(overrides)
     return ExtractedJobPost.model_validate(base)
-
-
-class FakeJdInvoker:
-    """Scripted invoker recording call count for zero-external-call assertions."""
-
-    def __init__(self, script: list[Any] | None = None) -> None:
-        self.script = list(script or [])
-        self.calls: list[dict[str, Any]] = []
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedJobPost | dict[str, Any]:
-        self.calls.append(
-            {"is_repair": is_repair, "message_count": len(list(messages))}
-        )
-        if not self.script:
-            raise RuntimeError("fake invoker script exhausted")
-        item = self.script.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
 
 
 def _factory(db_path: Path):
@@ -467,14 +443,23 @@ def test_failed_exact_duplicate_retries_same_id_and_clears_terminal_fields(
         engine, factory = _factory(db_path)
         try:
             jd = "Retryable failed JD content."
+            sync_calls = 0
+
+            async def _sync(**kwargs: Any) -> None:
+                nonlocal sync_calls
+                del kwargs
+                sync_calls += 1
+
             # First pass: non-retryable provider failure → failed terminal
             fail_invoker = FakeJdInvoker([RuntimeError("provider down")])
+            emb_fail = FakeEmbeddingClient()
             first = await ingest_raw_text(
                 jd,
                 invoker=fail_invoker,
                 normalizer=_normalizer(),
-                embedding_client=FakeEmbeddingClient(),
+                embedding_client=emb_fail,
                 session_factory=factory,
+                job_sync_fn=_sync,
             )
             assert first.outcome == "created"
             assert first.processing_status == JOB_PROCESSING_STATUS_FAILED
@@ -483,6 +468,11 @@ def test_failed_exact_duplicate_retries_same_id_and_clears_terminal_fields(
             failed_row = await _get_job(factory, job_id)
             assert failed_row.raw_content == jd
             assert failed_row.raw_content_hash == _sha(jd)
+            # Failed attempt: one provider call, no embed, no graph, one Job row.
+            assert len(fail_invoker.calls) == 1
+            assert emb_fail.calls == []
+            assert sync_calls == 0
+            assert await _count_jobs(factory) == 1
 
             # Second pass: same text → retry same ID, success
             ok_invoker = FakeJdInvoker([_full_extracted()])
@@ -493,14 +483,18 @@ def test_failed_exact_duplicate_retries_same_id_and_clears_terminal_fields(
                 normalizer=_normalizer(),
                 embedding_client=emb,
                 session_factory=factory,
+                job_sync_fn=_sync,
             )
             assert second.outcome == "retried"
             assert second.job_id == job_id
             assert second.processing_status == JOB_PROCESSING_STATUS_PROCESSED
             assert second.jd_quality == JOB_JD_QUALITY_FULL
             assert second.failure_code is None
+            assert second.sync_ok is True
+            # Retry: exactly one extract, one embed, one graph on the same row.
             assert len(ok_invoker.calls) == 1
             assert len(emb.calls) == 1
+            assert sync_calls == 1
             assert await _count_jobs(factory) == 1
 
             row = await _get_job(factory, job_id)

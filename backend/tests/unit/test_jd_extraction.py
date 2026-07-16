@@ -6,7 +6,6 @@ Service tests are fake-invoker only — never call the live ShopAIKey provider.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from inspect import signature
 from pathlib import Path
 from typing import Any, get_args
@@ -45,6 +44,8 @@ from app.services.provider_retry import (
 )
 from app.services.skill_normalization import SkillNormalizer
 from pydantic import ValidationError
+
+from tests.fakes.structured_output import FakeJdInvoker
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
@@ -324,35 +325,6 @@ def _valid_extracted(**overrides: Any) -> ExtractedJobPost:
     }
     base.update(overrides)
     return ExtractedJobPost.model_validate(base)
-
-
-class FakeJdInvoker:
-    """Scripted invoker: returns payloads or raises in order."""
-
-    def __init__(self, script: list[Any]) -> None:
-        self.script = list(script)
-        self.calls: list[dict[str, Any]] = []
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedJobPost | dict[str, Any]:
-        self.calls.append(
-            {
-                "is_repair": is_repair,
-                "message_count": len(list(messages)),
-            }
-        )
-        if not self.script:
-            raise RuntimeError("fake invoker script exhausted")
-        item = self.script.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        if isinstance(item, type) and issubclass(item, BaseException):
-            raise item("fake error")
-        return item
 
 
 class APITimeoutError(Exception):

@@ -69,6 +69,7 @@ def test_preflight_mismatch_before_clear_no_provider(
     assert "restore" in exc.value.message.lower() or "Restore" in exc.value.message
     assert CONFIGURATION_RESTORATION_GUIDANCE.split(".")[0] in exc.value.message
     assert not any("DETACH DELETE" in q for q in driver.queries)
+    assert driver.schema_statements == 0
     assert driver.other_nodes == {"keep-me"}
     after = run_async(snapshot_sqlite(factory))
     assert after == before
@@ -105,6 +106,7 @@ def test_preflight_non_finite_vector_before_clear(
         run_async(_body())
     assert exc.value.code == "EMBEDDING_CONFIG_MISMATCH"
     assert not any("DETACH DELETE" in q for q in driver.queries)
+    assert driver.schema_statements == 0
 
 
 def test_preflight_wrong_dimension_count(
@@ -123,6 +125,78 @@ def test_preflight_wrong_dimension_count(
             assert row is not None
             row.embedding_json = short  # type: ignore[assignment]
             row.embedding_dimensions = LOCKED_EMBEDDING_DIMENSIONS
+            await session.commit()
+
+    run_async(_setup())
+
+    async def _body() -> None:
+        await rebuild_graph(
+            driver,
+            session_factory=factory,
+            normalizer=normalizer,
+            settings=settings(),
+        )
+
+    with pytest.raises(RebuildError) as exc:
+        run_async(_body())
+    assert exc.value.code == "EMBEDDING_CONFIG_MISMATCH"
+    assert not any("DETACH DELETE" in q for q in driver.queries)
+    assert driver.schema_statements == 0
+
+
+def test_preflight_null_embedding_before_clear(
+    migrated_sqlite: Path,
+) -> None:
+    engine = build_async_engine(migrated_sqlite)
+    factory = session_factory(engine)
+    normalizer = SkillNormalizer.from_path(skills_fixture())
+    driver = FakeNeo4jDriver()
+    driver.seed_unrelated("preflight-keep")
+
+    async def _setup() -> None:
+        job_id = await seed_scorable_job(factory, raw_hash="hash-null-emb")
+        async with factory() as session:
+            row = await jobs_repo.get_by_id(session, job_id)
+            assert row is not None
+            row.embedding_json = None  # type: ignore[assignment]
+            await session.commit()
+
+    run_async(_setup())
+    before = run_async(snapshot_sqlite(factory))
+
+    async def _body() -> None:
+        await rebuild_graph(
+            driver,
+            session_factory=factory,
+            normalizer=normalizer,
+            settings=settings(),
+        )
+
+    with pytest.raises(RebuildError) as exc:
+        run_async(_body())
+    assert exc.value.code == "EMBEDDING_CONFIG_MISMATCH"
+    assert not any("DETACH DELETE" in q for q in driver.queries)
+    assert driver.schema_statements == 0
+    assert driver.other_nodes == {"preflight-keep"}
+    after = run_async(snapshot_sqlite(factory))
+    assert after == before
+
+
+def test_preflight_stored_dimensions_column_mismatch(
+    migrated_sqlite: Path,
+) -> None:
+    engine = build_async_engine(migrated_sqlite)
+    factory = session_factory(engine)
+    normalizer = SkillNormalizer.from_path(skills_fixture())
+    driver = FakeNeo4jDriver()
+
+    async def _setup() -> None:
+        job_id = await seed_scorable_job(factory, raw_hash="hash-dim-col")
+        async with factory() as session:
+            row = await jobs_repo.get_by_id(session, job_id)
+            assert row is not None
+            # Vector length remains locked; dimensions column is wrong.
+            row.embedding_dimensions = LOCKED_EMBEDDING_DIMENSIONS + 1
             await session.commit()
 
     run_async(_setup())
@@ -160,6 +234,33 @@ def test_runtime_settings_model_mismatch_fails_before_clear(
             session_factory=factory,
             normalizer=normalizer,
             settings=settings(model="text-embedding-3-large"),
+        )
+
+    with pytest.raises(RebuildError) as exc:
+        run_async(_body())
+    assert exc.value.code == "EMBEDDING_CONFIG_MISMATCH"
+    assert not any("DETACH DELETE" in q for q in driver.queries)
+
+
+def test_runtime_settings_dimensions_mismatch_fails_before_clear(
+    migrated_sqlite: Path,
+) -> None:
+    engine = build_async_engine(migrated_sqlite)
+    factory = session_factory(engine)
+    normalizer = SkillNormalizer.from_path(skills_fixture())
+    driver = FakeNeo4jDriver()
+
+    async def _setup() -> None:
+        await seed_scorable_job(factory, raw_hash="hash-ok-dims")
+
+    run_async(_setup())
+
+    async def _body() -> None:
+        await rebuild_graph(
+            driver,
+            session_factory=factory,
+            normalizer=normalizer,
+            settings=settings(dimensions=LOCKED_EMBEDDING_DIMENSIONS + 1),
         )
 
     with pytest.raises(RebuildError) as exc:

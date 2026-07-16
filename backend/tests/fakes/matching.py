@@ -51,7 +51,13 @@ class _ScriptedSession:
         if any(token in upper for token in self._driver.write_tokens):
             self._driver.write_queries.append(query)
             raise AssertionError(f"write Cypher is not allowed: {query}")
-        if self._driver.failure is not None:
+        targeted = self._driver.fail_on_query_contains
+        if targeted is not None:
+            if targeted in query:
+                if self._driver.failure is not None:
+                    raise self._driver.failure
+                raise OSError("scripted read failure")
+        elif self._driver.failure is not None:
             raise self._driver.failure
         for script in self._driver.scripts:
             if script.query_contains in query:
@@ -77,9 +83,13 @@ class ScriptedReadDriver:
         scripts: Sequence[ScriptedRead],
         *,
         failure: Exception | None = None,
+        fail_on_query_contains: str | None = None,
     ) -> None:
         self.scripts = tuple(scripts)
         self.failure = failure
+        # When set, only the matching read raises *failure*; other scripts succeed.
+        # Enables consistency-pass then vector-unavailable without a second fake.
+        self.fail_on_query_contains = fail_on_query_contains
         self.queries: list[str] = []
         self.parameters: list[dict[str, Any]] = []
         self.write_queries: list[str] = []
@@ -113,12 +123,16 @@ def orchestration_read_driver(
     jobs: Sequence[Mapping[str, Any]],
     vector_rows: Sequence[Mapping[str, Any]] | None = None,
     failure: Exception | None = None,
+    fail_on_query_contains: str | None = None,
 ) -> ScriptedReadDriver:
     """Build a read fake for consistency plus optional top-k vector retrieval.
 
     *vector_rows* is optional so consistency-only failure cases need not script
     a vector index response. When provided, scripts match the same query
     substrings used by ``consistency`` and ``retrieval`` owners.
+
+    *fail_on_query_contains* raises *failure* only for matching reads so tests
+    can pass revision consistency and still simulate vector-query outage.
     """
     scripts: list[ScriptedRead] = [
         ScriptedRead("MATCH (c:Candidate)", candidates),
@@ -126,7 +140,11 @@ def orchestration_read_driver(
     ]
     if vector_rows is not None:
         scripts.append(ScriptedRead("db.index.vector.queryNodes", vector_rows))
-    return ScriptedReadDriver(tuple(scripts), failure=failure)
+    return ScriptedReadDriver(
+        tuple(scripts),
+        failure=failure,
+        fail_on_query_contains=fail_on_query_contains,
+    )
 
 
 __all__ = [

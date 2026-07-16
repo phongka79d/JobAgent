@@ -34,6 +34,7 @@ from app.services import chat_turns
 from app.services.chat_turns import (
     ERROR_APPROVAL_ACTION_REQUIRED,
     ERROR_INVALID_APPROVAL_ACTION,
+    ERROR_RUN_NOT_RESUMABLE,
     ChatTurnError,
     count_chat_messages,
     create_user_turn,
@@ -499,6 +500,151 @@ def test_terminal_resume_is_noop_no_graph_or_side_effect(db_path: Path) -> None:
             assert counter["n"] == side_effects_after_complete
 
             # No extra tool rows.
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_rapid_repeated_approval_accepts_once_exact_counts(db_path: Path) -> None:
+    """Rapid double approval: one side effect, one ToolResult row, second is no-op.
+
+    Covers sequential re-entry (double-click after accept) and concurrent claims
+    while the first resume still owns the run (second is not resumable).
+    """
+    import asyncio
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        counter: dict[str, int] = {"n": 0}
+        try:
+            bundle, _, counter = _bundle(factory, counter)
+            events = await _collect(
+                stream_chat_turn(
+                    message="rapid double approval",
+                    graph_bundle=bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            )
+            assert events[-1].event == "approval_required"
+            run_id = events[-1].run_id
+            assert counter["n"] == 0
+
+            # --- Concurrent rapid claims: exactly one accepts the interrupt. ---
+            model_a = FakeChatModel(responses=[_ai_text("first winner")])
+            model_b = FakeChatModel(responses=[_ai_text("should not run graph")])
+            bundle_a = build_agent_graph(
+                model=model_a,
+                registry=ToolRegistry(
+                    [
+                        build_synthetic_interrupt_tool(
+                            session_factory=factory,
+                            side_effect_counter=counter,
+                        )
+                    ]
+                ),
+            )
+            bundle_b = build_agent_graph(
+                model=model_b,
+                registry=ToolRegistry(
+                    [
+                        build_synthetic_interrupt_tool(
+                            session_factory=factory,
+                            side_effect_counter=counter,
+                        )
+                    ]
+                ),
+            )
+
+            outcomes = await asyncio.gather(
+                _collect(
+                    stream_resume(
+                        run_id=run_id,
+                        action="approve",
+                        graph_bundle=bundle_a,
+                        session_factory=factory,
+                        sqlite_path=db_path,
+                    )
+                ),
+                _collect(
+                    stream_resume(
+                        run_id=run_id,
+                        action="approve",
+                        graph_bundle=bundle_b,
+                        session_factory=factory,
+                        sqlite_path=db_path,
+                    )
+                ),
+                return_exceptions=True,
+            )
+
+            successes = [o for o in outcomes if not isinstance(o, BaseException)]
+            failures = [o for o in outcomes if isinstance(o, BaseException)]
+            # Winner finishes the run; loser is either still-running rejection
+            # or terminal no-op if the winner already committed.
+            assert len(successes) >= 1
+            assert counter["n"] == 1
+
+            completed_streams = 0
+            for o in successes:
+                names = _names(o)  # type: ignore[arg-type]
+                if names[-1] == "run_completed":
+                    completed_streams += 1
+                # Terminal no-op stream is exactly run_started → run_completed.
+                if names == ["run_started", "run_completed"]:
+                    assert len(names) == 2
+            assert completed_streams >= 1
+
+            for err in failures:
+                assert isinstance(err, ChatTurnError)
+                assert err.code == ERROR_RUN_NOT_RESUMABLE
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is True
+                assert stored.data is not None
+                assert stored.data.get("action") == "approve"
+                assert stored.data.get("committed") is True
+
+            # --- Sequential rapid re-entry after accept: terminal no-op. ---
+            boom_model = FakeChatModel(
+                responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)]
+            )
+            boom_bundle = build_agent_graph(
+                model=boom_model,
+                registry=ToolRegistry(
+                    [
+                        build_synthetic_interrupt_tool(
+                            session_factory=factory,
+                            side_effect_counter=counter,
+                        )
+                    ]
+                ),
+            )
+            side_effects_before_third = counter["n"]
+            third = await _collect(
+                stream_resume(
+                    run_id=run_id,
+                    action="approve",
+                    graph_bundle=boom_bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            )
+            assert _names(third) == ["run_started", "run_completed"]
+            assert boom_model.invoke_count == 0
+            assert counter["n"] == side_effects_before_third == 1
+
             async with factory() as session:
                 tools = await tool_repo.list_for_run_ids(session, [run_id])
                 assert len(tools) == 1

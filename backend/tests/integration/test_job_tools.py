@@ -12,7 +12,6 @@ import ast
 import inspect
 import json
 import re
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args
@@ -72,6 +71,7 @@ from app.tools.registry import production_registry
 from sqlalchemy import func, select, text
 
 from tests.fakes.embeddings import FakeEmbeddingClient
+from tests.fakes.structured_output import FakeJdInvoker
 from tests.support.db_migration import run_async, session_factory
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -115,28 +115,6 @@ def _full_extracted(**overrides: Any) -> ExtractedJobPost:
     }
     base.update(overrides)
     return ExtractedJobPost.model_validate(base)
-
-
-class FakeJdInvoker:
-    def __init__(self, script: list[Any] | None = None) -> None:
-        self.script = list(script or [])
-        self.calls: list[dict[str, Any]] = []
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedJobPost | dict[str, Any]:
-        self.calls.append(
-            {"is_repair": is_repair, "message_count": len(list(messages))}
-        )
-        if not self.script:
-            raise RuntimeError("fake invoker script exhausted")
-        item = self.script.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
 
 
 class RecordingSync:
@@ -523,11 +501,13 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
 
             invoker = FakeJdInvoker([_full_extracted(), _full_extracted()])
             embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
             tool_fn = build_save_job_tool(
                 session_factory=factory,
                 invoker=invoker,
                 normalizer=_normalizer(),
                 embedding_client=embedder,
+                job_sync_fn=sync,
             )
             jd = "Unique JD body for return/retry path. Python required."
             first = await _ainvoke_save(
@@ -537,6 +517,9 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
             assert first.data is not None
             assert first.data["outcome"] == "created"
             job_id = first.data["job_id"]
+            assert len(invoker.calls) == 1
+            assert len(embedder.calls) == 1
+            assert sync.calls == 1
 
             second = await _ainvoke_save(
                 tool_fn, run_id=run_id, tool_call_id="call_dup", text=jd
@@ -545,9 +528,15 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
             assert second.data is not None
             assert second.data["outcome"] == "returned"
             assert second.data["job_id"] == job_id
-            # Duplicate return: no second extract/embed.
+            # Duplicate return: no second extract/embed/graph; still one Job.
             assert len(invoker.calls) == 1
             assert len(embedder.calls) == 1
+            assert sync.calls == 1
+            async with factory() as session:
+                count = await session.execute(
+                    select(func.count()).select_from(JobPost)
+                )
+                assert int(count.scalar_one()) == 1
 
             # Force failed row then retry same content (clear scorable embedding).
             async with factory() as session:
@@ -570,8 +559,15 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
             assert retried.data is not None
             assert retried.data["outcome"] == "retried"
             assert retried.data["job_id"] == job_id
+            # Retry reprocesses same row: one more extract/embed/graph each.
             assert len(invoker.calls) == 2
             assert len(embedder.calls) == 2
+            assert sync.calls == 2
+            async with factory() as session:
+                count = await session.execute(
+                    select(func.count()).select_from(JobPost)
+                )
+                assert int(count.scalar_one()) == 1
         finally:
             await engine.dispose()
 

@@ -20,8 +20,10 @@ import {
   parseSseEventData,
   SSE_EVENT_NAMES,
   SseParseError,
+  TOOL_STATUSES,
   type HistoryPage,
   type SseEvent,
+  type ToolStatus,
 } from '../features/chat/types';
 import {getApiBaseUrl} from '../lib/api/chat';
 import {
@@ -136,6 +138,56 @@ describe('SSE event vocabulary and status aliases', () => {
     expect(tool.event).toBe('tool_status');
     if (tool.event === 'tool_status') {
       expect(tool.payload.status).toBe('pending');
+    }
+  });
+
+  it('accepts every exact tool status pending|running|completed|failed only', () => {
+    expect([...TOOL_STATUSES]).toEqual([
+      'pending',
+      'running',
+      'completed',
+      'failed',
+    ]);
+    const payloads: Record<ToolStatus, Record<string, unknown>> = {
+      pending: {
+        tool_execution_id: TOOL_EXEC,
+        tool_call_id: 'tc1',
+        tool_name: 'demo',
+        status: 'pending',
+      },
+      running: {
+        tool_execution_id: TOOL_EXEC,
+        tool_call_id: 'tc1',
+        tool_name: 'demo',
+        status: 'running',
+      },
+      completed: {
+        tool_execution_id: TOOL_EXEC,
+        tool_call_id: 'tc1',
+        tool_name: 'demo',
+        status: 'completed',
+        duration_ms: 8,
+        summary: 'ok',
+      },
+      failed: {
+        tool_execution_id: TOOL_EXEC,
+        tool_call_id: 'tc1',
+        tool_name: 'demo',
+        status: 'failed',
+        duration_ms: 4,
+        error_code: 'TOOL_ERROR',
+        summary: 'tool failed',
+      },
+    };
+    for (const status of TOOL_STATUSES) {
+      const parsed = parseSseEventData(
+        envelope(EVENT_A, 'tool_status', payloads[status]),
+      );
+      expect(parsed.event).toBe('tool_status');
+      if (parsed.event === 'tool_status') {
+        expect(parsed.payload.status).toBe(status);
+        expect(FORBIDDEN_STATUS_ALIASES.has(parsed.payload.status)).toBe(false);
+      }
     }
   });
 });
@@ -487,6 +539,154 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
     expect(run?.state).toBe('running');
     expect(run?.state).not.toBe('completed');
     expect(run?.state).not.toBe('failed');
+  });
+
+  it('tracks tool_status failed with exact status and never complete/error aliases', () => {
+    let state = createInitialChatState();
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc1',
+          tool_name: 'lookup',
+          status: 'running',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc1',
+          tool_name: 'lookup',
+          status: 'failed',
+          duration_ms: 9,
+          error_code: 'TOOL_ERROR',
+          summary: 'lookup failed',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_D, 'run_failed', {
+          state: 'failed',
+          error_code: 'TOOL_ERROR',
+          summary: 'tool failed the run',
+        }),
+      ),
+    ]);
+    const tools = state.messages.find((m) => m.role === 'assistant')?.run?.tools;
+    expect(tools?.[0].status).toBe('failed');
+    expect(tools?.[0].errorCode).toBe('TOOL_ERROR');
+    expect(tools?.[0].status).not.toBe('error');
+    expect(tools?.[0].status).not.toBe('complete');
+    expect(state.streamPhase).toBe('failed');
+    expect(
+      state.messages.every(
+        (m) => m.run === null || m.run.state !== 'completed',
+      ),
+    ).toBe(true);
+  });
+
+  it('disconnect recovery rehydrates durable tools without inventing completed', () => {
+    // Mid-stream disconnect leaves non-terminal truth; same single reducer
+    // history/rehydrate path supplies durable run/tool state (no second store).
+    let state = createInitialChatState();
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc1',
+          tool_name: 'lookup',
+          status: 'running',
+        }),
+      ),
+      parseSseEventData(envelope(EVENT_C, 'text_delta', {delta: 'Partial'})),
+    ]);
+    state = chatReducer(state, {type: 'stream/disconnected'});
+    const mid = state.messages.find((m) => m.role === 'assistant')?.run;
+    expect(state.streamPhase).toBe('disconnected');
+    expect(mid?.state).toBe('running');
+    expect(mid?.tools[0]?.status).toBe('running');
+    expect(mid?.tools[0]?.source).toBe('stream');
+    expect(mid?.tools[0]?.resultData).toBeNull();
+
+    const durablePage: HistoryPage = {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'Hello',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'completed',
+            pending_approval: null,
+            error_code: null,
+            completed_at: TS,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc1',
+                tool_name: 'lookup',
+                status: 'completed',
+                duration_ms: 15,
+                error_code: null,
+                result: {
+                  ok: true,
+                  code: null,
+                  summary: 'durable after disconnect',
+                  data: null,
+                },
+                arguments_summary: null,
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'Partial and finished',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+
+    // Disconnect alone never completes; durable page is the only success path.
+    expect(
+      state.messages.every(
+        (m) => m.run === null || m.run.state !== 'completed',
+      ),
+    ).toBe(true);
+
+    state = chatReducer(state, {type: 'history/rehydrate', page: durablePage});
+    const durableUser = state.messages.find((m) => m.id === MSG_USER);
+    expect(durableUser?.run?.state).toBe('completed');
+    expect(durableUser?.run?.tools[0]?.source).toBe('history');
+    expect(durableUser?.run?.tools[0]?.status).toBe('completed');
+    expect(durableUser?.run?.tools[0]?.summary).toBe(
+      'durable after disconnect',
+    );
+    expect(durableUser?.run?.tools[0]?.status).not.toBe('complete');
+    // Stream-shaped assistant host is collapsed when durable assistant exists.
+    expect(state.messages.some((m) => m.id === `assistant:${RUN_ID}`)).toBe(
+      false,
+    );
+    // Still the single chatReducer — no second API/SSE event invented success.
+    expect(state.seenEventIds[EVENT_A]).toBe(true);
   });
 
   it('http failure does not invent completed status', () => {

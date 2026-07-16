@@ -187,7 +187,7 @@ task with its production owner and regression before retrying coverage.
 
 ### Tasks
 
-- [ ] (01A): Close persistent data and SQLite/Alembic contract coverage gaps
+- [x] (01A): Close persistent data and SQLite/Alembic contract coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01A)`
@@ -238,7 +238,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_SOURCE_CONFLICT` if Plan 6 acceptance remains unreconciled; `BLOCKED_ENVIRONMENT` if the pinned local Python/test tools are unavailable; `BLOCKED_SCOPE_CONFLICT` if a reproduced root fix must leave `Allowed Files`.
   - Files: the files in `Likely Files` plus `backend/tests/support/db_migration.py` only if reused
 
-- [ ] (01B): Close CV and profile lifecycle coverage gaps
+- [x] (01B): Close CV and profile lifecycle coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01B)`
@@ -289,7 +289,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_ENVIRONMENT` if the fake-backed suite cannot run; `BLOCKED_SCOPE_CONFLICT` if any new case exposes product behavior; `BLOCKED_AMBIGUOUS_REF` if structured-output fake ownership cannot be consolidated without duplication.
   - Files: the files in `Likely Files` plus only the shared profile fake actually reused
 
-- [ ] (01C): Close deterministic matching coverage gaps
+- [x] (01C): Close deterministic matching coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01C)`
@@ -338,7 +338,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_ENVIRONMENT` if fake-backed matching tests cannot run; `BLOCKED_SCOPE_CONFLICT` if any new case exposes product behavior; `BLOCKED_AMBIGUOUS_REF` if matching fake ownership cannot be resolved without duplication.
   - Files: the files in `Likely Files`
 
-- [ ] (01D): Close frontend status, history, approval, card, error, and disconnect gaps
+- [x] (01D): Close frontend status, history, approval, card, error, and disconnect gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01D)`
@@ -388,7 +388,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_ENVIRONMENT` if the pinned Node/Astryx toolchain is unavailable; `BLOCKED_SCOPE_CONFLICT` if any new case exposes product behavior; `BLOCKED_MISSING_REF` if a required Astryx public component contract cannot be inspected.
   - Files: the files in `Likely Files` plus `frontend/src/test/setup.ts` only if shared
 
-- [ ] (01E): Close conversation, Agent, SSE, history, and checkpoint coverage gaps
+- [x] (01E): Close conversation, Agent, SSE, history, and checkpoint coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01E)`
@@ -440,7 +440,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_ENVIRONMENT` if the isolated Agent suite cannot run; `BLOCKED_SCOPE_CONFLICT` if any case exposes product behavior; `BLOCKED_AMBIGUOUS_REF` if public/SSE helper ownership cannot be consolidated without duplication.
   - Files: the files in `Likely Files` plus only the shared support helper actually reused
 
-- [ ] (01F): Close JD ingestion, provider-failure, duplicate, and Job-sync coverage gaps
+- [x] (01F): Close JD ingestion, provider-failure, duplicate, and Job-sync coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01F)`
@@ -492,7 +492,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_ENVIRONMENT` if the fake-backed JD suite cannot run; `BLOCKED_SCOPE_CONFLICT` if any case exposes product behavior; `BLOCKED_AMBIGUOUS_REF` if shared structured-output ownership remains unresolved after (01B).
   - Files: the files in `Likely Files` plus only the established shared fakes actually reused
 
-- [ ] (01G): Close provider-free rebuild coverage gaps
+- [x] (01G): Close provider-free rebuild coverage gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01G)`
@@ -541,7 +541,7 @@ task with its production owner and regression before retrying coverage.
   - Blocked Condition: `BLOCKED_SOURCE_CONFLICT` if a case requires host-side rebuild or weaker choice-C checks; `BLOCKED_ENVIRONMENT` if fake-backed rebuild tests cannot run; `BLOCKED_SCOPE_CONFLICT` if any case exposes product behavior.
   - Files: the files in `Likely Files`
 
-- [ ] (01H): Close write-tool, approval-action, and terminal-resume idempotency gaps
+- [x] (01H): Close write-tool, approval-action, and terminal-resume idempotency gaps
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_7.md` > `## Mandatory Batch01 - Focused Automated Contract Closure` > `(01H)`

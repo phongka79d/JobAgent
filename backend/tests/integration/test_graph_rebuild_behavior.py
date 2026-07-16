@@ -135,6 +135,7 @@ def test_empty_candidate_seed_only_and_scorable_jobs(
     factory = session_factory(engine)
     normalizer = SkillNormalizer.from_path(skills_fixture())
     driver = FakeNeo4jDriver()
+    before = run_async(snapshot_sqlite(factory))
 
     async def _seed_only() -> None:
         return await rebuild_graph(
@@ -145,14 +146,21 @@ def test_empty_candidate_seed_only_and_scorable_jobs(
         )
 
     counts = run_async(_seed_only())
+    # Fresh/empty SQLite projection: seed Skills + RELATED_TO only.
     assert counts.Candidate == 0
     assert counts.Job == 0
-    assert counts.Skill >= 1
-    assert counts.RELATED_TO >= 0
+    assert counts.HAS_SKILL == 0
+    assert counts.REQUIRES == 0
+    assert counts.PREFERS == 0
+    assert counts.Skill == 5
+    assert counts.RELATED_TO == 2
+    assert driver.schema_statements >= 1
     assert any(
         "RELATED_TO" in q or "seed_skills" in str(p)
         for q, p in zip(driver.queries, driver.parameters, strict=False)
     )
+    after = run_async(snapshot_sqlite(factory))
+    assert after == before
 
 
 def test_with_candidate_reuses_sync_candidate_owner(
@@ -168,6 +176,7 @@ def test_with_candidate_reuses_sync_candidate_owner(
         await seed_scorable_job(factory, raw_hash="hash-with-cand")
 
     run_async(_setup())
+    before = run_async(snapshot_sqlite(factory))
 
     async def _body() -> None:
         return await rebuild_graph(
@@ -180,6 +189,11 @@ def test_with_candidate_reuses_sync_candidate_owner(
     counts = run_async(_body())
     assert counts.Candidate == 1
     assert counts.Job == 1
+    assert counts.HAS_SKILL == 1
+    assert counts.REQUIRES == 1
+    assert counts.PREFERS == 1
+    assert counts.RELATED_TO == 2
+    assert counts.Skill == 5
     assert any("MERGE (c:Candidate" in q for q in driver.queries)
     assert any("HAS_SKILL" in q for q in driver.queries)
     has_skill_params = [
@@ -192,6 +206,8 @@ def test_with_candidate_reuses_sync_candidate_owner(
     }
     assert "python" in keys
     assert "react" not in keys
+    after = run_async(snapshot_sqlite(factory))
+    assert after == before
 
 
 def test_rebuild_repeat_safe(
@@ -207,6 +223,7 @@ def test_rebuild_repeat_safe(
         await seed_scorable_job(factory, raw_hash="hash-repeat")
 
     run_async(_setup())
+    before = run_async(snapshot_sqlite(factory))
 
     async def _once() -> Any:
         return await rebuild_graph(
@@ -218,8 +235,16 @@ def test_rebuild_repeat_safe(
 
     first = run_async(_once())
     second = run_async(_once())
-    assert first.Candidate == second.Candidate == 1
-    assert first.Job == second.Job == 1
+    assert first.as_mapping() == second.as_mapping()
+    assert first.Candidate == 1
+    assert first.Job == 1
+    assert first.HAS_SKILL == 1
+    assert first.REQUIRES == 1
+    assert first.PREFERS == 1
+    assert first.RELATED_TO == 2
+    assert first.Skill == 5
+    after = run_async(snapshot_sqlite(factory))
+    assert after == before
 
 
 def test_rebuild_sync_failure_nonzero(
@@ -243,5 +268,6 @@ def test_rebuild_sync_failure_nonzero(
             settings=settings(),
         )
 
-    with pytest.raises(RebuildError):
+    with pytest.raises(RebuildError) as exc:
         run_async(_body())
+    assert exc.value.code in {"REBUILD_FAILED", "NEO4J_SYNC_FAILED"}

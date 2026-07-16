@@ -51,7 +51,16 @@ the sixth production Agent tool. Plan 6 Batch04 is complete: durable
 backend-ordered Astryx match cards with collapsible score breakdowns through the
 existing chat/history truth path, plus the disposable manual JD acceptance
 checklist under `docs/acceptance/manual_jd_checklist.md`. Plan 6 / Master Phase 5
-is complete.
+is complete. Plan 7 Batch01 (focused automated contract closure) is complete:
+Plan 7 matrix 7.1 and failure-recovery 7.3 automated rows for persistent data,
+CV/profile, matching, frontend, conversation/Agent/SSE, JD, rebuild, and
+write-tool/approval/terminal-resume idempotency map to named fake-backed tests;
+coverage gaps closed under `backend/tests/**` and `frontend/src/test/**` only
+(shared structured-output fake, matching/rebuild assertions, frontend
+disconnect/status cases, identity replay). No product feature, schema, endpoint,
+tool, or production `backend/app/**` change. Remaining Plan 7 work: Batch02
+public-boundary E2E smoke, Batch03 safeguards/README release guide, Batch04
+live release evidence, Batch05 final gate.
 
 ## Repository layout
 

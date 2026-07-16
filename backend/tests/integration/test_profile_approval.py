@@ -1407,6 +1407,123 @@ def test_first_approval_commits_active_profile_no_draft(
     run_async(_body())
 
 
+def test_approved_profile_persists_across_engine_restart(
+    db_path: Path, tmp_path: Path
+) -> None:
+    """Restart persistence: approved profile, prefs, active CV survive reopen.
+
+    Simulates process stop by disposing the engine, then reopening the same
+    SQLite file and FILES_DIR path. User corrections in approved JSON remain.
+    """
+    from app.core.ids import new_uuid
+    from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+
+    files_dir = tmp_path / "files"
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    driver = _RecordingSyncDriver()
+    prefs = {
+        "target_roles": ["Platform Engineer"],
+        "preferred_locations": ["Remote"],
+        "acceptable_work_modes": ["remote"],
+        "target_seniority": ["senior"],
+    }
+
+    async def _approve() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="restart-appr",
+                    original_name="cv-restart.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_approval_draft_json(
+                        prefs=prefs, exclude_python=True
+                    ),
+                    source_attachment_id=att_id,
+                )
+                await session.commit()
+
+            result = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                driver=driver,  # type: ignore[arg-type]
+            )
+            assert result.ok is True
+            assert result.sqlite_committed is True
+            assert result.active_attachment_id == att_id
+            return att_id
+        finally:
+            await engine.dispose()
+
+    att_id = run_async(_approve())
+    assert storage.exists(att_id)
+
+    async def _reopen_and_assert() -> None:
+        # Fresh engine on the same durable path (no remigration).
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.id == CANDIDATE_PROFILE_ID
+                assert profile.active_attachment_id == att_id
+                assert profile.profile_json["summary"] == "Backend engineer"
+                skills = profile.profile_json["skills"]
+                py = next(
+                    s
+                    for s in skills
+                    if s["skill"]["canonical_key"] == "python"
+                )
+                assert py["excluded"] is True
+                assert py["source"] == "user_correction"
+
+                att = await att_repo.get_by_id(session, att_id)
+                assert att is not None
+                assert att.state == ATTACHMENT_STATE_ACTIVE
+                assert att.original_name == "cv-restart.pdf"
+                active = await att_repo.get_active(session)
+                assert active is not None
+                assert active.id == att_id
+
+                jp = await prof_repo.get_job_preferences(session)
+                assert jp is not None
+                assert jp.preferences_json["target_roles"] == [
+                    "Platform Engineer"
+                ]
+                assert await prof_repo.get_current_draft(session) is None
+
+                n = (
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM attachments")
+                    )
+                ).scalar_one()
+                assert int(n) == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_reopen_and_assert())
+    # File bytes remain under the original FILES_DIR after engine restart.
+    assert storage.exists(att_id)
+    assert (files_dir / att_id).is_file()
+
+
 def test_replacement_removes_old_attachment_row_and_file(
     db_path: Path, tmp_path: Path
 ) -> None:
@@ -2227,6 +2344,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 draft = await prof_repo.get_current_draft(session)
                 assert draft is not None
                 assert draft.id == PROFILE_DRAFT_ID
+                draft_json_after = draft.draft_json
 
             async with open_checkpointer(db_path) as saver:
                 assert await thread_has_checkpoints(saver, run_id) is False
@@ -2241,6 +2359,50 @@ def test_commit_profile_draft_request_changes_preserves_draft(
             assert replay.ok is True
             assert replay.data is not None
             assert replay.data.get("committed") is False
+            assert commits == []
+
+            # Terminal re-entry / rapid repeated request_changes: no commit, draft
+            # unchanged, one stored ToolResult identity.
+            boom_model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "call-should-not-run",
+                                "type": "tool_call",
+                            }
+                        ],
+                    )
+                ]
+            )
+            boom_bundle = build_agent_graph(
+                model=boom_model,
+                registry=ToolRegistry([tool2]),
+            )
+            noop = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="request_changes",
+                    graph_bundle=boom_bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert [e.event for e in noop] == ["run_started", "run_completed"]
+            assert boom_model.invoke_count == 0
+            assert commits == []
+
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].tool_call_id == "call-commit-rc"
+                draft = await prof_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.draft_json == draft_json_after
         finally:
             await engine.dispose()
 
@@ -2555,20 +2717,45 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                 )
             ]
             assert resume_events[-1].event == "run_completed"
-            assert driver.runs >= 1
+            # One accepted save drives a non-zero Cypher batch (merge/clear/skills).
+            graph_queries_after_save = driver.runs
+            assert graph_queries_after_save >= 1
 
             async with factory() as session:
                 tools = await tool_repo.list_for_run_ids(session, [run_id])
                 assert len(tools) == 1
                 assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                assert tools[0].tool_call_id == "call-commit-ok"
                 stored = tool_repo.load_stored_result(tools[0])
                 assert stored.ok is True
                 assert stored.data is not None
                 assert stored.data.get("committed") is True
-                assert await prof_repo.get_active_profile(session) is not None
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                profile_updated = profile.updated_at
                 assert await prof_repo.get_current_draft(session) is None
 
-            # Terminal no-op resume.
+            # Same-identity ToolResult replay: no second SQLite/graph work.
+            replay = await execute_tool_replay(
+                factory=factory,
+                run_id=run_id,
+                tool_call_id="call-commit-ok",
+            )
+            assert replay is not None
+            assert replay.ok is True
+            assert replay.data is not None
+            assert replay.data.get("committed") is True
+            assert driver.runs == graph_queries_after_save
+
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                profile = await prof_repo.get_active_profile(session)
+                assert profile is not None
+                assert profile.updated_at == profile_updated
+                assert await prof_repo.get_current_draft(session) is None
+
+            # Terminal no-op resume / rapid repeated save_profile.
             noop = [
                 e
                 async for e in stream_resume(
@@ -2580,13 +2767,15 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                 )
             ]
             noop_names = [e.event for e in noop]
-            assert noop_names[0] == "run_started"
-            assert noop_names[-1] == "run_completed"
+            assert noop_names == ["run_started", "run_completed"]
             assert "text_delta" not in noop_names
             assert "approval_required" not in noop_names
-            runs_after = driver.runs
-            # No second commit/sync from terminal no-op.
-            assert driver.runs == runs_after
+            assert driver.runs == graph_queries_after_save
+
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].tool_call_id == "call-commit-ok"
         finally:
             await engine.dispose()
 
