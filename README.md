@@ -11,9 +11,10 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 8 Batch03):** Batch01 retention/chunks, Batch02
-bounded read-only observability APIs, and Batch03 accessible lazy sidebar
-inspector are on the worktree under audit. Approved CV replacement archives the
+**Current status (Plan 8 Batch04 complete on worktree):** Batch01 retention/
+chunks, Batch02 bounded read-only observability APIs, Batch03 accessible lazy
+sidebar inspector, and Batch04 synthetic local smoke plus final regression
+evidence are on the worktree under audit. Approved CV replacement archives the
 former active attachment (file and metadata retained; no restore path).
 Successful digital-PDF extraction persists the exact deterministic
 `"\n\n"`-joined chunk sequence in `attachment_text_chunks`. Migration head
@@ -26,8 +27,12 @@ sidebar keeps Overview upload/replace/download and the interaction lock, and
 adds cached CV history / LLM chunks / Neo4j graph / Agent runs tabs that lazy-
 load on first select, retain safe prior data after failed refresh, expand full
 chunk text only on demand, and use an `aria-expanded` collapse control (mobile
-Escape via AppShell MobileNav). Synthetic local smoke and final regression
-checklist remain Plan 8 Batch04.
+Escape via AppShell MobileNav). Synthetic-data-only direct smoke and final
+regression gates are recorded in
+`docs/acceptance/observability_sidebar_checklist.md` (archive replacement,
+retained open/download, chunk expand, runs, ready/truncated/fallback graph,
+collapse dual evidence, console hygiene, secret prohibition; Compose health
+`overall=available`).
 
 ## Purpose and scope
 
@@ -115,7 +120,7 @@ Public functional endpoints (Master §14 core plus Plan 8 observability):
 │   ├── neo4j/skills_seed.yaml
 │   └── scripts/              # Provider diagnostic, PDF diagnostic, rebuild help
 └── docs/
-    ├── acceptance/           # Release checklist + manual JD checklist
+    ├── acceptance/           # Release, observability smoke, and manual JD checklists
     ├── plans/                # Master and plan sources of truth
     └── tasks/                # Canonical task contracts
 ```
@@ -268,6 +273,32 @@ Set-Location ..
 git diff --check
 ```
 
+Plan 8 Batch04 synthetic observability release evidence (focused backend + full
+frontend gates, Compose health, checklist direct smoke, scope hygiene). Run from
+the repository root with a usable root `.env` and Docker Desktop Linux engine
+when exercising Compose/smoke; automated tests remain fake-backed:
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_attachment_text_chunks.py tests/unit/test_observability_graph.py tests/integration/test_observability_api.py tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..\frontend
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+Set-Location ..
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d --wait --wait-timeout 180
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+# Then execute docs/acceptance/observability_sidebar_checklist.md with synthetic CVs only
+git diff --check
+```
+
+Dated PASS rows for the Batch04 synthetic observations live only in
+`docs/acceptance/observability_sidebar_checklist.md`. Do not paste raw PDF
+bytes, storage paths, prompts, secrets, or stack traces into evidence cells.
+
 `tests/e2e/test_demo_flow.py` is the disposable public-boundary smoke: greeting →
 CV upload → profile draft/approval resume → JD save/extract/embed/sync →
 `match_jobs`, with durable DB/file/checkpoint assertions through public FastAPI
@@ -353,7 +384,9 @@ named disposable Compose project. Automated matching/unit gates remain the
 fake-backed pre-live requirements.
 
 Release evidence for automated coverage, safeguards, demo, rebuild, and final
-scope is recorded in `docs/acceptance/local_release_checklist.md`.
+scope is recorded in `docs/acceptance/local_release_checklist.md`. Plan 8
+synthetic observability sidebar smoke evidence is recorded in
+`docs/acceptance/observability_sidebar_checklist.md`.
 
 ## Demo flow
 
@@ -457,7 +490,9 @@ Local-demo safeguards:
 - Logs and UI payloads use stable codes and safe summaries—not API keys, raw
   document bodies, or stack traces.
 - Rebuild is choice-C only; host wrapper cannot destroy graph data.
-- Release evidence owner: `docs/acceptance/local_release_checklist.md`.
+- Release evidence owners: `docs/acceptance/local_release_checklist.md`
+  (Plan 7 baseline) and `docs/acceptance/observability_sidebar_checklist.md`
+  (Plan 8 synthetic observability smoke).
 
 Explicit limitations (not production claims):
 
@@ -501,5 +536,6 @@ CI workflows/evaluation datasets or metrics/production security subsystem
   owner (package script, pytest path, Compose file, or infrastructure script).
 - **Evidence, not phase diaries.** Completion status for release checks is
   recorded with dated PASS rows in
-  `docs/acceptance/local_release_checklist.md`, not by expanding this README
-  into historical batch notes.
+  `docs/acceptance/local_release_checklist.md` and Plan 8 observability smoke
+  in `docs/acceptance/observability_sidebar_checklist.md`, not by expanding
+  this README into historical batch notes.

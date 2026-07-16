@@ -296,7 +296,7 @@ Own the new checklist and fresh evidence only. Do not add product behavior, alte
 
 ### Tasks
 
-- [ ] (04A): Publish and run the synthetic-data observability sidebar checklist and final regressions
+- [x] (04A): Publish and run the synthetic-data observability sidebar checklist and final regressions
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_8.md` > `## Mandatory Batch04 - Synthetic Local Observability Release Evidence` > `(04A)`
