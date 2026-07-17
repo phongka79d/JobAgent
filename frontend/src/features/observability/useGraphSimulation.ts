@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 
 import type {GraphModel} from './graphPresentation';
 import {
@@ -95,7 +95,7 @@ export function useGraphSimulation(
     if (changed) setRevision((current) => current + 1);
   }, [controller, model]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!controller) return;
     const currentSize = sizeRef.current;
     if (
@@ -105,7 +105,22 @@ export function useGraphSimulation(
     ) {
       return;
     }
-    controller.resize(width, height);
+    const hadValidSize =
+      currentSize?.controller === controller &&
+      Number.isFinite(currentSize.width) &&
+      currentSize.width > 0 &&
+      Number.isFinite(currentSize.height) &&
+      currentSize.height > 0;
+    const hasValidSize =
+      Number.isFinite(width) &&
+      width > 0 &&
+      Number.isFinite(height) &&
+      height > 0;
+    if (!hadValidSize && hasValidSize) {
+      controller.resize(width, height, true);
+    } else {
+      controller.resize(width, height);
+    }
     sizeRef.current = {controller, width, height};
   }, [controller, height, width]);
 

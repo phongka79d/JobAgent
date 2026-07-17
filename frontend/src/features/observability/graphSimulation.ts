@@ -12,10 +12,12 @@ import type {
   GraphNodeDatum,
 } from './graphPresentation';
 
+const INITIAL_SETTLING_TICKS = 120;
+
 export type GraphSimulationController = {
   nodes: GraphNodeDatum[];
   links: GraphLinkDatum[];
-  resize: (width: number, height: number) => void;
+  resize: (width: number, height: number, settle?: boolean) => void;
   beginDrag: (key: string) => void;
   dragNode: (key: string, x: number, y: number) => void;
   endDrag: () => void;
@@ -60,24 +62,23 @@ export function createGraphSimulation(
     .force('center', forceCenter(width / 2, height / 2))
     .on('tick', onTick);
 
-  if (reducedMotion) {
-    simulation.stop();
-    simulation.tick(120);
-    onTick();
-  }
+  if (reducedMotion) simulation.stop();
+  simulation.tick(INITIAL_SETTLING_TICKS);
+  if (reducedMotion) onTick();
 
   return {
     nodes,
     links,
-    resize(nextWidth, nextHeight) {
+    resize(nextWidth, nextHeight, settle = false) {
       simulation.force(
         'center',
         forceCenter(nextWidth / 2, nextHeight / 2),
       );
-      if (reducedMotion) {
+      if (reducedMotion || settle) {
         simulation.stop();
-        simulation.alpha(1).tick(120);
+        simulation.alpha(1).tick(INITIAL_SETTLING_TICKS);
         onTick();
+        if (!reducedMotion) simulation.restart();
       } else {
         simulation.alpha(0.3).restart();
       }

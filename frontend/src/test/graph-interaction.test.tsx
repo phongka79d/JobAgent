@@ -25,6 +25,26 @@ afterEach(() => {
 });
 
 describe('graph simulation controller', () => {
+  it('pre-settles normal-motion nodes around the viewport before first render', () => {
+    const controller = createGraphSimulation(
+      toGraphModel(graphReady()),
+      260,
+      432,
+      vi.fn(),
+    );
+    activeControllers.add(controller);
+    const center = controller.nodes.reduce(
+      (sum, node) => ({
+        x: sum.x + (node.x ?? 0),
+        y: sum.y + (node.y ?? 0),
+      }),
+      {x: 0, y: 0},
+    );
+
+    expect(center.x / controller.nodes.length).toBeCloseTo(130, 0);
+    expect(center.y / controller.nodes.length).toBeCloseTo(216, 0);
+  });
+
   it('pins a dragged node, keeps it pinned on drop, and releases all pins on reset', () => {
     const controller = createGraphSimulation(
       toGraphModel(graphReady()),
@@ -128,6 +148,33 @@ describe('graph simulation controller', () => {
 });
 
 describe('graph simulation hook lifecycle', () => {
+  it('settles an invalid initial controller on its first valid resize', () => {
+    const resize = vi.fn();
+    const factory = vi.fn<GraphSimulationFactory>((model) => ({
+      nodes: model.nodes.map((node) => ({...node})),
+      links: model.links.map((link) => ({...link})),
+      resize,
+      beginDrag: vi.fn(),
+      dragNode: vi.fn(),
+      endDrag: vi.fn(),
+      cancelDrag: vi.fn(),
+      resetLayout: vi.fn(),
+      stop: vi.fn(),
+    }));
+    const model = toGraphModel(graphReady());
+    const {rerender, unmount} = renderHook(
+      ({width, height}) =>
+        useGraphSimulation(model, width, height, factory),
+      {initialProps: {width: 0, height: 0}},
+    );
+
+    expect(factory).toHaveBeenCalledOnce();
+
+    rerender({width: 260, height: 432});
+    expect(resize).toHaveBeenCalledWith(260, 432, true);
+    unmount();
+  });
+
   it('syncs presentation fields without recreating or moving the controller', () => {
     const factory = vi.fn<GraphSimulationFactory>((model) => ({
       nodes: model.nodes.map((node, index) => ({
