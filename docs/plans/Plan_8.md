@@ -231,11 +231,22 @@ and `NO_ACTIVE_PROFILE`; no hidden fields are inferred by the frontend.
 | Implementation orchestration | `plan_id: plan-8` batch contracts | A1/A2/A3 evidence follows the verification matrix above. |
 | Local user | Bounded sidebar observability experience | Direct FE checklist passes without exposing prohibited data. |
 
-## Completion Contract
+### Next Consumer
 
-Plan 8 is complete only when deterministic CV chunks are persisted safely for new
-successful extractions; the read-only observability API and sidebar expose the
-approved history, chunk, run, and graph views; all safe fallback/redaction and
-accessibility requirements are verified; existing product flows remain green; and
-the direct FE checklist proves the user can inspect the new surfaces on local
-synthetic data without creating a new write path.
+`Plan_9.md` consumes the implemented deterministic chunk store, retained-CV stream,
+run observability, bounded graph endpoint, resizable sidebar/tab rail, interactive
+D3 graph, mobile drawer, and focused frontend module/test baseline. It alone owns
+the approved CV Manager mutations, document-first dynamic extraction, active-CV
+graph projection, archived-CV deletion, and bounded Agent document retrieval. It
+must preserve the colors, components, interactions, and responsive layout completed
+by `docs/superpowers/plans/2026-07-16-observability-sidebar-ui-refresh.md`.
+
+### Historical Completion Contract
+
+Plan 8 historical scope is complete only when deterministic CV chunks are persisted
+safely for new successful extractions; the read-only observability API and sidebar
+expose the approved history, chunk, run, and graph views; all safe
+fallback/redaction and accessibility requirements are verified; existing product
+flows remain green; and the direct FE checklist proves the user can inspect the new
+surfaces on local synthetic data without creating a new write path. This evidence
+remains the baseline consumed by Plan 9 and is not reopened by the successor plan.

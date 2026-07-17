@@ -1,9 +1,9 @@
 # JobAgent Master Plan
 
-**Version:** 1.6
-**Date:** 2026-07-13
-**Status:** Ready for implementation after Phase 0 feasibility gates  
-**Project type:** Single-user, local-first AI/NLP portfolio project  
+**Version:** 1.7
+**Date:** 2026-07-17
+**Status:** Amended for Phase 8 CV Manager; full plan portfolio requires fresh review before task writing
+**Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
 
@@ -22,6 +22,9 @@ The system must let the user:
 7. Rank saved jobs against the active profile.
 8. Explain semantic similarity, matched/related/missing skills, and the simple seniority, experience, location, and work-mode components.
 9. Persist chat history while keeping structured long-term memory focused on the active profile, preferences, corrections, and saved jobs.
+10. Manage retained CVs, reprocess and approve an archived CV as the active source, and delete non-active CVs with their owned data.
+11. Preserve every detected CV section in a document-first extraction, including headings such as Certifications, Projects, Awards, or Publications that are not fields in the Candidate Profile schema.
+12. Let the Agent inspect only the active CV through bounded, explicit retrieval instead of injecting the whole document into every prompt.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
@@ -48,8 +51,11 @@ Otherwise, it remains outside the MVP.
 - One persistent application conversation.
 - Natural general conversation without requiring a job-related intent.
 - React chat-first interface using Astryx.
-- Upload one active PDF CV.
-- Read-only history of prior CV uploads and Agent runs for the single local user.
+- Upload one active PDF CV and retain multiple archived PDF CVs.
+- CV Manager actions to reprocess an archived CV for approval, activate only the approved result, and delete a non-active CV with its owned records.
+- Document-first extraction that retains ordered known and unknown sections before deriving the canonical Candidate Profile.
+- Bounded Agent retrieval of the active CV by outline, section, search, or chunk.
+- Read-only history of Agent runs for the single local user.
 - Candidate Profile draft and approval flow.
 - Structured long-term memory for profile corrections and job preferences.
 - Manual JD input through public URL or raw text.
@@ -68,7 +74,9 @@ Otherwise, it remains outside the MVP.
 
 - Multi-user accounts, login, roles, and permissions.
 - Multiple conversations.
-- Mutable CV/profile versioning or rollback.
+- Direct profile rollback or activation without reprocessing and explicit approval.
+- Editing archived CV content in place.
+- Injecting an entire CV or all retained documents into every Agent prompt.
 - DOCX, image CVs, or OCR.
 - Automatic job discovery or crawling.
 - Authenticated, paywalled, cookie-dependent, or JavaScript-only job pages.
@@ -208,7 +216,7 @@ The three runtime folders are `frontend`, `backend`, and `infrastructure`; `docs
 - Store enums as `TEXT` with named `CHECK` constraints. Store booleans as SQLite `INTEGER` through SQLAlchemy `Boolean`.
 - Use constraint names `pk_<table>`, `fk_<table>__<column>`, `uq_<table>__<columns>`, `ck_<table>__<rule>`, and index names `ix_<table>__<columns>`.
 - Enforce static enums, scalar ranges, singleton IDs, and simple null-coupling rules with named `CHECK` constraints. Pydantic/application services enforce JSON shape, finite embedding values, configuration-dependent limits, and cross-row invariants.
-- Do not add soft-delete columns, audit-history tables, database triggers, or generic key-value storage.
+- Do not add generic soft-delete columns, audit-history tables, database triggers, or generic key-value storage. The attachment `deleting` lifecycle state is allowed only for retryable cross-store CV deletion.
 - Never hold a SQLite transaction open while calling ShopAIKey, reading a remote URL, writing Neo4j, or streaming an SSE response.
 
 ### 6.2 Application table schemas
@@ -224,7 +232,7 @@ The three runtime folders are `frontend`, `backend`, and `infrastructure`; `docs
 | `size_bytes` | `INTEGER` | No | `> 0` |
 | `page_count` | `INTEGER` | Yes | `> 0` after parsing; service enforces `MAX_PDF_PAGES` |
 | `storage_path` | `TEXT` | No | Unique path relative to `FILES_DIR` |
-| `state` | `TEXT` | No | `staged | active | archived | failed`; defaults to `staged` |
+| `state` | `TEXT` | No | `staged | active | archived | failed | deleting`; defaults to `staged` |
 | `failure_code` | `TEXT` | Yes | Stable application error code |
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
@@ -232,16 +240,16 @@ Add `uq_attachments__file_hash`, `uq_attachments__storage_path`, and partial uni
 
 `failure_code` is required only for `state='failed'`. An active attachment must have a non-null `page_count`. Attachment/profile cross-row state is validated at the final Section 6.4 transaction boundary, not by a database `CHECK`.
 
-Allowed transitions are `staged → active`, `staged → failed`, `failed → staged` for an explicit same-file retry, and `active → archived` after an approved replacement. Exactly one row may be active. Archived rows are immutable history: their metadata and stored PDF remain retained, cannot become active again, and cannot be edited or deleted through a product endpoint. If a retained file is missing from local storage, its metadata remains archived and observability reports `CV_FILE_UNAVAILABLE`.
+Allowed transitions are `staged → active`, `staged → failed`, `failed → staged` for an explicit same-file retry, `active → archived` after an approved replacement, `archived → active` only inside approval of a freshly reprocessed archived CV, and `archived | failed | staged → deleting` for explicit deletion. Exactly one row may be active. Archived rows cannot be edited in place; they may be reprocessed into a new draft or deleted. The active row cannot enter `deleting`. If a retained file is missing from local storage, its metadata remains selectable for deletion but reprocessing/file streaming reports `CV_FILE_UNAVAILABLE`.
 
-The unique hash rule remains global. Uploading a hash already held by an archived row returns `ARCHIVED_ATTACHMENT_EXISTS` with that row's safe metadata; it does not create a second row, reprocess the PDF, or restore the archived CV. This is upload history, not mutable CV/profile versioning or rollback.
+The unique hash rule remains global. Uploading a hash already held by an archived row returns `ARCHIVED_ATTACHMENT_EXISTS` with that row's safe metadata and points the user to CV Manager. Reprocessing that existing row is an explicit action and never creates a duplicate attachment. A successfully deleted row releases its hash for a future upload.
 
 #### `attachment_text_chunks`
 
 | Column | SQLite type | Null | Rules |
 |---|---|---:|---|
 | `id` | `TEXT` | No | UUID v4 primary key |
-| `attachment_id` | `TEXT` | No | FK to `attachments.id`; `ON DELETE RESTRICT` |
+| `attachment_id` | `TEXT` | No | FK to `attachments.id`; `ON DELETE CASCADE` |
 | `ordinal` | `INTEGER` | No | Zero-based deterministic source order |
 | `text` | `TEXT` | No | Parsed CV text segment sent to the profile-extraction boundary |
 | `preview` | `TEXT` | No | Fixed bounded projection of `text` for list responses |
@@ -250,7 +258,35 @@ The unique hash rule remains global. Uploading a hash already held by an archive
 | `created_at` | `DATETIME` | No | UTC |
 
 Add `uq_attachment_text_chunks__attachment_ordinal` on `(attachment_id, ordinal)`.
-Chunk rows are the canonical local projection of text sent to structured profile extraction. The deterministic chunker emits non-empty `text` values in ascending `ordinal`; the extraction service sends exactly `text[0] + "\n\n" + ... + text[n]` to the model. It persists the same ordered rows in the successful extraction/draft-input transaction, never stores PDF bytes or provider prompts, and keeps rows read only after creation.
+Chunk rows are the complete ordered local text source for document extraction and bounded Agent reads. The deterministic chunker emits non-empty `text` values in ascending `ordinal`; document extraction must cover the full sequence, but may send bounded batches and a final consolidation request instead of one unbounded prompt. Reprocessing replaces a CV's chunk set only after parsing succeeds. Rows remain read only between reprocessing attempts and cascade only when their non-active attachment is deleted.
+
+#### `cv_documents`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `attachment_id` | `TEXT` | No | Primary key and FK to `attachments.id`; `ON DELETE CASCADE` |
+| `document_json` | `JSON` | No | Validated `CVDocument`; complete ordered heading/section/entry extraction |
+| `profile_json` | `JSON` | No | Validated `CandidateProfile` projection derived only from `document_json` |
+| `outline_json` | `JSON` | No | Bounded section IDs, headings, kinds, entry counts, and source chunk ranges |
+| `extraction_version` | `TEXT` | No | Versioned document-first extractor contract |
+| `source_hash` | `TEXT` | No | SHA-256 of the canonical ordered chunk text |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+`document_json` is the latest approved per-CV structured source of truth. It preserves every detected section and entry, including unknown headings, without adding a database column or Candidate Profile field. `profile_json` and `outline_json` are deterministic validated projections of that document, not independent extraction inputs. Reprocessing never overwrites this approved row before approval.
+
+#### `cv_document_drafts`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `attachment_id` | `TEXT` | No | Primary key and FK to `attachments.id`; `ON DELETE CASCADE` |
+| `document_json` | `JSON` | No | Validated pending `CVDocument` |
+| `profile_json` | `JSON` | No | Candidate projection derived from the pending document |
+| `outline_json` | `JSON` | No | Bounded pending outline |
+| `extraction_version` | `TEXT` | No | Versioned extractor contract |
+| `source_hash` | `TEXT` | No | SHA-256 of pending canonical chunk text |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+There is at most one document draft for the singleton profile draft. It may belong to a staged, archived, or active attachment explicitly reprocessed through CV Manager. Approval upserts its values into `cv_documents` and deletes it; request changes preserves it. The previously approved `cv_documents` row and active profile remain unchanged while the draft is pending.
 
 #### `candidate_profile`
 
@@ -261,7 +297,7 @@ Chunk rows are the canonical local projection of text sent to structured profile
 | `profile_json` | `JSON` | No | Validated `CandidateProfile` |
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
-The table contains zero or one row. It stores only the current approved profile; no profile-history table exists.
+The table contains zero or one row. It is the current active projection and points to the approved per-CV document. Historical approved content lives only with each retained `cv_documents` row; there is no independently editable profile-history table.
 
 Outside the approved-replacement transaction, the service verifies that `active_attachment_id` references an active attachment. During replacement it may temporarily reference the validated staged attachment, but the transaction must end with exactly one active attachment and the profile pointing to it.
 
@@ -276,7 +312,7 @@ Outside the approved-replacement transaction, the service verifies that `active_
 
 The table contains zero or one row. Draft existence means approval is pending or the user is preparing a correction. Request Changes leaves the row intact; the next correction updates it. Successful Save Profile deletes it. Do not add a draft-history or draft-status table.
 
-When `source_attachment_id` is non-null, the service verifies that it references a `staged` attachment.
+When `source_attachment_id` is non-null, the service verifies that it references a `staged`, `archived`, or explicitly reprocessed `active` attachment with a validated `cv_document_drafts` row.
 
 #### `job_preferences`
 
@@ -339,9 +375,13 @@ The table contains exactly one row after application initialization.
 | `role` | `TEXT` | No | `user | assistant | system` |
 | `content` | `TEXT` | No | May be empty only when `structured_payload` is present |
 | `structured_payload` | `JSON` | Yes | Approval card or match card payload |
+| `source_attachment_id` | `TEXT` | Yes | FK to `attachments.id`; `ON DELETE SET NULL`; set on CV extraction/approval messages |
+| `redacted_at` | `DATETIME` | Yes | Set only when CV deletion replaces content with the fixed deleted-CV marker |
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
 Add `ix_chat_messages__conversation_created_at` on `(conversation_id, created_at, id)` for deterministic history pagination.
+
+Every message whose text or structured payload identifies or summarizes a CV must carry `source_attachment_id`. Deleting that CV replaces `content` with the locale-neutral marker `[CV deleted]`, clears `structured_payload`, sets `redacted_at`, and then allows the FK to become null. Unrelated conversation messages remain unchanged.
 
 #### `agent_runs`
 
@@ -349,6 +389,7 @@ Add `ix_chat_messages__conversation_created_at` on `(conversation_id, created_at
 |---|---|---:|---|
 | `id` | `TEXT` | No | UUID v4 primary key; also used as LangGraph `thread_id` |
 | `user_message_id` | `TEXT` | No | Unique FK to `chat_messages.id`; `ON DELETE CASCADE` |
+| `source_attachment_id` | `TEXT` | Yes | FK to `attachments.id`; `ON DELETE CASCADE`; set for CV extraction/reprocessing runs |
 | `state` | `TEXT` | No | `running | interrupted | completed | failed`; defaults to `running` |
 | `pending_approval_json` | `JSON` | Yes | Present only while `state='interrupted'` |
 | `error_code` | `TEXT` | Yes | Stable application error code |
@@ -356,6 +397,8 @@ Add `ix_chat_messages__conversation_created_at` on `(conversation_id, created_at
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
 
 Add `uq_agent_runs__user_message_id` and `ix_agent_runs__state`.
+
+Deleting a non-active CV removes its CV-scoped Agent runs and cascades their tool executions after associated chat messages have been redacted. The checkpoint service deletes each matching LangGraph checkpoint before the final attachment row is removed. Runs not scoped to that attachment are preserved.
 
 `pending_approval_json` is non-null exactly when `state='interrupted'`. `completed_at` is non-null exactly when `state in ('completed', 'failed')`.
 
@@ -365,6 +408,7 @@ Add `uq_agent_runs__user_message_id` and `ix_agent_runs__state`.
 |---|---|---:|---|
 | `id` | `TEXT` | No | UUID v4 primary key |
 | `run_id` | `TEXT` | No | FK to `agent_runs.id`; `ON DELETE CASCADE` |
+| `source_attachment_id` | `TEXT` | Yes | FK to `attachments.id`; `ON DELETE CASCADE`; required for CV extraction/read tools |
 | `tool_call_id` | `TEXT` | No | Provider/tool-loop identifier |
 | `tool_name` | `TEXT` | No | One of the registered JobAgent tool names |
 | `arguments_summary_json` | `JSON` | Yes | Short non-document argument summary |
@@ -382,13 +426,20 @@ Allowed transitions are `pending → running → completed | failed`. An interru
 
 `tool_executions` is the only durable tool-status and tool-result record. Do not copy tool results into `chat_messages`. Provider `ToolMessage` objects live only in the active LangGraph state/checkpoint. Chat-history responses attach tool activity to the initiating user turn by joining `agent_runs.user_message_id` to `tool_executions`.
 
+CV tools set `source_attachment_id` before persisting arguments/results. If a final assistant message uses any CV tool result, the runner also sets that message's `source_attachment_id`, so later deletion removes the tool record and redacts every durable CV-derived message even when the containing run was not an extraction run.
+
 ### 6.3 Foreign-key and deletion rules
 
 | Parent | Child FK | On delete | Reason |
 |---|---|---|---|
 | `attachments` | `candidate_profile.active_attachment_id` | `RESTRICT` | Never delete the active CV metadata |
-| `attachments` | `attachment_text_chunks.attachment_id` | `RESTRICT` | Preserve auditable chunks with retained upload history |
+| `attachments` | `attachment_text_chunks.attachment_id` | `CASCADE` | Delete text owned by an explicitly deleted non-active CV |
+| `attachments` | `cv_documents.attachment_id` | `CASCADE` | Delete document/profile projections owned by that CV |
+| `attachments` | `cv_document_drafts.attachment_id` | `CASCADE` | Delete pending document extraction owned by that CV |
 | `attachments` | `profile_drafts.source_attachment_id` | `CASCADE` | Removing a staged upload removes a CV-backed draft; null is allowed for text-only updates |
+| `attachments` | `chat_messages.source_attachment_id` | `SET NULL` | Preserve only the fixed redacted chat marker after CV deletion |
+| `attachments` | `agent_runs.source_attachment_id` | `CASCADE` | CV-scoped runs and their tool records are deleted with the CV |
+| `attachments` | `tool_executions.source_attachment_id` | `CASCADE` | Delete bounded CV excerpts/results even when the parent run is otherwise unrelated |
 | `conversation` | `chat_messages.conversation_id` | `CASCADE` | Test cleanup may remove the complete conversation |
 | `chat_messages` | `agent_runs.user_message_id` | `CASCADE` | A run cannot exist without its initiating turn |
 | `agent_runs` | `tool_executions.run_id` | `CASCADE` | Tool logs belong to one run |
@@ -398,7 +449,9 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 ### 6.4 Transaction boundaries
 
 - **CV upload:** write the PDF once to its UUID-based path under `FILES_DIR`, then create the staged `attachments` row. Approval changes database state; it does not move the file again.
-- **Profile approval:** validate the draft and, when it references a CV, the staged attachment and stored file before opening the transaction. In one SQLite transaction, upsert `candidate_profile('active')`, upsert `job_preferences('active')` when changed, and delete `profile_drafts('current')`. For a CV replacement, repoint the profile, change the previous active attachment to `archived`, mark the new attachment active, and verify the final one-active-attachment invariant before commit. Archived metadata, PDF files, and chunk rows are retained; no previous-file cleanup occurs. Direct Neo4j synchronization occurs after commit.
+- **Document extraction/reprocessing:** parse and chunk outside a transaction, extract every bounded batch into ordered `CVSection`/`CVEntry` data, run one consolidation pass for section continuity and omissions, derive `CandidateProfile` only from the validated complete `CVDocument`, then atomically replace the attachment's chunks and `cv_document_drafts` row and upsert `profile_drafts('current')`. A failed attempt leaves the current chunks, approved document, and active profile intact.
+- **Profile approval:** validate the profile/document drafts, their staged/archived/active attachment, stored file, source hash, and derived profile before opening the transaction. In one SQLite transaction, archive the previous active attachment only when selecting a different CV, mark the selected attachment active, upsert its `cv_documents` row from `cv_document_drafts`, upsert `candidate_profile('active')`, update preferences when changed, delete both draft rows, and verify one active attachment/document/profile before commit. Re-extracting the current active CV changes no attachment state. Direct active-CV Neo4j synchronization occurs after commit.
+- **CV deletion:** reject the active attachment. Mark an eligible attachment `deleting`, redact its linked chat messages, and clear any draft in a short transaction; delete matching checkpoints, its retained file, and only its CV-owned Neo4j subgraph with idempotent operations; then delete CV-scoped runs plus every directly CV-owned tool execution and delete the attachment in a final transaction so chunks/documents cascade. Retrying `DELETE` resumes a `deleting` row. Shared `Job`, `Skill`, seed relationships, unrelated runs/messages, and the active Candidate projection are never deleted. A partial failure keeps the row in `deleting` with a stable safe code and retry guidance; the UI must not report success until the row and file are gone and the CV subgraph delete succeeded.
 - **Approval decision:** both approval buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
 - **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
 - **Chat turn:** create the user message and `agent_runs` row together. Persist tool status transitions in short transactions. Persist the final assistant message and terminal run state together.
@@ -418,10 +471,13 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 | SQLite source | Neo4j identity |
 |---|---|
 | `candidate_profile.id='active'` | `Candidate.id='active'` |
+| `attachments.id` with `cv_documents` | `CV.id` |
+| `CVDocument.sections[*].id` scoped by attachment | `CVSection.id='<attachment_id>:<section_id>'` |
+| `CVSection.entries[*].id` scoped by section | `CVEntry.id='<attachment_id>:<section_id>:<entry_id>'` |
 | `job_posts.id` UUID | `Job.id` |
 | Normalized skill key in JSON/seed data | `Skill.canonical_key` |
 
-Neo4j stores no independent application IDs and never becomes the source of truth for profile, job, conversation, or status data.
+Neo4j stores no independent application IDs and never becomes the source of truth for CV documents, profile, job, conversation, or status data.
 
 ---
 
@@ -440,6 +496,42 @@ SkillRef
 `SkillRef` contains normalized identity only. The deterministic normalizer populates aliases and category from `skills_seed.yaml`; an unresolved skill has an empty alias list and may have no category. The LLM must not invent aliases or relationships.
 
 ### 7.2 Candidate Profile
+
+The extractor first produces the complete per-CV document below. It must not ask the model to emit `CandidateProfile` directly from raw chunks.
+
+```text
+CVDocument
+- attachment_id: UUID
+- detected_languages: list[str]
+- sections: list[CVSection]
+- extraction_warnings: list[str]
+- extraction_confidence: float [0, 1]
+
+CVSection
+- id: str
+- ordinal: int >= 0
+- heading: str
+- kind: summary | experience | education | skills | languages | certifications |
+        projects | awards | publications | volunteering | interests | references | other
+- entries: list[CVEntry]
+- source_chunk_ordinals: list[int]
+
+CVEntry
+- id: str
+- ordinal: int >= 0
+- title: str | None
+- subtitle: str | None
+- date_text: str | None
+- location: str | None
+- body: str
+- bullets: list[str]
+- attributes: dict[str, str | list[str]]
+- source_chunk_ordinals: list[int]
+```
+
+Section and entry IDs are deterministic within one extraction version. The original heading is always preserved. A heading unknown to the enum uses `kind='other'`; its entries and attributes are still retained, so adding a new CV section never requires a database or Candidate Profile schema change. Empty decorative headings may be omitted, but no meaningful source text may be silently dropped: content that cannot be classified belongs to an `other` section and extraction warnings identify uncertain boundaries. Attribute names are normalized display labels from that entry only, not a global schema.
+
+`CandidateProfile` is then derived from the validated `CVDocument`. Known profile facts are projections; dynamic sections such as certifications remain in `CVDocument` and are available to Neo4j and bounded Agent retrieval even when they have no Candidate Profile field.
 
 ```text
 CandidateProfile
@@ -483,7 +575,7 @@ LanguageItem
 - proficiency: str | None
 ```
 
-Proficiency and years may be `unknown`. The model must not infer precise years without timeline evidence.
+Proficiency and years may be `unknown`. The model must not infer precise years without timeline evidence. GPA may be retained as an Education entry attribute without becoming a skill; certificates remain certification entries and must not be coerced into skills.
 
 ### 7.3 Job Preferences
 
@@ -540,7 +632,7 @@ ToolResult
 - data: dict[str, JSONValue] | None
 ```
 
-Every terminal `tool_executions.result_json` must validate as `ToolResult`. `JSONValue` means a JSON scalar, list, or object. `ok=true` requires `code=null` and database status `completed`; `ok=false` requires a stable failure `code`, matching `error_code`, and database status `failed`. `data` uses the tool's compact output schema and may contain IDs, counts, or card payloads, but never raw CV/JD bodies. This same validated object is returned during idempotent replay.
+Every terminal `tool_executions.result_json` must validate as `ToolResult`. `JSONValue` means a JSON scalar, list, or object. `ok=true` requires `code=null` and database status `completed`; `ok=false` requires a stable failure `code`, matching `error_code`, and database status `failed`. `data` uses the tool's compact output schema and may contain IDs, counts, or card payloads. The sole document-body exception is the bounded page explicitly returned by `read_active_cv`; no other tool returns raw CV/JD bodies. This same validated object is returned during idempotent replay.
 
 ### 7.6 JD quality rules
 
@@ -558,13 +650,21 @@ Do not duplicate `jd_quality` inside `extraction_json`.
 
 ```text
 (:Candidate {id, source_updated_at})
+(:CV {id, original_name, source_updated_at, extraction_version})
+(:CVSection {id, heading, kind, ordinal, entry_count})
+(:CVEntry {id, ordinal, title, subtitle, date_text, preview})
 (:Job {id, title, company, location, work_mode, seniority, quality, embedding, source_updated_at})
 (:Skill {canonical_key, display_name, aliases, category})
 ```
 
+`CVEntry.preview` is bounded and display-safe. Full entry bodies, bullets, arbitrary attributes, chunk text, and PDF text remain in SQLite and are not copied into Neo4j.
+
 ### 8.2 Relationships
 
 ```text
+(CV)-[:PROJECTS_TO]->(Candidate)
+(CV)-[:HAS_SECTION]->(CVSection)
+(CVSection)-[:HAS_ENTRY]->(CVEntry)
 (Candidate)-[:HAS_SKILL {confidence, years, proficiency, evidence}]->(Skill)
 (Job)-[:REQUIRES {confidence, evidence}]->(Skill)
 (Job)-[:PREFERS {confidence, evidence}]->(Skill)
@@ -574,6 +674,9 @@ Do not duplicate `jd_quality` inside `extraction_json`.
 ### 8.3 Constraints and indexes
 
 - Unique constraint on `Candidate.id`.
+- Unique constraint on `CV.id`.
+- Unique constraint on `CVSection.id`.
+- Unique constraint on `CVEntry.id`.
 - Unique constraint on `Job.id`.
 - Unique constraint on `Skill.canonical_key`.
 - Vector index on `Job.embedding` using cosine similarity.
@@ -587,6 +690,8 @@ Changing the embedding model or dimensions is outside the MVP. It requires an ex
 - A new unknown skill may be stored as a canonical `Skill`, but it receives no `RELATED_TO` edges automatically.
 - Only aliases and `RELATED_TO` relationships from `skills_seed.yaml` contribute to related-skill scoring.
 - An exact content match creates no new Job row or Neo4j node; the existing Job is returned or, when failed, retried in place.
+- Every approved CV document is projected under its owning `CV` node with fixed allowlisted labels. The observability graph selects only the active CV branch, but archived branches remain addressable by attachment ID for idempotent deletion and rebuild.
+- CV deletion matches the exact `CV.id`, deletes its owned `CVSection`/`CVEntry` nodes and connecting relationships, and never deletes shared `Skill`, `Job`, seed `RELATED_TO`, or unrelated Candidate data. The active CV is rejected before graph mutation.
 - Neo4j remains fully rebuildable through one local command using SQLite records.
 
 ---
@@ -635,7 +740,7 @@ File-hash duplicate policy:
 - If the hash belongs to the active attachment, return that attachment/profile and do not extract again.
 - If the hash belongs to the current staged attachment, return the existing attachment/draft.
 - Uploading the same file again when its attachment is `failed` is the explicit retry signal: reuse the same file/row, change it to staged, clear `failure_code`, and process it again. Do not add a retry endpoint or flag.
-- If the hash belongs to an archived attachment, return `ARCHIVED_ATTACHMENT_EXISTS` and the archived metadata. Do not reprocess, duplicate, or restore it; a user must upload a different PDF to create a new candidate profile input.
+- If the hash belongs to an archived attachment, return `ARCHIVED_ATTACHMENT_EXISTS` and the archived metadata plus the CV Manager reprocess action. Do not duplicate it or activate it directly.
 - Processing a different staged CV while a CV-backed draft exists replaces the singleton draft, removes the previous unreferenced staged row, and cleans up its file on a best-effort basis.
 - A parsing or extraction failure after staging changes the attachment to `failed` with a stable `failure_code`; the stored file is retained for an explicit retry or deletion.
 
@@ -645,22 +750,19 @@ File-hash duplicate policy:
 attachment_id
 → file-hash duplicate check
 → pypdf layout text extraction
-→ extractable-text validation
-→ deterministic chunking and chunk persistence
-→ gpt-4o-mini structured extraction
-→ Pydantic validation, with at most one JSON repair and revalidation when invalid
+→ extractable-text validation and deterministic chunking
+→ bounded gpt-4o-mini section/entry extraction over every ordered chunk batch
+→ one document consolidation and omission audit
+→ CVDocument validation, with at most one repair for each invalid model boundary
+→ derive and validate CandidateProfile from CVDocument
 → deterministic skill normalization
-→ profile draft
+→ atomically persist chunks, cv_document_drafts, and profile draft
 → LangGraph interrupt
 ```
 
 If no meaningful digital text is available, return `NO_EXTRACTABLE_TEXT`. Do not add OCR fallback.
 
-The chunker owns the exact structured-extraction input. It emits ascending ordinals,
-joins persisted chunk text with exactly `\n\n`, and sends that joined string to the
-profile extractor. A failed parse, chunking operation, model call, repair, or draft
-validation writes no chunk rows. Historical attachments without rows remain visible
-but their chunk endpoint returns `CHUNKS_UNAVAILABLE`.
+The ordered chunks own the exact document-extraction input. The service partitions them into bounded batches with explicit ordinal ranges, extracts section fragments from every batch, and performs one bounded consolidation over fragment metadata and content. It may split consolidation recursively when configured prompt limits would be exceeded, but it must preserve source order and use no unbounded prompt. A final deterministic coverage audit verifies that every source chunk is referenced by at least one section or recorded in an `other` section/warning. A failed parse, model call, repair, document validation, profile derivation, or coverage audit publishes none of the new draft rows. Historical attachments without chunks may be deleted but cannot be reprocessed and return `CHUNKS_UNAVAILABLE`/`CV_FILE_UNAVAILABLE` as appropriate.
 
 ### 10.3 Chat approval
 
@@ -684,12 +786,20 @@ The assistant renders a profile summary card with Astryx `ButtonGroup`:
 The old active profile and CV remain usable until the new draft is approved. On approval:
 
 1. Confirm that the staged attachment and its UUID-based file already exist.
-2. Run the Section 6.4 SQLite transaction in constraint-safe order: repoint the profile, change the old active attachment to immutable `archived`, mark the new attachment active, update preferences when present, and delete the draft. Before commit, verify that the new attachment is the only active attachment and is referenced by `candidate_profile('active')`.
+2. Run the Section 6.4 SQLite transaction in constraint-safe order: archive the old active attachment, mark the staged or reprocessed archived attachment active, mark its document approved, repoint the profile to its derived projection, update preferences when present, and delete the draft. Before commit, verify that the selected attachment is the only active attachment and is referenced by `candidate_profile('active')`.
 3. If the transaction fails, roll it back. The old profile remains active and the new attachment remains staged for retry or deletion.
-4. After commit, retain the previous archived PDF and its chunk rows for local read-only history. Do not run automatic previous-file cleanup and do not offer restore/delete actions; a missing retained file is surfaced only as `CV_FILE_UNAVAILABLE`.
-5. Synchronize Candidate and Skill nodes directly to Neo4j.
+4. After commit, retain the previous archived PDF, chunks, and document until an explicit CV Manager deletion.
+5. Synchronize the active Candidate/Skill projection and selected CV document branch directly to Neo4j. The graph view must identify the selected active CV.
 
 If the later Neo4j sync fails, the approved SQLite profile remains committed. Return `NEO4J_SYNC_FAILED` with the rebuild instruction instead of rolling the profile back.
+
+### 10.5 CV Manager reprocessing and deletion
+
+- Selecting **Make active** on an archived CV never flips state directly. It starts the same document-first extraction pipeline against that attachment's retained PDF, creates a new draft document/profile, and renders the existing approval card. The current CV remains active until **Save Profile** succeeds; **Request Changes** leaves the archived CV non-active.
+- Selecting **Re-extract** on the active CV uses the same draft/approval path without changing attachment state. This is the explicit upgrade path for pre-Phase-8 CVs that have chunks/profile data but no approved `cv_documents` row.
+- Only one CV-backed draft/approval may exist. Starting archived reprocessing obeys the existing `APPROVAL_ACTION_REQUIRED` lock and replaces only an un-interrupted draft through the existing draft ownership rules.
+- **Delete** is available only for `archived`, `failed`, or unreferenced `staged` attachments. The active attachment returns `CV_ACTIVE_DELETE_FORBIDDEN`; deleting a CV under a pending approval cancels and removes only that CV-scoped draft/run/checkpoint after confirmation.
+- The retryable Section 6.4 deletion coordinator removes the retained file, chunks, document/profile snapshot, attachment metadata, CV-owned Neo4j branch, CV-scoped runs/tools, and CV-linked chat content. The chat timeline retains only `[CV deleted]` markers. Shared Job/Skill data and unrelated conversation history are preserved.
 
 ---
 
@@ -789,13 +899,14 @@ AgentState
 - messages_for_this_turn
 - recent_context
 - candidate_context
+- active_cv_context
 - attachment_ids
 - pending_approval
 - tool_iteration_count
 - error
 ```
 
-Large PDF/JD bodies are stored out of state and referenced by IDs.
+Large PDF/JD bodies are stored out of state and referenced by IDs. `active_cv_context` contains only active attachment ID, extraction version/source hash, and a compact section outline; it never contains section bodies or chunks.
 
 ### 12.4 Memory policy
 
@@ -803,10 +914,11 @@ The model receives:
 
 - Current approved Candidate Profile.
 - Current Job Preferences.
+- Active CV identity and bounded outline containing section IDs/headings/kinds/entry counts.
 - Current turn.
 - A bounded recent message window that fits the prompt budget.
 
-It does not receive the entire conversation or a fixed 64K-token history. Profile and preference corrections are remembered through structured state, not by relying on old chat text.
+It does not receive the entire conversation, a fixed 64K-token history, full CV sections, or all chunks. Profile and preference corrections are remembered through structured state, not by relying on old chat text. When the question needs document evidence beyond the outline, the Agent calls `read_active_cv` narrowly and may paginate; it must not walk every cursor unless the user explicitly asks for a whole-document task.
 
 General conversation remains available through persisted chat history and the bounded recent-message window. Do not add a separate memory-fact table or a general-purpose memory extraction pipeline.
 
@@ -841,18 +953,19 @@ A greeting or general-question turn creates user and assistant messages plus one
 
 ## 13. Agent-Facing Tool Contracts
 
-The Agent sees exactly six job-specific tools. Before graph execution, the application injects compact `candidate_context` from the approved profile and preferences; raw CV text is never injected and candidate context is not an Agent-facing tool.
+The Agent sees exactly seven job-specific tools. Before graph execution, the application injects compact `candidate_context` plus `active_cv_context`; raw CV text is never injected. `read_active_cv` is the only Agent-facing path to CV document bodies or raw chunks and can access only the currently active attachment.
 
 `(run_id, tool_call_id)` is the durable identity of one tool invocation. Re-entering a terminal invocation returns its stored `result_json`; it never repeats a completed side effect. The LLM and frontend do not generate separate idempotency keys.
 
 ### 13.1 `propose_profile_from_cv`
 
-Input: `attachment_id`.
+Input: `attachment_id` and optional `reprocess=false`.
 
 - Validates attachment ownership/state.
 - For a staged attachment already referenced by `profile_drafts('current')`, returns the existing draft without processing again.
 - For any other staged attachment, parses, extracts, validates, and creates a draft.
-- For the already active attachment, returns the existing approved profile without extraction or a new draft.
+- With `reprocess=true`, an archived or active attachment selected through CV Manager re-runs document-first extraction and creates a fresh draft without changing active state.
+- For the already active attachment with `reprocess=false`, returns the existing approved profile without extraction or a new draft.
 - Returns either the new `draft_id` or the existing profile ID with a short summary.
 - Never commits the profile.
 
@@ -896,20 +1009,40 @@ Input: optional result limit in `1..10`; current approved `JobPreferences` are r
 - Runs retrieval, graph features, scoring, and explanation.
 - Defaults to final top 10.
 
-### 13.7 Tool authorization matrix
+### 13.7 `read_active_cv`
+
+Input: exactly one mode plus bounded selectors.
+
+```text
+mode: section | search | chunk
+section_id: str | None
+query: str | None
+chunk_ordinal: int | None
+cursor: opaque str | None
+max_results: int = 5, range 1..10
+max_chars: int = 6000, range 500..12000
+```
+
+- Resolves the active attachment server-side and rejects any caller-supplied archived/staged attachment ID; the Agent cannot read another CV through this tool.
+- `section` returns ordered entries from one outline section, `search` returns bounded matching entry/chunk excerpts, and `chunk` returns one requested raw chunk page. It does not expose PDF bytes or storage paths.
+- Every success returns `attachment_id`, `extraction_version`, `source_hash`, `mode`, selected records, `returned_chars`, `truncated`, and `next_cursor`. Cursors are bound to the active CV revision and mode/query; activation invalidates old cursors with `ACTIVE_CV_CHANGED`.
+- The service applies both result and character caps before creating `ToolResult`. An oversized single record is safely truncated with source IDs so the Agent can request the next page or exact chunk.
+- This read-only tool uses the existing tool loop and durable execution contract. It adds no second Agent, retrieval model, vector store, or automatic whole-CV preload.
+
+### 13.8 Tool authorization matrix
 
 | State | Write tools | Read/compute tools |
 |---|---|---|
 | No active profile, no draft | `propose_profile_from_cv`, `save_job` | `query_jobs` |
 | Draft pending, no active profile | `propose_profile_from_cv`, `propose_profile_update`, guarded `commit_profile_draft`, `save_job` | `query_jobs` |
-| Active profile, no draft | `propose_profile_from_cv`, `propose_profile_update`, `save_job` | `query_jobs`, `match_jobs` |
-| Active profile with draft pending | `propose_profile_from_cv`, `propose_profile_update`, guarded `commit_profile_draft`, `save_job` | `query_jobs`, `match_jobs` against the approved profile only |
+| Active profile, no draft | `propose_profile_from_cv`, `propose_profile_update`, `save_job` | `query_jobs`, `match_jobs`, `read_active_cv` |
+| Active profile with draft pending | `propose_profile_from_cv`, `propose_profile_update`, guarded `commit_profile_draft`, `save_job` | `query_jobs`, `match_jobs`, `read_active_cv` against the approved active CV only |
 
 ---
 
 ## 14. Public FastAPI Boundary
 
-Expose the seven chat/profile endpoints plus read-only local observability endpoints.
+Expose the existing chat/profile endpoints, two explicit CV Manager mutations, and local observability reads.
 
 ```text
 GET  /api/health
@@ -917,6 +1050,9 @@ GET  /api/health
 POST /api/attachments/cv
 GET  /api/profile
 GET  /api/profile/cv
+
+POST   /api/cvs/{attachment_id}/reprocess
+DELETE /api/cvs/{attachment_id}
 
 GET  /api/chat/history?limit=50&before=<opaque_cursor>
 POST /api/chat/turns
@@ -932,18 +1068,20 @@ GET  /api/observability/graph
 
 ### 14.1 API rules
 
-- No public profile/job CRUD endpoints.
-- All business writes occur through Agent tool calls.
+- No public profile/job CRUD endpoints. The only direct CV writes are the named reprocess and delete actions; approval still uses the Agent interrupt/resume contract.
+- Job/profile edits occur through Agent tool calls. CV Manager routes call the same application services used by the Agent and do not duplicate extraction, approval, deletion, or graph logic.
 - File upload and chat messages remain separate requests.
 - Sidebar upload immediately starts a chat turn containing the returned attachment ID.
 - `POST /api/chat/turns` returns an SSE stream.
 - Resume also returns an SSE stream.
 - Chat history `limit` is `1..100`. The opaque `before` cursor encodes `(created_at, id)` from the oldest returned item. Query newest-first with `limit+1`, reverse the page for chronological output, and return `{items, next_cursor}`. A malformed cursor returns `422`.
 - While a run is interrupted for approval, both a new chat turn and a new CV upload return `APPROVAL_ACTION_REQUIRED` before persisting new input. The frontend disables the composer and upload controls until either approval action completes the run.
-- Observability endpoints are read-only, cursor-bounded, and validate each selected attachment, chunk, or run against the single local-user data set. They return safe summaries only: no PDF bytes, filesystem paths, prompts, checkpoints, stack traces, embeddings, credentials, arbitrary Cypher, or unrelated Neo4j labels.
+- Observability endpoints remain read-only and cursor-bounded. CV Manager composes its list/detail views from those reads and uses only the two dedicated mutation routes. Responses expose no filesystem paths, prompts, checkpoints, stack traces, embeddings, credentials, arbitrary Cypher, or unrelated Neo4j labels.
+- `POST /api/cvs/{attachment_id}/reprocess` accepts an active or archived attachment with an available retained PDF, invokes the existing proposal tool/service with `reprocess=true` in a CV-scoped run, and returns the normal SSE stream through extraction and approval interrupt. It returns `APPROVAL_ACTION_REQUIRED`, `CV_NOT_REPROCESSABLE`, `CV_FILE_UNAVAILABLE`, or `CHUNKS_UNAVAILABLE` without changing active selection when preconditions fail.
+- `DELETE /api/cvs/{attachment_id}` rejects the active row with `409 CV_ACTIVE_DELETE_FORBIDDEN`, runs the retryable deletion coordinator for eligible non-active rows, and returns `204` only after SQLite metadata/owned records, retained file, and CV-owned Neo4j data are gone. A partial cleanup returns a stable safe failure with retry guidance; repeating DELETE is idempotent for `deleting` rows and returns `404 CV_ATTACHMENT_NOT_FOUND` only after completion.
 - `GET /api/observability/cvs/{attachment_id}/file` validates an `active` or `archived` attachment, checks retained local-file availability, and streams only `application/pdf` with a sanitized `Content-Disposition` filename. Unknown IDs return `CV_ATTACHMENT_NOT_FOUND`; a missing retained file returns `CV_FILE_UNAVAILABLE`. Both are safe JSON errors and never reveal a storage path.
 - Observability cursors have no expiry. A cursor is valid while its encoded tuple decodes and its row ordering remains queryable; malformed cursors return `422`, and a well-formed cursor past the final page returns an empty page with `next_cursor=null`.
-- `GET /api/observability/graph` exposes a bounded Candidate/Job/Skill snapshot and a typed unavailable or stale state. It never mutates the derived graph or accepts a client query. A `ready` response contains at most one Candidate (`id`, `revision`), 20 Jobs (`id`, `title`, `company`, `revision`) ordered by `id ASC`, and 40 Skills (`canonical_name`) ordered by `canonical_name ASC`; only `HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO` edges with `source_id`, `target_id`, and `type` are returned. Edges are sorted by `(type, source_id, target_id)` and capped at 100 after node selection. The response includes `nodes_truncated`, `edges_truncated`, `omitted_node_count`, and `omitted_edge_count`; no other node or edge properties are serialized. With no active Candidate, return `status='ready'`, an empty projection, and `NO_ACTIVE_PROFILE`.
+- `GET /api/observability/graph` exposes a bounded snapshot rooted at the active CV plus Candidate/Job/Skill data and a typed unavailable or stale state. It never mutates the graph or accepts a client query. A `ready` response contains at most one active CV, one Candidate, 20 CVSections, 60 CVEntries, 20 Jobs, and 40 Skills; only `PROJECTS_TO`, `HAS_SECTION`, `HAS_ENTRY`, `HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO` edges are returned. Node/edge caps, stable ordering, omission counts, and truncation flags remain mandatory. Full CV bodies and arbitrary attributes are never serialized. With no active Candidate/CV, return `status='ready'`, an empty projection, and `NO_ACTIVE_PROFILE`.
 
 ### 14.2 SSE contract
 
@@ -969,23 +1107,22 @@ FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may b
 
 ### 15.1 Layout
 
-- Astryx `AppShell`.
-- Left sidebar approximately 256 px.
-- Main content is `ChatLayout`.
-- Responsive sidebar collapses on small screens.
+- Preserve the implemented resizable Astryx shell and vertical observability tab rail from `docs/superpowers/plans/2026-07-16-observability-sidebar-ui-refresh.md`.
+- Preserve the current desktop proportions (approximately `13% / 47% / 40%` for rail/sidebar/chat composition), drag constraints, mobile drawer, and full-height chat behavior.
+- Phase 8 may change panel content density and action layout only as needed for CV Manager; it must not redesign colors, graph controls, navigation primitives, or the established responsive shell.
 
 ### 15.2 Sidebar
 
-The expanded sidebar contains `Overview`, `CV history`, `LLM chunks`, `Neo4j graph`, and `Agent runs` tabs.
+The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Neo4j graph`, and `Agent runs` tabs.
 
 - `Overview` retains active-CV filename, profile state, upload/replace, and view/download actions.
-- `CV history` lists prior attachment metadata and retained-file availability without changing which CV is active. An available active or archived PDF may open/download through the dedicated stream route; unavailable files show the stable safe error state.
+- `CV Manager` lists active and archived attachment metadata, retained-file availability, extraction state, and active badge. An archived CV offers Open/Download, **Make active**, and **Delete**; the active row offers Open/Download and **Re-extract**, but no delete action. Reprocessing streams the normal extraction/approval workflow and does not change the badge before approval. **Delete** requires explicit confirmation naming the file and refreshes CV/chunk/graph/run caches only after the API confirms completion.
 - `LLM chunks` lists fixed previews for a selected attachment; full chunk text is fetched only after that row is expanded.
-- `Neo4j graph` renders a bounded read-only Candidate/Job/Skill snapshot and falls back to a typed stale/unavailable state.
+- `Neo4j graph` renders the active CV, its dynamic sections/entries, and bounded Candidate/Job/Skill snapshot. After approval it changes to the newly active CV; after archived deletion it contains no nodes owned by the deleted CV.
 - `Agent runs` lists durable run/tool status and safe summaries, not arguments or internal traces.
 - Collapsed state retains a keyboard-accessible expand control and compact active-profile/CV status. Responsive behavior must not hide the chat composer or trap focus.
 
-Do not add a full profile editor, mutable profile history, arbitrary graph-query UI, or a developer console.
+Do not add a full profile editor, arbitrary graph-query UI, a developer console, or direct activation that bypasses extraction and approval.
 
 ### 15.3 Chat components
 
@@ -1028,11 +1165,11 @@ Each top result shows:
 
 ### 15.6 Observability sidebar boundaries
 
-The observability tabs are sidebar-local read models. They load on tab selection,
+The observability tabs and CV Manager are sidebar-local read models plus two explicit CV action states. They load on tab selection,
 cache successful pages by query, and keep independent loading, empty, and error
 states. The graph panel renders the Master allowlisted bounded snapshot and its
 truncation metadata; it does not infer hidden properties or query for more nodes.
-They do not add a second chat/SSE store or change agent tool behavior.
+Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, and run caches.
 
 ---
 
@@ -1198,6 +1335,10 @@ These checks are manual product acceptance only. Automated functional tests rema
 | ShopAIKey timeout/rate limit | Retry once, then persist failure |
 | Invalid structured output | One repair request, then fail safely |
 | No PDF text | `NO_EXTRACTABLE_TEXT`; no OCR |
+| CV batch/consolidation omission or invalid document | Keep current active CV; publish no partial draft; return stable extraction failure |
+| Archived CV selected without retained file/chunks | Keep active CV unchanged; return `CV_FILE_UNAVAILABLE` or `CHUNKS_UNAVAILABLE` |
+| Active CV deletion | Reject with `CV_ACTIVE_DELETE_FORBIDDEN`; require another approved active CV first |
+| Partial CV deletion | Keep attachment in `deleting`; return safe retry guidance and never report success |
 | Unsupported/oversized PDF | Reject before creating a persistent file or attachment row |
 | URL unsupported or unavailable | Ask user to paste JD text |
 | JD extraction failure | Keep raw record with failed status |
@@ -1218,8 +1359,8 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 ### 21.1 Direct sync rule
 
 - SQLite commits first and remains the source of truth.
-- After a successful profile or job write, call a focused Neo4j sync function immediately.
-- Use `Candidate.id='active'`, the SQLite Job UUID, and `Skill.canonical_key` as Neo4j identities.
+- After a successful profile/CV or job write, call a focused Neo4j sync function immediately.
+- Use `Candidate.id='active'`, attachment UUID for `CV.id`, scoped deterministic CV section/entry IDs, the SQLite Job UUID, and `Skill.canonical_key` as Neo4j identities.
 - Copy the SQLite row's `updated_at` into Neo4j as `source_updated_at` on Candidate and Job nodes.
 - Use Neo4j uniqueness constraints and `MERGE` so rerunning the same sync is safe.
 - Do not add an outbox table, background worker, retry queue, or graph-sync state machine.
@@ -1239,8 +1380,8 @@ Provide one local command that:
 1. Validates that every processed `full` or `partial` Job has a stored embedding matching the locked model and dimensions; exits non-zero with a configuration-restoration instruction on mismatch.
 2. Clears only JobAgent nodes and relationships.
 3. Recreates constraints and the vector index.
-4. Reads the active Candidate and all scorable Jobs from SQLite.
-5. Rebuilds Candidate, Job, Skill, and seed `RELATED_TO` data using the stored embeddings without calling ShopAIKey or mutating SQLite.
+4. Reads every retained approved CV document, the active Candidate, and all scorable Jobs from SQLite.
+5. Rebuilds CV/CVSection/CVEntry, Candidate, Job, Skill, and seed `RELATED_TO` data using stored documents/embeddings without calling ShopAIKey or mutating SQLite; only the active CV receives `PROJECTS_TO` to Candidate.
 6. Prints rebuilt entity counts and exits non-zero on failure.
 
 ---
@@ -1284,6 +1425,11 @@ EMBEDDING_DIMENSIONS=1536
 
 MAX_PDF_SIZE_MB=10
 MAX_PDF_PAGES=10
+CV_EXTRACT_BATCH_MAX_CHARS=12000
+CV_CONSOLIDATE_BATCH_MAX_CHARS=12000
+CV_READ_DEFAULT_MAX_CHARS=6000
+CV_READ_HARD_MAX_CHARS=12000
+CV_READ_MAX_RESULTS=10
 URL_FETCH_TIMEOUT_SECONDS=10
 URL_MAX_RESPONSE_MB=5
 TOOL_LOOP_LIMIT=6
@@ -1300,6 +1446,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 ### 24.1 Backend unit tests
 
 - Pydantic validation.
+- Dynamic `CVDocument` section/entry validation, unknown-heading retention, deterministic IDs, and document-to-profile projection.
+- Bounded extraction batching/consolidation coverage and `read_active_cv` mode/cursor/character caps.
 - `ToolResult` success/failure coupling with tool status and `error_code`.
 - UUID, UTC timestamp, enum, and singleton-ID conventions from Section 6.1.
 - Settings-dependent PDF/embedding limits are enforced by services rather than migration constants.
@@ -1317,6 +1465,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 ### 24.2 Backend integration tests
 
 - FastAPI PDF upload and validation.
+- Archived-CV reprocessing keeps the prior active CV until approval and switches profile/graph only after approval.
+- Active-delete rejection and idempotent non-active deletion across chunks, documents, drafts, runs/tools, redacted chat markers, storage, and CV-owned graph nodes while preserving shared Jobs/Skills.
 - SSE event schema/order.
 - LangGraph interrupt/resume.
 - `request_changes` completes the original run, deletes its checkpoint, preserves the draft, and lets the next correction start a new run.
@@ -1337,6 +1487,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Attachment chunk persistence, cursor pagination, detail authorization, preview
   bounds, and redaction of PDF bytes/provider data from observability responses.
 - Bounded Neo4j graph snapshot with unavailable/stale typed states and no graph mutation.
+- Active-CV graph projection includes dynamic sections/entries and changes with approved selection.
+- Agent prompt contains only the active CV outline; bounded `read_active_cv` cannot access archived IDs and invalidates cursors after active selection changes.
 
 Normal automated tests must not call the real ShopAIKey API.
 
@@ -1353,6 +1505,7 @@ Normal automated tests must not call the real ShopAIKey API.
 - Error and disconnected stream states.
 - Observability tabs: lazy load, cache, collapsed/expanded accessibility, chunk
   preview-to-detail expansion, empty/loading/error states, and narrow layouts.
+- CV Manager active badge, reprocess/approval flow, active-delete guard, confirmed archived deletion, cache invalidation, and partial-cleanup errors within the existing refreshed layout.
 
 ### 24.4 End-to-end smoke test
 
@@ -1363,6 +1516,10 @@ Send greeting
 → upload synthetic PDF
 → create profile draft
 → approve profile
+→ upload and approve a second CV
+→ reprocess the archived first CV and approve it active
+→ verify Neo4j and Agent bounded reads use the first CV
+→ delete the now-archived second CV and verify owned SQLite/file/graph/run data is gone
 → submit JD text
 → save/sync JD
 → request matching
@@ -1566,6 +1723,29 @@ Exit gate:
 
 ---
 
+### Phase 8 - CV Manager, document-first extraction, and bounded active-CV reads
+
+Tasks:
+
+- [ ] Add `cv_documents`, CV/run/message ownership fields, deletion lifecycle, and migrations while preserving existing local data.
+- [ ] Replace profile-first extraction with bounded full-document section/entry extraction, consolidation/coverage audit, and document-to-profile projection.
+- [ ] Support archived-CV reprocessing through the existing Agent approval flow without changing active state before approval.
+- [ ] Add retryable non-active CV deletion with chat redaction, run/tool/checkpoint cleanup, file removal, and CV-owned graph deletion.
+- [ ] Extend Neo4j projection/rebuild/observability with active `CV`, `CVSection`, and `CVEntry` nodes while preserving shared Job/Skill data.
+- [ ] Add compact active-CV outline context and the bounded `read_active_cv` seventh tool.
+- [ ] Convert the implemented `CV history` panel to `CV Manager` actions while preserving the completed resizable UI refresh, colors, components, graph interactions, and responsive layout.
+- [ ] Verify unknown-section retention using a synthetic CV with Certifications and another unmodeled heading; verify active selection, deletion, graph ownership, and bounded Agent retrieval end to end.
+
+Exit gate:
+
+- Certificates and every meaningful unknown section survive document extraction and are queryable through the active CV tool and visible as bounded Neo4j nodes.
+- Reprocessing an archive requires approval and never disrupts the current active CV on failure or request changes.
+- The active CV cannot be deleted; deleting an archived CV removes all CV-owned data and redacts linked chat content without deleting shared Jobs/Skills.
+- Agent prompts contain only a compact outline by default, and all document reads enforce active-only result/character/cursor bounds.
+- Existing chat, matching, observability interactions, refreshed desktop/mobile layout, and local-release tests remain green.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -1580,6 +1760,7 @@ Recommended sequence for one intern developer:
 | Phase 5 | 3–5 days |
 | Phase 6 | 2–4 days |
 | Phase 7 | 4–6 days |
+| Phase 8 | 5–8 days |
 
 This is approximately 3–5 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
@@ -1592,16 +1773,18 @@ JobAgent MVP is done only when all conditions are true:
 - The user can upload a PDF CV from sidebar or chat.
 - The user can chat naturally about general topics without triggering JobAgent tools.
 - The Agent creates a validated profile draft.
+- The extractor preserves all meaningful CV headings/entries in a validated per-CV document before deriving the profile, including unknown sections such as Certifications.
 - Profile/preference writes require in-chat approval.
 - Only one active CV/profile exists after commit.
+- CV Manager can reprocess an archive for approval, visibly switch the active CV/profile/graph after approval, and fully delete only a non-active CV.
+- Agent context carries a compact active-CV outline and bounded `read_active_cv` retrieval never exposes an archived CV or unbounded document body.
 - The Agent remembers approved corrections across restarts.
 - The user can submit public URL or raw JD text.
 - Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
 - Scorable jobs synchronize to Neo4j.
 - Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
 - Tool activity is visible and concise.
-- The sidebar exposes bounded read-only CV upload history, opt-in chunk detail,
-  Agent-run history, and derived graph status without exposing internal data.
+- The sidebar exposes CV Manager, opt-in chunk detail, Agent-run history, and the active-CV-derived graph without exposing internal data or redesigning the implemented observability shell.
 - Failure paths do not report false success.
 - Automated functional tests pass and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.
@@ -1617,6 +1800,7 @@ Only consider these after the MVP demo flow is stable:
 - Public job discovery.
 - Application tracking.
 - Multiple career profiles.
+- Cross-document Agent search over archived CVs.
 - Multiple conversations.
 - DOCX support.
 - Public cloud deployment and authentication.
@@ -1630,11 +1814,11 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Evidence is sufficient to begin Phase 0 implementation because all material product and architecture choices are locked, while uncertain technical integrations are isolated behind Phase 0 pass/fail gates.
+Phases 0-7 and the completed observability sidebar UI refresh form the implemented baseline. This Version 1.7 amendment locks the Phase 8 CV Manager increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-9 receive a fresh portfolio review.
 
 The project remains intentionally narrow:
 
-> One user, one natural conversation, one active CV, one Agent with job-specific tools, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, and transparent matching behavior.
+> One user, one natural conversation, one approved active CV selected through CV Manager, one Agent with bounded active-document access, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, and transparent matching behavior.
 
 ---
 
