@@ -18,7 +18,19 @@ Object.defineProperty(window, 'matchMedia', {
 
 // ChatLayout / ChatMessageList use ResizeObserver (jsdom does not implement it).
 class ResizeObserverStub {
-  observe(): void {}
+  constructor(private readonly callback: ResizeObserverCallback) {}
+
+  observe(target: Element): void {
+    this.callback(
+      [
+        {
+          target,
+          contentRect: target.getBoundingClientRect(),
+        } as ResizeObserverEntry,
+      ],
+      this,
+    );
+  }
   unobserve(): void {}
   disconnect(): void {}
 }
