@@ -48,6 +48,24 @@ beforeEach(() => {
 });
 
 describe('observability navigation', () => {
+  it('uses the reference 13/47/40 desktop proportions', async () => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 1000,
+    });
+    localStorage.clear();
+
+    renderObservabilitySidebar();
+
+    expect(
+      await screen.findByRole('navigation', {name: 'Side navigation'}),
+    ).toHaveStyle({width: '600px'});
+    expect(
+      window.getComputedStyle(screen.getByTestId('jobagent-obs-root'))
+        .gridTemplateColumns,
+    ).toBe('13fr 47fr');
+  });
+
   it('uses a vertical tab list and Astryx resize handle', async () => {
     renderObservabilitySidebar();
     const tablist = await screen.findByRole('tablist', {

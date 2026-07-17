@@ -5,7 +5,6 @@
 
 .jobagent-obs-root {
   display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr);
   width: 100%;
   min-width: 0;
 }

@@ -114,6 +114,7 @@ export function ObservabilitySidebar({
       className="jobagent-obs-root"
       data-collapsed="false"
       data-testid="jobagent-obs-root"
+      style={{gridTemplateColumns: '13fr 47fr'}}
     >
       <div data-testid="jobagent-obs-tabs">
         <ObservabilityTabList

@@ -83,13 +83,15 @@ function SidebarCollapseControl() {
 }
 
 function CvSidebarShell({children}: {children?: ReactNode}) {
+  const viewportWidth = window.innerWidth;
+
   return (
     <SideNav
       resizable={{
-        defaultWidth: 420,
+        defaultWidth: Math.round(viewportWidth * 0.6),
         minWidth: 360,
-        maxWidth: 560,
-        autoSaveId: 'jobagent-observability-sidebar-width',
+        maxWidth: Math.round(viewportWidth * 0.72),
+        autoSaveId: 'jobagent-observability-sidebar-width-v2',
       }}
       collapsible={{hasButton: false}}
       className="jobagent-cv-sidebar-shell"
