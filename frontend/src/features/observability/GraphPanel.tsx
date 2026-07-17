@@ -119,7 +119,10 @@ export function GraphPanel({resource, onRefresh}: GraphPanelProps) {
           {statusBanner(snapshot)}
 
           {model ? (
-            <GraphVisualizationBoundary key={model.identity}>
+            <GraphVisualizationBoundary
+              key={model.identity}
+              resetKey={snapshot}
+            >
               <GraphCanvas model={model} />
             </GraphVisualizationBoundary>
           ) : null}

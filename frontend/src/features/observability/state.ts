@@ -17,6 +17,7 @@ import type {
   ObservabilityTabId,
   RunHistoryPage,
 } from './types';
+import {useLatestRequest} from './useLatestRequest';
 
 export type RequestPhase =
   | 'idle'
@@ -325,6 +326,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
     observabilityReducer,
     initialObservabilityState,
   );
+  const beginLatestRequest = useLatestRequest();
 
   const selectTab = useCallback((tab: ObservabilityTabId) => {
     dispatch({type: 'select_tab', tab});
@@ -347,15 +349,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.cvHistory.loaded && !opts?.force) {
         return;
       }
+      const isLatest = beginLatestRequest('cv-history');
       dispatch({type: 'resource_loading', resource: 'cvHistory'});
       try {
         const data = await api.fetchCvHistory({}, opts?.signal);
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'cvHistory', data});
       } catch (err) {
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({
@@ -365,7 +368,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, state.cvHistory.loaded],
+    [api, beginLatestRequest, state.cvHistory.loaded],
   );
 
   const loadRuns = useCallback(
@@ -373,15 +376,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.runs.loaded && !opts?.force) {
         return;
       }
+      const isLatest = beginLatestRequest('runs');
       dispatch({type: 'resource_loading', resource: 'runs'});
       try {
         const data = await api.fetchRunHistory({}, opts?.signal);
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'runs', data});
       } catch (err) {
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({
@@ -391,7 +395,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, state.runs.loaded],
+    [api, beginLatestRequest, state.runs.loaded],
   );
 
   const loadGraph = useCallback(
@@ -399,15 +403,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.graph.loaded && !opts?.force) {
         return;
       }
+      const isLatest = beginLatestRequest('graph');
       dispatch({type: 'resource_loading', resource: 'graph'});
       try {
         const data = await api.fetchGraphSnapshot(opts?.signal);
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'graph', data});
       } catch (err) {
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({
@@ -417,7 +422,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, state.graph.loaded],
+    [api, beginLatestRequest, state.graph.loaded],
   );
 
   const loadChunkList = useCallback(
@@ -429,15 +434,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (cached?.loaded && !opts?.force) {
         return;
       }
+      const isLatest = beginLatestRequest(`chunk-list:${attachmentId}`);
       dispatch({type: 'chunk_list_loading', attachmentId});
       try {
         const data = await api.fetchChunkList(attachmentId, {}, opts?.signal);
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({type: 'chunk_list_success', attachmentId, data});
       } catch (err) {
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
         dispatch({
@@ -447,7 +453,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, state.chunkLists],
+    [api, beginLatestRequest, state.chunkLists],
   );
 
   const expandChunk = useCallback(

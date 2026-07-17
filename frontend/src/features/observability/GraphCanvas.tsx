@@ -22,11 +22,13 @@ import type {
   GraphNodeDatum,
 } from './graphPresentation';
 import {getParallelEdgeOffsets} from './graphEdgeLayout';
+import {
+  formatGraphNodeLabel,
+  GRAPH_NODE_LABEL_Y,
+  GRAPH_NODE_RADIUS,
+} from './graphNodeRendering';
 import {useGraphSimulation} from './useGraphSimulation';
 import {useGraphViewport} from './useGraphViewport';
-
-const NODE_RADIUS = 24;
-const MAX_NODE_LABEL_LENGTH = 18;
 
 type GraphCanvasProps = {
   model: GraphModel;
@@ -53,10 +55,10 @@ function GraphEdgeView({link, markerId, offset, labelOffset}: GraphEdgeViewProps
   const unitY = deltaY / distance;
   const normalX = -unitY;
   const normalY = unitX;
-  const startX = sourceX + unitX * NODE_RADIUS + normalX * offset;
-  const startY = sourceY + unitY * NODE_RADIUS + normalY * offset;
-  const endX = targetX - unitX * (NODE_RADIUS + 4) + normalX * offset;
-  const endY = targetY - unitY * (NODE_RADIUS + 4) + normalY * offset;
+  const startX = sourceX + unitX * GRAPH_NODE_RADIUS + normalX * offset;
+  const startY = sourceY + unitY * GRAPH_NODE_RADIUS + normalY * offset;
+  const endX = targetX - unitX * (GRAPH_NODE_RADIUS + 4) + normalX * offset;
+  const endY = targetY - unitY * (GRAPH_NODE_RADIUS + 4) + normalY * offset;
   const labelX = (sourceX + targetX) / 2 + normalX * labelOffset;
   const labelY = (sourceY + targetY) / 2 + normalY * labelOffset;
   const labelWidth = link.type.length * 7 + 12;
@@ -103,10 +105,7 @@ function GraphNodeView({
 }: GraphNodeViewProps) {
   const x = node.x ?? 0;
   const y = node.y ?? 0;
-  const visibleLabel =
-    node.label.length > MAX_NODE_LABEL_LENGTH
-      ? `${node.label.slice(0, MAX_NODE_LABEL_LENGTH - 3)}...`
-      : node.label;
+  const visibleLabel = formatGraphNodeLabel(node.label);
 
   function handleKeyDown(event: KeyboardEvent<SVGGElement>) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -159,8 +158,8 @@ function GraphNodeView({
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerCancel}
     >
-      <circle r={NODE_RADIUS} />
-      <text className="jobagent-graph-node-label" y={NODE_RADIUS + 14}>
+      <circle r={GRAPH_NODE_RADIUS} />
+      <text className="jobagent-graph-node-label" y={GRAPH_NODE_LABEL_Y}>
         {visibleLabel}
       </text>
     </g>

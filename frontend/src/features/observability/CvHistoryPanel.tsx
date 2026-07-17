@@ -58,7 +58,7 @@ export function CvHistoryPanel({
         eyebrow="Attachments"
         title="CV history"
         onRefresh={onRefresh}
-        isRefreshing={resource.phase === 'loading' && Boolean(resource.data)}
+        isRefreshing={resource.phase === 'loading'}
         refreshTestId="jobagent-obs-cv-history-refresh"
       />
 

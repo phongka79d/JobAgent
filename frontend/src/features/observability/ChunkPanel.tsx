@@ -73,7 +73,7 @@ export function ChunkPanel({
         eyebrow="Extracted text"
         title="LLM chunks"
         onRefresh={onRefresh}
-        isRefreshing={phase === 'loading' && Boolean(listResource?.data)}
+        isRefreshing={phase === 'loading'}
         refreshTestId="jobagent-obs-chunks-refresh"
       />
 

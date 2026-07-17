@@ -13,6 +13,8 @@ import {
   type RefObject,
 } from 'react';
 
+import {getGraphNodeRenderedExtent} from './graphNodeRendering';
+
 export type GraphViewportSize = {
   width: number;
   height: number;
@@ -26,7 +28,7 @@ export type GraphViewport = {
 };
 
 export function calculateFitTransform(
-  nodes: ReadonlyArray<{x?: number; y?: number}>,
+  nodes: ReadonlyArray<{x?: number; y?: number; label?: string}>,
   size: GraphViewportSize,
   padding = 40,
 ) {
@@ -38,10 +40,11 @@ export function calculateFitTransform(
       Number.isFinite(node.y),
   );
   if (points.length === 0) return zoomIdentity;
-  const minX = Math.min(...points.map((node) => node.x));
-  const maxX = Math.max(...points.map((node) => node.x));
-  const minY = Math.min(...points.map((node) => node.y));
-  const maxY = Math.max(...points.map((node) => node.y));
+  const extents = points.map(getGraphNodeRenderedExtent);
+  const minX = Math.min(...extents.map((extent) => extent.left));
+  const maxX = Math.max(...extents.map((extent) => extent.right));
+  const minY = Math.min(...extents.map((extent) => extent.top));
+  const maxY = Math.max(...extents.map((extent) => extent.bottom));
   const spanX = Math.max(1, maxX - minX);
   const spanY = Math.max(1, maxY - minY);
   const scale = Math.min(
@@ -67,7 +70,7 @@ export function calculateFitTransform(
 export function useGraphViewport(
   containerRef: RefObject<HTMLElement | null>,
   svgRef: RefObject<SVGSVGElement | null>,
-  nodes: ReadonlyArray<{x?: number; y?: number}>,
+  nodes: ReadonlyArray<{x?: number; y?: number; label?: string}>,
   identity: string,
 ): GraphViewport {
   const [size, setSize] = useState<GraphViewportSize>({width: 0, height: 0});

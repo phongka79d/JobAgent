@@ -3,19 +3,33 @@ import {Component, type ReactNode} from 'react';
 
 type GraphVisualizationBoundaryProps = {
   children: ReactNode;
+  resetKey: unknown;
 };
 
 type GraphVisualizationBoundaryState = {
   failed: boolean;
+  resetKey: unknown;
 };
 
 export class GraphVisualizationBoundary extends Component<
   GraphVisualizationBoundaryProps,
   GraphVisualizationBoundaryState
 > {
-  state: GraphVisualizationBoundaryState = {failed: false};
+  state: GraphVisualizationBoundaryState = {
+    failed: false,
+    resetKey: this.props.resetKey,
+  };
 
-  static getDerivedStateFromError(): GraphVisualizationBoundaryState {
+  static getDerivedStateFromProps(
+    props: GraphVisualizationBoundaryProps,
+    state: GraphVisualizationBoundaryState,
+  ): GraphVisualizationBoundaryState | null {
+    return state.resetKey === props.resetKey
+      ? null
+      : {failed: false, resetKey: props.resetKey};
+  }
+
+  static getDerivedStateFromError(): Partial<GraphVisualizationBoundaryState> {
     return {failed: true};
   }
 

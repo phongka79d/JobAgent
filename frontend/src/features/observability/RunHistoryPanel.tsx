@@ -67,7 +67,7 @@ export function RunHistoryPanel({
         eyebrow="Execution history"
         title="Agent runs"
         onRefresh={onRefresh}
-        isRefreshing={resource.phase === 'loading' && Boolean(resource.data)}
+        isRefreshing={resource.phase === 'loading'}
         refreshTestId="jobagent-obs-runs-refresh"
       />
 

@@ -94,6 +94,29 @@ describe('graph viewport fitting', () => {
     expect(transform.apply([100, 50])).toEqual([300, 200]);
   });
 
+  it('keeps sparse node circles and external labels inside the fit viewport', () => {
+    const nodes = [
+      {x: 100, y: 200, label: 'Principal Engineer'},
+      {x: 120, y: 200, label: 'Distributed Systems'},
+    ];
+    const transform = calculateFitTransform(nodes, {width: 300, height: 200});
+    const renderedExtents = nodes.map((node) => ({
+      left: node.x - 63,
+      right: node.x + 63,
+      top: node.y - 24,
+      bottom: node.y + 48,
+    }));
+
+    expect(transform.k).toBeGreaterThan(1);
+    expect(transform.k).toBeLessThan(4);
+    for (const extent of renderedExtents) {
+      expect(transform.applyX(extent.left)).toBeGreaterThanOrEqual(40 - 1e-9);
+      expect(transform.applyX(extent.right)).toBeLessThanOrEqual(260 + 1e-9);
+      expect(transform.applyY(extent.top)).toBeGreaterThanOrEqual(40 - 1e-9);
+      expect(transform.applyY(extent.bottom)).toBeLessThanOrEqual(160 + 1e-9);
+    }
+  });
+
   it('ignores unpositioned nodes and keeps the minimum fit scale bounded', () => {
     const transform = calculateFitTransform(
       [{x: Number.NaN, y: 10}, {}, {x: 0, y: 0}, {x: 10_000, y: 10_000}],
@@ -150,7 +173,7 @@ describe('graph viewport fitting', () => {
 
     rerender({nodes: [{x: 0, y: 0}, {x: 200, y: 100}], identity: 'graph-a'});
     const firstFit = result.current.transform;
-    expect(firstFit.k).toBe(2.6);
+    expect(firstFit.k).toBeCloseTo(520 / (200 + 48));
     expect(
       result.current.toGraphPoint(
         firstFit.applyX(100) + 10,

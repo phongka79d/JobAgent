@@ -1,7 +1,12 @@
-import {act, cleanup, screen, waitFor, within} from '@testing-library/react';
+import {Theme} from '@astryxdesign/core';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
+import {act, cleanup, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {ChunkPanel} from '../features/observability/ChunkPanel';
+import {CvHistoryPanel} from '../features/observability/CvHistoryPanel';
+import {RunHistoryPanel} from '../features/observability/RunHistoryPanel';
 import {
   ATTACHMENT_ID,
   MSG_ID,
@@ -23,6 +28,53 @@ beforeEach(() => {
 });
 
 describe('Observability list panels', () => {
+  it.each([
+    {
+      name: 'CV history',
+      testId: 'jobagent-obs-cv-history-refresh',
+      panel: (
+        <CvHistoryPanel
+          resource={{phase: 'loading', data: null, error: null, loaded: false}}
+          selectedAttachmentId={null}
+          onSelect={vi.fn()}
+          onOpenFile={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      ),
+    },
+    {
+      name: 'LLM chunks',
+      testId: 'jobagent-obs-chunks-refresh',
+      panel: (
+        <ChunkPanel
+          selectedAttachmentId={ATTACHMENT_ID}
+          listResource={{phase: 'loading', data: null, error: null, loaded: false}}
+          details={{}}
+          expandedOrdinal={null}
+          onExpand={vi.fn()}
+          onCollapse={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      ),
+    },
+    {
+      name: 'Agent runs',
+      testId: 'jobagent-obs-runs-refresh',
+      panel: (
+        <RunHistoryPanel
+          resource={{phase: 'loading', data: null, error: null, loaded: false}}
+          expandedRunId={null}
+          onToggleRun={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      ),
+    },
+  ])('disables the $name header refresh during initial loading', ({panel, testId}) => {
+    render(<Theme theme={neutralTheme}>{panel}</Theme>);
+
+    expect(screen.getByTestId(testId)).toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('shows run status, duration, safe metadata, and a tool timeline', async () => {
     renderObservabilitySidebar(mockObservabilityApi());
     await userEvent.click(screen.getByRole('tab', {name: 'Agent runs'}));
