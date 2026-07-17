@@ -29,6 +29,8 @@ describe('Observability list panels', () => {
     const run = await screen.findByTestId(
       `jobagent-obs-run-toggle-${RUN_ID}`,
     );
+    const runLabel = within(run).getByText(`Run ${RUN_ID}`);
+    expect(runLabel).toHaveClass('jobagent-obs-meta');
     expect(run).toHaveTextContent('Completed');
     expect(run).toHaveTextContent('1 min');
     await userEvent.click(run);

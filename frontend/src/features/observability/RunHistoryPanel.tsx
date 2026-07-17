@@ -119,7 +119,11 @@ export function RunHistoryPanel({
             return (
               <ListItem
                 key={run.id}
-                label={`Run ${run.id}`}
+                label={
+                  <Text type="body" className="jobagent-obs-meta">
+                    Run {run.id}
+                  </Text>
+                }
                 description={
                   <Text
                     type="supporting"
