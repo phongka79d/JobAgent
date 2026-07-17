@@ -13,6 +13,18 @@ import {
   renderObservabilitySidebar,
 } from './support/observability';
 
+function expectVerticalTabsToFit(tablist: HTMLElement) {
+  const strip = tablist.querySelector<HTMLElement>('.astryx-tab-list');
+  expect(strip).not.toBeNull();
+  expect(window.getComputedStyle(strip!).flexDirection).toBe('column');
+  expect(window.getComputedStyle(strip!).width).toBe('100%');
+
+  for (const tab of strip!.querySelectorAll<HTMLElement>('[data-tab-value]')) {
+    expect(window.getComputedStyle(tab).width).toBe('100%');
+    expect(window.getComputedStyle(tab).maxWidth).toBe('100%');
+  }
+}
+
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
     this.setAttribute('open', '');
@@ -34,9 +46,11 @@ beforeEach(() => {
 describe('observability navigation', () => {
   it('uses a vertical tab list and Astryx resize handle', async () => {
     renderObservabilitySidebar();
-    expect(
-      await screen.findByRole('tablist', {name: 'Observability inspector'}),
-    ).toHaveAttribute('aria-orientation', 'vertical');
+    const tablist = await screen.findByRole('tablist', {
+      name: 'Observability inspector',
+    });
+    expect(tablist).toHaveAttribute('aria-orientation', 'vertical');
+    expectVerticalTabsToFit(tablist);
     expect(
       screen.getByRole('separator', {name: 'Resize sidebar'}),
     ).toBeInTheDocument();
@@ -46,6 +60,9 @@ describe('observability navigation', () => {
     renderObservabilitySidebar();
     await userEvent.click(
       await screen.findByTestId('jobagent-sidebar-collapse'),
+    );
+    expectVerticalTabsToFit(
+      screen.getByRole('tablist', {name: 'Observability inspector'}),
     );
     expect(screen.getByRole('tab', {name: 'Neo4j graph'})).toBeInTheDocument();
     await userEvent.click(screen.getByRole('tab', {name: 'Neo4j graph'}));
@@ -80,6 +97,9 @@ describe('observability navigation', () => {
     );
     const open = await screen.findByRole('button', {name: 'Open navigation'});
     await userEvent.click(open);
+    expectVerticalTabsToFit(
+      await screen.findByRole('tablist', {name: 'Observability inspector'}),
+    );
     expect(await screen.findByRole('tab', {name: 'Overview'})).toBeInTheDocument();
     expect(screen.getByTestId('mobile-chat-content')).toBeInTheDocument();
   });

@@ -21,6 +21,11 @@
   min-width: 0;
 }
 
+.jobagent-obs-tab-rail {
+  width: 100%;
+  max-width: 100%;
+}
+
 .jobagent-obs-content {
   border-inline-start: 1px solid var(--color-border);
   padding: var(--spacing-2);

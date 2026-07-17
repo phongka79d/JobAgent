@@ -4,6 +4,17 @@ import {Tooltip} from '@astryxdesign/core/Tooltip';
 
 import type {ObservabilityTabId} from './types';
 
+const TAB_FIT_STYLE = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
+} as const;
+
+const VERTICAL_TAB_LIST_STYLE = {
+  ...TAB_FIT_STYLE,
+  flexDirection: 'column',
+} as const;
+
 const TABS: ReadonlyArray<{
   id: ObservabilityTabId;
   label: string;
@@ -40,6 +51,7 @@ export function ObservabilityTabList({
         }}
         orientation="vertical"
         size="sm"
+        style={VERTICAL_TAB_LIST_STYLE}
       >
         {TABS.map((tab) => (
           <Tab
@@ -50,6 +62,7 @@ export function ObservabilityTabList({
             role="tab"
             aria-selected={value === tab.id}
             aria-controls={`jobagent-obs-panel-${tab.id}`}
+            style={TAB_FIT_STYLE}
             icon={
               isCollapsed ? (
                 <Tooltip content={tab.label} placement="end">
