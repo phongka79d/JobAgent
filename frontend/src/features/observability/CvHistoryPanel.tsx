@@ -1,15 +1,21 @@
 /**
- * CV history inspector panel — select attachment; open/download when file_available.
+ * CV history inspector panel - select attachment; open/download when file_available.
  */
 
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
-import {Spinner} from '@astryxdesign/core/Spinner';
-import {Text} from '@astryxdesign/core/Text';
-import {HStack} from '@astryxdesign/core/HStack';
+import {List, ListItem} from '@astryxdesign/core/List';
+import {
+  MetadataList,
+  MetadataListItem,
+} from '@astryxdesign/core/MetadataList';
+import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {VStack} from '@astryxdesign/core/VStack';
 
+import {ObservabilityListSkeleton} from './ObservabilityListSkeleton';
+import {ObservabilityPanelHeader} from './ObservabilityPanelHeader';
+import {formatObservabilityDateTime} from './observabilityFormat';
 import type {CachedResource} from './state';
 import type {CvHistoryItem, CvHistoryPage} from './types';
 
@@ -21,6 +27,13 @@ export type CvHistoryPanelProps = {
   onRefresh: () => void;
 };
 
+function attachmentVariant(state: CvHistoryItem['state']) {
+  if (state === 'active') return 'success' as const;
+  if (state === 'staged') return 'warning' as const;
+  if (state === 'failed') return 'error' as const;
+  return 'neutral' as const;
+}
+
 export function CvHistoryPanel({
   resource,
   selectedAttachmentId,
@@ -29,33 +42,31 @@ export function CvHistoryPanel({
   onRefresh,
 }: CvHistoryPanelProps) {
   const items = resource.data?.items ?? [];
+  const selectedItem =
+    items.find((item) => item.id === selectedAttachmentId) ?? null;
 
   return (
-    <div
+    <VStack
+      gap={2}
       className="jobagent-obs-panel"
       data-testid="jobagent-obs-cv-history"
       role="tabpanel"
       id="jobagent-obs-panel-cv-history"
       aria-labelledby="jobagent-obs-tab-cv-history"
     >
-      <HStack gap={2} hAlign="between" vAlign="center">
-        <Text type="label">CV history</Text>
-        <Button
-          label="Refresh"
-          variant="ghost"
-          size="sm"
-          onClick={onRefresh}
-          data-testid="jobagent-obs-cv-history-refresh"
-        />
-      </HStack>
+      <ObservabilityPanelHeader
+        eyebrow="Attachments"
+        title="CV history"
+        onRefresh={onRefresh}
+        isRefreshing={resource.phase === 'loading' && Boolean(resource.data)}
+        refreshTestId="jobagent-obs-cv-history-refresh"
+      />
 
       {resource.phase === 'loading' && !resource.data ? (
-        <HStack gap={2} vAlign="center" data-testid="jobagent-obs-cv-history-loading">
-          <Spinner size="sm" />
-          <Text type="body" color="secondary">
-            Loading CV history…
-          </Text>
-        </HStack>
+        <ObservabilityListSkeleton
+          rows={3}
+          testId="jobagent-obs-cv-history-loading"
+        />
       ) : null}
 
       {resource.phase === 'error' && resource.error ? (
@@ -63,7 +74,7 @@ export function CvHistoryPanel({
           status="error"
           title="CV history unavailable"
           description={`${resource.error.summary} (${resource.error.code})`}
-          container="card"
+          container="section"
           data-testid="jobagent-obs-cv-history-error"
         />
       ) : null}
@@ -79,53 +90,67 @@ export function CvHistoryPanel({
       ) : null}
 
       {items.length > 0 ? (
-        <VStack gap={2} width="100%">
-          {items.map((item) => {
-            const selected = item.id === selectedAttachmentId;
-            return (
-              <div
-                key={item.id}
-                className="jobagent-obs-row"
-                data-testid={`jobagent-obs-cv-item-${item.id}`}
-                data-selected={selected ? 'true' : 'false'}
-              >
-                <Text type="body" className="jobagent-obs-meta">
-                  {item.original_name}
-                </Text>
-                <Text type="supporting" color="secondary" className="jobagent-obs-meta">
-                  {item.state}
-                  {' · '}
-                  {item.file_hash_abbreviated}
-                  {item.file_available ? '' : ' · file unavailable'}
-                </Text>
-                <div className="jobagent-obs-row-actions">
-                  <Button
-                    label={selected ? 'Selected' : 'Select for chunks'}
-                    variant={selected ? 'primary' : 'secondary'}
-                    size="sm"
-                    onClick={() => onSelect(item)}
-                    data-testid={`jobagent-obs-cv-select-${item.id}`}
-                  />
-                  <Button
-                    label="Open / download"
-                    variant="secondary"
-                    size="sm"
-                    isDisabled={!item.file_available}
-                    onClick={() => onOpenFile(item)}
-                    data-testid={`jobagent-obs-cv-open-${item.id}`}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </VStack>
+        <List density="compact" hasDividers header="CV history">
+          {items.map((item) => (
+            <ListItem
+              key={item.id}
+              label={item.original_name}
+              description={`${item.state} · ${formatObservabilityDateTime(item.created_at)}`}
+              startContent={
+                <StatusDot
+                  variant={attachmentVariant(item.state)}
+                  label={item.state}
+                />
+              }
+              endContent={item.file_available ? 'Available' : 'Unavailable'}
+              isSelected={item.id === selectedAttachmentId}
+              onClick={() => onSelect(item)}
+              data-testid={`jobagent-obs-cv-select-${item.id}`}
+            />
+          ))}
+        </List>
       ) : null}
 
-      {resource.phase === 'loading' && resource.data ? (
-        <Text type="supporting" color="secondary">
-          Refreshing…
-        </Text>
+      {selectedItem ? (
+        <VStack
+          gap={2}
+          className="jobagent-obs-detail"
+          data-testid="jobagent-obs-cv-detail"
+        >
+          <MetadataList
+            columns="single"
+            label={{position: 'top'}}
+            title="Selected CV"
+          >
+            <MetadataListItem label="State">
+              {selectedItem.state}
+            </MetadataListItem>
+            <MetadataListItem label="Hash">
+              {selectedItem.file_hash_abbreviated}
+            </MetadataListItem>
+            <MetadataListItem label="Page count">
+              {selectedItem.page_count ?? 'Unavailable'}
+            </MetadataListItem>
+            <MetadataListItem label="Size">
+              {selectedItem.size_bytes} bytes
+            </MetadataListItem>
+            <MetadataListItem label="Created">
+              {formatObservabilityDateTime(selectedItem.created_at)}
+            </MetadataListItem>
+            <MetadataListItem label="Updated">
+              {formatObservabilityDateTime(selectedItem.updated_at)}
+            </MetadataListItem>
+          </MetadataList>
+          <Button
+            label="Open / download"
+            variant="secondary"
+            size="sm"
+            isDisabled={!selectedItem.file_available}
+            onClick={() => onOpenFile(selectedItem)}
+            data-testid={`jobagent-obs-cv-open-${selectedItem.id}`}
+          />
+        </VStack>
       ) : null}
-    </div>
+    </VStack>
   );
 }

@@ -138,7 +138,7 @@ describe('ObservabilitySidebar composition', () => {
     expect(screen.getByText('Preview only text')).toBeInTheDocument();
     expect(screen.queryByText('Full expanded chunk body for inspection')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('jobagent-obs-chunk-expand-0'));
+    await userEvent.click(screen.getByTestId('jobagent-obs-chunk-toggle-0'));
     await waitFor(() => {
       expect(api.fetchChunkDetail).toHaveBeenCalled();
     });
@@ -156,6 +156,9 @@ describe('ObservabilitySidebar composition', () => {
     await waitFor(() => {
       expect(screen.getByText('archived.pdf')).toBeInTheDocument();
     });
+    await userEvent.click(
+      screen.getByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
+    );
     const openBtn = screen.getByTestId(`jobagent-obs-cv-open-${ATTACHMENT_ID}`);
     expect(openBtn).toBeDisabled();
   });

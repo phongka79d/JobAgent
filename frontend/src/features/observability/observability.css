@@ -64,7 +64,18 @@
   overflow-wrap: anywhere;
 }
 
+.jobagent-obs-detail {
+  min-width: 0;
+  padding-block: var(--spacing-2);
+  border-block-start: var(--border-width) solid var(--color-border);
+  overflow-wrap: anywhere;
+}
+
 .jobagent-obs-fulltext {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
