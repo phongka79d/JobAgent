@@ -8,7 +8,6 @@ import {useSideNavCollapse} from '@astryxdesign/core/SideNav';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 
-import type {ObservabilityApi} from './api';
 import {ChunkPanel} from './ChunkPanel';
 import {CvHistoryPanel} from './CvHistoryPanel';
 import {GraphPanel} from './GraphPanel';
@@ -30,19 +29,6 @@ export type ObservabilitySidebarProps = {
   };
   observability: ReturnType<typeof useObservabilityState>;
 };
-
-export function ObservabilityStateBoundary({
-  api,
-  children,
-}: {
-  api?: Partial<ObservabilityApi>;
-  children: (
-    observability: ReturnType<typeof useObservabilityState>,
-  ) => ReactNode;
-}) {
-  const observability = useObservabilityState({api});
-  return children(observability);
-}
 
 export function ObservabilitySidebar({
   overview,

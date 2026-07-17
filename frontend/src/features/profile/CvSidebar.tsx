@@ -3,7 +3,13 @@
  * Profile and upload state stay here; presentation and inspector state are delegated.
  */
 
-import {useCallback, useEffect, useState} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {Icon} from '@astryxdesign/core/Icon';
 import {NavIcon} from '@astryxdesign/core/NavIcon';
 import {
@@ -11,13 +17,12 @@ import {
   SideNavCollapseButton,
   SideNavHeading,
   useSideNavCollapse,
+  useSideNavRenderMode,
 } from '@astryxdesign/core/SideNav';
 
 import type {ObservabilityApi} from '../observability/api';
-import {
-  ObservabilitySidebar,
-  ObservabilityStateBoundary,
-} from '../observability/ObservabilitySidebar';
+import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
+import {useObservabilityState} from '../observability/state';
 import {
   ChatApiError,
   fetchProfile,
@@ -77,12 +82,49 @@ function SidebarCollapseControl() {
   );
 }
 
-export function CvSidebar({
+function CvSidebarShell({children}: {children?: ReactNode}) {
+  return (
+    <SideNav
+      resizable={{
+        defaultWidth: 420,
+        minWidth: 360,
+        maxWidth: 560,
+        autoSaveId: 'jobagent-observability-sidebar-width',
+      }}
+      collapsible={{hasButton: false}}
+      className="jobagent-cv-sidebar-shell"
+      header={
+        <SideNavHeading
+          heading="JobAgent"
+          subheading="CV & profile"
+          icon={<NavIcon icon={<Icon icon="search" />} />}
+        />
+      }
+      footerIcons={<SidebarCollapseControl />}
+      data-testid="jobagent-cv-sidebar"
+    >
+      {children}
+    </SideNav>
+  );
+}
+
+export function CvSidebar(props: CvSidebarProps) {
+  const renderMode = useSideNavRenderMode();
+
+  if (renderMode === 'topbar') {
+    return <CvSidebarShell />;
+  }
+
+  return <CvSidebarController {...props} />;
+}
+
+function CvSidebarController({
   isUploadDisabled,
   onSidebarUploadSuccess,
   refreshKey = 0,
   deps,
 }: CvSidebarProps) {
+  const observability = useObservabilityState({api: deps?.observability});
   const loadProfile = deps?.loadProfile ?? fetchProfile;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
@@ -92,6 +134,7 @@ export function CvSidebar({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const loadedRefreshKey = useRef(refreshKey);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -118,12 +161,18 @@ export function CvSidebar({
   );
 
   useEffect(() => {
+    const isRefreshRequested = loadedRefreshKey.current !== refreshKey;
+    loadedRefreshKey.current = refreshKey;
+    if (profile !== null && !isRefreshRequested) {
+      return;
+    }
+
     const controller = new AbortController();
     void reload(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [reload, refreshKey]);
+  }, [profile, reload, refreshKey]);
 
   const handleFileChange = useCallback(
     (files: File | File[] | null) => {
@@ -205,38 +254,16 @@ export function CvSidebar({
   );
 
   return (
-    <ObservabilityStateBoundary api={deps?.observability}>
-      {(observability) => (
-        <SideNav
-          resizable={{
-            defaultWidth: 420,
-            minWidth: 360,
-            maxWidth: 560,
-            autoSaveId: 'jobagent-observability-sidebar-width',
-          }}
-          collapsible={{hasButton: false}}
-          className="jobagent-cv-sidebar-shell"
-          header={
-            <SideNavHeading
-              heading="JobAgent"
-              subheading="CV & profile"
-              icon={<NavIcon icon={<Icon icon="search" />} />}
-            />
-          }
-          footerIcons={<SidebarCollapseControl />}
-          data-testid="jobagent-cv-sidebar"
-        >
-          <ObservabilitySidebar
-            overview={overview}
-            collapsedStatus={{
-              label: state.text,
-              variant: state.variant,
-              cvName: displayCvName,
-            }}
-            observability={observability}
-          />
-        </SideNav>
-      )}
-    </ObservabilityStateBoundary>
+    <CvSidebarShell>
+      <ObservabilitySidebar
+        overview={overview}
+        collapsedStatus={{
+          label: state.text,
+          variant: state.variant,
+          cvName: displayCvName,
+        }}
+        observability={observability}
+      />
+    </CvSidebarShell>
   );
 }

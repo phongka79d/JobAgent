@@ -44,6 +44,7 @@ export function ObservabilityTabList({
       aria-orientation="vertical"
     >
       <TabList
+        role="presentation"
         value={value}
         onChange={(next) => {
           const tab = TABS.find((item) => item.id === next);
@@ -61,7 +62,9 @@ export function ObservabilityTabList({
             isLabelHidden={isCollapsed}
             role="tab"
             aria-selected={value === tab.id}
-            aria-controls={`jobagent-obs-panel-${tab.id}`}
+            aria-controls={
+              isCollapsed ? undefined : `jobagent-obs-panel-${tab.id}`
+            }
             style={TAB_FIT_STYLE}
             icon={
               isCollapsed ? (
