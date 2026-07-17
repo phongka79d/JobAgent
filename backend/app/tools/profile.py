@@ -148,7 +148,21 @@ def build_propose_profile_from_cv_tool(
             if isinstance(state, dict)
             else []
         )
-        do_reprocess = bool(reprocess)
+        # CV Manager reprocess turns stamp source_attachment_id on the run.
+        # Live models often omit reprocess=true; force re-extract for owned runs
+        # so active short-circuit / archived miss cannot skip draft publication.
+        from app.repositories import agent_runs as runs_repo
+
+        owned_attachment_id: str | None = None
+        async with factory() as session:
+            run = await runs_repo.get_run(session, run_id)
+            if (
+                run is not None
+                and isinstance(run.source_attachment_id, str)
+                and run.source_attachment_id.strip() != ""
+            ):
+                owned_attachment_id = run.source_attachment_id.strip()
+        do_reprocess = bool(reprocess) or owned_attachment_id is not None
 
         async def _invoke() -> ToolResult:
             from app.db.models.attachments import (
@@ -180,12 +194,19 @@ def build_propose_profile_from_cv_tool(
                 if do_reprocess:
                     # Reprocess targets active/archived; staged resolve would miss.
                     candidates: list[str] = []
+                    # Prefer the CV-owned attachment stamped on the reprocess run.
+                    if owned_attachment_id is not None:
+                        candidates.append(owned_attachment_id)
                     raw = (
                         attachment_id.strip()
                         if isinstance(attachment_id, str)
                         else ""
                     )
-                    if raw and looks_like_attachment_uuid(raw):
+                    if (
+                        raw
+                        and looks_like_attachment_uuid(raw)
+                        and raw not in candidates
+                    ):
                         candidates.append(raw)
                     for item in turn_ids:
                         if (
@@ -238,35 +259,24 @@ def build_propose_profile_from_cv_tool(
             return result.tool_result
 
         # Arguments summary uses the model-supplied value; durable result carries
-        # the resolved UUID after invoke.
+        # the resolved UUID after invoke. Report forced reprocess truthfully.
         args_summary = arguments_summary_for_propose_cv(
             attachment_id, reprocess=do_reprocess
         )
-        # CV-scoped reprocess: stamp tool ownership from the resolved id when
-        # the parent run already records the same source attachment.
-        if do_reprocess:
-            from app.repositories import agent_runs as runs_repo
+        # CV-scoped reprocess: stamp tool ownership from the owned id when set.
+        if do_reprocess and owned_attachment_id is not None:
             from app.repositories import tool_executions as tool_repo
 
             async with factory() as session:
-                run = await runs_repo.get_run(session, run_id)
-                owner = (
-                    run.source_attachment_id
-                    if run is not None
-                    and isinstance(run.source_attachment_id, str)
-                    and run.source_attachment_id.strip() != ""
-                    else None
+                await tool_repo.get_or_create_pending(
+                    session,
+                    run_id=run_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=PROPOSE_PROFILE_FROM_CV_NAME,
+                    arguments_summary_json=args_summary,
+                    source_attachment_id=owned_attachment_id,
                 )
-                if owner is not None:
-                    await tool_repo.get_or_create_pending(
-                        session,
-                        run_id=run_id,
-                        tool_call_id=tool_call_id,
-                        tool_name=PROPOSE_PROFILE_FROM_CV_NAME,
-                        arguments_summary_json=args_summary,
-                        source_attachment_id=owner,
-                    )
-                    await session.commit()
+                await session.commit()
 
         tool_result = await execute_tool(
             run_id=run_id,

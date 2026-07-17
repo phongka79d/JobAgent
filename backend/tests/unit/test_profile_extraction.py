@@ -146,7 +146,7 @@ def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
                     location=None,
                     body="Backend engineer with Python and FastAPI experience.",
                     bullets=[],
-                    attributes={},
+                    attributes=[],
                     source_chunk_ordinals=[first],
                 )
             ],
@@ -163,7 +163,7 @@ def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
                     location=None,
                     body="Python, FastAPI, React.js",
                     bullets=["Python", "React.js"],
-                    attributes={},
+                    attributes=[],
                     source_chunk_ordinals=list(rest) if rest else [first],
                 )
             ],
@@ -180,7 +180,7 @@ def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
                     location=None,
                     body="Built APIs",
                     bullets=[],
-                    attributes={},
+                    attributes=[],
                     source_chunk_ordinals=[first],
                 )
             ],

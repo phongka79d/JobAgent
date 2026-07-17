@@ -98,6 +98,18 @@ class CVDocumentExtractionError(Exception):
 
 
 # --- LLM-facing schemas (strict JSON schema safe; no Field ge/le) ---
+# Free-form dicts (additionalProperties maps) are rejected by ShopAIKey/OpenAI
+# strict response_format. Use ordered key/value rows instead, then convert
+# to the domain dict shape in ``_entry_from_fragment``.
+
+
+class ExtractedAttributeItem(BaseModel):
+    """One free-form attribute as a strict-schema-safe key/value pair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    value: str
 
 
 class ExtractedEntryFragment(BaseModel):
@@ -111,7 +123,7 @@ class ExtractedEntryFragment(BaseModel):
     location: str | None
     body: str
     bullets: list[str]
-    attributes: dict[str, str]
+    attributes: list[ExtractedAttributeItem]
     source_chunk_ordinals: list[int]
 
 
@@ -355,9 +367,15 @@ def _entry_from_fragment(
     sources = _filter_ordinals(frag.source_chunk_ordinals, allowed_ordinals)
     body = frag.body if isinstance(frag.body, str) else ""
     bullets = [b for b in frag.bullets if isinstance(b, str)]
-    attrs: dict[str, str | list[str]] = {
-        k: v for k, v in frag.attributes.items() if isinstance(k, str) and k
-    }
+    attrs: dict[str, str | list[str]] = {}
+    for item in frag.attributes:
+        key = (item.key if isinstance(item, ExtractedAttributeItem) else "").strip()
+        if not key:
+            continue
+        value = item.value if isinstance(item, ExtractedAttributeItem) else ""
+        if not isinstance(value, str):
+            continue
+        attrs[key] = value
     # Drop empty decorative entries with no content.
     if (
         not body.strip()
@@ -1077,6 +1095,7 @@ __all__ = [
     "ChunkBatch",
     "DEFAULT_BATCH_MAX_CHARS",
     "EXTRACTION_VERSION",
+    "ExtractedAttributeItem",
     "ExtractedBatchDocument",
     "ExtractedConsolidation",
     "ExtractedEntryFragment",

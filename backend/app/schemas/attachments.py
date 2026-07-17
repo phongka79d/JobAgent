@@ -11,19 +11,24 @@ from typing import Literal
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
 )
 from app.schemas.common import StrictModelConfig, UuidStr
 from pydantic import BaseModel, Field
 
-AttachmentState = Literal["staged", "active", "failed"]
+# Public lifecycle states returned on profile/upload boundaries. Includes
+# archived so pending drafts from CV Manager reprocess of archived CVs can
+# surface without 500s (upload outcomes still use staged/active/failed only).
+AttachmentState = Literal["staged", "active", "archived", "failed"]
 CvUploadOutcome = Literal["new", "existing_active", "existing_staged", "retry"]
 
-assert frozenset(("staged", "active", "failed")) == frozenset(
+assert frozenset(("staged", "active", "archived", "failed")) == frozenset(
     {
         ATTACHMENT_STATE_STAGED,
         ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_ARCHIVED,
         ATTACHMENT_STATE_FAILED,
     }
 )

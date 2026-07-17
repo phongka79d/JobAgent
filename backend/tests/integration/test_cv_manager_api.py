@@ -99,7 +99,7 @@ class _CoveringDocumentInvoker:
                         location=None,
                         body="Integration-test backend engineer.",
                         bullets=[],
-                        attributes={},
+                        attributes=[],
                         source_chunk_ordinals=[first],
                     )
                 ],
@@ -116,7 +116,7 @@ class _CoveringDocumentInvoker:
                         location=None,
                         body="Python",
                         bullets=["Python"],
-                        attributes={},
+                        attributes=[],
                         source_chunk_ordinals=ordinals,
                     )
                 ],

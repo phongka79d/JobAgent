@@ -552,9 +552,12 @@ async def stream_cv_reprocess(
         session_factory=factory,
     )
     # Domain-agnostic user text; attachment_ids + ownership drive the tools.
+    # Do not name tool symbols here (ownership boundary). CV-owned runs stamp
+    # source_attachment_id so propose forces reprocess even if the model omits it.
     message = (
         f"Re-extract the retained CV for attachment {attachment_id} "
-        "and prepare the current draft for approval."
+        "and prepare a new current draft for approval without reusing the "
+        "existing approved profile as a no-extract short-circuit."
     )
     async for event in stream_chat_turn(
         message=message,

@@ -15,6 +15,7 @@ from app.services.cv_document_extraction import (
     DEFAULT_BATCH_MAX_CHARS,
     EXTRACTION_VERSION,
     FAILURE_INVALID_STRUCTURED_OUTPUT,
+    ExtractedAttributeItem,
     ExtractedBatchDocument,
     ExtractedConsolidation,
     ExtractedEntryFragment,
@@ -64,6 +65,10 @@ def _entry_frag(
     bullets: list[str] | None = None,
     attributes: dict[str, str] | None = None,
 ) -> ExtractedEntryFragment:
+    attr_items = [
+        ExtractedAttributeItem(key=k, value=v)
+        for k, v in (attributes or {}).items()
+    ]
     return ExtractedEntryFragment(
         title=title,
         subtitle=None,
@@ -71,7 +76,7 @@ def _entry_frag(
         location=None,
         body=body,
         bullets=bullets or [],
-        attributes=attributes or {},
+        attributes=attr_items,
         source_chunk_ordinals=ordinals,
     )
 
@@ -643,3 +648,15 @@ def test_profile_extraction_delegate_document_first() -> None:
 def test_default_batch_ceiling_positive() -> None:
     assert DEFAULT_BATCH_MAX_CHARS > 0
     assert DEFAULT_BATCH_MAX_CHARS == 6000
+
+
+def test_batch_schema_has_no_freeform_attribute_map() -> None:
+    """ShopAIKey/OpenAI strict response_format rejects additionalProperties maps."""
+    schema = ExtractedBatchDocument.model_json_schema()
+    entry = schema["$defs"]["ExtractedEntryFragment"]
+    attrs = entry["properties"]["attributes"]
+    assert attrs.get("type") == "array"
+    assert "additionalProperties" not in attrs
+    items = attrs.get("items") or {}
+    # Prefer $ref to ExtractedAttributeItem with fixed key/value props.
+    assert "$ref" in items or items.get("type") == "object"

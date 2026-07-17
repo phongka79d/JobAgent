@@ -93,9 +93,13 @@ def build_system_prompt(
                     "",
                     "Profile / CV tools:",
                     "- propose_profile_from_cv requires a staged attachment "
-                    "UUID from this turn or durable working memory. Never pass "
-                    "draft_id placeholders such as 'current' or 'latest' as "
-                    "attachment_id.",
+                    "UUID from this turn or durable working memory for first-time "
+                    "extraction. Never pass draft_id placeholders such as "
+                    "'current' or 'latest' as attachment_id.",
+                    "- For active or archived re-extract (CV Manager reprocess), "
+                    "pass reprocess=true with that attachment UUID so document-"
+                    "first extraction publishes a new draft without changing "
+                    "active selection until Save Profile.",
                     "- After a successful propose that creates or reuses a "
                     "draft, call commit_profile_draft with draft_id='current' "
                     "so the user can Save Profile or Request Changes. Without "

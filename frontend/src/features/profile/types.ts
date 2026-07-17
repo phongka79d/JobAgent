@@ -4,7 +4,7 @@
  * Never carries storage_path, raw PDF bytes, or secrets.
  */
 
-export type AttachmentState = 'staged' | 'active' | 'failed';
+export type AttachmentState = 'staged' | 'active' | 'archived' | 'failed';
 export type CvUploadOutcome =
   | 'new'
   | 'existing_active'
@@ -100,6 +100,7 @@ function asBoolean(value: unknown): boolean | null {
 const ATTACHMENT_STATES: ReadonlySet<string> = new Set([
   'staged',
   'active',
+  'archived',
   'failed',
 ]);
 
