@@ -4,6 +4,8 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   ATTACHMENT_ID,
+  MSG_ID,
+  RUN_ID,
   chunkDetail,
   chunkListPage,
   installMatchMedia,
@@ -21,6 +23,24 @@ beforeEach(() => {
 });
 
 describe('Observability list panels', () => {
+  it('shows run status, duration, safe metadata, and a tool timeline', async () => {
+    renderObservabilitySidebar(mockObservabilityApi());
+    await userEvent.click(screen.getByRole('tab', {name: 'Agent runs'}));
+    const run = await screen.findByTestId(
+      `jobagent-obs-run-toggle-${RUN_ID}`,
+    );
+    expect(run).toHaveTextContent('Completed');
+    expect(run).toHaveTextContent('1 min');
+    await userEvent.click(run);
+    const detail = await screen.findByTestId(
+      `jobagent-obs-run-detail-${RUN_ID}`,
+    );
+    expect(detail).toHaveTextContent(MSG_ID);
+    expect(detail).toHaveTextContent('propose_profile_from_cv');
+    expect(detail).toHaveTextContent('12 ms');
+    expect(detail).not.toHaveTextContent('arguments');
+  });
+
   it('selects a CV from one divided Astryx list and shows details outside the row', async () => {
     const api = mockObservabilityApi();
     renderObservabilitySidebar(api);

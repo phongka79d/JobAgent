@@ -1,17 +1,42 @@
 /**
- * Agent run history — terminal status and structured tool details only.
+ * Agent run history - terminal status and structured tool details only.
  */
 
 import {Banner} from '@astryxdesign/core/Banner';
-import {Button} from '@astryxdesign/core/Button';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
-import {Spinner} from '@astryxdesign/core/Spinner';
-import {Text} from '@astryxdesign/core/Text';
 import {HStack} from '@astryxdesign/core/HStack';
+import {List, ListItem} from '@astryxdesign/core/List';
+import {
+  MetadataList,
+  MetadataListItem,
+} from '@astryxdesign/core/MetadataList';
+import {StatusDot} from '@astryxdesign/core/StatusDot';
+import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
+import {ObservabilityListSkeleton} from './ObservabilityListSkeleton';
+import {ObservabilityPanelHeader} from './ObservabilityPanelHeader';
+import {
+  formatDurationMs,
+  formatObservabilityDateTime,
+  formatRunDuration,
+} from './observabilityFormat';
 import type {CachedResource} from './state';
 import type {RunHistoryPage} from './types';
+
+const RUN_VARIANT = {
+  running: 'accent',
+  interrupted: 'warning',
+  completed: 'success',
+  failed: 'error',
+} as const;
+
+const RUN_LABEL = {
+  running: 'Running',
+  interrupted: 'Interrupted',
+  completed: 'Completed',
+  failed: 'Failed',
+} as const;
 
 export type RunHistoryPanelProps = {
   resource: CachedResource<RunHistoryPage>;
@@ -27,33 +52,30 @@ export function RunHistoryPanel({
   onRefresh,
 }: RunHistoryPanelProps) {
   const items = resource.data?.items ?? [];
+  const selectedRun = items.find((run) => run.id === expandedRunId) ?? null;
 
   return (
-    <div
+    <VStack
+      gap={2}
       className="jobagent-obs-panel"
       data-testid="jobagent-obs-runs"
       role="tabpanel"
       id="jobagent-obs-panel-runs"
       aria-labelledby="jobagent-obs-tab-runs"
     >
-      <HStack gap={2} hAlign="between" vAlign="center">
-        <Text type="label">Agent runs</Text>
-        <Button
-          label="Refresh"
-          variant="ghost"
-          size="sm"
-          onClick={onRefresh}
-          data-testid="jobagent-obs-runs-refresh"
-        />
-      </HStack>
+      <ObservabilityPanelHeader
+        eyebrow="Execution history"
+        title="Agent runs"
+        onRefresh={onRefresh}
+        isRefreshing={resource.phase === 'loading' && Boolean(resource.data)}
+        refreshTestId="jobagent-obs-runs-refresh"
+      />
 
       {resource.phase === 'loading' && !resource.data ? (
-        <HStack gap={2} vAlign="center" data-testid="jobagent-obs-runs-loading">
-          <Spinner size="sm" />
-          <Text type="body" color="secondary">
-            Loading runs…
-          </Text>
-        </HStack>
+        <ObservabilityListSkeleton
+          rows={3}
+          testId="jobagent-obs-runs-loading"
+        />
       ) : null}
 
       {resource.phase === 'error' && resource.error ? (
@@ -61,7 +83,7 @@ export function RunHistoryPanel({
           status="error"
           title="Run history unavailable"
           description={`${resource.error.summary} (${resource.error.code})`}
-          container="card"
+          container="section"
           data-testid="jobagent-obs-runs-error"
         />
       ) : null}
@@ -77,66 +99,125 @@ export function RunHistoryPanel({
       ) : null}
 
       {items.length > 0 ? (
-        <VStack gap={2} width="100%">
+        <List density="compact" hasDividers header="Agent runs">
           {items.map((run) => {
-            const expanded = expandedRunId === run.id;
+            const duration = formatRunDuration(
+              run.created_at,
+              run.completed_at,
+            );
+            const toolCount = run.tool_executions.length;
+            const description = [
+              RUN_LABEL[run.state],
+              formatObservabilityDateTime(run.created_at),
+              `${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}`,
+              run.error_code,
+              duration,
+            ]
+              .filter(Boolean)
+              .join(' · ');
+
             return (
-              <div
+              <ListItem
                 key={run.id}
-                className="jobagent-obs-row"
-                data-testid={`jobagent-obs-run-${run.id}`}
-              >
-                <Text type="body" className="jobagent-obs-meta">
-                  Run {run.id.slice(0, 8)}…
-                </Text>
-                <Text type="supporting" color="secondary" className="jobagent-obs-meta">
-                  {run.state}
-                  {run.error_code ? ` · ${run.error_code}` : ''}
-                  {' · '}
-                  {run.created_at}
-                </Text>
-                <Button
-                  label={expanded ? 'Hide details' : 'Show details'}
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onToggleRun(run.id)}
-                  data-testid={`jobagent-obs-run-toggle-${run.id}`}
-                />
-                {expanded ? (
-                  <VStack gap={1} width="100%" data-testid={`jobagent-obs-run-detail-${run.id}`}>
-                    {run.tool_executions.length === 0 ? (
-                      <Text type="supporting" color="secondary">
-                        No tool executions
-                      </Text>
-                    ) : (
-                      run.tool_executions.map((tool) => (
-                        <div key={tool.id} className="jobagent-obs-meta">
-                          <Text type="body">
-                            {tool.tool_name} · {tool.status}
-                            {tool.duration_ms != null
-                              ? ` · ${tool.duration_ms}ms`
-                              : ''}
-                          </Text>
-                          {tool.summary ? (
-                            <Text type="supporting" color="secondary">
-                              {tool.summary}
-                            </Text>
-                          ) : null}
-                          {tool.error_code ? (
-                            <Text type="supporting" color="secondary">
-                              {tool.error_code}
-                            </Text>
-                          ) : null}
-                        </div>
-                      ))
-                    )}
-                  </VStack>
-                ) : null}
-              </div>
+                label={`Run ${run.id}`}
+                description={
+                  <Text
+                    type="supporting"
+                    color="secondary"
+                    className="jobagent-obs-meta"
+                  >
+                    {description}
+                  </Text>
+                }
+                startContent={
+                  <StatusDot
+                    variant={RUN_VARIANT[run.state]}
+                    label={RUN_LABEL[run.state]}
+                  />
+                }
+                isSelected={run.id === expandedRunId}
+                onClick={() => onToggleRun(run.id)}
+                data-testid={`jobagent-obs-run-toggle-${run.id}`}
+              />
             );
           })}
+        </List>
+      ) : null}
+
+      {selectedRun ? (
+        <VStack
+          gap={2}
+          className="jobagent-obs-detail"
+          data-testid={`jobagent-obs-run-detail-${selectedRun.id}`}
+        >
+          <MetadataList
+            columns="single"
+            label={{position: 'top'}}
+            title="Selected run"
+          >
+            <MetadataListItem label="Run ID">{selectedRun.id}</MetadataListItem>
+            <MetadataListItem label="User message ID">
+              {selectedRun.user_message_id}
+            </MetadataListItem>
+            <MetadataListItem label="Created">
+              {formatObservabilityDateTime(selectedRun.created_at)}
+            </MetadataListItem>
+            <MetadataListItem label="Completed">
+              {selectedRun.completed_at
+                ? formatObservabilityDateTime(selectedRun.completed_at)
+                : 'Not completed'}
+            </MetadataListItem>
+            <MetadataListItem label="Related attachments">
+              {selectedRun.related_attachment_ids.length}
+            </MetadataListItem>
+            <MetadataListItem label="Related jobs">
+              {selectedRun.related_job_ids.length}
+            </MetadataListItem>
+          </MetadataList>
+
+          <Text type="label">Tool timeline</Text>
+          {selectedRun.tool_executions.length === 0 ? (
+            <Text type="supporting" color="secondary">
+              No tool executions
+            </Text>
+          ) : (
+            <VStack gap={2} width="100%">
+              {selectedRun.tool_executions.map((tool) => (
+                <HStack
+                  key={tool.id}
+                  gap={2}
+                  vAlign="start"
+                  className="jobagent-obs-tool-timeline"
+                >
+                  <StatusDot
+                    variant={
+                      tool.status === 'pending'
+                        ? 'neutral'
+                        : RUN_VARIANT[tool.status]
+                    }
+                    label={tool.status}
+                  />
+                  <VStack gap={0.5} width="100%">
+                    <Text type="body">{tool.tool_name}</Text>
+                    <Text type="supporting" color="secondary">
+                      {tool.status}
+                      {tool.duration_ms == null
+                        ? ''
+                        : ` · ${formatDurationMs(tool.duration_ms)}`}
+                    </Text>
+                    {tool.summary ? (
+                      <Text type="supporting">{tool.summary}</Text>
+                    ) : null}
+                    {tool.error_code ? (
+                      <Text type="supporting">{tool.error_code}</Text>
+                    ) : null}
+                  </VStack>
+                </HStack>
+              ))}
+            </VStack>
+          )}
         </VStack>
       ) : null}
-    </div>
+    </VStack>
   );
 }

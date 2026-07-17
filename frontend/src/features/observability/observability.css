@@ -71,6 +71,11 @@
   overflow-wrap: anywhere;
 }
 
+.jobagent-obs-tool-timeline {
+  padding-inline-start: var(--spacing-2);
+  border-inline-start: var(--border-width) solid var(--color-border);
+}
+
 .jobagent-obs-fulltext {
   box-sizing: border-box;
   width: 100%;
