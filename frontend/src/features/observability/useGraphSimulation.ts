@@ -69,6 +69,34 @@ export function useGraphSimulation(
 
   useEffect(() => {
     if (!controller) return;
+    const modelNodes = new Map(model.nodes.map((node) => [node.key, node]));
+    let changed = false;
+    for (const node of controller.nodes) {
+      const modelNode = modelNodes.get(node.key);
+      if (!modelNode) continue;
+      if (
+        node.rawId !== modelNode.rawId ||
+        node.kind !== modelNode.kind ||
+        node.label !== modelNode.label ||
+        node.metadata.length !== modelNode.metadata.length ||
+        node.metadata.some(
+          ([label, value], index) =>
+            label !== modelNode.metadata[index]?.[0] ||
+            value !== modelNode.metadata[index]?.[1],
+        )
+      ) {
+        node.rawId = modelNode.rawId;
+        node.kind = modelNode.kind;
+        node.label = modelNode.label;
+        node.metadata = modelNode.metadata;
+        changed = true;
+      }
+    }
+    if (changed) setRevision((current) => current + 1);
+  }, [controller, model]);
+
+  useEffect(() => {
+    if (!controller) return;
     const currentSize = sizeRef.current;
     if (
       currentSize?.controller === controller &&

@@ -10,13 +10,16 @@ import {
   useGraphSimulation,
   type GraphSimulationFactory,
 } from '../features/observability/useGraphSimulation';
-import {calculateFitTransform} from '../features/observability/useGraphViewport';
 import {
   graphReady,
   installMatchMedia,
 } from './support/observability';
 
+const activeControllers = new Set<GraphSimulationController>();
+
 afterEach(() => {
+  for (const controller of activeControllers) controller.stop();
+  activeControllers.clear();
   installMatchMedia(false);
 });
 
@@ -28,6 +31,7 @@ describe('graph simulation controller', () => {
       420,
       vi.fn(),
     );
+    activeControllers.add(controller);
     controller.beginDrag('candidate:cand-1');
     controller.dragNode('candidate:cand-1', 120, 140);
     controller.endDrag();
@@ -45,6 +49,7 @@ describe('graph simulation controller', () => {
     const controller = createGraphSimulation(model, 640, 420, vi.fn(), {
       reducedMotion: true,
     });
+    activeControllers.add(controller);
 
     controller.dragNode('candidate:cand-1', 80, 90);
     controller.resize(800, 500);
@@ -65,6 +70,7 @@ describe('graph simulation controller', () => {
       onTick,
       {reducedMotion: true},
     );
+    activeControllers.add(controller);
     expect(
       controller.nodes.every(
         (node) =>
@@ -77,31 +83,102 @@ describe('graph simulation controller', () => {
     expect(onTick).toHaveBeenCalledOnce();
     controller.stop();
   });
-});
 
-describe('graph viewport fitting', () => {
-  it('calculates a bounded fit transform around positioned nodes', () => {
-    const transform = calculateFitTransform(
-      [{x: 0, y: 0}, {x: 200, y: 100}],
-      {width: 600, height: 400},
-      40,
+  it('resolves object link endpoints onto cloned simulation nodes', () => {
+    const model = toGraphModel(graphReady());
+    const source = model.nodes.find((node) => node.key === 'candidate:cand-1');
+    const target = model.nodes.find((node) => node.key === 'skill:python');
+    if (!source || !target) throw new Error('Expected graph fixture nodes');
+    model.links[0].source = source;
+    model.links[0].target = target;
+
+    const controller = createGraphSimulation(model, 640, 420, vi.fn(), {
+      reducedMotion: true,
+    });
+    activeControllers.add(controller);
+
+    expect(controller.links[0].source).toBe(
+      controller.nodes.find((node) => node.key === source.key),
     );
-    expect(transform.k).toBeGreaterThan(0);
-    expect(transform.k).toBeLessThanOrEqual(4);
-    expect(transform.apply([100, 50])).toEqual([300, 200]);
-  });
-
-  it('ignores unpositioned nodes and keeps the minimum fit scale bounded', () => {
-    const transform = calculateFitTransform(
-      [{x: Number.NaN, y: 10}, {}, {x: 0, y: 0}, {x: 10_000, y: 10_000}],
-      {width: 100, height: 100},
+    expect(controller.links[0].target).toBe(
+      controller.nodes.find((node) => node.key === target.key),
     );
-
-    expect(transform.k).toBe(0.25);
+    expect(controller.links[0].source).not.toBe(source);
+    expect(controller.links[0].target).not.toBe(target);
   });
 });
 
 describe('graph simulation hook lifecycle', () => {
+  it('syncs presentation fields without recreating or moving the controller', () => {
+    const factory = vi.fn<GraphSimulationFactory>((model) => ({
+      nodes: model.nodes.map((node, index) => ({
+        ...node,
+        x: 20 + index,
+        y: 30 + index,
+        fx: index === 0 ? 20 : null,
+        fy: index === 0 ? 30 : null,
+      })),
+      links: model.links.map((link) => ({...link})),
+      resize: vi.fn(),
+      beginDrag: vi.fn(),
+      dragNode: vi.fn(),
+      endDrag: vi.fn(),
+      resetLayout: vi.fn(),
+      stop: vi.fn(),
+    }));
+    const firstModel = toGraphModel(graphReady());
+    const {result, rerender} = renderHook(
+      ({model}) => useGraphSimulation(model, 640, 420, factory),
+      {initialProps: {model: firstModel}},
+    );
+    const controller = result.current.controller;
+    const position = {
+      x: controller?.nodes[0].x,
+      y: controller?.nodes[0].y,
+      fx: controller?.nodes[0].fx,
+      fy: controller?.nodes[0].fy,
+    };
+    const updatedModel = {
+      ...firstModel,
+      nodes: firstModel.nodes.map((node, index) =>
+        index === 0
+          ? {
+              ...node,
+              rawId: 'updated-id',
+              kind: 'job' as const,
+              label: 'Updated candidate',
+              metadata: [['Revision', 'updated']] as const,
+            }
+          : node,
+      ),
+    };
+
+    rerender({model: updatedModel});
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(result.current.controller).toBe(controller);
+    expect(result.current.controller?.nodes[0]).toMatchObject({
+      rawId: 'updated-id',
+      kind: 'job',
+      label: 'Updated candidate',
+      metadata: [['Revision', 'updated']],
+      ...position,
+    });
+    const revision = result.current.revision;
+    rerender({
+      model: {
+        ...updatedModel,
+        nodes: updatedModel.nodes.map((node) => ({
+          ...node,
+          metadata: node.metadata.map(
+            ([label, value]) => [label, value] as const,
+          ),
+        })),
+      },
+    });
+    expect(result.current.revision).toBe(revision);
+  });
+
   it('reuses the controller across resize, recreates it for identity changes, and cleans up', () => {
     installMatchMedia(true);
     const controllers: GraphSimulationController[] = [];

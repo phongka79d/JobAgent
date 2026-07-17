@@ -35,7 +35,11 @@ export function createGraphSimulation(
   options: GraphSimulationOptions = {},
 ): GraphSimulationController {
   const nodes = model.nodes.map((node) => ({...node}));
-  const links = model.links.map((link) => ({...link}));
+  const links = model.links.map((link) => ({
+    ...link,
+    source: typeof link.source === 'string' ? link.source : link.source.key,
+    target: typeof link.target === 'string' ? link.target : link.target.key,
+  }));
   const nodesByKey = new Map(nodes.map((node) => [node.key, node]));
   const reducedMotion = options.reducedMotion === true;
   const simulation = forceSimulation(nodes)

@@ -74,6 +74,11 @@ export function useGraphViewport(
   const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
   const behaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const fittedIdentityRef = useRef<string | null>(null);
+  const hasValidSize =
+    Number.isFinite(size.width) &&
+    size.width > 0 &&
+    Number.isFinite(size.height) &&
+    size.height > 0;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -94,12 +99,15 @@ export function useGraphViewport(
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const behavior = zoom<SVGSVGElement, unknown>()
+    const behavior = zoom<SVGSVGElement, unknown>();
+    const defaultFilter = behavior.filter();
+    behavior
       .scaleExtent([0.25, 4])
-      .filter((event) => {
+      .filter(function filterGraphEvent(event, datum) {
         const target = event.target;
-        return !(
-          target instanceof Element && target.closest('[data-graph-node]')
+        return (
+          defaultFilter.call(this, event, datum) &&
+          !(target instanceof Element && target.closest('[data-graph-node]'))
         );
       })
       .on('zoom.jobagent', (event) => setTransform(event.transform));
@@ -117,16 +125,15 @@ export function useGraphViewport(
   const fitView = useCallback(() => {
     const svg = svgRef.current;
     const behavior = behaviorRef.current;
-    if (!svg || !behavior) return;
+    if (!svg || !behavior || !hasValidSize) return;
     select(svg).call(behavior.transform, calculateFitTransform(nodes, size));
-  }, [nodes, size, svgRef]);
+  }, [hasValidSize, nodes, size, svgRef]);
 
   useEffect(() => {
     if (
       fittedIdentityRef.current === identity ||
       nodes.length === 0 ||
-      size.width <= 0 ||
-      size.height <= 0 ||
+      !hasValidSize ||
       !svgRef.current ||
       !behaviorRef.current ||
       !nodes.every(
