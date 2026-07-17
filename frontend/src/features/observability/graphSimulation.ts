@@ -127,7 +127,7 @@ export function createGraphSimulation(
       simulation.alpha(1);
       if (reducedMotion) {
         simulation.stop();
-        simulation.tick(120);
+        simulation.tick(INITIAL_SETTLING_TICKS);
         onTick();
       } else {
         simulation.restart();
