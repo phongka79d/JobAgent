@@ -105,15 +105,18 @@ def build_propose_profile_from_cv_tool(
         tool_call_id: Annotated[str, InjectedToolCallId],
         state: Annotated[dict[str, Any], InjectedState],
         attachment_id: str,
+        reprocess: bool = False,
     ) -> dict[str, Any]:
-        """Propose a Candidate Profile draft from a staged CV attachment.
+        """Propose a Candidate Profile draft from a CV attachment.
 
-        Input is only ``attachment_id``: use an exact staged attachment UUID
-        supplied for this turn (never invent IDs, paths, or placeholders like
-        ``current`` / ``latest``). Active attachments return the approved
-        profile; a staged attachment already backing the current draft is
-        reused; other staged attachments run extraction into
-        ``profile_drafts('current')``. Never commits active profile/preferences.
+        Pass an exact attachment UUID for this turn (never invent IDs, paths,
+        or placeholders like ``current`` / ``latest``). With ``reprocess=false``
+        (default): active attachments return the approved profile; a staged
+        attachment already backing the current draft is reused; other staged
+        attachments run extraction into ``profile_drafts('current')``. With
+        ``reprocess=true``: active or archived attachments re-run document-first
+        extraction into drafts without changing active selection. Never commits
+        active profile/preferences.
         """
         from app.core.settings import get_settings
         from app.services.profile_extraction import ShopAIKeyStructuredProfileInvoker
@@ -145,9 +148,16 @@ def build_propose_profile_from_cv_tool(
             if isinstance(state, dict)
             else []
         )
+        do_reprocess = bool(reprocess)
 
         async def _invoke() -> ToolResult:
+            from app.db.models.attachments import (
+                ATTACHMENT_STATE_ACTIVE,
+                ATTACHMENT_STATE_ARCHIVED,
+            )
+            from app.repositories import attachments as att_repo
             from app.services.attachment_resolve import (
+                looks_like_attachment_uuid,
                 resolve_attachment_id_for_propose,
             )
 
@@ -166,13 +176,41 @@ def build_propose_profile_from_cv_tool(
                 if normalizer is not None
                 else SkillNormalizer.production()
             )
-            # Resolve placeholders like "current" (draft_id) to a real staged UUID.
             async with factory() as session:
-                resolved = await resolve_attachment_id_for_propose(
-                    session,
-                    attachment_id,
-                    turn_attachment_ids=turn_ids,
-                )
+                if do_reprocess:
+                    # Reprocess targets active/archived; staged resolve would miss.
+                    candidates: list[str] = []
+                    raw = (
+                        attachment_id.strip()
+                        if isinstance(attachment_id, str)
+                        else ""
+                    )
+                    if raw and looks_like_attachment_uuid(raw):
+                        candidates.append(raw)
+                    for item in turn_ids:
+                        if (
+                            isinstance(item, str)
+                            and item.strip()
+                            and looks_like_attachment_uuid(item.strip())
+                            and item.strip() not in candidates
+                        ):
+                            candidates.append(item.strip())
+                    resolved = None
+                    for candidate in candidates:
+                        row = await att_repo.get_by_id(session, candidate)
+                        if row is not None and row.state in (
+                            ATTACHMENT_STATE_ACTIVE,
+                            ATTACHMENT_STATE_ARCHIVED,
+                        ):
+                            resolved = candidate
+                            break
+                else:
+                    # Resolve placeholders like "current" to a staged/active UUID.
+                    resolved = await resolve_attachment_id_for_propose(
+                        session,
+                        attachment_id,
+                        turn_attachment_ids=turn_ids,
+                    )
             if resolved is None:
                 return ToolResult(
                     ok=False,
@@ -180,6 +218,11 @@ def build_propose_profile_from_cv_tool(
                     summary=(
                         f"attachment {attachment_id!r} not found; upload a CV "
                         "or pass a staged attachment UUID"
+                        if not do_reprocess
+                        else (
+                            f"attachment {attachment_id!r} not found or not "
+                            "eligible for reprocess"
+                        )
                     ),
                     data={"attachment_id": attachment_id},
                 )
@@ -190,12 +233,41 @@ def build_propose_profile_from_cv_tool(
                 invoker=inv,
                 normalizer=norm,
                 extract_text_fn=extract_text_fn,
+                reprocess=do_reprocess,
             )
             return result.tool_result
 
         # Arguments summary uses the model-supplied value; durable result carries
         # the resolved UUID after invoke.
-        args_summary = arguments_summary_for_propose_cv(attachment_id)
+        args_summary = arguments_summary_for_propose_cv(
+            attachment_id, reprocess=do_reprocess
+        )
+        # CV-scoped reprocess: stamp tool ownership from the resolved id when
+        # the parent run already records the same source attachment.
+        if do_reprocess:
+            from app.repositories import agent_runs as runs_repo
+            from app.repositories import tool_executions as tool_repo
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                owner = (
+                    run.source_attachment_id
+                    if run is not None
+                    and isinstance(run.source_attachment_id, str)
+                    and run.source_attachment_id.strip() != ""
+                    else None
+                )
+                if owner is not None:
+                    await tool_repo.get_or_create_pending(
+                        session,
+                        run_id=run_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=PROPOSE_PROFILE_FROM_CV_NAME,
+                        arguments_summary_json=args_summary,
+                        source_attachment_id=owner,
+                    )
+                    await session.commit()
+
         tool_result = await execute_tool(
             run_id=run_id,
             tool_call_id=tool_call_id,

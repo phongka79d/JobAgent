@@ -3,22 +3,22 @@
 Owns ``commit_approved_draft`` / SQLite-first approval:
 
 1. **Preflight** (no open write transaction): validate the complete draft,
-   staged source attachment + file when a CV is present, and cross-row
-   prerequisites.
+   staged/archived/active source attachment + file + document draft/hash when
+   a CV is present, and cross-row prerequisites.
 2. **One short SQLite transaction**: upsert active profile, update preferences
-   when changed, repoint profile, archive former active attachment, mark new
-   attachment active, delete draft, assert one-active invariant, commit.
+   when changed, repoint profile, archive former active only when IDs differ,
+   activate the selected attachment, promote document draft → ``cv_documents``,
+   delete both drafts, assert one-active invariant, commit.
 3. **Post-commit** (never open SQLite txn across these): synchronize
    Candidate/Skill graph data. Former active PDF/chunks stay retained under
-   immutable ``archived`` state (no previous-file cleanup).
+   ``archived`` state (no previous-file cleanup).
 
-Transaction failure rolls back to the prior active profile/CV and leaves the
-new attachment staged. Neo4j failure never rolls SQLite back; sync failure
-returns ``NEO4J_SYNC_FAILED`` plus rebuild guidance while accurately reporting
-committed SQLite truth.
+Transaction failure rolls back to the prior active profile/CV. Neo4j failure
+never rolls SQLite back; sync failure returns ``NEO4J_SYNC_FAILED`` plus
+rebuild guidance while accurately reporting committed SQLite truth.
 
-No restore path for archived CVs. No file moves at approval. No raw CV text
-in results/logs.
+Archived → active is allowed only inside this approval path for a reprocessed
+archived CV. No file moves at approval. No raw CV text in results/logs.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
-    ATTACHMENT_STATE_STAGED,
     Attachment,
 )
 from app.db.models.profiles import (
@@ -59,6 +58,14 @@ from app.schemas.profile import (
     parse_job_preferences,
     parse_profile_draft_payload,
 )
+from app.services.profile_activation import (
+    ActivationError,
+    DocumentDraftBundle,
+    activate_selected_attachment,
+    assert_source_attachment_eligible,
+    load_document_draft_bundle,
+    promote_document_draft,
+)
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 
@@ -74,6 +81,8 @@ ERROR_ACTIVE_PROFILE_MISSING: str = "ACTIVE_PROFILE_MISSING"
 ERROR_ACTIVE_ATTACHMENT_MISSING: str = "ACTIVE_ATTACHMENT_MISSING"
 ERROR_APPROVAL_TRANSACTION_FAILED: str = "APPROVAL_TRANSACTION_FAILED"
 ERROR_INVARIANT_VIOLATION: str = "APPROVAL_INVARIANT_VIOLATION"
+ERROR_DOCUMENT_DRAFT_NOT_FOUND: str = "DOCUMENT_DRAFT_NOT_FOUND"
+ERROR_DOCUMENT_DRAFT_INVALID: str = "DOCUMENT_DRAFT_INVALID"
 
 # Failpoint names for deterministic integration tests only.
 Failpoint = Literal[
@@ -145,6 +154,20 @@ class _Preflight:
     active_attachment_id_for_profile: str
     preferences_changed: bool
     current_prefs: JobPreferences
+    document_bundle: DocumentDraftBundle | None
+
+
+def _activation_to_approval_error(exc: ActivationError) -> ProfileApprovalError:
+    code_map = {
+        "DOCUMENT_DRAFT_NOT_FOUND": ERROR_DOCUMENT_DRAFT_NOT_FOUND,
+        "DOCUMENT_DRAFT_INVALID": ERROR_DOCUMENT_DRAFT_INVALID,
+        "ATTACHMENT_NOT_FOUND": ERROR_ATTACHMENT_NOT_FOUND,
+        "ATTACHMENT_NOT_STAGED": ERROR_ATTACHMENT_NOT_STAGED,
+    }
+    return ProfileApprovalError(
+        exc.message,
+        code=code_map.get(exc.code, ERROR_APPROVAL_TRANSACTION_FAILED),
+    )
 
 
 async def _load_preflight(
@@ -155,7 +178,7 @@ async def _load_preflight(
 ) -> _Preflight:
     """Validate draft and attachment prerequisites.
 
-    When *check_files* is True (outer preflight only), confirm the staged PDF
+    When *check_files* is True (outer preflight only), confirm the source PDF
     exists on disk. Inside an open SQLite transaction, pass ``check_files=False``
     and ``storage=None`` so the write unit never spans filesystem I/O.
     """
@@ -179,6 +202,7 @@ async def _load_preflight(
     new_storage_path: str | None = None
     old_attachment_id: str | None = None
     old_storage_path: str | None = None
+    document_bundle: DocumentDraftBundle | None = None
 
     active_profile = await profile_repo.get_active_profile(session)
     active_att = await att_repo.get_active(session)
@@ -190,16 +214,13 @@ async def _load_preflight(
                 f"Draft source attachment {source_id!r} not found",
                 code=ERROR_ATTACHMENT_NOT_FOUND,
             )
-        if new_attachment.state != ATTACHMENT_STATE_STAGED:
-            raise ProfileApprovalError(
-                "Draft source attachment must be staged for approval",
-                code=ERROR_ATTACHMENT_NOT_STAGED,
+        try:
+            assert_source_attachment_eligible(new_attachment)
+            document_bundle = await load_document_draft_bundle(
+                session, attachment_id=source_id
             )
-        if new_attachment.page_count is None or new_attachment.page_count <= 0:
-            raise ProfileApprovalError(
-                "Staged attachment requires page_count > 0 before activation",
-                code=ERROR_ATTACHMENT_NOT_STAGED,
-            )
+        except ActivationError as exc:
+            raise _activation_to_approval_error(exc) from exc
         if check_files:
             if storage is None:
                 raise ProfileApprovalError(
@@ -208,7 +229,7 @@ async def _load_preflight(
                 )
             if not storage.exists(new_attachment.storage_path):
                 raise ProfileApprovalError(
-                    "Staged attachment file is missing from storage",
+                    "Source attachment file is missing from storage",
                     code=ERROR_ATTACHMENT_FILE_MISSING,
                 )
         new_storage_path = new_attachment.storage_path
@@ -268,6 +289,7 @@ async def _load_preflight(
         active_attachment_id_for_profile=active_attachment_id_for_profile,
         preferences_changed=preferences_changed,
         current_prefs=current_prefs,
+        document_bundle=document_bundle,
     )
 
 
@@ -327,7 +349,7 @@ async def _run_sqlite_approval(
     profile_json = preflight.draft.candidate_profile.model_dump(mode="json")
     target_att_id = preflight.active_attachment_id_for_profile
 
-    # 1. Upsert active profile (repoint first so old attachment can be deleted).
+    # 1. Upsert active profile (repoint first so old attachment can be archived).
     await profile_repo.upsert_active_profile(
         session,
         active_attachment_id=target_att_id,
@@ -345,9 +367,8 @@ async def _run_sqlite_approval(
             ),
         )
 
-    # 3–4. Replacement / first CV: archive old active, mark new active.
-    # Order: profile already repointed above; archive former active only after
-    # that repoint so FK RESTRICT on candidate_profile remains satisfied.
+    # 3–4. CV-backed: archive prior active when IDs differ; activate selected.
+    # Profile already repointed so FK RESTRICT on candidate_profile is satisfied.
     if preflight.new_attachment is not None:
         if preflight.old_attachment_id is not None:
             await att_repo.mark_archived(session, preflight.old_attachment_id)
@@ -356,27 +377,24 @@ async def _run_sqlite_approval(
                 "after_old_attachment_delete",
             ):
                 raise RuntimeError(f"failpoint:{failpoint}")
-        # New attachment is still staged; activate it.
-        # If it is already the sole active (should not happen for staged), skip.
-        current = await att_repo.get_by_id(session, target_att_id)
-        if current is None:
-            raise ProfileApprovalError(
-                "Approved attachment disappeared during transaction",
-                code=ERROR_ATTACHMENT_NOT_FOUND,
-            )
-        if current.state == ATTACHMENT_STATE_STAGED:
-            await att_repo.mark_active(
+        try:
+            # old already archived above when IDs differ.
+            await activate_selected_attachment(
                 session,
-                target_att_id,
-                page_count=current.page_count,
+                attachment_id=target_att_id,
+                old_attachment_id=None,
             )
-        elif current.state != ATTACHMENT_STATE_ACTIVE:
-            raise ProfileApprovalError(
-                f"Attachment in unexpected state {current.state!r}",
-                code=ERROR_ATTACHMENT_NOT_STAGED,
-            )
+        except ActivationError as exc:
+            raise _activation_to_approval_error(exc) from exc
 
-    # 5. Delete draft.
+        # Promote document draft → approved cv_documents; clear document draft.
+        if preflight.document_bundle is not None:
+            try:
+                await promote_document_draft(session, preflight.document_bundle)
+            except ActivationError as exc:
+                raise _activation_to_approval_error(exc) from exc
+
+    # 5. Delete profile draft.
     await profile_repo.delete_current_draft(session)
 
     # 6. Final invariant, then caller commits.

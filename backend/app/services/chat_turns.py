@@ -29,6 +29,10 @@ from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
 from app.core.ids import new_uuid
 from app.core.time import utc_now
+from app.db.models.attachments import (
+    ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
+)
 from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
     AGENT_RUN_STATE_FAILED,
@@ -41,8 +45,10 @@ from app.db.models.chat import (
 )
 from app.db.session import get_session_factory
 from app.repositories import agent_runs as runs_repo
+from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
 from app.schemas.sse import SseEvent, parse_sse_event
+from app.storage.attachments import AttachmentStorage
 from app.tools.registry import ToolRegistry
 
 # Stable application codes (not domain workflow names).
@@ -50,6 +56,14 @@ ERROR_APPROVAL_ACTION_REQUIRED: str = "APPROVAL_ACTION_REQUIRED"
 ERROR_INVALID_APPROVAL_ACTION: str = "INVALID_APPROVAL_ACTION"
 ERROR_RUN_NOT_FOUND: str = "RUN_NOT_FOUND"
 ERROR_RUN_NOT_RESUMABLE: str = "RUN_NOT_RESUMABLE"
+ERROR_CV_ATTACHMENT_NOT_FOUND: str = "CV_ATTACHMENT_NOT_FOUND"
+ERROR_CV_NOT_REPROCESSABLE: str = "CV_NOT_REPROCESSABLE"
+ERROR_CV_FILE_UNAVAILABLE: str = "CV_FILE_UNAVAILABLE"
+ERROR_CHUNKS_UNAVAILABLE: str = "CHUNKS_UNAVAILABLE"
+
+_REPROCESS_ELIGIBLE_STATES: frozenset[str] = frozenset(
+    {ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_ARCHIVED}
+)
 
 
 class ChatTurnError(Exception):
@@ -164,15 +178,28 @@ async def create_user_turn(
     *,
     message: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    source_attachment_id: str | None = None,
 ) -> CreatedTurn:
     """Atomically insert user message + ``running`` run, or reject interruption.
 
     Raises ``ChatTurnError(APPROVAL_ACTION_REQUIRED)`` **before** any insert when
-    an interrupted run exists.
+    an interrupted run exists. Optional *source_attachment_id* stamps CV
+    ownership on both the message and run rows (reprocess turns).
     """
     text = message.strip() if isinstance(message, str) else ""
     if text == "":
         raise ChatTurnError("EMPTY_MESSAGE", "message must be non-empty")
+    owner: str | None = None
+    if source_attachment_id is not None:
+        if (
+            not isinstance(source_attachment_id, str)
+            or source_attachment_id.strip() == ""
+        ):
+            raise ChatTurnError(
+                ERROR_CV_ATTACHMENT_NOT_FOUND,
+                "source_attachment_id must be a non-empty attachment id",
+            )
+        owner = source_attachment_id.strip()
 
     factory = session_factory or get_session_factory()
     async with _short_transaction(factory) as session:
@@ -186,13 +213,61 @@ async def create_user_turn(
             session,
             role=CHAT_MESSAGE_ROLE_USER,
             content=text,
+            source_attachment_id=owner,
         )
-        run = await runs_repo.create_run(session, user_message_id=user.id)
+        run = await runs_repo.create_run(
+            session,
+            user_message_id=user.id,
+            source_attachment_id=owner,
+        )
         return CreatedTurn(
             user_message_id=user.id,
             run_id=run.id,
             content=text,
         )
+
+
+async def assert_cv_reprocessable(
+    *,
+    attachment_id: str,
+    storage: AttachmentStorage,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> None:
+    """Validate reprocess preconditions without mutating state.
+
+    Raises :class:`ChatTurnError` with stable codes for not-found, wrong state,
+    missing retained file, or a conflicting interrupted run.
+    """
+    if not isinstance(attachment_id, str) or attachment_id.strip() == "":
+        raise ChatTurnError(
+            ERROR_CV_ATTACHMENT_NOT_FOUND,
+            "attachment_id is required",
+        )
+    att_id = attachment_id.strip()
+    factory = session_factory or get_session_factory()
+    async with factory() as session:
+        interrupted = await get_interrupted_run(session)
+        if interrupted is not None:
+            raise ChatTurnError(
+                ERROR_APPROVAL_ACTION_REQUIRED,
+                "an interrupted run requires an approval action before reprocess",
+            )
+        row = await att_repo.get_by_id(session, att_id)
+        if row is None:
+            raise ChatTurnError(
+                ERROR_CV_ATTACHMENT_NOT_FOUND,
+                f"attachment {att_id!r} not found",
+            )
+        if row.state not in _REPROCESS_ELIGIBLE_STATES:
+            raise ChatTurnError(
+                ERROR_CV_NOT_REPROCESSABLE,
+                f"attachment state {row.state!r} cannot be reprocessed",
+            )
+        if not storage.exists(row.storage_path):
+            raise ChatTurnError(
+                ERROR_CV_FILE_UNAVAILABLE,
+                "retained CV file is unavailable for reprocess",
+            )
 
 
 async def persist_terminal_success(
@@ -383,13 +458,19 @@ async def stream_chat_turn(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     sqlite_path: str | Path | None = None,
     include_assistant_status: bool = False,
+    source_attachment_id: str | None = None,
 ) -> AsyncIterator[SseEvent]:
     """Create a durable turn, run the graph, persist terminal/interrupt state.
 
-    Blocks new turns while any run is interrupted (before insert).
+    Blocks new turns while any run is interrupted (before insert). Optional
+    *source_attachment_id* stamps CV ownership on the message/run pair.
     """
     factory = session_factory or get_session_factory()
-    turn = await create_user_turn(message=message, session_factory=factory)
+    turn = await create_user_turn(
+        message=message,
+        session_factory=factory,
+        source_attachment_id=source_attachment_id,
+    )
     interrupt_holder: dict[str, Any] = {}
 
     # Load bounded recent + approved candidate memory before graph execution.
@@ -439,6 +520,48 @@ async def stream_chat_turn(
     projection = interrupt_holder.get("projection")
     if isinstance(projection, dict):
         yield _approval_required_event(turn.run_id, projection)
+
+
+async def stream_cv_reprocess(
+    *,
+    attachment_id: str,
+    storage: AttachmentStorage,
+    model: BaseChatModel | Runnable[Any, Any] | None = None,
+    registry: ToolRegistry | None = None,
+    graph_bundle: AgentGraphBundle | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    sqlite_path: str | Path | None = None,
+    include_assistant_status: bool = False,
+) -> AsyncIterator[SseEvent]:
+    """CV Manager reprocess: validate, create one CV-owned turn, stream SSE.
+
+    Reuses the normal runner/SSE/approval contract. Active selection is not
+    mutated here; only the Agent proposal/commit tools write drafts and the
+    resume path activates on Save Profile.
+    """
+    factory = session_factory or get_session_factory()
+    await assert_cv_reprocessable(
+        attachment_id=attachment_id,
+        storage=storage,
+        session_factory=factory,
+    )
+    # Domain-agnostic user text; attachment_ids + ownership drive the tools.
+    message = (
+        f"Re-extract the retained CV for attachment {attachment_id} "
+        "and prepare the current draft for approval."
+    )
+    async for event in stream_chat_turn(
+        message=message,
+        model=model,
+        registry=registry,
+        graph_bundle=graph_bundle,
+        attachment_ids=[attachment_id],
+        session_factory=factory,
+        sqlite_path=sqlite_path,
+        include_assistant_status=include_assistant_status,
+        source_attachment_id=attachment_id,
+    ):
+        yield event
 
 
 async def stream_resume(
@@ -504,11 +627,16 @@ async def stream_resume(
 
 __all__ = [
     "ERROR_APPROVAL_ACTION_REQUIRED",
+    "ERROR_CHUNKS_UNAVAILABLE",
+    "ERROR_CV_ATTACHMENT_NOT_FOUND",
+    "ERROR_CV_FILE_UNAVAILABLE",
+    "ERROR_CV_NOT_REPROCESSABLE",
     "ERROR_INVALID_APPROVAL_ACTION",
     "ERROR_RUN_NOT_FOUND",
     "ERROR_RUN_NOT_RESUMABLE",
     "ChatTurnError",
     "CreatedTurn",
+    "assert_cv_reprocessable",
     "claim_resume",
     "count_chat_messages",
     "create_user_turn",
@@ -517,5 +645,6 @@ __all__ = [
     "persist_terminal_failure",
     "persist_terminal_success",
     "stream_chat_turn",
+    "stream_cv_reprocess",
     "stream_resume",
 ]

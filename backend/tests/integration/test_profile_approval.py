@@ -228,6 +228,10 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                     draft_json=MINIMAL_DRAFT,
                     source_attachment_id=att_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
+                )
                 assert draft.id == PROFILE_DRAFT_ID
                 assert draft.source_attachment_id == att_id
                 assert draft.draft_json["profile"]["full_name"] == "Test User"
@@ -282,6 +286,10 @@ def test_draft_source_attachment_unique_and_cascade(db_path: Path) -> None:
                     session,
                     draft_json=MINIMAL_DRAFT,
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
                 saved_att = att_id
@@ -725,6 +733,10 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                     draft_json=old_draft.model_dump(mode="json"),
                     source_attachment_id=old_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=old_id,
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
@@ -906,6 +918,10 @@ def test_propose_update_current_draft_profile_and_skills(
                     session,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
                 saved_att = att_id
@@ -1396,6 +1412,51 @@ def _write_pdf(storage: Any, attachment_id: str) -> str:
     return storage.write_bytes(attachment_id, b"%PDF-1.4 approval-test\n%%EOF\n")
 
 
+async def _seed_cv_document_draft(
+    session: Any,
+    *,
+    attachment_id: str,
+    profile_json: dict[str, Any] | None = None,
+    chunk_text: str = "approval coupling chunk text",
+) -> str:
+    """Seed document draft + matching chunks for CV-backed approval preflight."""
+    from app.repositories import attachment_text_chunks as chunk_repo
+    from app.repositories import cv_documents as cv_doc_repo
+    from app.repositories.attachment_text_chunks import build_chunk_write
+    from app.services.profile_extraction import (
+        CanonicalChunk,
+        compute_canonical_source_hash,
+    )
+
+    chunks = (CanonicalChunk(ordinal=0, text=chunk_text),)
+    source_hash = compute_canonical_source_hash(chunks)
+    profile = (
+        profile_json
+        if profile_json is not None
+        else _approval_valid_profile_json()
+    )
+    await cv_doc_repo.upsert_draft(
+        session,
+        attachment_id=attachment_id,
+        document_json={
+            "attachment_id": attachment_id,
+            "sections": [],
+            "extraction_version": "test-v1",
+            "source_hash": source_hash,
+        },
+        profile_json=profile,
+        outline_json={"sections": []},
+        extraction_version="test-v1",
+        source_hash=source_hash,
+    )
+    await chunk_repo.replace_for_attachment(
+        session,
+        attachment_id,
+        [build_chunk_write(0, chunk_text)],
+    )
+    return source_hash
+
+
 def test_first_approval_commits_active_profile_no_draft(
     db_path: Path, tmp_path: Path
 ) -> None:
@@ -1437,6 +1498,10 @@ def test_first_approval_commits_active_profile_no_draft(
                     session,
                     draft_json=_approval_draft_json(prefs=prefs),
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
 
@@ -1532,6 +1597,10 @@ def test_approved_profile_persists_across_engine_restart(
                         prefs=prefs, exclude_python=True
                     ),
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
 
@@ -1665,6 +1734,10 @@ def test_replacement_archives_old_attachment_and_retains_file(
                     draft_json=_approval_draft_json(),
                     source_attachment_id=new_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=new_id,
+                )
                 await session.commit()
 
             result = await commit_approved_draft(
@@ -1779,6 +1852,10 @@ def test_preflight_missing_file_leaves_prior_truth(
                     draft_json=_approval_draft_json(),
                     source_attachment_id=new_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=new_id,
+                )
                 await session.commit()
 
             result = await commit_approved_draft(
@@ -1866,6 +1943,10 @@ def test_transaction_failpoint_rolls_back_preserves_staged(
                     draft_json=_approval_draft_json(),
                     source_attachment_id=new_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=new_id,
+                )
                 await session.commit()
 
             result = await commit_approved_draft(
@@ -1937,6 +2018,10 @@ def test_sync_failure_after_commit_keeps_sqlite_truth(
                     session,
                     draft_json=_approval_draft_json(exclude_python=True),
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
 
@@ -2026,6 +2111,10 @@ def test_cleanup_failure_reported_sqlite_valid(
                     session,
                     draft_json=_approval_draft_json(),
                     source_attachment_id=new_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=new_id,
                 )
                 await session.commit()
 
@@ -2350,6 +2439,10 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                     draft_json=_approval_draft_json(),
                     source_attachment_id=att_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
+                )
                 await session.commit()
 
             tool = build_commit_profile_draft_tool(
@@ -2593,6 +2686,10 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
                     draft_json=_approval_draft_json(),
                     source_attachment_id=att_id,
                 )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
+                )
                 await session.commit()
 
             driver = _RecordingSyncDriver(fail=True)
@@ -2769,6 +2866,10 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                         }
                     ),
                     source_attachment_id=att_id,
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=att_id,
                 )
                 await session.commit()
 
@@ -3105,7 +3206,7 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     or {}
                 ).keys()
             )
-            assert cv_props == {"attachment_id"}
+            assert cv_props == {"attachment_id", "reprocess"}
             upd_props = set(
                 (
                     convert_to_openai_tool(propose_upd)
@@ -3297,7 +3398,10 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                 )
                 # Compact arguments summaries only (IDs / keys, never bodies).
                 cv_args = by_call["call_five_propose_cv"].arguments_summary_json
-                assert cv_args == {"attachment_id": att_id}
+                assert cv_args == {
+                    "attachment_id": att_id,
+                    "reprocess": False,
+                }
                 upd_args = by_call[
                     "call_five_propose_upd"
                 ].arguments_summary_json

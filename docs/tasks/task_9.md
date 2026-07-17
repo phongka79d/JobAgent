@@ -271,7 +271,7 @@ Own the dedicated reprocess route, CV-scoped turn creation, proposal/approval in
 
 ### Tasks
 
-- [ ] (03A): Reprocess active or archived CVs and activate only approved drafts
+- [x] (03A): Reprocess active or archived CVs and activate only approved drafts
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch03 - Approval-Gated CV Reprocessing and Activation` > `(03A)`

@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch02 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 9 Batch03 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01 added the
 data-preserving SQLite foundation (`0003_add_cv_documents_and_ownership`):
@@ -24,11 +24,19 @@ publishing `profile_drafts('current')` + `cv_document_drafts` + canonical
 chunks in one short transaction only after provider/coverage/projection/
 source-hash succeed outside any write txn (or rolls all back). Profile facts
 derive only from the validated document; certifications and unknown headings
-remain document content (`kind=other`). Reprocess/approval activation,
-deletion coordination, graph CV branches, Agent active-CV tools, and frontend
-CV Manager remain later batches. Six typed `GET /api/observability/*` routes
-and the CV sidebar inspector from Plan 8 are unchanged. Synthetic observability
-smoke evidence remains in `docs/acceptance/observability_sidebar_checklist.md`.
+remain document content (`kind=other`). Plan 9 Batch03 adds approval-gated CV
+reprocessing: thin `POST /api/cvs/{attachment_id}/reprocess` reuses the normal
+CV-scoped chat-turn/SSE/runner path (active/archived only, retained PDF required,
+interrupt lock); `propose_profile_from_cv(reprocess=true)` writes drafts only;
+Save Profile verifies document-draft/hash coupling, archives the prior active
+only when IDs differ, activates staged or archived targets, promotes document
+drafts, and clears drafts with a one-active invariant; graph failure after
+SQLite commit remains truthful (`NEO4J_SYNC_FAILED`, no rollback). Deletion
+coordination, complete CV graph projection/rebuild, Agent active-CV tools, and
+frontend CV Manager remain later batches. Six typed `GET /api/observability/*`
+routes and the CV sidebar inspector from Plan 8 are unchanged. Synthetic
+observability smoke evidence remains in
+`docs/acceptance/observability_sidebar_checklist.md`.
 
 ## Purpose and scope
 
@@ -38,6 +46,8 @@ JobAgent provides:
 - Multipart PDF CV upload (sidebar or chat), document-first structured draft
   proposal (bounded CVDocument extract → projected profile → atomic draft/
   chunk publish), and interrupt-guarded Save Profile / Request Changes approval.
+- Active/archived CV reprocess via `POST /api/cvs/{attachment_id}/reprocess`
+  (normal SSE/approval contract; draft-only until Save Profile activation).
 - Immutable archived prior CVs after approved replacement (retained PDF bytes and
   metadata; not selectable profile versions) and canonical parsed-text chunks
   for successful digital-PDF extraction.
@@ -71,10 +81,10 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | Layer | Owns |
 |---|---|
 | `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**`), approval/saved-job/match cards, single SSE reducer, typed API clients |
-| `backend/app/api/` | Thin public routes: health, CV upload, profile reads, chat history/turn/resume, read-only observability |
+| `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, profile approval/extraction/drafts, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, JD, matching, tool execution, history, observability assembly) |
 | `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
@@ -92,6 +102,7 @@ Public functional endpoints (Master §14 core plus Plan 8 observability):
 
 - `GET /api/health`
 - `POST /api/attachments/cv`
+- `POST /api/cvs/{attachment_id}/reprocess`
 - `GET /api/profile`
 - `GET /api/profile/cv`
 - `GET /api/chat/history`
@@ -254,6 +265,20 @@ chunks + document draft + profile draft, rollback/failpoint, source-hash):
 ```powershell
 Set-Location backend
 py -3.13 -m pytest tests/unit/test_cv_document.py tests/unit/test_cv_document_extraction.py tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 9 Batch03 approval-gated CV reprocess and activation gate
+(active/archived eligibility, SSE/ownership, draft-only reprocess, Request
+Changes preserve, Save Profile switch/same-ID refresh, rollback, sync failure,
+terminal resume idempotency):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/integration/test_cv_manager_api.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..

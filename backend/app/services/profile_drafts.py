@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
@@ -130,9 +131,13 @@ def _tool_fail(
     return ToolResult(ok=False, code=code, summary=summary, data=data)
 
 
-def arguments_summary_for_propose_cv(attachment_id: str) -> dict[str, Any]:
-    """Compact ``arguments_summary_json`` — IDs only, never raw CV text."""
-    return {"attachment_id": attachment_id}
+def arguments_summary_for_propose_cv(
+    attachment_id: str,
+    *,
+    reprocess: bool = False,
+) -> dict[str, Any]:
+    """Compact ``arguments_summary_json`` — IDs/flags only, never raw CV text."""
+    return {"attachment_id": attachment_id, "reprocess": bool(reprocess)}
 
 
 async def _mark_failed(
@@ -165,13 +170,18 @@ async def propose_profile_from_cv(
     invoker: Any = None,
     extract_text_fn: Callable[[Any], Any] | None = None,
     publish_failpoint: str | None = None,
+    reprocess: bool = False,
 ) -> ProposeFromCvResult:
-    """Run active/draft reuse or staged document-first draft publication.
+    """Run active/draft reuse, staged publication, or active/archived reprocess.
 
     Does not mutate active profile or job preferences. Provider, PDF, document
     extraction, coverage, projection, and source-hash work occur outside any
     transaction. Only after total success, one short transaction replaces
     chunks + ``cv_document_drafts`` and upserts ``profile_drafts('current')``.
+
+    With *reprocess* True, an active or archived attachment is re-extracted
+    into drafts without changing attachment lifecycle state. With *reprocess*
+    False, active returns the approved profile and archived is rejected.
 
     *invoker* should be a document-capable structured invoker (``schema_name``).
     Profile-first invokers are ignored and a production document invoker is
@@ -207,81 +217,104 @@ async def propose_profile_from_cv(
         storage_path = attachment.storage_path
         original_name = attachment.original_name
 
-        # --- Active: return approved profile without extraction/draft ---
-        # Legacy active rows without cv_documents stay usable; no synthesis.
-        if state == ATTACHMENT_STATE_ACTIVE:
-            profile_row = await profile_repo.get_active_profile(session)
-            if profile_row is None or profile_row.active_attachment_id != attachment_id:
+        if reprocess:
+            if state not in (
+                ATTACHMENT_STATE_ACTIVE,
+                ATTACHMENT_STATE_ARCHIVED,
+            ):
                 return ProposeFromCvResult(
-                    kind="active_profile",
+                    kind="new_draft",
                     tool_result=_tool_fail(
-                        ERROR_ACTIVE_PROFILE_MISSING,
-                        "active attachment has no matching approved profile",
-                        {"attachment_id": attachment_id},
+                        ERROR_ATTACHMENT_NOT_PROCESSABLE,
+                        "reprocess requires an active or archived attachment",
+                        {"attachment_id": attachment_id, "state": state},
                     ),
                     attachment_id=attachment_id,
                 )
-            profile = parse_candidate_profile(profile_row.profile_json)
-            data = {
-                "profile_id": CANDIDATE_PROFILE_ID,
-                "attachment_id": attachment_id,
-                "reused": True,
-                "kind": "active_profile",
-                **compact_profile_summary(profile),
-            }
-            return ProposeFromCvResult(
-                kind="active_profile",
-                tool_result=_tool_ok(
-                    "returned existing approved candidate profile without extraction",
-                    data,
-                ),
-                profile=profile,
-                attachment_id=attachment_id,
-            )
-
-        # --- Staged already backing current draft: reuse ---
-        if state == ATTACHMENT_STATE_STAGED:
-            draft_row = await profile_repo.get_current_draft(session)
-            if (
-                draft_row is not None
-                and draft_row.source_attachment_id == attachment_id
-            ):
-                draft = parse_profile_draft_payload(draft_row.draft_json)
+            # Fall through to document-first publication (no state change).
+        else:
+            # --- Active: return approved profile without extraction/draft ---
+            # Legacy active rows without cv_documents stay usable; no synthesis.
+            if state == ATTACHMENT_STATE_ACTIVE:
+                profile_row = await profile_repo.get_active_profile(session)
+                if (
+                    profile_row is None
+                    or profile_row.active_attachment_id != attachment_id
+                ):
+                    return ProposeFromCvResult(
+                        kind="active_profile",
+                        tool_result=_tool_fail(
+                            ERROR_ACTIVE_PROFILE_MISSING,
+                            "active attachment has no matching approved profile",
+                            {"attachment_id": attachment_id},
+                        ),
+                        attachment_id=attachment_id,
+                    )
+                profile = parse_candidate_profile(profile_row.profile_json)
                 data = {
-                    "draft_id": PROFILE_DRAFT_ID,
+                    "profile_id": CANDIDATE_PROFILE_ID,
                     "attachment_id": attachment_id,
                     "reused": True,
-                    "kind": "existing_draft",
-                    **compact_draft_summary(draft),
+                    "kind": "active_profile",
+                    **compact_profile_summary(profile),
                 }
                 return ProposeFromCvResult(
-                    kind="existing_draft",
+                    kind="active_profile",
                     tool_result=_tool_ok(
-                        "returned existing current draft for this staged attachment",
+                        "returned existing approved candidate profile "
+                        "without extraction",
                         data,
                     ),
-                    draft=draft,
+                    profile=profile,
                     attachment_id=attachment_id,
                 )
-        else:
-            return ProposeFromCvResult(
-                kind="new_draft",
-                tool_result=_tool_fail(
-                    ERROR_ATTACHMENT_NOT_PROCESSABLE,
-                    f"attachment state {state!r} cannot be processed for proposal",
-                    {"attachment_id": attachment_id, "state": state},
-                ),
-                attachment_id=attachment_id,
-            )
 
-    # --- New staged document-first extraction (outside any write transaction) ---
+            # --- Staged already backing current draft: reuse ---
+            if state == ATTACHMENT_STATE_STAGED:
+                draft_row = await profile_repo.get_current_draft(session)
+                if (
+                    draft_row is not None
+                    and draft_row.source_attachment_id == attachment_id
+                ):
+                    draft = parse_profile_draft_payload(draft_row.draft_json)
+                    data = {
+                        "draft_id": PROFILE_DRAFT_ID,
+                        "attachment_id": attachment_id,
+                        "reused": True,
+                        "kind": "existing_draft",
+                        **compact_draft_summary(draft),
+                    }
+                    return ProposeFromCvResult(
+                        kind="existing_draft",
+                        tool_result=_tool_ok(
+                            "returned existing current draft for this "
+                            "staged attachment",
+                            data,
+                        ),
+                        draft=draft,
+                        attachment_id=attachment_id,
+                    )
+            else:
+                return ProposeFromCvResult(
+                    kind="new_draft",
+                    tool_result=_tool_fail(
+                        ERROR_ATTACHMENT_NOT_PROCESSABLE,
+                        f"attachment state {state!r} cannot be processed "
+                        "for proposal",
+                        {"attachment_id": attachment_id, "state": state},
+                    ),
+                    attachment_id=attachment_id,
+                )
+
+    # --- Document-first extraction (outside any write transaction) ---
     if not storage.exists(storage_path):
-        await _mark_failed(session_factory, attachment_id, ERROR_FILE_MISSING)
+        if not reprocess:
+            await _mark_failed(session_factory, attachment_id, ERROR_FILE_MISSING)
         return ProposeFromCvResult(
             kind="new_draft",
             tool_result=_tool_fail(
                 ERROR_FILE_MISSING,
-                "staged attachment file is missing",
+                "attachment file is missing",
                 {"attachment_id": attachment_id},
             ),
             attachment_id=attachment_id,
@@ -297,7 +330,8 @@ async def propose_profile_from_cv(
             extract_text_fn=extract_text_fn,
         )
     except ProfileExtractionError as exc:
-        await _mark_failed(session_factory, attachment_id, exc.code)
+        if not reprocess:
+            await _mark_failed(session_factory, attachment_id, exc.code)
         # Never include raw CV text in the failure ToolResult.
         return ProposeFromCvResult(
             kind="new_draft",
@@ -314,9 +348,10 @@ async def propose_profile_from_cv(
     # Full model already validated by document projection / parse helpers.
     parse_profile_draft_payload(draft_json)
     if not artifacts.source_hash or not artifacts.chunks:
-        await _mark_failed(
-            session_factory, attachment_id, "INVALID_STRUCTURED_OUTPUT"
-        )
+        if not reprocess:
+            await _mark_failed(
+                session_factory, attachment_id, "INVALID_STRUCTURED_OUTPUT"
+            )
         return ProposeFromCvResult(
             kind="new_draft",
             tool_result=_tool_fail(
@@ -329,17 +364,21 @@ async def propose_profile_from_cv(
 
     prior_storage_path: str | None = None
     prior_attachment_id: str | None = None
+    allowed_states = (
+        frozenset({ATTACHMENT_STATE_STAGED})
+        if not reprocess
+        else frozenset({ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_ARCHIVED})
+    )
 
     try:
         async with _short_transaction(session_factory) as session:
-            # Re-check attachment still staged (no concurrent approval assumed).
             row = await att_repo.get_by_id(session, attachment_id)
-            if row is None or row.state != ATTACHMENT_STATE_STAGED:
+            if row is None or row.state not in allowed_states:
                 return ProposeFromCvResult(
                     kind="new_draft",
                     tool_result=_tool_fail(
                         ERROR_ATTACHMENT_NOT_PROCESSABLE,
-                        "attachment is no longer staged for proposal",
+                        "attachment is no longer eligible for proposal",
                         {"attachment_id": attachment_id},
                     ),
                     attachment_id=attachment_id,
@@ -350,6 +389,8 @@ async def propose_profile_from_cv(
                 prior_id = existing.source_attachment_id
                 if prior_id != attachment_id:
                     prior = await att_repo.get_by_id(session, prior_id)
+                    # Only unreferenced staged priors are deleted (never
+                    # active/archived history rows).
                     if prior is not None and prior.state == ATTACHMENT_STATE_STAGED:
                         prior_attachment_id = prior.id
                         prior_storage_path = prior.storage_path
@@ -423,11 +464,17 @@ async def propose_profile_from_cv(
                 prior_storage_path,
             )
 
+    summary = (
+        "created validated document and profile drafts from reprocessed CV"
+        if reprocess
+        else "created validated document and profile drafts from staged CV"
+    )
     data = {
         "draft_id": PROFILE_DRAFT_ID,
         "attachment_id": attachment_id,
         "reused": False,
         "kind": "new_draft",
+        "reprocess": bool(reprocess),
         "schema_repairs_used": artifacts.schema_repairs_used,
         "provider_retries_used": artifacts.provider_retries_used,
         "prior_staged_removed": prior_attachment_id is not None,
@@ -437,10 +484,7 @@ async def propose_profile_from_cv(
     }
     return ProposeFromCvResult(
         kind="new_draft",
-        tool_result=_tool_ok(
-            "created validated document and profile drafts from staged CV",
-            data,
-        ),
+        tool_result=_tool_ok(summary, data),
         draft=draft_payload,
         attachment_id=attachment_id,
         schema_repairs_used=artifacts.schema_repairs_used,
