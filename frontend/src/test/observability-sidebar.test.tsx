@@ -193,10 +193,11 @@ describe('ObservabilitySidebar composition', () => {
     await waitFor(() => {
       expect(screen.getByTestId('jobagent-obs-tabs')).toBeInTheDocument();
     });
-    const collapse = screen.getByTestId('jobagent-sidebar-collapse');
+    let collapse = screen.getByTestId('jobagent-sidebar-collapse');
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
 
     await userEvent.click(collapse);
+    collapse = screen.getByTestId('jobagent-sidebar-collapse');
     expect(collapse).toHaveAttribute('aria-expanded', 'false');
     expect(
       await screen.findByTestId('jobagent-obs-collapsed-status'),
@@ -204,6 +205,7 @@ describe('ObservabilitySidebar composition', () => {
     expect(screen.queryByTestId('jobagent-obs-tabs')).not.toBeInTheDocument();
 
     await userEvent.click(collapse);
+    collapse = screen.getByTestId('jobagent-sidebar-collapse');
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
     expect(await screen.findByTestId('jobagent-obs-tabs')).toBeInTheDocument();
   });

@@ -19,6 +19,23 @@ export const RUN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 export const TOOL_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
 export const MSG_ID = 'dddddddd-eeee-4fff-8aaa-111111111111';
 
+export function installMatchMedia(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: (query: string): MediaQueryList => ({
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 export function emptyProfile(): ProfileReadResponse {
   return {
     present: false,

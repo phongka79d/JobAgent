@@ -4,30 +4,26 @@
  */
 
 .jobagent-obs-root {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+}
+
+.jobagent-obs-root[data-collapsed='true'] {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2, 8px);
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
+  align-items: center;
 }
 
-.jobagent-obs-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-1, 4px);
-  width: 100%;
+.jobagent-obs-tab-rail,
+.jobagent-obs-content {
   min-width: 0;
 }
 
-.jobagent-obs-tab {
-  /* Focus ring visible for keyboard users */
-  outline-offset: 2px;
-}
-
-.jobagent-obs-tab:focus-visible {
-  outline: 2px solid var(--color-border-focus, currentColor);
+.jobagent-obs-content {
+  border-inline-start: 1px solid var(--color-border);
+  padding: var(--spacing-2);
 }
 
 .jobagent-obs-panel {
@@ -101,11 +97,6 @@
   width: 100%;
 }
 
-.jobagent-obs-collapse-btn:focus-visible {
-  outline: 2px solid var(--color-border-focus, currentColor);
-  outline-offset: 2px;
-}
-
 /* Prevent sidebar content from forcing the shell wider than the chat column. */
 .jobagent-cv-sidebar-shell {
   max-width: 100%;
@@ -113,6 +104,16 @@
 }
 
 @media (max-width: 767px) {
+  .jobagent-obs-root {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .jobagent-obs-content {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--color-border);
+  }
+
   /* Mobile drawer must not trap the chat composer under fixed chrome. */
   .jobagent-obs-panel {
     max-height: min(50vh, 22rem);
