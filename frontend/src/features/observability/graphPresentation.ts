@@ -29,6 +29,15 @@ function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function uniqueByKey<T extends {key: string}>(items: T[]): T[] {
+  const unique = new Map<string, T>();
+  for (const item of items) {
+    // ponytail: Keep the first duplicate key; handle conflicts only if contracts permit them.
+    if (!unique.has(item.key)) unique.set(item.key, item);
+  }
+  return [...unique.values()];
+}
+
 function sourceKey(type: GraphEdgeType, id: string): string {
   if (type === 'HAS_SKILL') return `candidate:${id}`;
   if (type === 'REQUIRES' || type === 'PREFERS') return `job:${id}`;
@@ -37,6 +46,10 @@ function sourceKey(type: GraphEdgeType, id: string): string {
 
 function targetKey(id: string): string {
   return `skill:${id}`;
+}
+
+function escapeLinkEndpoint(key: string): string {
+  return key.replaceAll('%', '%25').replaceAll('->', '%2D%3E');
 }
 
 export function toGraphModel(snapshot: GraphSnapshot): GraphModel {
@@ -81,35 +94,35 @@ export function toGraphModel(snapshot: GraphSnapshot): GraphModel {
     ),
   );
 
-  nodes.sort((left, right) =>
+  const uniqueNodes = uniqueByKey(nodes).sort((left, right) =>
     compareStrings(`${left.kind}:${left.key}`, `${right.kind}:${right.key}`),
   );
-  const nodeKeys = new Set(nodes.map((node) => node.key));
+  const nodeKeys = new Set(uniqueNodes.map((node) => node.key));
 
-  const links = snapshot.edges
-    .flatMap((edge): GraphLinkDatum[] => {
+  const links = uniqueByKey(
+    snapshot.edges.flatMap((edge): GraphLinkDatum[] => {
       const source = sourceKey(edge.type, edge.source_id);
       const target = targetKey(edge.target_id);
       if (!nodeKeys.has(source) || !nodeKeys.has(target)) return [];
+      const escapedSource = escapeLinkEndpoint(source);
+      const escapedTarget = escapeLinkEndpoint(target);
       return [
         {
-          key: `${edge.type}:${source}->${target}`,
+          key: `${edge.type}:${escapedSource}->${escapedTarget}`,
           source,
           target,
           type: edge.type,
         },
       ];
-    })
-    .sort((left, right) =>
-      compareStrings(
-        `${left.type}:${left.source}:${left.target}`,
-        `${right.type}:${right.source}:${right.target}`,
-      ),
-    );
+    }),
+  ).sort((left, right) => compareStrings(left.key, right.key));
 
   return {
-    identity: [...nodes.map((node) => node.key), ...links.map((link) => link.key)].join('|'),
-    nodes,
+    identity: JSON.stringify([
+      uniqueNodes.map((node) => node.key),
+      links.map((link) => link.key),
+    ]),
+    nodes: uniqueNodes,
     links,
   };
 }
