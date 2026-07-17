@@ -93,20 +93,136 @@
   font-size: 0.8125rem;
 }
 
-.jobagent-obs-graph-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-1, 4px);
+.jobagent-graph-canvas {
+  position: relative;
+  width: 100%;
+  height: clamp(20rem, 48vh, 30rem);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-surface);
+  touch-action: none;
 }
 
-.jobagent-obs-graph-list li {
-  padding: var(--spacing-1, 4px) var(--spacing-2, 8px);
-  border-left: 2px solid var(--color-border, rgba(0, 0, 0, 0.12));
+.jobagent-graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
   min-width: 0;
-  word-break: break-word;
+}
+
+.jobagent-graph-edge {
+  stroke: var(--color-border-gray);
+  stroke-width: var(--border-width);
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.jobagent-graph-arrow {
+  fill: var(--color-border-gray);
+  stroke: none;
+}
+
+.jobagent-graph-edge-label rect {
+  fill: var(--color-background-surface);
+  stroke: var(--color-border);
+  stroke-width: var(--border-width);
+  rx: var(--radius-inner);
+}
+
+.jobagent-graph-edge-label text,
+.jobagent-graph-node text {
+  fill: var(--color-text-primary);
+  font-family: var(--font-family-body);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  user-select: none;
+}
+
+.jobagent-graph-node {
+  cursor: grab;
+  outline: var(--border-width) solid transparent;
+  outline-offset: var(--spacing-1);
+}
+
+.jobagent-graph-node:active {
+  cursor: grabbing;
+}
+
+.jobagent-graph-node circle {
+  stroke-width: calc(var(--border-width) * 2);
+  vector-effect: non-scaling-stroke;
+}
+
+.jobagent-graph-node--candidate circle {
+  fill: var(--color-background-green);
+  stroke: var(--color-border-green);
+}
+
+.jobagent-graph-node--job circle {
+  fill: var(--color-background-purple);
+  stroke: var(--color-border-purple);
+}
+
+.jobagent-graph-node--skill circle {
+  fill: var(--color-background-blue);
+  stroke: var(--color-border-blue);
+}
+
+.jobagent-graph-node:focus-visible {
+  outline-color: var(--color-accent);
+}
+
+.jobagent-graph-node:focus-visible circle,
+.jobagent-graph-node.is-selected circle {
+  stroke: var(--color-accent);
+  stroke-width: calc(var(--border-width) * 4);
+}
+
+.jobagent-graph-legend {
+  flex-wrap: wrap;
+}
+
+.jobagent-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
+  letter-spacing: 0;
+}
+
+.jobagent-graph-legend-item > span {
+  width: var(--spacing-3);
+  height: var(--spacing-3);
+  border: var(--border-width) solid;
+  border-radius: var(--radius-full);
+}
+
+.jobagent-graph-legend-item--candidate > span {
+  background: var(--color-background-green);
+  border-color: var(--color-border-green);
+}
+
+.jobagent-graph-legend-item--job > span {
+  background: var(--color-background-purple);
+  border-color: var(--color-border-purple);
+}
+
+.jobagent-graph-legend-item--skill > span {
+  background: var(--color-background-blue);
+  border-color: var(--color-border-blue);
+}
+
+.jobagent-graph-skeleton-canvas {
+  width: 100%;
+  height: clamp(20rem, 48vh, 30rem);
+  min-width: 0;
 }
 
 .jobagent-obs-collapsed-status {

@@ -163,19 +163,28 @@ describe('ObservabilitySidebar composition', () => {
     expect(openBtn).toBeDisabled();
   });
 
-  it('renders graph semantic fallback with truncation metadata', async () => {
+  it('renders graph canvas with truncation metadata and semantic fallback', async () => {
     const api = mockObservabilityApi();
     renderObservabilitySidebar(api);
     await userEvent.click(screen.getByTestId('jobagent-obs-tab-graph'));
     await waitFor(() => {
       expect(api.fetchGraphSnapshot).toHaveBeenCalledTimes(1);
     });
-    expect(await screen.findByTestId('jobagent-obs-graph-jobs')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('group', {
+        name: 'Candidate, jobs and skills network',
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-obs-graph-meta')).toHaveTextContent(
       /nodes truncated \(\+2\)/,
     );
-    expect(screen.getByText('python')).toBeInTheDocument();
-    expect(screen.getByText(/HAS_SKILL/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Graph data'));
+    expect(screen.getByTestId('jobagent-obs-graph-skills')).toHaveTextContent(
+      'python',
+    );
+    expect(screen.getByTestId('jobagent-obs-graph-edges')).toHaveTextContent(
+      'HAS_SKILL',
+    );
   });
 
   it('loads runs and expands structured tool details', async () => {

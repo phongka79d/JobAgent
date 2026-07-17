@@ -1,6 +1,17 @@
-import {act, renderHook} from '@testing-library/react';
+import {Theme} from '@astryxdesign/core';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  screen,
+  within,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+import {GraphPanel} from '../features/observability/GraphPanel';
 import {toGraphModel} from '../features/observability/graphPresentation';
 import {
   createGraphSimulation,
@@ -10,6 +21,7 @@ import {
   useGraphSimulation,
   type GraphSimulationFactory,
 } from '../features/observability/useGraphSimulation';
+import type {GraphSnapshot} from '../features/observability/types';
 import {
   graphReady,
   installMatchMedia,
@@ -17,7 +29,19 @@ import {
 
 const activeControllers = new Set<GraphSimulationController>();
 
+function renderGraphPanel(snapshot: GraphSnapshot) {
+  return render(
+    <Theme theme={neutralTheme}>
+      <GraphPanel
+        resource={{phase: 'ready', data: snapshot, error: null, loaded: true}}
+        onRefresh={vi.fn()}
+      />
+    </Theme>,
+  );
+}
+
 afterEach(() => {
+  cleanup();
   for (const controller of activeControllers) controller.stop();
   activeControllers.clear();
   installMatchMedia(false);
@@ -225,5 +249,40 @@ describe('graph simulation hook lifecycle', () => {
 
     unmount();
     expect(controllers[1].stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe('graph panel', () => {
+  it('renders typed nodes, directed labeled edges, controls, and safe metadata', async () => {
+    renderGraphPanel(graphReady());
+    const graph = await screen.findByRole('group', {
+      name: 'Candidate, jobs and skills network',
+    });
+    expect(graph).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-graph-node-candidate:cand-1'),
+    ).toHaveTextContent('Candidate');
+    expect(within(graph).getByText('HAS_SKILL')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Fit view'})).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {name: 'Reset layout'}),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByTestId('jobagent-graph-node-candidate:cand-1'),
+    );
+    expect(
+      screen.getByTestId('jobagent-graph-selected-metadata'),
+    ).toHaveTextContent('cand-1');
+  });
+
+  it('keeps a readable semantic list and stale warning', async () => {
+    const snapshot = graphReady();
+    snapshot.status = 'stale';
+    renderGraphPanel(snapshot);
+    expect(
+      await screen.findByTestId('jobagent-obs-graph-status-stale'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Graph data'));
+    expect(screen.getByText(/cand-1.*HAS_SKILL.*python/)).toBeInTheDocument();
   });
 });
