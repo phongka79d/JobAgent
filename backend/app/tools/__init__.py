@@ -1,4 +1,4 @@
-"""Agent-facing tool registry boundary (Plan 3 production registry is empty)."""
+"""Agent-facing tool registry boundary (seven production tools via registry)."""
 
 from app.tools.registry import ToolRegistry, production_registry
 

@@ -1036,3 +1036,256 @@ def test_tool_status_live_pending_running_while_side_effect_blocks(
             await engine.dispose()
 
     run_async(_body())
+
+
+# ---------------------------------------------------------------------------
+# Active-CV outline injection (Batch06 A3-B01)
+# ---------------------------------------------------------------------------
+
+
+def test_stream_agent_run_injects_active_cv_context_outline(
+    tmp_path: Path,
+) -> None:
+    """Runner passes non-None outline into initial graph state / model prompt."""
+    db = tmp_path / "active-cv-runner.db"
+    outline = {
+        "attachment_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "extraction_version": "cv-document-v1",
+        "source_hash": "abc123sourcehash",
+        "reprocess_required": False,
+        "sections": [
+            {
+                "id": "cv-document-v1:s0:experience",
+                "ordinal": 0,
+                "heading": "Experience",
+                "kind": "experience",
+                "entry_count": 2,
+                "source_chunk_range": [0, 1],
+            }
+        ],
+    }
+
+    async def _body() -> None:
+        model = FakeChatModel(responses=[_ai_text("Outline received.")])
+        events = await _collect(
+            stream_agent_run(
+                run_id=RUN_A,
+                user_text="Summarize my experience section ids",
+                active_cv_context=outline,
+                model=model,
+                sqlite_path=db,
+                include_assistant_status=False,
+            )
+        )
+        assert _names(events)[-1] == "run_completed"
+        assert model.invoke_count >= 1
+        joined = "\n".join(
+            str(m.content)
+            for call in model.call_log
+            for m in call
+            if hasattr(m, "content")
+        )
+        assert "Active CV outline only" in joined
+        assert outline["attachment_id"] in joined
+        assert "Experience" in joined
+        assert "Built APIs" not in joined
+        assert "SECRET_BODY" not in joined
+
+    run_async(_body())
+
+
+def test_stream_chat_turn_loads_active_cv_outline_before_graph(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """Live stream_chat_turn loads outline via load_active_cv_context (not None)."""
+    from app.repositories import attachments as att_repo
+    from app.repositories import cv_documents as cv_doc_repo
+    from app.services.chat_turns import stream_chat_turn
+
+    attachment_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    body_secret = "Built APIs with Python SECRET_BODY_LEAK"
+    document = {
+        "attachment_id": attachment_id,
+        "detected_languages": ["en"],
+        "sections": [
+            {
+                "id": "cv-document-v1:s0:experience",
+                "ordinal": 0,
+                "heading": "Experience",
+                "kind": "experience",
+                "entries": [
+                    {
+                        "id": "cv-document-v1:s0:e0:role",
+                        "ordinal": 0,
+                        "title": "Engineer",
+                        "subtitle": "Acme",
+                        "date_text": "2019",
+                        "location": None,
+                        "body": body_secret,
+                        "bullets": ["Python"],
+                        "attributes": {},
+                        "source_chunk_ordinals": [0],
+                    }
+                ],
+                "source_chunk_ordinals": [0],
+            }
+        ],
+        "extraction_warnings": [],
+        "extraction_confidence": 0.9,
+    }
+    outline_json = {
+        "sections": [
+            {
+                "id": "cv-document-v1:s0:experience",
+                "ordinal": 0,
+                "heading": "Experience",
+                "kind": "experience",
+                "entry_count": 1,
+                "source_chunk_ordinals": [0],
+                "source_chunk_range": [0, 0],
+            }
+        ]
+    }
+    checkpoint_db = tmp_path / "chat-turn-active-cv.db"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="hash-active-cv-turn",
+                    original_name="cv.pdf",
+                    size_bytes=10,
+                    storage_path=f"{attachment_id}.pdf",
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id, page_count=1)
+                await profile_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=attachment_id,
+                    profile_json={
+                        "summary": "Engineer",
+                        "current_title": "Engineer",
+                        "total_experience_years": 5.0,
+                        "skills": [],
+                        "experiences": [],
+                        "education": [],
+                        "languages": [],
+                        "extraction_confidence": 0.9,
+                    },
+                )
+                await cv_doc_repo.upsert_document(
+                    session,
+                    attachment_id=attachment_id,
+                    document_json=document,
+                    profile_json={"summary": "Engineer"},
+                    outline_json=outline_json,
+                    extraction_version="cv-document-v1",
+                    source_hash="abc123sourcehashfixed000000000000000000000000000000000000001",
+                )
+                await session.commit()
+
+            model = FakeChatModel(responses=[_ai_text("Got outline.")])
+            events = await _collect(
+                stream_chat_turn(
+                    message="What sections are on my active CV?",
+                    model=model,
+                    session_factory=factory,
+                    sqlite_path=checkpoint_db,
+                    include_assistant_status=False,
+                )
+            )
+            assert _names(events)[0] == "run_started"
+            assert _names(events)[-1] == "run_completed"
+            assert model.invoke_count >= 1
+            joined = "\n".join(
+                str(m.content)
+                for call in model.call_log
+                for m in call
+                if hasattr(m, "content")
+            )
+            assert "Active CV outline only" in joined
+            assert attachment_id in joined
+            assert "Experience" in joined
+            assert "reprocess_required" in joined
+            assert body_secret not in joined
+            assert "SECRET_BODY_LEAK" not in joined
+            assert "storage_path" not in joined
+            assert "%PDF" not in joined
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_stream_chat_turn_legacy_active_cv_reprocess_outline(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """Legacy active CV (no cv_documents row) injects reprocess_required shape."""
+    from app.repositories import attachments as att_repo
+    from app.services.chat_turns import stream_chat_turn
+
+    attachment_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    checkpoint_db = tmp_path / "chat-turn-legacy-cv.db"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="hash-legacy-cv-turn",
+                    original_name="legacy.pdf",
+                    size_bytes=10,
+                    storage_path=f"{attachment_id}.pdf",
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id, page_count=1)
+                await profile_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=attachment_id,
+                    profile_json={
+                        "summary": "Legacy Engineer",
+                        "current_title": "Engineer",
+                        "total_experience_years": 3.0,
+                        "skills": [],
+                        "experiences": [],
+                        "education": [],
+                        "languages": [],
+                        "extraction_confidence": 0.5,
+                    },
+                )
+                await session.commit()
+
+            model = FakeChatModel(responses=[_ai_text("Legacy noted.")])
+            events = await _collect(
+                stream_chat_turn(
+                    message="Is my CV ready?",
+                    model=model,
+                    session_factory=factory,
+                    sqlite_path=checkpoint_db,
+                    include_assistant_status=False,
+                )
+            )
+            assert _names(events)[-1] == "run_completed"
+            joined = "\n".join(
+                str(m.content)
+                for call in model.call_log
+                for m in call
+                if hasattr(m, "content")
+            )
+            assert "Active CV outline only" in joined
+            assert attachment_id in joined
+            assert "true" in joined.lower() or "reprocess_required" in joined
+            assert "legacy-reprocess-required" in joined
+        finally:
+            await engine.dispose()
+
+    run_async(_body())

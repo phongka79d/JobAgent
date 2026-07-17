@@ -11,7 +11,7 @@ beyond ``TOOL_LOOP_LIMIT`` (default six) ends with a stable controlled failure.
 
 Graph nodes perform no SQLAlchemy writes, HTTP transport, hidden transactions, or
 provider construction. The factory may bind an injected model/tools; production
-defaults to the six production tools via :func:`production_registry`.
+defaults to the seven production tools via :func:`production_registry`.
 """
 
 from __future__ import annotations
@@ -76,6 +76,7 @@ class AgentGraphState(TypedDict):
     messages_for_this_turn: Annotated[list[AnyMessage], add_messages]
     recent_context: list[dict[str, Any]]
     candidate_context: list[dict[str, Any]]
+    active_cv_context: dict[str, Any] | None
     attachment_ids: list[str]
     pending_approval: dict[str, Any] | None
     tool_iteration_count: int
@@ -247,17 +248,48 @@ def _format_attachment_ids_block(
     )
 
 
+def _format_active_cv_context_block(
+    active_cv_context: dict[str, Any] | None,
+) -> str | None:
+    """Serialize compact active-CV outline for the system prompt.
+
+    Outline only: attachment identity, revision/hash, and section
+    ids/headings/kinds/counts/ranges. Never bodies, entries, or chunks.
+    Returns ``None`` when empty so the model is not fed a placeholder block.
+    """
+    if not isinstance(active_cv_context, dict) or not active_cv_context:
+        return None
+    try:
+        payload = json.dumps(
+            active_cv_context, ensure_ascii=False, separators=(",", ":")
+        )
+    except (TypeError, ValueError):
+        return None
+    return (
+        "Active CV outline only (identity, revision, section ids/headings/"
+        "kinds/entry counts; never section bodies or chunks). When document "
+        "evidence is needed beyond this outline, call read_active_cv with the "
+        "narrowest mode; do not assume full CV text is already in context:\n"
+        f"{payload}"
+    )
+
+
 def _build_model_messages(
     state: AgentGraphState,
     system_prompt: str,
 ) -> list[BaseMessage]:
-    """Assemble system + candidate + attachment refs + context + turn messages."""
+    """Assemble system + candidate + active-CV outline + attachment refs + turn."""
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     candidate_block = _format_candidate_context_block(
         state.get("candidate_context")
     )
     if candidate_block is not None:
         messages.append(SystemMessage(content=candidate_block))
+    active_cv_block = _format_active_cv_context_block(
+        state.get("active_cv_context")
+    )
+    if active_cv_block is not None:
+        messages.append(SystemMessage(content=active_cv_block))
     attachment_block = _format_attachment_ids_block(state.get("attachment_ids"))
     if attachment_block is not None:
         messages.append(SystemMessage(content=attachment_block))
@@ -429,7 +461,7 @@ def build_agent_graph(
         Chat model used by the decision node. When omitted, constructed via the
         ShopAIKey adapter (not inside a graph node). Tests inject fakes.
     registry:
-        Tool registry. Defaults to :func:`production_registry` (six tools).
+        Tool registry. Defaults to :func:`production_registry` (seven tools).
     tool_loop_limit:
         Max ToolNode passes per turn (default ``Settings.TOOL_LOOP_LIMIT`` = 6).
     settings:
@@ -540,6 +572,7 @@ def initial_graph_state(
     user_text: str,
     recent_context: Sequence[dict[str, Any]] | None = None,
     candidate_context: Sequence[dict[str, Any]] | None = None,
+    active_cv_context: dict[str, Any] | None = None,
     attachment_ids: Sequence[str] | None = None,
     tool_iteration_count: int = 0,
     error: str | None = None,
@@ -553,6 +586,7 @@ def initial_graph_state(
         "messages_for_this_turn": [HumanMessage(content=user_text)],
         "recent_context": list(recent_context or ()),
         "candidate_context": list(candidate_context or ()),
+        "active_cv_context": active_cv_context,
         "attachment_ids": list(attachment_ids or ()),
         "pending_approval": None,
         "tool_iteration_count": tool_iteration_count,

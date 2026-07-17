@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.context import (
+    load_active_cv_context,
     load_candidate_context,
     load_profile_working_memory_messages,
     load_recent_context,
@@ -473,17 +474,21 @@ async def stream_chat_turn(
     )
     interrupt_holder: dict[str, Any] = {}
 
-    # Load bounded recent + approved candidate memory before graph execution.
-    # Short read session only — never held open across provider/graph work.
-    # Candidate context is the approved profile only; draft/staged attachment
-    # working memory is injected as system ContextMessages so later turns still
-    # see source_attachment_id UUIDs (models otherwise invent "current").
+    # Load bounded recent + approved candidate + compact active-CV outline
+    # before graph execution. Short read session only — never held open across
+    # provider/graph work. Candidate context is the approved profile only;
+    # draft/staged attachment working memory is injected as system
+    # ContextMessages so later turns still see source_attachment_id UUIDs
+    # (models otherwise invent "current"). Active outline is identity + section
+    # headings only (never bodies/chunks); resolved server-side from the active
+    # profile.
     async with factory() as session:
         recent_loaded = await load_recent_context(
             session,
             exclude_ids=frozenset({turn.user_message_id}),
         )
         candidate_context = await load_candidate_context(session)
+        active_cv_context = await load_active_cv_context(session)
         working_memory = await load_profile_working_memory_messages(session)
         effective_attachment_ids = await merge_turn_attachment_ids(
             session,
@@ -506,6 +511,7 @@ async def stream_chat_turn(
         user_text=turn.content,
         recent_context=recent_context,
         candidate_context=candidate_context,
+        active_cv_context=active_cv_context,
         attachment_ids=effective_attachment_ids,
         model=model,
         registry=registry,

@@ -1289,6 +1289,7 @@ def test_propose_update_tool_compact_and_no_preference_tool() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
     assert "propose_profile_update" in names
 
@@ -3009,8 +3010,9 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
     run_async(_body())
 
 
-def test_production_registry_exactly_six_tools_static() -> None:
-    """Production registry is six tools; no synthetic helpers."""
+def test_production_registry_exactly_seven_tools_static() -> None:
+    """Production registry is seven tools; no synthetic helpers."""
+    from app.tools.active_cv import READ_ACTIVE_CV_NAME
     from app.tools.jobs import QUERY_JOBS_NAME, SAVE_JOB_NAME
     from app.tools.matching import MATCH_JOBS_NAME
     from app.tools.profile import (
@@ -3028,6 +3030,7 @@ def test_production_registry_exactly_six_tools_static() -> None:
         SAVE_JOB_NAME,
         QUERY_JOBS_NAME,
         MATCH_JOBS_NAME,
+        READ_ACTIVE_CV_NAME,
     ]
     assert "synthetic_interrupt" not in names
 
@@ -3037,6 +3040,7 @@ def test_production_registry_exactly_six_tools_static() -> None:
     assert "build_synthetic" not in reg_src
     assert "build_production_job_tools" in reg_src
     assert "build_production_match_tools" in reg_src
+    assert "build_production_active_cv_tools" in reg_src
     profile_src = (
         Path(__file__).resolve().parents[2] / "app" / "tools" / "profile.py"
     ).read_text(encoding="utf-8")

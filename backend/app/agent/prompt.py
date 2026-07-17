@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 # Domain tool names that must never appear when the registry is empty.
-# Production tools are registered by later plans; Phase 2 keeps the list empty.
 PRODUCTION_DOMAIN_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "propose_profile_from_cv",
@@ -19,6 +18,7 @@ PRODUCTION_DOMAIN_TOOL_NAMES: frozenset[str] = frozenset(
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     }
 )
 
@@ -103,6 +103,25 @@ def build_system_prompt(
                     "- Answer follow-up profile questions from the current "
                     "unapproved draft or approved profile context when present; "
                     "do not re-run propose with invented attachment IDs.",
+                ]
+            )
+        if "read_active_cv" in names:
+            sections.extend(
+                [
+                    "",
+                    "Active CV evidence (read_active_cv):",
+                    "- Prompt context includes only the active CV identity and "
+                    "compact outline (section ids/headings/kinds/counts). It "
+                    "never includes section bodies or chunk text by default.",
+                    "- Call read_active_cv only when the user needs document "
+                    "evidence beyond the outline. Prefer the narrowest mode: "
+                    "section for one outline section_id, search for a short "
+                    "query, or chunk for one ordered raw page.",
+                    "- Never pass attachment IDs; the tool resolves the active "
+                    "CV server-side and rejects archived or staged CVs.",
+                    "- Paginate with next_cursor only when the user's request "
+                    "genuinely needs more evidence. Do not walk every cursor "
+                    "or exhaust the document automatically.",
                 ]
             )
 

@@ -18,6 +18,10 @@ Selected messages are returned oldest→newest for chronological prompt order.
 ``candidate_context`` is a compact projection of the **approved** Candidate
 Profile and Job Preferences only. Raw CV text, storage paths, secrets, full
 history dumps, and unapproved draft documents never enter this list.
+
+``active_cv_context`` loading lives in :mod:`app.agent.active_cv_context` and is
+re-exported here so turn assembly has one import surface. Outline only — never
+section bodies or chunks.
 """
 
 from __future__ import annotations
@@ -27,6 +31,11 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.active_cv_context import (
+    empty_active_cv_context,
+    load_active_cv_context,
+    project_active_cv_context,
+)
 from app.agent.state import ContextMessage
 from app.db.models.chat import CONVERSATION_ID
 from app.repositories import chat_messages as messages_repo
@@ -399,10 +408,13 @@ __all__ = [
     "apply_recent_context_budget",
     "compact_approved_profile_card",
     "compact_preferences_card",
+    "empty_active_cv_context",
     "empty_candidate_context",
+    "load_active_cv_context",
     "load_candidate_context",
     "load_profile_working_memory_messages",
     "load_recent_context",
     "merge_turn_attachment_ids",
+    "project_active_cv_context",
     "project_candidate_context",
 ]

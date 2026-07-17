@@ -53,13 +53,14 @@ def _msg(i: int, *, role: str = "user", content: str | None = None) -> _FakeMsg:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_state_has_exactly_nine_named_fields() -> None:
+def test_agent_state_has_exactly_ten_named_fields() -> None:
     expected = {
         "conversation_id",
         "run_id",
         "messages_for_this_turn",
         "recent_context",
         "candidate_context",
+        "active_cv_context",
         "attachment_ids",
         "pending_approval",
         "tool_iteration_count",
@@ -67,8 +68,8 @@ def test_agent_state_has_exactly_nine_named_fields() -> None:
     }
     assert AGENT_STATE_FIELDS == expected
     assert agent_state_field_names() == expected
-    assert len(AGENT_STATE_FIELDS) == 9
-    # TypedDict annotations expose the same nine keys.
+    assert len(AGENT_STATE_FIELDS) == 10
+    # TypedDict annotations expose the same ten keys.
     hints = get_type_hints(AgentState)
     assert set(hints) == expected
 
@@ -102,6 +103,7 @@ def test_build_initial_state_candidate_context_defaults_empty() -> None:
     assert empty_candidate_context() == []
     assert state["candidate_context"] is not None
     assert len(state["candidate_context"]) == 0
+    assert state["active_cv_context"] is None
 
 
 def test_build_initial_state_accepts_compact_candidate_context() -> None:
@@ -136,6 +138,7 @@ def test_build_initial_state_defaults() -> None:
     assert state["recent_context"] == []
     assert state["attachment_ids"] == []
     assert state["pending_approval"] is None
+    assert state["active_cv_context"] is None
     assert state["tool_iteration_count"] == 0
     assert state["error"] is None
 
@@ -566,3 +569,43 @@ def test_load_candidate_context_empty_when_no_profile(
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_build_initial_state_accepts_compact_active_cv_outline_only() -> None:
+    outline = {
+        "attachment_id": "11111111-1111-4111-8111-111111111111",
+        "extraction_version": "cv-document-v1",
+        "source_hash": "hash",
+        "reprocess_required": False,
+        "sections": [
+            {
+                "id": "sec-1",
+                "ordinal": 0,
+                "heading": "Experience",
+                "kind": "experience",
+                "entry_count": 2,
+                "source_chunk_range": [0, 1],
+            }
+        ],
+    }
+    state = build_initial_agent_state(
+        run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        active_cv_context=outline,
+    )
+    assert state["active_cv_context"] == outline
+    assert set(state) == AGENT_STATE_FIELDS
+    section = outline["sections"][0]
+    assert "body" not in section
+    assert "entries" not in section
+    assert "chunks" not in section
+    assert "storage_path" not in section
+    assert "source_chunk_range" in section
+    assert "raw_cv" not in str(outline)
+
+
+def test_context_module_reexports_active_cv_loaders() -> None:
+    from app.agent import context as ctx
+
+    assert callable(ctx.load_active_cv_context)
+    assert callable(ctx.project_active_cv_context)
+    assert ctx.empty_active_cv_context() is None

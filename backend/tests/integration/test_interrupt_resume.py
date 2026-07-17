@@ -736,7 +736,7 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_six_tools_and_synthetic_is_test_only() -> None:
+def test_production_registry_seven_tools_and_synthetic_is_test_only() -> None:
     reg = production_registry()
     names = reg.tool_names()
     assert names == [
@@ -746,6 +746,7 @@ def test_production_registry_six_tools_and_synthetic_is_test_only() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
     assert SYNTHETIC_TOOL_NAME not in names
 
@@ -757,6 +758,7 @@ def test_production_registry_six_tools_and_synthetic_is_test_only() -> None:
     assert "interrupt(" not in prod_registry
     assert "build_production_job_tools" in prod_registry
     assert "build_production_match_tools" in prod_registry
+    assert "build_production_active_cv_tools" in prod_registry
 
     synth_path = BACKEND_ROOT / "tests" / "fakes" / "synthetic_tool.py"
     assert synth_path.is_file()

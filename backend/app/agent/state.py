@@ -1,8 +1,9 @@
 """Exact Agent runtime state (Plan 3 §7.4 / Master §12.3).
 
-``AgentState`` exposes exactly nine fields. Large documents stay out of state
-and are referenced by attachment IDs only. No classifier, long-term memory, or
-second-agent fields are permitted.
+``AgentState`` exposes exactly ten fields. Large documents stay out of state
+and are referenced by attachment IDs only. ``active_cv_context`` is a compact
+outline projection (never section bodies or chunks). No classifier, long-term
+memory, or second-agent fields are permitted.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ AGENT_STATE_FIELDS: frozenset[str] = frozenset(
         "messages_for_this_turn",
         "recent_context",
         "candidate_context",
+        "active_cv_context",
         "attachment_ids",
         "pending_approval",
         "tool_iteration_count",
@@ -43,7 +45,7 @@ class ContextMessage(TypedDict):
 
 
 class AgentState(TypedDict):
-    """LangGraph / runner state with exactly the nine named fields.
+    """LangGraph / runner state with exactly the ten named fields.
 
     - ``conversation_id`` is always the singleton ``main``.
     - ``run_id`` is the durable agent-run id and future LangGraph ``thread_id``.
@@ -51,6 +53,8 @@ class AgentState(TypedDict):
     - ``recent_context`` is a budget-bounded prior window (see ``context``).
     - ``candidate_context`` is a compact approved profile/preferences projection
       (empty when no active profile; never raw CV text or drafts).
+    - ``active_cv_context`` is a compact active-CV outline (ids/headings/kinds/
+      counts/ranges only) or null; never section bodies or chunks.
     - ``attachment_ids`` are UUID references only — never raw file contents.
     - ``pending_approval`` is the compact interruption projection or null.
     - ``tool_iteration_count`` tracks ToolNode passes (limit owned by settings).
@@ -62,6 +66,7 @@ class AgentState(TypedDict):
     messages_for_this_turn: list[ContextMessage]
     recent_context: list[ContextMessage]
     candidate_context: list[dict[str, Any]]
+    active_cv_context: dict[str, Any] | None
     attachment_ids: list[str]
     pending_approval: dict[str, Any] | None
     tool_iteration_count: int
@@ -79,6 +84,7 @@ def build_initial_agent_state(
     messages_for_this_turn: list[ContextMessage] | None = None,
     recent_context: list[ContextMessage] | None = None,
     candidate_context: list[dict[str, Any]] | None = None,
+    active_cv_context: dict[str, Any] | None = None,
     attachment_ids: list[str] | None = None,
     pending_approval: dict[str, Any] | None = None,
     tool_iteration_count: int = 0,
@@ -88,7 +94,8 @@ def build_initial_agent_state(
 
     Always sets ``conversation_id`` to ``main``. ``candidate_context`` defaults
     to empty and must be a compact list of dict cards (never raw document
-    bodies). Does not accept extra state keys.
+    bodies). ``active_cv_context`` defaults to null (no outline). Does not
+    accept extra state keys.
     """
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
@@ -101,6 +108,7 @@ def build_initial_agent_state(
         "messages_for_this_turn": list(messages_for_this_turn or ()),
         "recent_context": list(recent_context or ()),
         "candidate_context": list(candidate_context or ()),
+        "active_cv_context": active_cv_context,
         "attachment_ids": list(attachment_ids or ()),
         "pending_approval": pending_approval,
         "tool_iteration_count": tool_iteration_count,

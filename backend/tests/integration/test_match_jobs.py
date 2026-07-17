@@ -992,8 +992,10 @@ def test_production_registry_includes_match_jobs_sixth() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
-    assert names[-1] == MATCH_JOBS_NAME
+    assert names[5] == MATCH_JOBS_NAME
+    assert names[-1] == "read_active_cv"
     assert "synthetic_interrupt" not in names
 
 

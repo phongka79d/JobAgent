@@ -99,8 +99,8 @@ def _bundle(
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_has_exactly_six_tools() -> None:
-    """Production registry: three profile, save_job, query_jobs, match_jobs."""
+def test_production_registry_has_exactly_seven_tools() -> None:
+    """Production registry: profile, jobs, match_jobs, read_active_cv."""
     reg = production_registry()
     assert not reg.is_empty()
     names = reg.tool_names()
@@ -111,6 +111,7 @@ def test_production_registry_has_exactly_six_tools() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
     assert "synthetic_interrupt" not in names
 
@@ -145,6 +146,7 @@ def test_initial_graph_state_matches_agent_state_keys() -> None:
     assert state["tool_iteration_count"] == 0
     assert state["error"] is None
     assert state["candidate_context"] == []
+    assert state["active_cv_context"] is None
     assert isinstance(state["messages_for_this_turn"][0], HumanMessage)
 
 
@@ -326,6 +328,7 @@ def test_injected_tools_without_changing_graph_construction() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
     assert not injected.registry.is_empty()
     assert injected.registry.tool_names() == ["echo_tool"]
@@ -440,6 +443,7 @@ def test_graph_and_registry_source_has_no_transport_or_persistence() -> None:
     assert "build_production_profile_tools" in registry_text
     assert "build_production_job_tools" in registry_text
     assert "build_production_match_tools" in registry_text
+    assert "build_production_active_cv_tools" in registry_text
     assert "ToolRegistry" in registry_text
 
 
@@ -504,7 +508,7 @@ def test_empty_registry_model_prompt_has_no_tools() -> None:
     assert "synthetic" not in str(system.content).lower()
 
 
-def test_production_registry_model_prompt_lists_six_tools() -> None:
+def test_production_registry_model_prompt_lists_seven_tools() -> None:
     model = FakeChatModel(responses=[_ai_text("ok")])
     bundle = build_agent_graph(model=model, registry=production_registry())
     bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="hi"))
@@ -515,4 +519,6 @@ def test_production_registry_model_prompt_lists_six_tools() -> None:
     assert "save_job" in system
     assert "query_jobs" in system
     assert "match_jobs" in system
+    assert "read_active_cv" in system
+    assert "narrowest mode" in system.lower()
     assert "synthetic" not in system.lower()

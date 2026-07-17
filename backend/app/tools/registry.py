@@ -1,10 +1,12 @@
-"""Injected tool registry for the single-Agent graph (Plan 3–6).
+"""Injected tool registry for the single-Agent graph (Plan 3–9).
 
-Production registers exactly six tools: three profile tools from
+Production registers exactly seven tools: three profile tools from
 :func:`app.tools.profile.build_production_profile_tools`, then
 ``save_job`` and ``query_jobs`` from
 :func:`app.tools.jobs.build_production_job_tools`, then ``match_jobs`` from
-:func:`app.tools.matching.build_production_match_tools`. Tests inject
+:func:`app.tools.matching.build_production_match_tools`, then
+``read_active_cv`` from
+:func:`app.tools.active_cv.build_production_active_cv_tools`. Tests inject
 side-effect-free fakes through the same :class:`ToolRegistry` interface without
 changing graph construction. Synthetic or test-only interrupt helpers are
 never registered here.
@@ -73,7 +75,7 @@ def production_registry(
     url_fetcher: UrlFetcher | None = None,
     job_sync_fn: JobSyncFn | None = None,
 ) -> ToolRegistry:
-    """Return the production registry: three profile, two Job, then match_jobs.
+    """Return the production registry: three profile, two Job, match, then CV read.
 
     Optional dependencies are closed over by the tools (or resolved at invoke
     time when omitted). Never registers preference-only tools or test-only
@@ -81,6 +83,7 @@ def production_registry(
     """
     # Local imports keep this module free of eager service construction and
     # avoid circular import at package load.
+    from app.tools.active_cv import build_production_active_cv_tools
     from app.tools.jobs import build_production_job_tools
     from app.tools.matching import build_production_match_tools
     from app.tools.profile import build_production_profile_tools
@@ -110,4 +113,9 @@ def production_registry(
         embedding_client=embedding_client,
         normalizer=normalizer,
     )
-    return ToolRegistry([*profile_tools, *job_tools, *match_tools])
+    active_cv_tools = build_production_active_cv_tools(
+        session_factory=session_factory,
+    )
+    return ToolRegistry(
+        [*profile_tools, *job_tools, *match_tools, *active_cv_tools]
+    )

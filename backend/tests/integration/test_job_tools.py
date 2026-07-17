@@ -3,7 +3,7 @@
 Migrated temporary SQLite + injected fakes only. Covers exactly-one input,
 authorization-state independence, compact created/returned/retried and
 failed/sync-failed results, query filters/default/order/ties, raw-data
-exclusion, same-call replay, and exact six production tool names/order.
+exclusion, same-call replay, and exact seven production tool names/order.
 """
 
 from __future__ import annotations
@@ -356,7 +356,7 @@ def test_job_tool_contract_ownership_no_parallel_vocabularies() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_exactly_six_tools_order() -> None:
+def test_production_registry_exactly_seven_tools_order() -> None:
     names = production_registry().tool_names()
     assert names == [
         "propose_profile_from_cv",
@@ -365,6 +365,7 @@ def test_production_registry_exactly_six_tools_order() -> None:
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
     assert "synthetic_interrupt" not in names
 
@@ -378,6 +379,7 @@ def test_no_job_route_and_single_registry_owner() -> None:
     assert "build_production_job_tools" in reg_src
     assert "build_production_profile_tools" in reg_src
     assert "build_production_match_tools" in reg_src
+    assert "build_production_active_cv_tools" in reg_src
     jobs_src = inspect.getsource(
         __import__("app.tools.jobs", fromlist=["jobs"])
     )

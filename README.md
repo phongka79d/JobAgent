@@ -11,29 +11,28 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch05 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 9 Batch06 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
-synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch04 remain
+synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch05 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
-drafts, approval-gated reprocess/activation, and retryable non-active CV
-deletion (exact `CV.id` graph branch via `graph/delete_cv.py`). Plan 9 Batch05
-adds owned CV graph projection and rebuild: focused `graph/sync_cv.py` projects
-fixed Master labels `CV` / `CVSection` / `CVEntry` with scoped IDs, ordinal
-order, and bounded entry preview (no body/bullets/attributes/chunks/PDF);
-exactly one active `PROJECTS_TO` edge while archived approved branches remain
-rebuildable/deletable; post-commit approval syncs Candidate then active CV
-SQLite-first (`NEO4J_SYNC_FAILED` without rollback). The sole provider-free
-rebuild path clears JobAgent labels (including CV*), recreates uniqueness
-constraints, and reconstructs every approved CV branch via `sync_cv` (legacy
-active without document emits metadata-only CV + `PROJECTS_TO`). Bounded graph
-observability merges the active CV branch under Master caps (1 CV / 20 sections
-/ 60 entries plus existing Candidate/Job/Skill/edge caps), allowlisted edges,
-and active attachment ID / document-revision staleness (`source_updated_at`
-paired with SQLite `cv_documents.updated_at`, which co-mutates with
-`source_hash`). Agent active-CV tools and frontend CV Manager remain later
-batches. Six typed `GET /api/observability/*` routes and the CV sidebar
-inspector from Plan 8 remain; `GET /api/observability/graph` is additive for CV
-fields. Synthetic observability smoke evidence remains in
+drafts, approval-gated reprocess/activation, retryable non-active CV deletion
+(exact `CV.id` graph branch via `graph/delete_cv.py`), and owned CV graph
+projection/rebuild (`graph/sync_cv.py` fixed labels `CV` / `CVSection` /
+`CVEntry`, exclusive active `PROJECTS_TO`, provider-free rebuild, bounded
+observability caps and document-revision staleness). Plan 9 Batch06 adds
+bounded active-CV Agent retrieval: production chat turns load compact
+outline-only `active_cv_context` (active attachment ID, revision/source hash,
+section ids/headings/kinds/counts/ranges or legacy reprocess-required; never
+bodies/chunks/paths) beside candidate/recent context and inject it into graph
+initial state before model execution; pure active-only `section` / `search` /
+`chunk` reader with dual caps, opaque cursors, and switch invalidation; seventh
+production tool `read_active_cv` on the existing single ToolNode with durable
+source-attachment ownership, terminal identity replay, selector-only argument
+summaries, and prompt policy for narrowest mode without automatic cursor
+exhaustion. Six-iteration guard and one decision + one ToolNode topology are
+unchanged. Frontend CV Manager remains a later batch. Six typed
+`GET /api/observability/*` routes and the CV sidebar inspector from Plan 8
+remain. Synthetic observability smoke evidence remains in
 `docs/acceptance/observability_sidebar_checklist.md`.
 
 ## Purpose and scope
@@ -62,6 +61,9 @@ JobAgent provides:
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
+- Compact active-CV outline in Agent prompt context plus durable
+  `read_active_cv` tool for bounded section/search/chunk evidence (active-only,
+  dual caps, cursors; no automatic full-document walk).
 - Derived Neo4j Candidate/Job/Skill plus fixed CV/CVSection/CVEntry index
   rebuildable from SQLite stored artifacts/embeddings without calling the
   provider.
@@ -85,9 +87,9 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 |---|---|
 | `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**`), approval/saved-job/match cards, single SSE reducer, typed API clients |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
-| `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
-| `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
+| `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, JD, matching, tool execution, history, observability assembly) |
 | `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
@@ -312,6 +314,20 @@ order/allowlists, ID/document-revision staleness, legacy reprocess-required):
 ```powershell
 Set-Location backend
 py -3.13 -m pytest tests/unit/test_cv_graph.py tests/unit/test_observability_graph.py tests/integration/test_observability_api.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_profile_approval.py tests/integration/test_cv_manager_deletion.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 9 Batch06 bounded active-CV Agent retrieval gate (outline-only
+context, production turn injection, active-only section/search/chunk reader,
+seventh tool durable ownership/replay/redaction, prompt narrow-mode policy,
+one ToolNode + six-iteration topology):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_active_cv_reader.py tests/integration/test_active_cv_tool.py tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/integration/test_agent_runner.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..

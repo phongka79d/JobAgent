@@ -508,7 +508,7 @@ Own compact context loading, active reader/cursors, the seventh tool, durable ex
 
 ### Tasks
 
-- [ ] (06A): Load compact active outlines and serve bounded active-only reads
+- [x] (06A): Load compact active outlines and serve bounded active-only reads
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch06 - Bounded Active-CV Agent Retrieval` > `(06A)`
@@ -555,7 +555,7 @@ Own compact context loading, active reader/cursors, the seventh tool, durable ex
   - Blocked Condition: A required archived/vector/semantic retrieval path is `BLOCKED_SCOPE_CONFLICT`; ambiguous cursor revision authority is `BLOCKED_SOURCE_CONFLICT`; unavailable test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/services/active_cv_reader.py`, `backend/app/agent/{active_cv_context,context,state}.py`, `backend/app/repositories/{cv_documents,attachment_text_chunks}.py`, `backend/app/schemas/cv_document.py`, `backend/tests/unit/test_{active_cv_reader,agent_context}.py`.
 
-- [ ] (06B): Register the seventh tool and enforce narrow durable read policy
+- [x] (06B): Register the seventh tool and enforce narrow durable read policy
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch06 - Bounded Active-CV Agent Retrieval` > `(06B)`

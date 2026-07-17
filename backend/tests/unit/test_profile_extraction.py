@@ -1111,7 +1111,7 @@ def test_tool_boundary_compact_and_not_production_registered(
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
 
-    # Production registry: three profile tools, job tools, then match_jobs.
+    # Production registry: three profile tools, job tools, match, then CV read.
     prod_names = production_registry().tool_names()
     assert PROPOSE_PROFILE_FROM_CV_NAME in prod_names
     assert prod_names == [
@@ -1121,6 +1121,7 @@ def test_tool_boundary_compact_and_not_production_registered(
         "save_job",
         "query_jobs",
         "match_jobs",
+        "read_active_cv",
     ]
 
     async def _ainvoke_with_identity(

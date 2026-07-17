@@ -158,6 +158,7 @@ async def execute_tool(
     arguments_summary_json: dict[str, Any] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     allow_running_reentry: bool = False,
+    source_attachment_id: str | None = None,
 ) -> ToolResult:
     """Run one tool call with durable get-or-create and exact identity replay.
 
@@ -189,6 +190,10 @@ async def execute_tool(
         When True, a non-terminal ``running`` row is re-entered under the same
         identity (required for interrupt-guarded tools). Default False preserves
         the original concurrent-running rejection for non-interrupt tools.
+    source_attachment_id:
+        Optional CV ownership stamp applied only when inserting a new pending
+        row (existing identities are unchanged). Used by CV-scoped tools so
+        deletion can cascade ownership-bound terminal results.
     """
     factory = session_factory if session_factory is not None else get_session_factory()
 
@@ -206,6 +211,7 @@ async def execute_tool(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             arguments_summary_json=arguments_summary_json,
+            source_attachment_id=source_attachment_id,
         )
         stored_tool_call_id = row.tool_call_id
         stored_tool_name = row.tool_name
