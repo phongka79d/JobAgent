@@ -10,8 +10,8 @@ Owns ``commit_approved_draft`` / SQLite-first approval:
    activate the selected attachment, promote document draft → ``cv_documents``,
    delete both drafts, assert one-active invariant, commit.
 3. **Post-commit** (never open SQLite txn across these): synchronize
-   Candidate/Skill graph data. Former active PDF/chunks stay retained under
-   ``archived`` state (no previous-file cleanup).
+   Candidate/Skill and the active CV branch graph data. Former active
+   PDF/chunks stay retained under ``archived`` state (no previous-file cleanup).
 
 Transaction failure rolls back to the prior active profile/CV. Neo4j failure
 never rolls SQLite back; sync failure returns ``NEO4J_SYNC_FAILED`` plus
@@ -49,8 +49,11 @@ from app.graph.sync_candidate import (
     CandidateSyncError,
     sync_candidate,
 )
+from app.graph.sync_cv import CvSyncError, sync_cv
 from app.repositories import attachments as att_repo
+from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
+from app.schemas.cv_document import CVDocument, parse_cv_document
 from app.schemas.profile import (
     CandidateProfile,
     JobPreferences,
@@ -293,6 +296,39 @@ async def _load_preflight(
     )
 
 
+async def _load_approved_cv_sync_inputs(
+    factory: async_sessionmaker[AsyncSession],
+    attachment_id: str,
+) -> tuple[CVDocument, str, str, datetime] | None:
+    """Load approved document + attachment metadata for post-commit CV sync.
+
+    Returns ``None`` when no approved ``cv_documents`` row exists (preference-
+    only approval or legacy profile without a retained document). Uses a short
+    read-only session; never held open across Neo4j I/O.
+    """
+    async with factory() as session:
+        row = await cv_doc_repo.get_document(session, attachment_id)
+        if row is None:
+            return None
+        attachment = await att_repo.get_by_id(session, attachment_id)
+        if attachment is None:
+            raise CvSyncError(
+                "Active attachment missing for approved CV graph sync"
+            )
+        try:
+            document = parse_cv_document(row.document_json)
+        except ValidationError as exc:
+            raise CvSyncError(
+                "Approved cv_documents.document_json failed CVDocument validation"
+            ) from exc
+        return (
+            document,
+            attachment.original_name,
+            row.extraction_version,
+            row.updated_at,
+        )
+
+
 async def _assert_final_invariant(
     session: AsyncSession,
     *,
@@ -428,7 +464,9 @@ async def commit_approved_draft(
     failpoint:
         Test-only hook name that raises inside the controlled path.
     sync_fn:
-        Optional override for Candidate sync (defaults to :func:`sync_candidate`).
+        Optional override for post-commit graph sync (defaults to Candidate
+        plus active CV branch projection via :func:`sync_candidate` /
+        :func:`sync_cv`).
     """
     # ---- Preflight (separate read session; file checks outside write txn) ----
     async with session_factory() as read_session:
@@ -519,7 +557,7 @@ async def commit_approved_draft(
     # that assert SQLite commit independence from post-commit reporting.
     cleanup_ok = failpoint != "cleanup"
 
-    # ---- Post-commit: Neo4j Candidate sync ----
+    # ---- Post-commit: Neo4j Candidate + active CV branch sync ----
     sync_ok = True
     sync_code: str | None = None
     sync_message: str | None = None
@@ -536,13 +574,28 @@ async def commit_approved_draft(
             source_updated_at=profile_updated_at,
             normalizer=normalizer,
         )
+        cv_bundle = await _load_approved_cv_sync_inputs(
+            session_factory, target_att_id
+        )
+        if cv_bundle is not None:
+            document, original_name, extraction_version, doc_updated_at = (
+                cv_bundle
+            )
+            await sync_cv(
+                driver,
+                document=document,
+                original_name=original_name,
+                extraction_version=extraction_version,
+                source_updated_at=doc_updated_at,
+                is_active=True,
+            )
 
     do_sync = sync_fn if sync_fn is not None else _default_sync
     try:
         if failpoint == "sync":
             raise CandidateSyncError("failpoint:sync")
         await do_sync()
-    except CandidateSyncError as exc:
+    except (CandidateSyncError, CvSyncError) as exc:
         sync_ok = False
         sync_code = exc.code
         sync_message = exc.message
@@ -550,7 +603,7 @@ async def commit_approved_draft(
     except Exception:
         sync_ok = False
         sync_code = NEO4J_SYNC_FAILED
-        sync_message = "Candidate/Skill Neo4j synchronization failed"
+        sync_message = "Candidate/Skill/CV Neo4j synchronization failed"
         rebuild = NEO4J_REBUILD_INSTRUCTION
 
     data: dict[str, Any] = {
@@ -571,7 +624,7 @@ async def commit_approved_draft(
             ok=False,
             code=sync_code or NEO4J_SYNC_FAILED,
             summary=(
-                "Profile committed to SQLite but Neo4j Candidate sync failed. "
+                "Profile committed to SQLite but Neo4j graph sync failed. "
                 f"{rebuild}"
             ),
             sqlite_committed=True,

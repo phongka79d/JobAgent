@@ -467,7 +467,13 @@ def test_profile_repository_source_has_no_commit_or_io() -> None:
 def test_profile_restrict_blocks_active_attachment_delete(
     db_path: Path,
 ) -> None:
-    """FK RESTRICT: cannot delete attachment still referenced by profile."""
+    """Active attachment delete is rejected; profile pointer remains intact.
+
+    Repository ownership blocks ``active`` before row removal (Batch04).
+    FK RESTRICT on ``candidate_profile.active_attachment_id`` remains the
+    database backstop if a raw DELETE bypassed the repository guard.
+    """
+    from app.repositories.attachments import AttachmentRepositoryError
 
     async def _body() -> None:
         engine = build_async_engine(db_path)
@@ -489,7 +495,7 @@ def test_profile_restrict_blocks_active_attachment_delete(
                 saved = att_id
 
             async with factory() as session:
-                with pytest.raises(IntegrityError):
+                with pytest.raises(AttachmentRepositoryError):
                     await att_repo.delete(session, saved)
                     await session.commit()
                 await session.rollback()
@@ -1440,9 +1446,10 @@ async def _seed_cv_document_draft(
         attachment_id=attachment_id,
         document_json={
             "attachment_id": attachment_id,
+            "detected_languages": ["en"],
             "sections": [],
-            "extraction_version": "test-v1",
-            "source_hash": source_hash,
+            "extraction_warnings": [],
+            "extraction_confidence": 0.8,
         },
         profile_json=profile,
         outline_json={"sections": []},
@@ -1520,6 +1527,11 @@ def test_first_approval_commits_active_profile_no_draft(
             assert result.preferences_updated is True
             assert result.code is None
             assert driver.runs >= 1
+            # Post-commit projects Candidate and active CV branch (05A).
+            joined = "\n".join(driver.queries)
+            assert "MERGE (c:Candidate {id: $candidate_id})" in joined
+            assert "MERGE (cv:CV {id: $cv_id})" in joined
+            assert "PROJECTS_TO" in joined
 
             async with factory() as session:
                 profile = await prof_repo.get_active_profile(session)

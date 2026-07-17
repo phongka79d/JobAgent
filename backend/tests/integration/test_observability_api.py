@@ -902,18 +902,26 @@ class GraphApiFakeDriver:
         *,
         revision_candidates: Sequence[Mapping[str, Any]] | None = None,
         revision_jobs: Sequence[Mapping[str, Any]] | None = None,
+        revision_active_cv: Sequence[Mapping[str, Any]] | None = None,
         proj_candidates: Sequence[Mapping[str, Any]] | None = None,
         proj_jobs: Sequence[Mapping[str, Any]] | None = None,
         proj_skills: Sequence[Mapping[str, Any]] | None = None,
         proj_edges: Sequence[Mapping[str, Any]] | None = None,
+        proj_cvs: Sequence[Mapping[str, Any]] | None = None,
+        proj_sections: Sequence[Mapping[str, Any]] | None = None,
+        proj_entries: Sequence[Mapping[str, Any]] | None = None,
         fail_all: bool = False,
     ) -> None:
         self.revision_candidates = [dict(r) for r in (revision_candidates or ())]
         self.revision_jobs = [dict(r) for r in (revision_jobs or ())]
+        self.revision_active_cv = [dict(r) for r in (revision_active_cv or ())]
         self.proj_candidates = [dict(r) for r in (proj_candidates or ())]
         self.proj_jobs = [dict(r) for r in (proj_jobs or ())]
         self.proj_skills = [dict(r) for r in (proj_skills or ())]
         self.proj_edges = [dict(r) for r in (proj_edges or ())]
+        self.proj_cvs = [dict(r) for r in (proj_cvs or ())]
+        self.proj_sections = [dict(r) for r in (proj_sections or ())]
+        self.proj_entries = [dict(r) for r in (proj_entries or ())]
         self.fail_all = fail_all
         self.queries: list[str] = []
         self.parameters: list[dict[str, Any]] = []
@@ -941,11 +949,60 @@ class GraphApiFakeDriver:
     def resolve(
         self, query: str, params: Mapping[str, Any]
     ) -> list[dict[str, Any]]:
+        # Active CV consistency revision (PROJECTS_TO branch).
+        if (
+            "cv.source_updated_at AS source_updated_at" in query
+            and "PROJECTS_TO" in query
+        ):
+            return list(self.revision_active_cv)
         # Consistency revision reads (source_updated_at alias).
         if "c.source_updated_at AS source_updated_at" in query:
             return list(self.revision_candidates)
         if "j.source_updated_at AS source_updated_at" in query:
             return list(self.revision_jobs)
+        # Active CV projection counts / nodes.
+        if "count(cv) AS total" in query and "PROJECTS_TO" in query:
+            return [{"total": len(self.proj_cvs)}]
+        if "count(sec) AS total" in query:
+            return [{"total": len(self.proj_sections)}]
+        if "count(entry) AS total" in query:
+            return [{"total": len(self.proj_entries)}]
+        if "cv.original_name AS original_name" in query:
+            ordered = sorted(self.proj_cvs, key=lambda r: str(r.get("id", "")))
+            return ordered[:1]
+        if "sec.heading AS heading" in query:
+            ordered = sorted(
+                self.proj_sections,
+                key=lambda r: (int(r.get("ordinal", 0)), str(r.get("id", ""))),
+            )
+            return ordered[:20]
+        if "entry.preview AS preview" in query:
+            ordered = sorted(
+                self.proj_entries,
+                key=lambda r: (
+                    int(r.get("section_ordinal", 0)),
+                    int(r.get("ordinal", 0)),
+                    str(r.get("id", "")),
+                ),
+            )
+            return ordered[:60]
+        if "PROJECTS_TO|HAS_SECTION|HAS_ENTRY" in query:
+            allowed = (
+                set(params.get("cv_ids") or [])
+                | set(params.get("section_ids") or [])
+                | set(params.get("entry_ids") or [])
+                | set(params.get("candidate_ids") or [])
+            )
+            out_cv: list[dict[str, Any]] = []
+            for edge in self.proj_edges:
+                etype = edge.get("type")
+                if (
+                    edge.get("source_id") in allowed
+                    and edge.get("target_id") in allowed
+                    and etype in {"PROJECTS_TO", "HAS_SECTION", "HAS_ENTRY"}
+                ):
+                    out_cv.append(dict(edge))
+            return out_cv
         # Projection counts / nodes / edges.
         if "count(c) AS total" in query:
             return [{"total": len(self.proj_candidates)}]
@@ -973,9 +1030,12 @@ class GraphApiFakeDriver:
             ) | set(params.get("skill_keys") or [])
             out: list[dict[str, Any]] = []
             for edge in self.proj_edges:
+                etype = edge.get("type")
                 if (
                     edge.get("source_id") in allowed
                     and edge.get("target_id") in allowed
+                    and etype
+                    in {"HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"}
                 ):
                     out.append(dict(edge))
             return out
@@ -1240,6 +1300,9 @@ def test_graph_ready_caps_order_and_truncation(
         "code",
         "summary",
         "rebuild_instruction",
+        "cv",
+        "sections",
+        "entries",
         "candidate",
         "jobs",
         "skills",
@@ -1250,3 +1313,7 @@ def test_graph_ready_caps_order_and_truncation(
         "omitted_edge_count",
         "checked_at",
     }
+    # Existing D3 fields remain present and typed.
+    assert body["cv"] is None or isinstance(body["cv"], dict)
+    assert isinstance(body["sections"], list)
+    assert isinstance(body["entries"], list)

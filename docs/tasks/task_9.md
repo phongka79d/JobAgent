@@ -400,7 +400,7 @@ Own CV graph sync payloads, constraints, approval sync integration, rebuild snap
 
 ### Tasks
 
-- [ ] (05A): Synchronize approved CV branches with fixed graph identities
+- [x] (05A): Synchronize approved CV branches with fixed graph identities
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch05 - Owned CV Graph Projection and Rebuild` > `(05A)`
@@ -446,7 +446,7 @@ Own CV graph sync payloads, constraints, approval sync integration, rebuild snap
   - Blocked Condition: Required dynamic labels/raw graph content is `BLOCKED_SCOPE_CONFLICT`; conflicting graph identity authority is `BLOCKED_SOURCE_CONFLICT`; unavailable graph fakes/tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/graph/{constraints,sync_cv,delete_cv,sync_shared}.py`, `backend/app/services/profile_approval.py` plus one focused post-commit sync helper, `backend/tests/unit/test_cv_graph.py`, `backend/tests/integration/test_{profile_approval,cv_manager_deletion}.py`.
 
-- [ ] (05B): Rebuild and observe the active CV branch without provider calls
+- [x] (05B): Rebuild and observe the active CV branch without provider calls
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch05 - Owned CV Graph Projection and Rebuild` > `(05B)`

@@ -1,4 +1,4 @@
-"""Provider-free Neo4j rebuild public service and CLI (Plan 5 §7.8).
+"""Provider-free Neo4j rebuild public service and CLI (Plan 5 §7.8 / Plan 9).
 
 One application owner for the local graph rebuild command, executable as
 ``python -m app.graph.rebuild`` inside the authoritative Compose backend
@@ -22,11 +22,15 @@ from typing import Any, TextIO
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.settings import Settings, get_settings
+from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.db.session import get_session_factory
 from app.graph.constraints import ensure_base_schema
 from app.graph.driver import close_driver, open_driver
 from app.graph.rebuild_ops import (
     CLEAR_CANDIDATE_CYPHER,
+    CLEAR_CV_CYPHER,
+    CLEAR_CV_ENTRY_CYPHER,
+    CLEAR_CV_SECTION_CYPHER,
     CLEAR_JOB_CYPHER,
     CLEAR_SKILL_CYPHER,
     COUNT_ORDER,
@@ -36,6 +40,7 @@ from app.graph.rebuild_ops import (
 )
 from app.graph.rebuild_snapshot import (
     CONFIGURATION_RESTORATION_GUIDANCE,
+    LegacyActiveCvRow,
     load_rebuild_inputs,
 )
 from app.graph.rebuild_target import (
@@ -44,9 +49,12 @@ from app.graph.rebuild_target import (
     assert_local_compose_neo4j_target,
 )
 from app.graph.sync_candidate import CandidateSyncError, sync_candidate
+from app.graph.sync_cv import CvSyncError, sync_cv
 from app.graph.sync_job import JobSyncError, sync_job
 from app.graph.sync_shared import (
     AsyncGraphDriver,
+    consume_result,
+    iso_utc,
     project_seed_skills_and_related,
     related_to_param_rows,
     seed_skill_param_rows,
@@ -61,6 +69,52 @@ from app.services.skill_normalization import SkillNormalizer
 _CLEAR_CANDIDATE_CYPHER = CLEAR_CANDIDATE_CYPHER
 _CLEAR_JOB_CYPHER = CLEAR_JOB_CYPHER
 _CLEAR_SKILL_CYPHER = CLEAR_SKILL_CYPHER
+_CLEAR_CV_CYPHER = CLEAR_CV_CYPHER
+_CLEAR_CV_SECTION_CYPHER = CLEAR_CV_SECTION_CYPHER
+_CLEAR_CV_ENTRY_CYPHER = CLEAR_CV_ENTRY_CYPHER
+
+# Legacy active CV (no approved document): metadata node only, reprocess-required.
+_LEGACY_EXTRACTION_VERSION: str = "legacy-reprocess-required"
+
+MERGE_LEGACY_CV_CYPHER: str = (
+    "MERGE (cv:CV {id: $cv_id}) "
+    "SET cv.original_name = $original_name, "
+    "    cv.extraction_version = $extraction_version, "
+    "    cv.source_updated_at = $source_updated_at "
+    "RETURN cv.id AS id"
+)
+
+CLEAR_ALL_PROJECTS_TO_CYPHER: str = (
+    "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "DELETE r"
+)
+
+MERGE_PROJECTS_TO_CYPHER: str = (
+    "MATCH (cv:CV {id: $cv_id}) "
+    "MATCH (c:Candidate {id: $candidate_id}) "
+    "MERGE (cv)-[:PROJECTS_TO]->(c)"
+)
+
+
+async def _project_legacy_active_cv(
+    driver: AsyncGraphDriver,
+    legacy: LegacyActiveCvRow,
+) -> None:
+    """Emit metadata-only active CV (no sections/entries) for reprocess-required."""
+    params = {
+        "cv_id": legacy.attachment_id,
+        "original_name": legacy.original_name,
+        "extraction_version": _LEGACY_EXTRACTION_VERSION,
+        "source_updated_at": iso_utc(legacy.source_updated_at),
+        "candidate_id": CANDIDATE_PROFILE_ID,
+    }
+    async with driver.session() as session:
+        result = await session.run(MERGE_LEGACY_CV_CYPHER, params)
+        await consume_result(result)
+        result = await session.run(CLEAR_ALL_PROJECTS_TO_CYPHER, params)
+        await consume_result(result)
+        result = await session.run(MERGE_PROJECTS_TO_CYPHER, params)
+        await consume_result(result)
 
 
 async def rebuild_graph(
@@ -74,8 +128,9 @@ async def rebuild_graph(
     """Run the full provider-free rebuild; return printed counts.
 
     Order: choice-C target guard → SQLite preflight → label-scoped clear →
-    schema → Candidate (optional) → scorable Jobs → seed-only when empty →
-    endpoint-scoped counts.
+    schema → Candidate (optional) → scorable Jobs → approved CV branches
+    (active PROJECTS_TO only) → legacy active metadata when needed →
+    seed-only when empty → endpoint-scoped counts.
 
     Raises :class:`RebuildError` before the first destructive statement when
     embeddings or target checks fail. Never opens ShopAIKey or writes SQLite.
@@ -100,7 +155,13 @@ async def rebuild_graph(
 
     # Preflight reads only — complete before any DETACH DELETE.
     async with session_factory() as session:
-        profile, profile_updated_at, scorable = await load_rebuild_inputs(
+        (
+            profile,
+            profile_updated_at,
+            scorable,
+            approved_cvs,
+            legacy_active,
+        ) = await load_rebuild_inputs(
             session,
             expected_model=expected_model,
             expected_dimensions=expected_dimensions,
@@ -127,6 +188,19 @@ async def rebuild_graph(
                 source_updated_at=job.source_updated_at,
                 normalizer=normalizer,
             )
+
+        for cv_row in approved_cvs:
+            await sync_cv(
+                driver,
+                document=cv_row.document,
+                original_name=cv_row.original_name,
+                extraction_version=cv_row.extraction_version,
+                source_updated_at=cv_row.source_updated_at,
+                is_active=cv_row.is_active,
+            )
+        if legacy_active is not None:
+            await _project_legacy_active_cv(driver, legacy_active)
+
         # Seed Skills/RELATED_TO when no Candidate and no Jobs still rebuild.
         if profile is None and not scorable:
             seed_skills = seed_skill_param_rows(normalizer)
@@ -138,7 +212,7 @@ async def rebuild_graph(
                     related=related,
                 )
         return await count_graph(driver)
-    except (CandidateSyncError, JobSyncError) as exc:
+    except (CandidateSyncError, JobSyncError, CvSyncError) as exc:
         raise RebuildError(
             f"Graph projection failed during rebuild: {exc.message}",
             code=getattr(exc, "code", "REBUILD_FAILED"),
@@ -165,11 +239,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.graph.rebuild",
         description=(
-            "Rebuild JobAgent Neo4j Candidate/Job/Skill data from SQLite "
-            "stored embeddings without calling ShopAIKey or mutating SQLite. "
-            "Destructive scope is limited to JobAgent labels Candidate, Job, "
-            "and Skill (no unrestricted graph wipe). Authorized only inside "
-            "the Compose backend container (choice C)."
+            "Rebuild JobAgent Neo4j CV/Candidate/Job/Skill data from SQLite "
+            "stored documents and embeddings without calling ShopAIKey or "
+            "mutating SQLite. Destructive scope is limited to JobAgent labels "
+            "CV, CVSection, CVEntry, Candidate, Job, and Skill (no unrestricted "
+            "graph wipe). Only the active CV receives PROJECTS_TO. Authorized "
+            "only inside the Compose backend container (choice C)."
         ),
         epilog=(
             "Canonical local Compose execution (choice C; run from repository "

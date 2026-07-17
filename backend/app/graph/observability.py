@@ -1,7 +1,8 @@
-"""Allowlisted read-only Neo4j projection for Plan 8 observability graph.
+"""Allowlisted read-only Neo4j projection for Plan 8/9 observability graph.
 
-Owns only fixed MATCH/RETURN Cypher for Candidate/Job/Skill nodes and the
-four JobAgent relationship types. Applies Master node/edge caps and ordering.
+Owns fixed MATCH/RETURN Cypher for Candidate/Job/Skill nodes and shared
+edge loading. Active CV branch projection lives in
+:mod:`app.graph.observability_cv`. Applies Master node/edge caps and ordering.
 Never mutates the graph, accepts client Cypher, or opens write sessions.
 """
 
@@ -12,17 +13,48 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-# Master / Plan 8 hard caps (apply after ordered selection).
+from app.graph.observability_cv import (
+    CAP_CV,
+    CAP_CV_ENTRIES,
+    CAP_CV_SECTIONS,
+    CV_EDGE_TYPES,
+    ActiveCvBranchProjection,
+    CvProjectionError,
+    ProjectedCv,
+    ProjectedCvEntry,
+    ProjectedCvSection,
+    assert_cv_read_only_templates,
+    cv_cypher_statement_templates,
+    load_active_cv_branch,
+)
+
+# Master / Plan 8/9 hard caps (apply after ordered selection).
 CAP_CANDIDATES: int = 1
 CAP_JOBS: int = 20
 CAP_SKILLS: int = 40
 CAP_EDGES: int = 100
 
 ALLOWLISTED_EDGE_TYPES: frozenset[str] = frozenset(
-    {"HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"}
+    {
+        "HAS_SKILL",
+        "REQUIRES",
+        "PREFERS",
+        "RELATED_TO",
+        "PROJECTS_TO",
+        "HAS_SECTION",
+        "HAS_ENTRY",
+    }
 )
 
-GraphEdgeType = Literal["HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"]
+GraphEdgeType = Literal[
+    "HAS_SKILL",
+    "REQUIRES",
+    "PREFERS",
+    "RELATED_TO",
+    "PROJECTS_TO",
+    "HAS_SECTION",
+    "HAS_ENTRY",
+]
 
 # Fixed read-only Cypher — unique RETURN shapes for test fakes and review.
 _COUNT_CANDIDATES_CYPHER: str = (
@@ -50,7 +82,7 @@ _SKILLS_CYPHER: str = (
     "ORDER BY s.canonical_key ASC "
     f"LIMIT {CAP_SKILLS}"
 )
-# Edges among already-selected node IDs only (parameters; no client Cypher).
+# Edges among already-selected Candidate/Job/Skill node IDs only.
 _EDGES_CYPHER: str = (
     "MATCH (a)-[r:HAS_SKILL|REQUIRES|PREFERS|RELATED_TO]->(b) "
     "WHERE ("
@@ -138,6 +170,9 @@ class ProjectedEdge:
 class BoundedGraphProjection:
     """Cap-aware allowlisted snapshot payload (nodes selected before edges)."""
 
+    cv: ProjectedCv | None
+    sections: tuple[ProjectedCvSection, ...]
+    entries: tuple[ProjectedCvEntry, ...]
     candidate: ProjectedCandidate | None
     jobs: tuple[ProjectedJob, ...]
     skills: tuple[ProjectedSkill, ...]
@@ -162,6 +197,7 @@ def cypher_statement_templates() -> Sequence[str]:
         _JOBS_CYPHER,
         _SKILLS_CYPHER,
         _EDGES_CYPHER,
+        *cv_cypher_statement_templates(),
     )
 
 
@@ -174,6 +210,7 @@ def assert_read_only_templates() -> None:
                 raise AssertionError(
                     f"observability graph Cypher must be read-only; found {token!r}"
                 )
+    assert_cv_read_only_templates()
 
 
 def _normalize_revision(value: object) -> str | None:
@@ -267,7 +304,7 @@ def _sort_edges(edges: Sequence[ProjectedEdge]) -> list[ProjectedEdge]:
 async def load_bounded_graph_projection(
     driver: AsyncGraphObservabilityDriver,
 ) -> BoundedGraphProjection:
-    """Load one allowlisted, cap-aware Candidate/Job/Skill snapshot.
+    """Load one allowlisted, cap-aware active-CV + Candidate/Job/Skill snapshot.
 
     Selects nodes first (ordered + capped), then only allowlisted edges whose
     endpoints are among the selected nodes. Edges are sorted by
@@ -319,6 +356,13 @@ async def load_bounded_graph_projection(
                 },
             )
             edge_rows = await edge_result.data()
+
+            try:
+                cv_branch: ActiveCvBranchProjection = await load_active_cv_branch(
+                    session
+                )
+            except CvProjectionError as exc:
+                raise GraphProjectionError(str(exc)) from exc
     except GraphProjectionError:
         raise
     except Exception as exc:
@@ -331,6 +375,15 @@ async def load_bounded_graph_projection(
         parsed_edge = _parse_edge(row)
         if parsed_edge is not None:
             raw_edges.append(parsed_edge)
+    for cv_edge in cv_branch.edges:
+        if cv_edge.type in ALLOWLISTED_EDGE_TYPES:
+            raw_edges.append(
+                ProjectedEdge(
+                    source_id=cv_edge.source_id,
+                    target_id=cv_edge.target_id,
+                    type=cv_edge.type,
+                )
+            )
     sorted_edges = _sort_edges(raw_edges)
     total_edges = len(sorted_edges)
     edges = sorted_edges[:CAP_EDGES]
@@ -341,11 +394,15 @@ async def load_bounded_graph_projection(
         max(0, total_candidates - selected_candidates)
         + max(0, total_jobs - len(jobs))
         + max(0, total_skills - len(skills))
+        + cv_branch.omitted_node_count
     )
     nodes_truncated = omitted_nodes > 0
     edges_truncated = omitted_edges > 0
 
     return BoundedGraphProjection(
+        cv=cv_branch.cv,
+        sections=cv_branch.sections,
+        entries=cv_branch.entries,
         candidate=candidate,
         jobs=tuple(jobs),
         skills=tuple(skills),
@@ -363,14 +420,21 @@ assert_read_only_templates()
 __all__ = [
     "ALLOWLISTED_EDGE_TYPES",
     "CAP_CANDIDATES",
+    "CAP_CV",
+    "CAP_CV_ENTRIES",
+    "CAP_CV_SECTIONS",
     "CAP_EDGES",
     "CAP_JOBS",
     "CAP_SKILLS",
+    "CV_EDGE_TYPES",
     "AsyncGraphObservabilityDriver",
     "BoundedGraphProjection",
     "GraphEdgeType",
     "GraphProjectionError",
     "ProjectedCandidate",
+    "ProjectedCv",
+    "ProjectedCvEntry",
+    "ProjectedCvSection",
     "ProjectedEdge",
     "ProjectedJob",
     "ProjectedSkill",

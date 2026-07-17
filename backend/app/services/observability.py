@@ -27,6 +27,7 @@ from app.graph.consistency import (
     NEO4J_UNAVAILABLE,
     REBUILD_REQUIRED_INSTRUCTION,
     AsyncGraphReadDriver,
+    check_active_cv_consistency,
     check_graph_revision_consistency,
 )
 from app.graph.observability import (
@@ -43,6 +44,9 @@ from app.schemas.observability import (
     CvHistoryItem,
     CvHistoryPage,
     GraphCandidateNode,
+    GraphCvEntryNode,
+    GraphCvNode,
+    GraphCvSectionNode,
     GraphEdge,
     GraphJobNode,
     GraphSkillNode,
@@ -65,6 +69,7 @@ ERROR_CV_FILE_UNAVAILABLE: str = "CV_FILE_UNAVAILABLE"
 ERROR_CHUNKS_UNAVAILABLE: str = "CHUNKS_UNAVAILABLE"
 ERROR_CHUNK_NOT_FOUND: str = "CHUNK_NOT_FOUND"
 ERROR_NO_ACTIVE_PROFILE: str = "NO_ACTIVE_PROFILE"
+ERROR_CV_REPROCESS_REQUIRED: str = "CV_REPROCESS_REQUIRED"
 
 _RETAINED_FILE_STATES: frozenset[str] = frozenset(
     {ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_ARCHIVED}
@@ -463,6 +468,9 @@ def _empty_graph_snapshot(
         code=code,
         summary=summary,
         rebuild_instruction=rebuild_instruction,
+        cv=None,
+        sections=[],
+        entries=[],
         candidate=None,
         jobs=[],
         skills=[],
@@ -475,18 +483,56 @@ def _empty_graph_snapshot(
     )
 
 
-def _ready_graph_snapshot(projection: BoundedGraphProjection) -> GraphSnapshot:
+def _ready_graph_snapshot(
+    projection: BoundedGraphProjection,
+    *,
+    code: str | None = None,
+    summary: str = (
+        "Bounded active-CV + Candidate/Job/Skill graph snapshot is ready."
+    ),
+) -> GraphSnapshot:
     candidate: GraphCandidateNode | None = None
     if projection.candidate is not None:
         candidate = GraphCandidateNode(
             id=projection.candidate.id,
             revision=projection.candidate.revision,
         )
+    cv: GraphCvNode | None = None
+    if projection.cv is not None:
+        cv = GraphCvNode(
+            id=projection.cv.id,
+            original_name=projection.cv.original_name,
+            extraction_version=projection.cv.extraction_version,
+            revision=projection.cv.revision,
+        )
     return GraphSnapshot(
         status="ready",
-        code=None,
-        summary="Bounded Candidate/Job/Skill graph snapshot is ready.",
+        code=code,
+        summary=summary,
         rebuild_instruction=None,
+        cv=cv,
+        sections=[
+            GraphCvSectionNode(
+                id=sec.id,
+                heading=sec.heading,
+                kind=sec.kind,
+                ordinal=sec.ordinal,
+                entry_count=sec.entry_count,
+            )
+            for sec in projection.sections
+        ],
+        entries=[
+            GraphCvEntryNode(
+                id=entry.id,
+                section_id=entry.section_id,
+                ordinal=entry.ordinal,
+                title=entry.title,
+                subtitle=entry.subtitle,
+                date_text=entry.date_text,
+                preview=entry.preview,
+            )
+            for entry in projection.entries
+        ],
         candidate=candidate,
         jobs=[
             GraphJobNode(
@@ -526,9 +572,11 @@ async def get_graph_snapshot(
     Status vocabulary is exactly ``ready | stale | unavailable``:
 
     * no active SQLite profile → ``ready`` + empty + ``NO_ACTIVE_PROFILE``;
-    * revision inconsistency → ``stale`` + empty + rebuild guidance;
+    * Candidate/Job or active-CV revision inconsistency → ``stale`` + empty
+      + rebuild guidance;
     * adapter/projection failure → ``unavailable`` + empty + safe guidance;
-    * otherwise ``ready`` with the cap-aware allowlisted projection.
+    * otherwise ``ready`` with the cap-aware allowlisted projection (legacy
+      active CV without document emits metadata only + ``CV_REPROCESS_REQUIRED``).
     """
     profile = await profile_repo.get_active_profile(session)
     if profile is None:
@@ -561,6 +609,29 @@ async def get_graph_snapshot(
             ),
         )
 
+    cv_consistency = await check_active_cv_consistency(session, driver)
+    if cv_consistency.error_code == NEO4J_UNAVAILABLE:
+        return _empty_graph_snapshot(
+            status="unavailable",
+            code=NEO4J_UNAVAILABLE,
+            summary=(
+                "Neo4j is unavailable; the graph snapshot cannot be loaded. "
+                "Restore connectivity and retry."
+            ),
+        )
+    if cv_consistency.error_code == NEO4J_REBUILD_REQUIRED:
+        return _empty_graph_snapshot(
+            status="stale",
+            code=NEO4J_REBUILD_REQUIRED,
+            summary=(
+                "Neo4j active CV attachment ID or document source revision "
+                "differs from SQLite; the graph snapshot is withheld until rebuild."
+            ),
+            rebuild_instruction=(
+                cv_consistency.rebuild_instruction or REBUILD_REQUIRED_INSTRUCTION
+            ),
+        )
+
     try:
         projection = await load_bounded_graph_projection(driver)
     except GraphProjectionError:
@@ -582,6 +653,20 @@ async def get_graph_snapshot(
             ),
         )
 
+    # Legacy active CV: metadata node present, no sections → reprocess-required.
+    if (
+        projection.cv is not None
+        and projection.cv.extraction_version == "legacy-reprocess-required"
+    ):
+        return _ready_graph_snapshot(
+            projection,
+            code=ERROR_CV_REPROCESS_REQUIRED,
+            summary=(
+                "Active CV is legacy metadata only (no structured sections); "
+                "reprocess through CV Manager is required."
+            ),
+        )
+
     return _ready_graph_snapshot(projection)
 
 
@@ -590,6 +675,7 @@ __all__ = [
     "ERROR_CHUNKS_UNAVAILABLE",
     "ERROR_CV_ATTACHMENT_NOT_FOUND",
     "ERROR_CV_FILE_UNAVAILABLE",
+    "ERROR_CV_REPROCESS_REQUIRED",
     "ERROR_NO_ACTIVE_PROFILE",
     "ObservabilityServiceError",
     "get_chunk_detail",

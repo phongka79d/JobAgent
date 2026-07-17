@@ -1,8 +1,10 @@
 """Read-only SQLite snapshot and stored-embedding preflight for rebuild.
 
-Owns the only approved graph-package SQLite reads: optional Candidate profile
-and every processed ``full|partial`` Job with locked embedding validation.
-Never mutates SQLite, opens ShopAIKey, or issues Neo4j statements.
+Owns the only approved graph-package SQLite reads: optional Candidate profile,
+every processed ``full|partial`` Job with locked embedding validation, and
+every retained approved CV document (plus legacy active metadata when no
+document row exists). Never mutates SQLite, opens ShopAIKey, or issues Neo4j
+statements.
 """
 
 from __future__ import annotations
@@ -12,9 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.attachments import Attachment
+from app.db.models.cv_documents import CVDocument
 from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
@@ -23,6 +28,8 @@ from app.db.models.jobs import (
 )
 from app.graph.rebuild_target import RebuildError
 from app.repositories import profiles as profile_repo
+from app.schemas.cv_document import CVDocument as CVDocumentModel
+from app.schemas.cv_document import parse_cv_document
 from app.schemas.embeddings import (
     LOCKED_EMBEDDING_DIMENSIONS,
     LOCKED_EMBEDDING_MODEL,
@@ -81,6 +88,38 @@ class SourceRevisionSnapshot:
 
     candidate: SourceRevision | None
     jobs: tuple[SourceRevision, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovedCvRebuildRow:
+    """One approved retained CV document ready for provider-free graph rebuild."""
+
+    attachment_id: str
+    document: CVDocumentModel
+    original_name: str
+    extraction_version: str
+    source_hash: str
+    source_updated_at: datetime
+    is_active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyActiveCvRow:
+    """Active attachment without ``cv_documents`` (pre-Phase-9 / reprocess-required)."""
+
+    attachment_id: str
+    original_name: str
+    source_updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveCvConsistencyFacts:
+    """SQLite facts used by observability active-CV staleness checks."""
+
+    active_attachment_id: str | None
+    source_hash: str | None
+    document_updated_at: datetime | None
+    has_document: bool
 
 
 def _scorable_jobs_stmt() -> Any:
@@ -146,6 +185,99 @@ async def load_source_revision_snapshot(
     return SourceRevisionSnapshot(candidate=candidate, jobs=jobs)
 
 
+async def load_active_cv_consistency_facts(
+    session: AsyncSession,
+) -> ActiveCvConsistencyFacts:
+    """Load active attachment ID and approved document hash/revision for staleness."""
+    profile_row = await profile_repo.get_active_profile(session)
+    if profile_row is None:
+        return ActiveCvConsistencyFacts(
+            active_attachment_id=None,
+            source_hash=None,
+            document_updated_at=None,
+            has_document=False,
+        )
+    active_id = profile_row.active_attachment_id
+    doc_row = await session.get(CVDocument, active_id)
+    if doc_row is None:
+        return ActiveCvConsistencyFacts(
+            active_attachment_id=active_id,
+            source_hash=None,
+            document_updated_at=None,
+            has_document=False,
+        )
+    return ActiveCvConsistencyFacts(
+        active_attachment_id=active_id,
+        source_hash=doc_row.source_hash,
+        document_updated_at=doc_row.updated_at,
+        has_document=True,
+    )
+
+
+async def load_approved_cv_rebuild_rows(
+    session: AsyncSession,
+    *,
+    active_attachment_id: str | None,
+) -> tuple[list[ApprovedCvRebuildRow], LegacyActiveCvRow | None]:
+    """Load every approved CV document and optional legacy active metadata.
+
+    Read-only. Invalid document_json fails the rebuild preflight before clear.
+    """
+    stmt = (
+        select(CVDocument, Attachment)
+        .join(Attachment, Attachment.id == CVDocument.attachment_id)
+        .order_by(CVDocument.attachment_id.asc())
+    )
+    result = await session.execute(stmt)
+    pairs = list(result.all())
+
+    approved: list[ApprovedCvRebuildRow] = []
+    seen_ids: set[str] = set()
+    for doc_row, attachment in pairs:
+        try:
+            document = parse_cv_document(doc_row.document_json)
+        except ValidationError as exc:
+            raise RebuildError(
+                f"CV {doc_row.attachment_id}: document_json failed validation; "
+                "fix SQLite cv_documents before rebuild.",
+                code="CV_INVALID",
+            ) from exc
+        attachment_id = str(doc_row.attachment_id)
+        seen_ids.add(attachment_id)
+        approved.append(
+            ApprovedCvRebuildRow(
+                attachment_id=attachment_id,
+                document=document,
+                original_name=attachment.original_name,
+                extraction_version=doc_row.extraction_version,
+                source_hash=doc_row.source_hash,
+                source_updated_at=doc_row.updated_at,
+                is_active=(
+                    active_attachment_id is not None
+                    and attachment_id == active_attachment_id
+                ),
+            )
+        )
+
+    legacy: LegacyActiveCvRow | None = None
+    if (
+        active_attachment_id is not None
+        and active_attachment_id not in seen_ids
+    ):
+        attachment = await session.get(Attachment, active_attachment_id)
+        if attachment is None:
+            raise RebuildError(
+                "Active attachment missing for legacy CV rebuild metadata.",
+                code="CV_ACTIVE_MISSING",
+            )
+        legacy = LegacyActiveCvRow(
+            attachment_id=active_attachment_id,
+            original_name=attachment.original_name,
+            source_updated_at=attachment.updated_at,
+        )
+    return approved, legacy
+
+
 async def load_scorable_job_facts(
     session: AsyncSession,
     job_ids: Iterable[str],
@@ -185,8 +317,14 @@ async def load_rebuild_inputs(
     *,
     expected_model: str,
     expected_dimensions: int,
-) -> tuple[CandidateProfile | None, Any | None, list[ScorableJobRow]]:
-    """Read Candidate (optional) and all scorable Jobs; preflight embeddings.
+) -> tuple[
+    CandidateProfile | None,
+    Any | None,
+    list[ScorableJobRow],
+    list[ApprovedCvRebuildRow],
+    LegacyActiveCvRow | None,
+]:
+    """Read Candidate, scorable Jobs, approved CVs; preflight embeddings.
 
     Read-only: no flush/commit of mutations. Preflight runs before any graph
     clear so mismatch never issues a destructive Cypher statement.
@@ -194,6 +332,7 @@ async def load_rebuild_inputs(
     profile_row = await profile_repo.get_active_profile(session)
     profile: CandidateProfile | None = None
     profile_updated_at: Any | None = None
+    active_attachment_id: str | None = None
     if profile_row is not None:
         try:
             profile = parse_candidate_profile(profile_row.profile_json)
@@ -204,6 +343,7 @@ async def load_rebuild_inputs(
                 code="CANDIDATE_INVALID",
             ) from exc
         profile_updated_at = profile_row.updated_at
+        active_attachment_id = profile_row.active_attachment_id
 
     result = await session.execute(_scorable_jobs_stmt())
     rows = list(result.scalars().all())
@@ -238,15 +378,25 @@ async def load_rebuild_inputs(
                 source_updated_at=row.updated_at,
             )
         )
-    return profile, profile_updated_at, scorable
+
+    approved_cvs, legacy_active = await load_approved_cv_rebuild_rows(
+        session,
+        active_attachment_id=active_attachment_id,
+    )
+    return profile, profile_updated_at, scorable, approved_cvs, legacy_active
 
 
 __all__ = [
     "CONFIGURATION_RESTORATION_GUIDANCE",
+    "ActiveCvConsistencyFacts",
+    "ApprovedCvRebuildRow",
+    "LegacyActiveCvRow",
     "ScorableJobFacts",
     "ScorableJobRow",
     "SourceRevision",
     "SourceRevisionSnapshot",
+    "load_active_cv_consistency_facts",
+    "load_approved_cv_rebuild_rows",
     "load_rebuild_inputs",
     "load_scorable_job_facts",
     "load_source_revision_snapshot",

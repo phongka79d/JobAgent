@@ -258,12 +258,20 @@ class RunHistoryPage(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Bounded Neo4j graph snapshot (Plan 8 / Master §14)
+# Bounded Neo4j graph snapshot (Plan 8/9 / Master §14)
 # ---------------------------------------------------------------------------
 
 GraphStatus = Literal["ready", "stale", "unavailable"]
 
-GraphEdgeType = Literal["HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"]
+GraphEdgeType = Literal[
+    "HAS_SKILL",
+    "REQUIRES",
+    "PREFERS",
+    "RELATED_TO",
+    "PROJECTS_TO",
+    "HAS_SECTION",
+    "HAS_ENTRY",
+]
 
 
 class GraphCandidateNode(BaseModel):
@@ -273,6 +281,43 @@ class GraphCandidateNode(BaseModel):
 
     id: str = Field(min_length=1)
     revision: str = Field(min_length=1)
+
+
+class GraphCvNode(BaseModel):
+    """Allowlisted active CV node fields only (no body/arbitrary attributes)."""
+
+    model_config = StrictModelConfig
+
+    id: UuidStr
+    original_name: str = Field(min_length=1)
+    extraction_version: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+
+
+class GraphCvSectionNode(BaseModel):
+    """Allowlisted CVSection fields only."""
+
+    model_config = StrictModelConfig
+
+    id: str = Field(min_length=1)
+    heading: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    ordinal: int = Field(ge=0)
+    entry_count: int = Field(ge=0)
+
+
+class GraphCvEntryNode(BaseModel):
+    """Allowlisted CVEntry fields only (bounded preview; no body/bullets)."""
+
+    model_config = StrictModelConfig
+
+    id: str = Field(min_length=1)
+    section_id: str = Field(min_length=1)
+    ordinal: int = Field(ge=0)
+    title: str | None = None
+    subtitle: str | None = None
+    date_text: str | None = None
+    preview: str = ""
 
 
 class GraphJobNode(BaseModel):
@@ -310,6 +355,9 @@ class GraphSnapshot(BaseModel):
     Accepts no query/filter input at the transport layer. Empty projections for
     ``stale`` / ``unavailable`` / no-active-profile include safe guidance codes
     only — never embeddings, credentials, or arbitrary Cypher results.
+
+    Existing Candidate/Job/Skill fields remain present for D3 compatibility;
+    active CV branch fields default empty when absent.
     """
 
     model_config = StrictModelConfig
@@ -318,6 +366,9 @@ class GraphSnapshot(BaseModel):
     code: str | None = None
     summary: str = Field(min_length=1)
     rebuild_instruction: str | None = None
+    cv: GraphCvNode | None = None
+    sections: list[GraphCvSectionNode] = Field(default_factory=list)
+    entries: list[GraphCvEntryNode] = Field(default_factory=list)
     candidate: GraphCandidateNode | None = None
     jobs: list[GraphJobNode] = Field(default_factory=list)
     skills: list[GraphSkillNode] = Field(default_factory=list)
@@ -344,6 +395,9 @@ __all__ = [
     "CvHistoryItem",
     "CvHistoryPage",
     "GraphCandidateNode",
+    "GraphCvEntryNode",
+    "GraphCvNode",
+    "GraphCvSectionNode",
     "GraphEdge",
     "GraphEdgeType",
     "GraphJobNode",

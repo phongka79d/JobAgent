@@ -1,11 +1,13 @@
 """Idempotent JobAgent Neo4j base schema (constraints + vector index).
 
-Creates only the three uniqueness constraints and one cosine/1536 vector index
-required by Plan 2 §7.6 / Master §8.3. No domain nodes, relationships, or
-graph synchronization behavior.
+Creates only the uniqueness constraints and one cosine/1536 vector index
+required by Master §8.3 / Plan 2 §7.6 / Plan 9 CV projection. No domain nodes,
+relationships, or graph synchronization behavior.
 
 Fixed identities (for later callers; not seeded here):
 - Candidate.id is the singleton key ``active``
+- CV.id is the SQLite attachment UUID
+- CVSection.id / CVEntry.id are attachment-scoped deterministic keys
 - Job.id is the SQLite ``job_posts.id`` UUID
 - Skill.canonical_key is the normalized skill key
 """
@@ -24,6 +26,18 @@ JOB_EMBEDDING_VECTOR_INDEX_NAME = "job_embedding_vector"
 CANDIDATE_ID_UNIQUE = (
     "CREATE CONSTRAINT candidate_id_unique IF NOT EXISTS "
     "FOR (c:Candidate) REQUIRE c.id IS UNIQUE"
+)
+CV_ID_UNIQUE = (
+    "CREATE CONSTRAINT cv_id_unique IF NOT EXISTS "
+    "FOR (cv:CV) REQUIRE cv.id IS UNIQUE"
+)
+CV_SECTION_ID_UNIQUE = (
+    "CREATE CONSTRAINT cv_section_id_unique IF NOT EXISTS "
+    "FOR (s:CVSection) REQUIRE s.id IS UNIQUE"
+)
+CV_ENTRY_ID_UNIQUE = (
+    "CREATE CONSTRAINT cv_entry_id_unique IF NOT EXISTS "
+    "FOR (e:CVEntry) REQUIRE e.id IS UNIQUE"
 )
 JOB_ID_UNIQUE = (
     "CREATE CONSTRAINT job_id_unique IF NOT EXISTS "
@@ -44,6 +58,9 @@ JOB_EMBEDDING_VECTOR_INDEX = (
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
     CANDIDATE_ID_UNIQUE,
+    CV_ID_UNIQUE,
+    CV_SECTION_ID_UNIQUE,
+    CV_ENTRY_ID_UNIQUE,
     JOB_ID_UNIQUE,
     SKILL_CANONICAL_KEY_UNIQUE,
     JOB_EMBEDDING_VECTOR_INDEX,

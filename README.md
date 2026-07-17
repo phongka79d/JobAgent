@@ -11,40 +11,29 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch04 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 9 Batch05 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
-synthetic local smoke) remain the reuse baseline. Plan 9 Batch01 added the
-data-preserving SQLite foundation (`0003_add_cv_documents_and_ownership`):
-`cv_documents` / `cv_document_drafts`, deleting lifecycle, ownership columns,
-and flush-only document repositories. Plan 9 Batch02 completes document-first
-extraction and atomic draft publication: strict `CVDocument` schemas, bounded
-batch/consolidate/coverage extraction (`CV_DOCUMENT_BATCH_MAX_CHARS`, default
-6000), pure document-to-profile projection, and `propose_profile_from_cv`
-publishing `profile_drafts('current')` + `cv_document_drafts` + canonical
-chunks in one short transaction only after provider/coverage/projection/
-source-hash succeed outside any write txn (or rolls all back). Profile facts
-derive only from the validated document; certifications and unknown headings
-remain document content (`kind=other`). Plan 9 Batch03 adds approval-gated CV
-reprocessing: thin `POST /api/cvs/{attachment_id}/reprocess` reuses the normal
-CV-scoped chat-turn/SSE/runner path (active/archived only, retained PDF required,
-interrupt lock); `propose_profile_from_cv(reprocess=true)` writes drafts only;
-Save Profile verifies document-draft/hash coupling, archives the prior active
-only when IDs differ, activates staged or archived targets, promotes document
-drafts, and clears drafts with a one-active invariant; graph failure after
-SQLite commit remains truthful (`NEO4J_SYNC_FAILED`, no rollback). Plan 9
-Batch04 adds retryable complete non-active CV deletion: `DELETE /api/cvs/{attachment_id}`
-rejects active rows before mutation (`409 CV_ACTIVE_DELETE_FORBIDDEN`); one
-coordinator (`services/cv_manager.py`) marks `deleting`, redacts owned chat to
-`[CV deleted]`, clears matching profile drafts, then idempotently removes
-CV-scoped checkpoints, retained file storage, the exact Neo4j `CV.id` branch
-(`graph/delete_cv.py`), CV-owned runs/tools, and the attachment so documents/
-chunks cascade; historical ownership uses a structured-map resolver only (no
-free-form regex). External faults retain `deleting` plus a stable retry code on
-the wire and resume on the same DELETE; `204` only after the attachment row is
-gone. Complete CV graph sync/rebuild/observability, Agent active-CV tools, and
-frontend CV Manager remain later batches. Six typed `GET /api/observability/*`
-routes and the CV sidebar inspector from Plan 8 are unchanged. Synthetic
-observability smoke evidence remains in
+synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch04 remain
+as delivered: SQLite document foundation, document-first extraction and atomic
+drafts, approval-gated reprocess/activation, and retryable non-active CV
+deletion (exact `CV.id` graph branch via `graph/delete_cv.py`). Plan 9 Batch05
+adds owned CV graph projection and rebuild: focused `graph/sync_cv.py` projects
+fixed Master labels `CV` / `CVSection` / `CVEntry` with scoped IDs, ordinal
+order, and bounded entry preview (no body/bullets/attributes/chunks/PDF);
+exactly one active `PROJECTS_TO` edge while archived approved branches remain
+rebuildable/deletable; post-commit approval syncs Candidate then active CV
+SQLite-first (`NEO4J_SYNC_FAILED` without rollback). The sole provider-free
+rebuild path clears JobAgent labels (including CV*), recreates uniqueness
+constraints, and reconstructs every approved CV branch via `sync_cv` (legacy
+active without document emits metadata-only CV + `PROJECTS_TO`). Bounded graph
+observability merges the active CV branch under Master caps (1 CV / 20 sections
+/ 60 entries plus existing Candidate/Job/Skill/edge caps), allowlisted edges,
+and active attachment ID / document-revision staleness (`source_updated_at`
+paired with SQLite `cv_documents.updated_at`, which co-mutates with
+`source_hash`). Agent active-CV tools and frontend CV Manager remain later
+batches. Six typed `GET /api/observability/*` routes and the CV sidebar
+inspector from Plan 8 remain; `GET /api/observability/graph` is additive for CV
+fields. Synthetic observability smoke evidence remains in
 `docs/acceptance/observability_sidebar_checklist.md`.
 
 ## Purpose and scope
@@ -65,15 +54,17 @@ JobAgent provides:
   for successful digital-PDF extraction.
 - Read-only observability APIs for CV history, retained-file stream, selected
   chunk text, durable Agent-run history, and a bounded Neo4j graph snapshot
-  (typed status, allowlisted labels/edges, hard caps, safe errors/redaction),
-  with a matching accessible sidebar inspector (lazy tabs, query cache, safe
-  display, semantic graph list fallback—no graph visualization dependency).
+  (typed status, allowlisted labels/edges including active CV branch,
+  hard caps, safe errors/redaction), with a matching accessible sidebar
+  inspector (lazy tabs, query cache, safe display, semantic graph list
+  fallback—frontend D3 still Plan-8-shaped until a later FE task).
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
-- Derived Neo4j Candidate/Job/Skill index rebuildable from SQLite stored
-  embeddings without calling the provider.
+- Derived Neo4j Candidate/Job/Skill plus fixed CV/CVSection/CVEntry index
+  rebuildable from SQLite stored artifacts/embeddings without calling the
+  provider.
 
 JobAgent does **not** provide authentication, multi-user or multi-conversation
 support, OCR/DOCX CVs, crawlers, browser automation, auto-apply, cover letters,
@@ -98,7 +89,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
 | `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, JD, matching, tool execution, history, observability assembly) |
 | `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives) and observability cross-table read projections |
-| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, exact CV-branch delete, revision consistency, provider-free rebuild, allowlisted observability projection |
+| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
 | `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
@@ -107,8 +98,9 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 SQLite is the sole durable source of truth for profiles, attachments (including
 immutable `archived` history and `deleting` lifecycle), attachment text chunks,
 per-CV approved/draft documents, jobs, messages, runs, and tool results (with
-optional CV ownership columns). Neo4j is a derived Candidate/Job/Skill index and
-vector retrieval surface. ShopAIKey is the only external model provider.
+optional CV ownership columns). Neo4j is a derived Candidate/Job/Skill and
+fixed CV-branch index plus vector retrieval surface. ShopAIKey is the only
+external model provider.
 
 Public functional endpoints (Master §14 core plus Plan 8 observability):
 
@@ -312,6 +304,20 @@ Set-Location ..
 git diff --check
 ```
 
+Focused Plan 9 Batch05 owned CV graph projection, rebuild, and active
+observability gate (fixed-label sync, exclusive `PROJECTS_TO`, exact-delete
+compatibility, provider-free rebuild of all approved branches, active-CV caps/
+order/allowlists, ID/document-revision staleness, legacy reprocess-required):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_cv_graph.py tests/unit/test_observability_graph.py tests/integration/test_observability_api.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_profile_approval.py tests/integration/test_cv_manager_deletion.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
 Focused Plan 8 Batch01 retention/chunk gate (archive lifecycle + canonical
 chunks; still valid regression surface):
 
@@ -421,11 +427,13 @@ headers.
 
 ### Graph rebuild (choice C only)
 
-Neo4j is a derived index. Rebuild restores JobAgent `Candidate`, `Job`, and
-`Skill` labels from SQLite **stored embeddings only**. It does not call
-ShopAIKey, does not re-embed, and does not mutate SQLite. Destructive scope is
-limited to those JobAgent labels and their relationships; there is no
-unrestricted `MATCH (n) DETACH DELETE n`.
+Neo4j is a derived index. Rebuild restores JobAgent `Candidate`, `Job`,
+`Skill`, `CV`, `CVSection`, and `CVEntry` labels from SQLite **stored artifacts
+and embeddings only**. It does not call ShopAIKey, does not re-embed, and does
+not mutate SQLite. Destructive scope is limited to those JobAgent labels and
+their relationships; there is no unrestricted `MATCH (n) DETACH DELETE n`.
+Only the active CV receives `PROJECTS_TO`; all approved document branches are
+recreated for exact delete/rebuild ownership.
 
 **Exclusive runtime contract (choice C):** rebuild is authorized only inside the
 Compose backend container with `APP_ENV=local`, `NEO4J_URI=bolt://neo4j:7687`,
@@ -438,8 +446,9 @@ Canonical live command (repository root; stack already up):
 docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild
 ```
 
-Expected: exit `0` with printed counts for `Candidate`, `Job`, `Skill`,
-`HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO`. Failures exit non-zero.
+Expected: exit `0` with printed counts for `Candidate`, `Job`, `Skill`, `CV`,
+`CVSection`, `CVEntry`, `HAS_SKILL`, `REQUIRES`, `PREFERS`, `RELATED_TO`,
+`PROJECTS_TO`, `HAS_SECTION`, and `HAS_ENTRY`. Failures exit non-zero.
 
 Thin host wrapper (help/version only; never runs rebuild). From the repository
 root:
@@ -534,9 +543,11 @@ not commit cleanup of real user CVs, JD text, or secrets.
 | ShopAIKey timeout / rate limit | One bounded retry, then durable failure with safe summary | Fix network/key/quota; retry the user action |
 | Invalid structured LLM output | Exactly one schema repair attempt, then safe failure | Retry; do not add hidden model switching |
 | Invalid profile-update validation | One concise terminal profile-update failure; unrelated matching is not attempted | Correct the requested changes and retry |
-| Neo4j down during Candidate/Job sync | SQLite commit retained; result reports `NEO4J_SYNC_FAILED` | Restore Neo4j; run choice-C rebuild if graph is empty/stale |
+| Neo4j down during Candidate/Job/CV sync | SQLite commit retained; result reports `NEO4J_SYNC_FAILED` | Restore Neo4j; run choice-C rebuild if graph is empty/stale |
 | Neo4j down during match | `NEO4J_UNAVAILABLE`; no partial ranking | Restore Neo4j; re-run match |
 | Candidate/Job revision mismatch | `NEO4J_REBUILD_REQUIRED`; no matching-path repair | Choice-C rebuild from SQLite embeddings |
+| Active CV ID/document revision mismatch (graph observability) | Graph snapshot `stale` / `NEO4J_REBUILD_REQUIRED` (matching still Candidate/Job-only) | Choice-C rebuild; re-open graph tab |
+| Legacy active CV without structured document | Graph ready with metadata-only CV; `CV_REPROCESS_REQUIRED` | Re-extract through CV Manager and approve |
 | SSE / client disconnect | Visible frontend disconnect/failure; durable run/tool truth remains | Reload history; do not force-replay terminal tools |
 | Duplicate CV / JD identity | Exact-hash reuse or failed-row retry on the same identity | Re-upload or re-save only when intentionally new content |
 | Repeated Save / Request Changes / terminal resume | One accepted action; no graph/tool replay side effects | Use a new turn for a new decision |

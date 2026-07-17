@@ -1,8 +1,8 @@
-"""Unit tests for bounded Neo4j observability graph projection (Plan 8 / 02B).
+"""Unit tests for bounded Neo4j observability graph projection (Plan 8/9).
 
 Covers allowlisted Cypher (no mutation tokens), node/edge caps and order,
-truncation metadata, and service status assembly for ready/stale/unavailable
-and no-active-profile. Uses in-process fakes only — no live Neo4j.
+active CV branch caps, truncation metadata, and service status assembly for
+ready/stale/unavailable and no-active-profile. Uses in-process fakes only.
 """
 
 from __future__ import annotations
@@ -19,11 +19,16 @@ from app.graph.consistency import (
 )
 from app.graph.observability import (
     ALLOWLISTED_EDGE_TYPES,
+    CAP_CV_ENTRIES,
+    CAP_CV_SECTIONS,
     CAP_EDGES,
     CAP_JOBS,
     CAP_SKILLS,
     BoundedGraphProjection,
     ProjectedCandidate,
+    ProjectedCv,
+    ProjectedCvEntry,
+    ProjectedCvSection,
     ProjectedEdge,
     ProjectedJob,
     ProjectedSkill,
@@ -100,12 +105,18 @@ class GraphObservabilityFake:
         jobs: Sequence[Mapping[str, Any]] | None = None,
         skills: Sequence[Mapping[str, Any]] | None = None,
         edges: Sequence[Mapping[str, Any]] | None = None,
+        cvs: Sequence[Mapping[str, Any]] | None = None,
+        sections: Sequence[Mapping[str, Any]] | None = None,
+        entries: Sequence[Mapping[str, Any]] | None = None,
         fail_on_run: bool = False,
     ) -> None:
         self.candidates = [dict(r) for r in (candidates or ())]
         self.jobs = [dict(r) for r in (jobs or ())]
         self.skills = [dict(r) for r in (skills or ())]
         self.edges = [dict(r) for r in (edges or ())]
+        self.cvs = [dict(r) for r in (cvs or ())]
+        self.sections = [dict(r) for r in (sections or ())]
+        self.entries = [dict(r) for r in (entries or ())]
         self.fail_on_run = fail_on_run
         self.queries: list[str] = []
         self.parameters: list[dict[str, Any]] = []
@@ -120,6 +131,57 @@ class GraphObservabilityFake:
     def resolve(
         self, query: str, params: Mapping[str, Any]
     ) -> list[dict[str, Any]]:
+        # Active CV branch counts / nodes / edges (observability_cv).
+        if "count(cv) AS total" in query and "PROJECTS_TO" in query:
+            return [{"total": len(self.cvs)}]
+        if "count(sec) AS total" in query:
+            return [{"total": len(self.sections)}]
+        if "count(entry) AS total" in query:
+            return [{"total": len(self.entries)}]
+        if "cv.original_name AS original_name" in query:
+            ordered = sorted(self.cvs, key=lambda r: str(r.get("id", "")))
+            return ordered[:1]
+        if "sec.heading AS heading" in query:
+            ordered = sorted(
+                self.sections,
+                key=lambda r: (int(r.get("ordinal", 0)), str(r.get("id", ""))),
+            )
+            return ordered[:CAP_CV_SECTIONS]
+        if "entry.preview AS preview" in query:
+            ordered = sorted(
+                self.entries,
+                key=lambda r: (
+                    int(r.get("section_ordinal", 0)),
+                    int(r.get("ordinal", 0)),
+                    str(r.get("id", "")),
+                ),
+            )
+            return ordered[:CAP_CV_ENTRIES]
+        if "PROJECTS_TO|HAS_SECTION|HAS_ENTRY" in query:
+            allowed = (
+                set(params.get("cv_ids") or [])
+                | set(params.get("section_ids") or [])
+                | set(params.get("entry_ids") or [])
+                | set(params.get("candidate_ids") or [])
+            )
+            out_cv: list[dict[str, Any]] = []
+            for edge in self.edges:
+                src = edge.get("source_id")
+                tgt = edge.get("target_id")
+                etype = edge.get("type")
+                if (
+                    src in allowed
+                    and tgt in allowed
+                    and etype in {"PROJECTS_TO", "HAS_SECTION", "HAS_ENTRY"}
+                ):
+                    out_cv.append(
+                        {
+                            "source_id": src,
+                            "target_id": tgt,
+                            "type": etype,
+                        }
+                    )
+            return out_cv
         if "count(c) AS total" in query:
             return [{"total": len(self.candidates)}]
         if "count(j) AS total" in query:
@@ -151,6 +213,8 @@ class GraphObservabilityFake:
                     src in allowed
                     and tgt in allowed
                     and etype in ALLOWLISTED_EDGE_TYPES
+                    and etype
+                    in {"HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"}
                 ):
                     out.append(
                         {
@@ -210,7 +274,15 @@ def test_templates_are_read_only() -> None:
 
 def test_edge_type_allowlist_exact() -> None:
     assert ALLOWLISTED_EDGE_TYPES == frozenset(
-        {"HAS_SKILL", "REQUIRES", "PREFERS", "RELATED_TO"}
+        {
+            "HAS_SKILL",
+            "REQUIRES",
+            "PREFERS",
+            "RELATED_TO",
+            "PROJECTS_TO",
+            "HAS_SECTION",
+            "HAS_ENTRY",
+        }
     )
 
 
@@ -361,7 +433,34 @@ def test_empty_snapshot_statuses() -> None:
 
 
 def test_ready_snapshot_maps_projection() -> None:
+    att = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     projection = BoundedGraphProjection(
+        cv=ProjectedCv(
+            id=att,
+            original_name="cv.pdf",
+            extraction_version="cv-document-v1",
+            revision=REV,
+        ),
+        sections=(
+            ProjectedCvSection(
+                id=f"{att}:s0",
+                heading="Experience",
+                kind="experience",
+                ordinal=0,
+                entry_count=1,
+            ),
+        ),
+        entries=(
+            ProjectedCvEntry(
+                id=f"{att}:s0:e0",
+                section_id=f"{att}:s0",
+                ordinal=0,
+                title="Engineer",
+                subtitle="Acme",
+                date_text="2020",
+                preview="Built APIs",
+            ),
+        ),
         candidate=ProjectedCandidate(id="active", revision=REV),
         jobs=(
             ProjectedJob(
@@ -373,6 +472,9 @@ def test_ready_snapshot_maps_projection() -> None:
             ProjectedEdge(
                 source_id="active", target_id="python", type="HAS_SKILL"
             ),
+            ProjectedEdge(
+                source_id=att, target_id="active", type="PROJECTS_TO"
+            ),
         ),
         nodes_truncated=False,
         edges_truncated=False,
@@ -382,15 +484,20 @@ def test_ready_snapshot_maps_projection() -> None:
     snap = _ready_graph_snapshot(projection)
     assert snap.status == "ready"
     assert snap.code is None
+    assert snap.cv is not None
+    assert snap.cv.id == att
+    assert len(snap.sections) == 1
+    assert len(snap.entries) == 1
     assert snap.candidate is not None
     assert snap.candidate.id == "active"
     assert len(snap.jobs) == 1
     assert snap.jobs[0].title == "SRE"
     assert snap.skills[0].canonical_name == "python"
-    assert snap.edges[0].type == "HAS_SKILL"
+    assert any(e.type == "HAS_SKILL" for e in snap.edges)
     # Forbid extras via schema
     body = snap.model_dump(mode="json")
     assert "embedding" not in body
+    assert "body" not in str(body)
     GraphSnapshot.model_validate(body)
 
 
@@ -415,3 +522,83 @@ async def test_revision_datetime_normalized_in_projection() -> None:
     assert projection.jobs[0].revision.endswith("Z") or "+" in projection.jobs[
         0
     ].revision
+
+
+@pytest.mark.asyncio
+async def test_active_cv_branch_caps_order_and_allowlist() -> None:
+    att = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    sections = [
+        {
+            "id": f"{att}:s{i:02d}",
+            "heading": f"H{i:02d}",
+            "kind": "other",
+            "ordinal": i,
+            "entry_count": 1,
+        }
+        for i in range(25)
+    ]
+    entries = [
+        {
+            "id": f"{att}:s{i:02d}:e0",
+            "section_id": f"{att}:s{i:02d}",
+            "ordinal": 0,
+            "title": f"T{i:02d}",
+            "subtitle": None,
+            "date_text": None,
+            "preview": "p",
+            "section_ordinal": i,
+        }
+        for i in range(70)
+    ]
+    edges = [
+        {"source_id": att, "target_id": "active", "type": "PROJECTS_TO"},
+    ]
+    for sec in sections[:CAP_CV_SECTIONS]:
+        edges.append(
+            {
+                "source_id": att,
+                "target_id": sec["id"],
+                "type": "HAS_SECTION",
+            }
+        )
+    for ent in entries[:CAP_CV_ENTRIES]:
+        edges.append(
+            {
+                "source_id": ent["section_id"],
+                "target_id": ent["id"],
+                "type": "HAS_ENTRY",
+            }
+        )
+    # Disallowed structural type must be dropped.
+    edges.append({"source_id": att, "target_id": "active", "type": "OWNS"})
+
+    fake = GraphObservabilityFake(
+        candidates=[_cand()],
+        cvs=[
+            {
+                "id": att,
+                "original_name": "cv.pdf",
+                "extraction_version": "cv-document-v1",
+                "revision": REV,
+            }
+        ],
+        sections=sections,
+        entries=entries,
+        edges=edges,
+    )
+    projection = await load_bounded_graph_projection(fake)
+    assert projection.cv is not None
+    assert projection.cv.id == att
+    assert len(projection.sections) == CAP_CV_SECTIONS
+    assert [s.ordinal for s in projection.sections] == list(
+        range(CAP_CV_SECTIONS)
+    )
+    assert len(projection.entries) == CAP_CV_ENTRIES
+    assert projection.nodes_truncated is True
+    assert all(
+        e.type in ALLOWLISTED_EDGE_TYPES for e in projection.edges
+    )
+    assert any(e.type == "PROJECTS_TO" for e in projection.edges)
+    assert not any(e.type == "OWNS" for e in projection.edges)
+    raw = str(projection)
+    assert "body" not in raw
