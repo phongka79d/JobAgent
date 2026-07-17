@@ -162,7 +162,7 @@ Own CV-document schemas, bounded extraction/consolidation/coverage, document-to-
 
 ### Tasks
 
-- [ ] (02A): Extract complete bounded CV documents and project Candidate Profiles
+- [x] (02A): Extract complete bounded CV documents and project Candidate Profiles
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch02 - Document-First Extraction and Draft Publication` > `(02A)`
@@ -209,7 +209,7 @@ Own CV-document schemas, bounded extraction/consolidation/coverage, document-to-
   - Blocked Condition: Missing authoritative provider ceiling/structured-output seam is `BLOCKED_MISSING_REF`; a required new parser/provider is `BLOCKED_SCOPE_CONFLICT`; unavailable test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/schemas/cv_document.py`, `backend/app/services/{cv_document_extraction,cv_document_projection,profile_extraction,provider_retry}.py`, `backend/app/core/settings.py`, `backend/tests/unit/test_{cv_document,cv_document_extraction,profile_extraction}.py`, `backend/tests/fixtures/cv/**`.
 
-- [ ] (02B): Publish complete CV document and profile drafts atomically
+- [x] (02B): Publish complete CV document and profile drafts atomically
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch02 - Document-First Extraction and Draft Publication` > `(02B)`

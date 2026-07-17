@@ -9,6 +9,7 @@ API routes remain later service tasks.
 from __future__ import annotations
 
 import inspect
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -589,29 +590,95 @@ def _fake_valid_extracted() -> Any:
     )
 
 
-class _ScriptedInvoker:
-    def __init__(self, items: list[Any]) -> None:
-        self._items = list(items)
+class _CoveringDocumentInvoker:
+    """Document-first invoker covering ordinals found in prompts."""
+
+    def __init__(self) -> None:
         self.calls = 0
 
     def invoke_structured(
-        self, messages: Any, *, is_repair: bool = False
+        self,
+        messages: Any,
+        *,
+        schema_name: str,
+        is_repair: bool = False,
     ) -> Any:
-        del messages, is_repair
+        del is_repair
+        from app.services.cv_document_extraction import (
+            ExtractedBatchDocument,
+            ExtractedConsolidation,
+            ExtractedEntryFragment,
+            ExtractedSectionFragment,
+        )
+
         self.calls += 1
-        if not self._items:
-            raise RuntimeError("script exhausted")
-        item = self._items.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
+        joined = "\n".join(
+            getattr(m, "content", "")
+            for m in list(messages)
+            if isinstance(getattr(m, "content", None), str)
+        )
+        ordinals = sorted(
+            {int(m) for m in re.findall(r"\[ordinal=(\d+)\]", joined)}
+        ) or [0]
+        first = ordinals[0]
+        sections = [
+            ExtractedSectionFragment(
+                heading="Summary",
+                kind="summary",
+                entries=[
+                    ExtractedEntryFragment(
+                        title="Backend Engineer",
+                        subtitle=None,
+                        date_text=None,
+                        location=None,
+                        body="Integration-test backend engineer.",
+                        bullets=[],
+                        attributes={},
+                        source_chunk_ordinals=[first],
+                    )
+                ],
+                source_chunk_ordinals=[first],
+            ),
+            ExtractedSectionFragment(
+                heading="Skills",
+                kind="skills",
+                entries=[
+                    ExtractedEntryFragment(
+                        title=None,
+                        subtitle=None,
+                        date_text=None,
+                        location=None,
+                        body="Python",
+                        bullets=["Python"],
+                        attributes={},
+                        source_chunk_ordinals=ordinals,
+                    )
+                ],
+                source_chunk_ordinals=ordinals,
+            ),
+        ]
+        if schema_name == "batch":
+            return ExtractedBatchDocument(
+                detected_languages=["en"],
+                sections=sections,
+                extraction_warnings=[],
+                extraction_confidence=0.8,
+            )
+        return ExtractedConsolidation(
+            detected_languages=["en"],
+            sections=sections,
+            extraction_warnings=[],
+            extraction_confidence=0.8,
+        )
 
 
 def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
     db_path: Path, tmp_path: Path
 ) -> None:
-    """New staged CV → validated draft_json; prior unreferenced staged removed."""
+    """New staged CV → validated draft pair + chunks; prior staged removed."""
     from app.core.ids import new_uuid
+    from app.repositories import attachment_text_chunks as chunk_repo
+    from app.repositories import cv_documents as cv_doc_repo
     from app.services.profile_drafts import propose_profile_from_cv
     from app.services.profile_extraction import build_draft_from_extracted
     from app.services.skill_normalization import SkillNormalizer
@@ -620,7 +687,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
-    invoker = _ScriptedInvoker([_fake_valid_extracted()])
+    invoker = _CoveringDocumentInvoker()
     pdf = _cv_fixture("digital_cv_01.pdf")
     old_draft = build_draft_from_extracted(
         _fake_valid_extracted(), normalizer
@@ -670,7 +737,8 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
             assert result.tool_result.ok is True
             assert result.tool_result.data is not None
             assert result.tool_result.data["draft_id"] == PROFILE_DRAFT_ID
-            assert invoker.calls == 1
+            assert result.tool_result.data["source_hash"]
+            assert invoker.calls >= 1
 
             async with factory() as session:
                 draft = await prof_repo.get_current_draft(session)
@@ -680,6 +748,11 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                 assert "candidate_profile" in draft.draft_json
                 assert "job_preferences" in draft.draft_json
                 assert draft.draft_json["job_preferences"]["target_roles"] == []
+                doc_draft = await cv_doc_repo.get_draft(session, new_id)
+                assert doc_draft is not None
+                assert doc_draft.source_hash == result.tool_result.data["source_hash"]
+                assert doc_draft.document_json["attachment_id"] == new_id
+                assert await chunk_repo.count_for_attachment(session, new_id) > 0
                 assert await att_repo.get_by_id(session, old_id) is None
                 # No active profile mutation.
                 assert await prof_repo.get_active_profile(session) is None
@@ -699,6 +772,8 @@ def test_propose_from_cv_no_text_marks_failed_retains_file(
 ) -> None:
     from app.core.ids import new_uuid
     from app.db.models.attachments import ATTACHMENT_STATE_FAILED
+    from app.repositories import attachment_text_chunks as chunk_repo
+    from app.repositories import cv_documents as cv_doc_repo
     from app.services.pdf_extraction import NO_EXTRACTABLE_TEXT
     from app.services.profile_drafts import propose_profile_from_cv
     from app.services.skill_normalization import SkillNormalizer
@@ -706,7 +781,7 @@ def test_propose_from_cv_no_text_marks_failed_retains_file(
 
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
-    invoker = _ScriptedInvoker([])
+    invoker = _CoveringDocumentInvoker()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
     pdf = _cv_fixture("image_only_cv.pdf")
 
@@ -743,6 +818,8 @@ def test_propose_from_cv_no_text_marks_failed_retains_file(
                 assert row.state == ATTACHMENT_STATE_FAILED
                 assert row.failure_code == NO_EXTRACTABLE_TEXT
                 assert await prof_repo.get_current_draft(session) is None
+                assert await cv_doc_repo.get_draft(session, att_id) is None
+                assert await chunk_repo.count_for_attachment(session, att_id) == 0
             assert storage.exists(rel)
             assert invoker.calls == 0
         finally:
@@ -2937,7 +3014,7 @@ def test_five_production_tools_durable_status_and_proposal_replay(
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
-    invoker = _ScriptedInvoker([_fake_valid_extracted()])
+    invoker = _CoveringDocumentInvoker()
     pdf = _cv_fixture("digital_cv_01.pdf")
 
     async def _ainvoke(
@@ -3056,7 +3133,8 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     args={"attachment_id": att_id},
                 )
             assert first_cv.ok is True
-            assert invoker.calls == 1
+            assert invoker.calls >= 1
+            calls_after_first = invoker.calls
             assert [p.status for p in pubs] == [
                 "pending",
                 "running",
@@ -3088,7 +3166,8 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             assert replay_cv.model_dump(mode="json") == first_cv.model_dump(
                 mode="json"
             )
-            assert invoker.calls == 1  # no second PDF/provider extraction
+            # Durable replay must not re-extract or re-call the document invoker.
+            assert invoker.calls == calls_after_first
             assert [p.status for p in pubs] == ["completed"]
             assert pubs[0].tool_execution_id == exec_id_cv
 

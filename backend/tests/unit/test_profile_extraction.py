@@ -5,6 +5,7 @@ Fake-backed only — never calls the live ShopAIKey provider.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,16 @@ from app.db.models.profiles import CANDIDATE_PROFILE_ID, PROFILE_DRAFT_ID
 from app.db.session import build_async_engine
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
+from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
+from app.services.cv_document_extraction import (
+    EXTRACTION_VERSION,
+    ExtractedBatchDocument,
+    ExtractedConsolidation,
+    ExtractedEntryFragment,
+    ExtractedSectionFragment,
+)
 from app.services.pdf_extraction import (
     NO_EXTRACTABLE_TEXT,
     PdfTextExtraction,
@@ -45,9 +54,12 @@ from app.services.profile_extraction import (
     build_draft_from_extracted,
     classify_provider_error,
     compact_draft_summary,
+    compute_canonical_source_hash,
     empty_job_preferences,
+    extract_document_publication_from_pdf,
     extract_profile_from_pdf,
     extracted_to_candidate_profile,
+    is_document_structured_invoker,
     join_chunks_for_model,
 )
 from app.services.skill_normalization import SkillNormalizer
@@ -64,6 +76,8 @@ from tests.support.db_migration import run_async, session_factory
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 CV_DIR = FIXTURES / "cv"
 SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
+
+_ORDINAL_RE = re.compile(r"\[ordinal=(\d+)\]")
 
 
 def _normalizer() -> SkillNormalizer:
@@ -115,8 +129,125 @@ def _valid_extracted(**overrides: Any) -> ExtractedCandidateProfile:
     return ExtractedCandidateProfile.model_validate(base)
 
 
+def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
+    if not ordinals:
+        ordinals = [0]
+    first = ordinals[0]
+    rest = ordinals[1:] if len(ordinals) > 1 else ordinals
+    sections = [
+        ExtractedSectionFragment(
+            heading="Summary",
+            kind="summary",
+            entries=[
+                ExtractedEntryFragment(
+                    title="Senior Backend Engineer",
+                    subtitle=None,
+                    date_text=None,
+                    location=None,
+                    body="Backend engineer with Python and FastAPI experience.",
+                    bullets=[],
+                    attributes={},
+                    source_chunk_ordinals=[first],
+                )
+            ],
+            source_chunk_ordinals=[first],
+        ),
+        ExtractedSectionFragment(
+            heading="Skills",
+            kind="skills",
+            entries=[
+                ExtractedEntryFragment(
+                    title=None,
+                    subtitle=None,
+                    date_text=None,
+                    location=None,
+                    body="Python, FastAPI, React.js",
+                    bullets=["Python", "React.js"],
+                    attributes={},
+                    source_chunk_ordinals=list(rest) if rest else [first],
+                )
+            ],
+            source_chunk_ordinals=list(rest) if rest else [first],
+        ),
+        ExtractedSectionFragment(
+            heading="Experience",
+            kind="experience",
+            entries=[
+                ExtractedEntryFragment(
+                    title="Engineer",
+                    subtitle="Acme",
+                    date_text="2019-01 – present",
+                    location=None,
+                    body="Built APIs",
+                    bullets=[],
+                    attributes={},
+                    source_chunk_ordinals=[first],
+                )
+            ],
+            source_chunk_ordinals=[first],
+        ),
+    ]
+    return sections
+
+
+class CoveringDocumentInvoker:
+    """Document invoker that covers ordinals mentioned in each prompt."""
+
+    def __init__(self, script: list[Any] | None = None) -> None:
+        self.script = list(script or [])
+        self.calls: list[dict[str, Any]] = []
+        self.last_human_content: str | None = None
+
+    def invoke_structured(
+        self,
+        messages: Sequence[Any],
+        *,
+        schema_name: str,
+        is_repair: bool = False,
+    ) -> Any:
+        msg_list = list(messages)
+        joined_parts: list[str] = []
+        for m in msg_list:
+            content = getattr(m, "content", None)
+            if isinstance(content, str):
+                joined_parts.append(content)
+        joined = "\n".join(joined_parts)
+        self.last_human_content = joined
+        self.calls.append(
+            {
+                "schema_name": schema_name,
+                "is_repair": is_repair,
+                "message_count": len(msg_list),
+            }
+        )
+        if self.script:
+            item = self.script.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            if isinstance(item, type) and issubclass(item, BaseException):
+                raise item("fake error")
+            return item
+        ordinals = sorted({int(m.group(1)) for m in _ORDINAL_RE.finditer(joined)})
+        if not ordinals:
+            ordinals = [0]
+        sections = _covering_sections(ordinals)
+        if schema_name == "batch":
+            return ExtractedBatchDocument(
+                detected_languages=["en"],
+                sections=sections,
+                extraction_warnings=[],
+                extraction_confidence=0.88,
+            )
+        return ExtractedConsolidation(
+            detected_languages=["en"],
+            sections=sections,
+            extraction_warnings=[],
+            extraction_confidence=0.88,
+        )
+
+
 class FakeStructuredInvoker:
-    """Scripted invoker: returns payloads or raises in order."""
+    """Scripted profile-first invoker (legacy unit tests only)."""
 
     def __init__(self, script: list[Any]) -> None:
         self.script = list(script)
@@ -141,8 +272,6 @@ class FakeStructuredInvoker:
             {
                 "is_repair": is_repair,
                 "message_count": len(msg_list),
-                # Assert no accidental persistence of raw text via call log dumps
-                # in ToolResult — we only record counts.
             }
         )
         if not self.script:
@@ -245,7 +374,7 @@ def test_extraction_failure_writes_no_chunk_rows(
     """Parse/model failure leaves attachment_text_chunks empty for the row."""
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
-    invoker = FakeStructuredInvoker([])  # never called on no-text
+    invoker = CoveringDocumentInvoker()  # never called on no-text
     pdf = CV_DIR / "image_only_cv.pdf"
 
     async def _body() -> None:
@@ -278,19 +407,21 @@ def test_extraction_failure_writes_no_chunk_rows(
 
             async with factory() as session:
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
+                assert await cv_doc_repo.get_draft(session, att_id) is None
+                assert await profile_repo.get_current_draft(session) is None
         finally:
             await engine.dispose()
 
     run_async(_body())
 
 
-def test_successful_propose_persists_canonical_chunks(
+def test_successful_propose_persists_chunks_document_and_profile_atomically(
     migrated_sqlite: Path, tmp_path: Path
 ) -> None:
-    """Successful extraction stores exactly the model-input chunk sequence."""
+    """Successful extraction stores document draft, profile draft, and chunks."""
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     pdf = CV_DIR / "digital_cv_01.pdf"
 
     async def _body() -> None:
@@ -319,14 +450,40 @@ def test_successful_propose_persists_canonical_chunks(
                 normalizer=_normalizer(),
             )
             assert result.tool_result.ok is True
-            assert invoker.last_human_content is not None
+            assert result.tool_result.data is not None
+            assert result.tool_result.data["source_hash"]
+            assert result.tool_result.data["extraction_version"] == EXTRACTION_VERSION
+            assert invoker.calls  # batch + consolidate
+            assert all("schema_name" in c for c in invoker.calls)
 
             async with factory() as session:
+                from app.services.profile_extraction import CanonicalChunk
+
                 rows = await chunk_repo.list_for_attachment(session, att_id)
                 assert rows
                 assert [r.ordinal for r in rows] == list(range(len(rows)))
-                joined = CHUNK_JOIN.join(r.text for r in rows)
-                assert joined in invoker.last_human_content
+                canon = tuple(
+                    CanonicalChunk(ordinal=r.ordinal, text=r.text) for r in rows
+                )
+                source_hash = compute_canonical_source_hash(canon)
+
+                draft_row = await profile_repo.get_current_draft(session)
+                assert draft_row is not None
+                assert draft_row.source_attachment_id == att_id
+                assert "candidate_profile" in draft_row.draft_json
+
+                doc_draft = await cv_doc_repo.get_draft(session, att_id)
+                assert doc_draft is not None
+                assert doc_draft.source_hash == source_hash
+                assert doc_draft.source_hash == result.tool_result.data["source_hash"]
+                assert doc_draft.extraction_version == EXTRACTION_VERSION
+                assert doc_draft.document_json["attachment_id"] == att_id
+                assert doc_draft.profile_json
+                assert "sections" in doc_draft.outline_json
+                assert (
+                    draft_row.draft_json["candidate_profile"]["summary"]
+                    == doc_draft.profile_json["summary"]
+                )
                 # Historic no-row attachment remains empty (no backfill).
                 other = new_uuid()
                 await att_repo.create_staged(
@@ -340,22 +497,23 @@ def test_successful_propose_persists_canonical_chunks(
                 )
                 await session.commit()
                 assert await chunk_repo.count_for_attachment(session, other) == 0
+                assert await cv_doc_repo.get_draft(session, other) is None
         finally:
             await engine.dispose()
 
     run_async(_body())
 
 
-def test_schema_repair_failure_does_not_persist_chunks(
+def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
     migrated_sqlite: Path, tmp_path: Path
 ) -> None:
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
     bad = ValidationError.from_exception_data(
-        "ExtractedCandidateProfile",
-        [{"type": "missing", "loc": ("summary",), "input": {}}],
+        "ExtractedBatchDocument",
+        [{"type": "missing", "loc": ("sections",), "input": {}}],
     )
-    invoker = FakeStructuredInvoker([bad, bad])
+    invoker = CoveringDocumentInvoker(script=[bad, bad])
     pdf = CV_DIR / "digital_cv_01.pdf"
 
     async def _body() -> None:
@@ -387,10 +545,103 @@ def test_schema_repair_failure_does_not_persist_chunks(
             assert result.tool_result.code == FAILURE_INVALID_STRUCTURED_OUTPUT
             async with factory() as session:
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
+                assert await cv_doc_repo.get_draft(session, att_id) is None
+                assert await profile_repo.get_current_draft(session) is None
         finally:
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_publish_failpoint_rolls_back_all_draft_artifacts(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    """Transaction failpoint publishes none of the new artifacts."""
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    invoker = CoveringDocumentInvoker()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+    prior_draft = build_draft_from_extracted(_valid_extracted(), _normalizer())
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            prior_id = new_uuid()
+            att_id = new_uuid()
+            prior_rel = storage.write_bytes(prior_id, pdf.read_bytes())
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="fp-prior",
+                    original_name="prior.pdf",
+                    size_bytes=10,
+                    storage_path=prior_rel,
+                    page_count=1,
+                    attachment_id=prior_id,
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="fp-new",
+                    original_name="cv.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                await profile_repo.upsert_current_draft(
+                    session,
+                    draft_json=prior_draft.model_dump(mode="json"),
+                    source_attachment_id=prior_id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=att_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                publish_failpoint="before_commit",
+            )
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == "DRAFT_PUBLISH_FAILED"
+
+            async with factory() as session:
+                # Prior draft truth preserved; no partial new artifacts.
+                draft_row = await profile_repo.get_current_draft(session)
+                assert draft_row is not None
+                assert draft_row.source_attachment_id == prior_id
+                assert await chunk_repo.count_for_attachment(session, att_id) == 0
+                assert await cv_doc_repo.get_draft(session, att_id) is None
+                assert await att_repo.get_by_id(session, prior_id) is not None
+                assert await att_repo.get_by_id(session, att_id) is not None
+            assert storage.exists(prior_rel)
+            assert storage.exists(rel)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_document_publication_pure_path_has_matching_hash() -> None:
+    invoker = CoveringDocumentInvoker()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+    att_id = "11111111-1111-4111-8111-111111111111"
+    artifacts = extract_document_publication_from_pdf(
+        pdf,
+        attachment_id=att_id,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert artifacts.source_hash == compute_canonical_source_hash(artifacts.chunks)
+    assert artifacts.document_json["attachment_id"] == att_id
+    assert artifacts.extraction_version == EXTRACTION_VERSION
+    assert "sections" in artifacts.outline_json
+    assert artifacts.draft.candidate_profile.summary
+    assert is_document_structured_invoker(invoker) is True
+    assert is_document_structured_invoker(FakeStructuredInvoker([])) is False
 
 
 def test_no_extractable_text_short_circuit() -> None:
@@ -555,7 +806,7 @@ def test_propose_active_reuses_profile_without_provider(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
 
@@ -612,7 +863,7 @@ def test_propose_existing_draft_reuse_without_provider(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
     draft = build_draft_from_extracted(_valid_extracted(), normalizer)
@@ -663,7 +914,7 @@ def test_propose_new_draft_and_replace_prior_staged(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
     old_draft = build_draft_from_extracted(
@@ -718,15 +969,20 @@ def test_propose_new_draft_and_replace_prior_staged(
             assert result.tool_result.data["draft_id"] == PROFILE_DRAFT_ID
             assert result.tool_result.data["reused"] is False
             assert result.tool_result.data["prior_staged_removed"] is True
-            assert invoker.calls  # provider used once
+            assert invoker.calls  # document batch/consolidate
 
             async with factory() as session:
                 draft_row = await profile_repo.get_current_draft(session)
                 assert draft_row is not None
                 assert draft_row.source_attachment_id == new_id
                 assert draft_row.draft_json["candidate_profile"]["summary"]
+                doc_draft = await cv_doc_repo.get_draft(session, new_id)
+                assert doc_draft is not None
+                assert doc_draft.source_hash == result.tool_result.data["source_hash"]
                 assert await att_repo.get_by_id(session, old_id) is None
                 assert await att_repo.get_by_id(session, new_id) is not None
+                # Prior document draft cascaded away with prior attachment.
+                assert await cv_doc_repo.get_draft(session, old_id) is None
                 # Active profile untouched
                 assert await profile_repo.get_active_profile(session) is None
 
@@ -747,7 +1003,7 @@ def test_failed_extraction_marks_failed_retains_file(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker([])  # unused — no text path
+    invoker = CoveringDocumentInvoker()  # unused — no text path
     normalizer = _normalizer()
     pdf = CV_DIR / "image_only_cv.pdf"
 
@@ -795,8 +1051,8 @@ def test_exhausted_provider_failure_no_success_claim(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker(
-        [APITimeoutError("t1"), APITimeoutError("t2")]
+    invoker = CoveringDocumentInvoker(
+        script=[APITimeoutError("t1"), APITimeoutError("t2")]
     )
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
@@ -833,6 +1089,8 @@ def test_exhausted_provider_failure_no_success_claim(
                 assert row is not None
                 assert row.state == ATTACHMENT_STATE_FAILED
                 assert await profile_repo.get_current_draft(session) is None
+                assert await cv_doc_repo.get_draft(session, att_id) is None
+                assert await chunk_repo.count_for_attachment(session, att_id) == 0
         finally:
             await engine.dispose()
 
@@ -849,7 +1107,7 @@ def test_tool_boundary_compact_and_not_production_registered(
     from app.repositories import chat_messages as messages_repo
 
     storage = AttachmentStorage(files_root)
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
 

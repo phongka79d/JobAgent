@@ -1,24 +1,30 @@
-"""Structured CV profile extraction via ShopAIKey (Plan 4 §7.4 / Plan 8).
+"""Structured CV extraction orchestration (Plan 4 / Plan 8 / Plan 9 adapter).
 
-Owns the LLM-backed Candidate Profile extraction path:
+Owns shared chunking, PDF→chunk preparation, and the document-first publication
+artifacts used by draft proposal. Document extraction and profile projection
+live in focused modules; this module reuses parser, provider-retry, and
+normalizer owners without duplicating them:
 
 * pypdf layout/normal text from :mod:`app.services.pdf_extraction`
 * pure deterministic chunking (``MAX_CHUNK_CHARS=1200``, zero overlap)
-* exact ``"\\n\\n"`` join of ascending chunks as the sole model document input
-* locked ``gpt-4o-mini`` via the ShopAIKey adapter and
-  ``with_structured_output(..., method='json_schema', strict=True)``
-* at most one schema-repair request when structured output is invalid
-* at most one timeout/rate-limit retry
-* deterministic skill normalization through the sole normalizer
-* explicit canonical chunk persistence call for the successful draft-input txn
+* exact ``"\\n\\n"`` join of ascending chunks for model/document input
+* SHA-256 ``source_hash`` over that canonical joined text
+* provider-retry and one schema-repair via :mod:`app.services.provider_retry`
+* skill normalization via :mod:`app.services.skill_normalization`
+* document-first path delegates to
+  :mod:`app.services.cv_document_extraction` and
+  :mod:`app.services.cv_document_projection`
 
 Raw extracted CV text is transient outside canonical chunk rows: never logged
 or returned in tool/public contracts. Callers pass file paths or openable
-sources only.
+sources only. Atomic DB publication of chunks + document/profile drafts is
+owned by :mod:`app.services.profile_drafts`.
 """
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import logging
 from collections.abc import Callable, Sequence
@@ -171,9 +177,33 @@ class ExtractionOutcome:
 
     ``chunks`` is the exact ascending sequence joined with :data:`CHUNK_JOIN`
     for the model input. Persistence is a separate explicit call.
+
+    Retained for isolated profile-schema helper tests; proposal publication
+    uses :class:`DocumentPublicationArtifacts` only.
     """
 
     draft: ProfileDraftPayload
+    schema_repairs_used: int
+    provider_retries_used: int
+    chunks: tuple[CanonicalChunk, ...]
+    model_input_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentPublicationArtifacts:
+    """Complete pre-persistence artifacts for atomic draft publication.
+
+    Built only after parse, chunk, document extraction, coverage, projection,
+    profile validation, and source-hash computation succeed outside any DB
+    transaction. No repository or session work lives here.
+    """
+
+    draft: ProfileDraftPayload
+    document_json: dict[str, Any]
+    profile_json: dict[str, Any]
+    outline_json: dict[str, Any]
+    extraction_version: str
+    source_hash: str
     schema_repairs_used: int
     provider_retries_used: int
     chunks: tuple[CanonicalChunk, ...]
@@ -481,6 +511,85 @@ async def persist_canonical_chunks(
     )
 
 
+def compute_canonical_source_hash(chunks: Sequence[CanonicalChunk]) -> str:
+    """SHA-256 hex of the canonical ordered chunk text (Master §6.2)."""
+    joined = join_chunks_for_model(chunks)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def is_document_structured_invoker(invoker: Any) -> bool:
+    """True when *invoker* accepts the document ``schema_name`` contract."""
+    if invoker is None:
+        return False
+    method = getattr(invoker, "invoke_structured", None)
+    if method is None or not callable(method):
+        return False
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+    return "schema_name" in params
+
+
+def resolve_document_invoker(invoker: Any = None) -> Any:
+    """Prefer a document-capable invoker; else build the production document invoker.
+
+    Profile-first invokers (no ``schema_name``) are ignored so the proposal path
+    never re-enters the superseded raw-chunks-to-profile model contract.
+    """
+    if is_document_structured_invoker(invoker):
+        return invoker
+    from app.services.cv_document_extraction import (
+        ShopAIKeyStructuredCVDocumentInvoker,
+    )
+
+    return ShopAIKeyStructuredCVDocumentInvoker()
+
+
+def build_draft_from_candidate_profile(
+    profile: CandidateProfile,
+) -> ProfileDraftPayload:
+    """Wrap a projected profile with empty job preferences for draft storage."""
+    return parse_profile_draft_payload(
+        {
+            "candidate_profile": profile.model_dump(mode="json"),
+            "job_preferences": empty_job_preferences().model_dump(mode="json"),
+        }
+    )
+
+
+def _parse_and_chunk_pdf(
+    source: Path | str | bytes | BinaryIO,
+    *,
+    extract_text_fn: Callable[[Any], Any] | None = None,
+) -> tuple[list[CanonicalChunk], str]:
+    """Parse PDF and emit canonical chunks (no provider, no persistence)."""
+    extract = extract_text_fn if extract_text_fn is not None else extract_pdf_text
+    try:
+        extraction = extract(source)
+    except PdfMalformedError as exc:
+        raise ProfileExtractionError(
+            FAILURE_MALFORMED_PDF,
+            str(exc) or "PDF is malformed or unreadable",
+        ) from exc
+
+    if not extraction.has_meaningful_text or extraction.preferred_text is None:
+        raise ProfileExtractionError(
+            FAILURE_NO_EXTRACTABLE_TEXT,
+            "PDF has no meaningful extractable digital text",
+        )
+
+    chunks = chunk_parsed_text(extraction.preferred_text)
+    model_input = join_chunks_for_model(chunks)
+    logger.debug(
+        "cv publication prep pages=%s strategy=%s chunks=%s",
+        extraction.page_count,
+        EXTRACTION_SCHEMA_STRATEGY,
+        len(chunks),
+    )
+    return chunks, model_input
+
+
 def _invoke_with_provider_retry(
     invoker: StructuredProfileInvoker,
     messages: Sequence[Any],
@@ -506,48 +615,12 @@ def extract_profile_from_pdf(
     normalizer: SkillNormalizer,
     extract_text_fn: Callable[[Any], Any] | None = None,
 ) -> ExtractionOutcome:
-    """Extract + validate a ProfileDraftPayload from a PDF source.
+    """Legacy profile-first extract for isolated unit tests only.
 
-    Deterministically chunks preferred PDF text, joins with :data:`CHUNK_JOIN`,
-    and sends only that joined string to the structured model. Does **not**
-    write chunk rows; callers must invoke :func:`persist_canonical_chunks`
-    inside the successful draft-input transaction.
-
-    Parameters
-    ----------
-    source:
-        PDF path, bytes, or binary stream (same as pdf_extraction).
-    invoker:
-        Structured LLM invoker (production ShopAIKey or test fake).
-    normalizer:
-        Sole skill normalizer instance.
-    extract_text_fn:
-        Optional override for unit tests (defaults to extract_pdf_text).
+    Proposal publication must use :func:`extract_document_publication_from_pdf`.
     """
-    extract = extract_text_fn if extract_text_fn is not None else extract_pdf_text
-    try:
-        extraction = extract(source)
-    except PdfMalformedError as exc:
-        raise ProfileExtractionError(
-            FAILURE_MALFORMED_PDF,
-            str(exc) or "PDF is malformed or unreadable",
-        ) from exc
-
-    if not extraction.has_meaningful_text or extraction.preferred_text is None:
-        raise ProfileExtractionError(
-            FAILURE_NO_EXTRACTABLE_TEXT,
-            "PDF has no meaningful extractable digital text",
-        )
-
-    preferred = extraction.preferred_text
-    chunks = chunk_parsed_text(preferred)
-    cv_text = join_chunks_for_model(chunks)
-    # Do not log cv_text or full extraction payloads.
-    logger.debug(
-        "profile extraction starting pages=%s strategy=%s chunks=%s",
-        extraction.page_count,
-        EXTRACTION_SCHEMA_STRATEGY,
-        len(chunks),
+    chunks, cv_text = _parse_and_chunk_pdf(
+        source, extract_text_fn=extract_text_fn
     )
 
     repairs_used = 0
@@ -583,6 +656,75 @@ def extract_profile_from_pdf(
             continue
 
 
+def extract_document_publication_from_pdf(
+    source: Path | str | bytes | BinaryIO,
+    *,
+    attachment_id: str,
+    invoker: Any,
+    normalizer: SkillNormalizer,
+    extract_text_fn: Callable[[Any], Any] | None = None,
+    max_chars: int | None = None,
+) -> DocumentPublicationArtifacts:
+    """Document-first PDF pipeline producing complete draft publication artifacts.
+
+    Performs provider calls, document validation, coverage, projection, and
+    source-hash computation. Does **not** open a DB transaction or write rows.
+    """
+    from app.services.cv_document_extraction import (
+        CVDocumentExtractionError,
+        extract_cv_document_from_chunks,
+    )
+    from app.services.cv_document_projection import (
+        project_candidate_profile,
+        project_outline,
+    )
+
+    if not isinstance(attachment_id, str) or attachment_id.strip() == "":
+        raise ProfileExtractionError(
+            FAILURE_EMPTY_CHUNKS,
+            "attachment_id is required for document-first extraction",
+        )
+
+    chunks, model_input = _parse_and_chunk_pdf(
+        source, extract_text_fn=extract_text_fn
+    )
+    document_invoker = resolve_document_invoker(invoker)
+
+    try:
+        outcome = extract_cv_document_from_chunks(
+            chunks,
+            attachment_id=attachment_id,
+            invoker=document_invoker,
+            max_chars=max_chars,
+        )
+        profile = project_candidate_profile(outcome.document, normalizer)
+    except CVDocumentExtractionError as exc:
+        raise ProfileExtractionError(exc.code, exc.message) from exc
+    except (ValidationError, TypeError, ValueError) as exc:
+        raise ProfileExtractionError(
+            FAILURE_INVALID_STRUCTURED_OUTPUT,
+            f"document projection or validation failed: {exc}",
+        ) from exc
+
+    draft = build_draft_from_candidate_profile(profile)
+    outline_json: dict[str, Any] = {
+        "sections": project_outline(outcome.document),
+    }
+    source_hash = compute_canonical_source_hash(chunks)
+    return DocumentPublicationArtifacts(
+        draft=draft,
+        document_json=outcome.document.model_dump(mode="json"),
+        profile_json=profile.model_dump(mode="json"),
+        outline_json=outline_json,
+        extraction_version=outcome.extraction_version,
+        source_hash=source_hash,
+        schema_repairs_used=outcome.schema_repairs_used,
+        provider_retries_used=outcome.provider_retries_used,
+        chunks=tuple(chunks),
+        model_input_text=model_input,
+    )
+
+
 def compact_profile_summary(profile: CandidateProfile) -> dict[str, Any]:
     """IDs-and-counts summary only — no evidence bodies or raw CV text."""
     return {
@@ -604,10 +746,48 @@ def compact_draft_summary(draft: ProfileDraftPayload) -> dict[str, Any]:
     return base
 
 
+def extract_document_and_profile_from_chunks(
+    chunks: Sequence[CanonicalChunk],
+    *,
+    attachment_id: str,
+    document_invoker: Any,
+    normalizer: SkillNormalizer,
+    max_chars: int | None = None,
+) -> tuple[Any, CandidateProfile, int, int]:
+    """Document-first pipeline: bounded CVDocument then projected profile.
+
+    Delegates extraction and projection to their owning modules. No
+    persistence or network beyond the injected document invoker.
+    """
+    from app.services.cv_document_extraction import (
+        CVDocumentExtractionError,
+        extract_cv_document_from_chunks,
+    )
+    from app.services.cv_document_projection import project_candidate_profile
+
+    try:
+        outcome = extract_cv_document_from_chunks(
+            chunks,
+            attachment_id=attachment_id,
+            invoker=document_invoker,
+            max_chars=max_chars,
+        )
+        profile = project_candidate_profile(outcome.document, normalizer)
+    except CVDocumentExtractionError as exc:
+        raise ProfileExtractionError(exc.code, exc.message) from exc
+    return (
+        outcome.document,
+        profile,
+        outcome.schema_repairs_used,
+        outcome.provider_retries_used,
+    )
+
+
 __all__ = [
     "CHUNK_JOIN",
     "CHUNK_OVERLAP",
     "CanonicalChunk",
+    "DocumentPublicationArtifacts",
     "EXTRACTION_SCHEMA_STRATEGY",
     "ExtractedCandidateProfile",
     "ExtractedSkillItem",
@@ -625,15 +805,21 @@ __all__ = [
     "STRUCTURED_OUTPUT_STRICT",
     "ShopAIKeyStructuredProfileInvoker",
     "StructuredProfileInvoker",
+    "build_draft_from_candidate_profile",
     "build_draft_from_extracted",
     "chunk_parsed_text",
     "chunks_to_writes",
     "classify_provider_error",
     "compact_draft_summary",
     "compact_profile_summary",
+    "compute_canonical_source_hash",
     "empty_job_preferences",
+    "extract_document_and_profile_from_chunks",
+    "extract_document_publication_from_pdf",
     "extract_profile_from_pdf",
     "extracted_to_candidate_profile",
+    "is_document_structured_invoker",
     "join_chunks_for_model",
     "persist_canonical_chunks",
+    "resolve_document_invoker",
 ]

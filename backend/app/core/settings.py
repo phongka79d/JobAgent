@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     URL_FETCH_TIMEOUT_SECONDS: int = 10
     URL_MAX_RESPONSE_MB: int = 5
     TOOL_LOOP_LIMIT: int = 6
+    # Bounded document-first CV extraction batch ceiling (character count).
+    CV_DOCUMENT_BATCH_MAX_CHARS: int = 6000
 
 
 @lru_cache(maxsize=1)

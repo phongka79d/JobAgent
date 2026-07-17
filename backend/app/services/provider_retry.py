@@ -7,9 +7,10 @@ Ownership
 * Schema/parse failures are re-raised for domain repair owners; they are never
   retried as provider errors.
 
-Domain modules (``profile_extraction``, ``jd_extraction``) keep their own
-prompts, structured schemas, coercion, and domain exception types. They wrap
-:class:`ProviderRetryError` into their stable failure surfaces.
+Domain modules (``profile_extraction``, ``jd_extraction``,
+``cv_document_extraction``) keep their own prompts, structured schemas,
+coercion, and domain exception types. They wrap :class:`ProviderRetryError`
+into their stable failure surfaces.
 """
 
 from __future__ import annotations

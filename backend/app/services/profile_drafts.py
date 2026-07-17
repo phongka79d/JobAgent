@@ -1,13 +1,16 @@
-"""Profile draft proposal orchestration (Plan 4 §7.4–7.5).
+"""Profile draft proposal orchestration (Plan 4 §7.4–7.5 / Plan 9 02B).
 
 Owns ``propose_profile_from_cv`` and ``propose_profile_update`` service behavior:
 
-* Active attachment → return approved profile (no extraction / no draft write)
+* Active attachment → return approved profile (no extraction / no draft write;
+  never synthesizes a CV document for legacy active rows)
 * Staged attachment already backing ``profile_drafts('current')`` → return draft
-* Other valid staged attachment → extract, validate, upsert singleton draft,
-  then remove the prior unreferenced staged row and best-effort delete its file
-* Extraction failure → mark the same staged row ``failed`` with a stable code;
-  retain file for exact-hash retry
+* Other valid staged attachment → document-first extract outside a transaction,
+  then atomically replace chunks + ``cv_document_drafts`` + upsert
+  ``profile_drafts('current')`` with matching attachment/source hash, then remove
+  the prior unreferenced staged row and best-effort delete its file
+* Any parse/model/repair/document/coverage/projection/hash/persistence failure
+  leaves prior chunks, approved document, drafts, and active profile unchanged
 * ``propose_profile_update`` applies profile/preference/skill corrections to the
   current draft or an active-context copy, validates the full
   ``ProfileDraftPayload``, and upserts only ``profile_drafts('current')``
@@ -37,6 +40,7 @@ from app.db.models.profiles import (
     PROFILE_DRAFT_ID,
 )
 from app.repositories import attachments as att_repo
+from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.profile import (
     CandidateProfile,
@@ -51,11 +55,10 @@ from app.schemas.tools import ToolResult
 from app.services.profile_extraction import (
     FAILURE_NO_EXTRACTABLE_TEXT,
     ProfileExtractionError,
-    StructuredProfileInvoker,
     compact_draft_summary,
     compact_profile_summary,
     empty_job_preferences,
-    extract_profile_from_pdf,
+    extract_document_publication_from_pdf,
     persist_canonical_chunks,
 )
 from app.services.skill_normalization import SkillNormalizer, SkillTaxonomyError
@@ -158,15 +161,24 @@ async def propose_profile_from_cv(
     attachment_id: str,
     session_factory: async_sessionmaker[AsyncSession],
     storage: AttachmentStorage,
-    invoker: StructuredProfileInvoker,
     normalizer: SkillNormalizer,
+    invoker: Any = None,
     extract_text_fn: Callable[[Any], Any] | None = None,
+    publish_failpoint: str | None = None,
 ) -> ProposeFromCvResult:
-    """Run active/draft reuse or staged CV extraction into the singleton draft.
+    """Run active/draft reuse or staged document-first draft publication.
 
-    Does not mutate active profile or job preferences. Provider and PDF work
-    occur outside any long-lived transaction; draft upsert is a short unit of
-    work after successful validation.
+    Does not mutate active profile or job preferences. Provider, PDF, document
+    extraction, coverage, projection, and source-hash work occur outside any
+    transaction. Only after total success, one short transaction replaces
+    chunks + ``cv_document_drafts`` and upserts ``profile_drafts('current')``.
+
+    *invoker* should be a document-capable structured invoker (``schema_name``).
+    Profile-first invokers are ignored and a production document invoker is
+    constructed so tools remain compatible without a second extraction path.
+
+    *publish_failpoint* is test-only: ``\"before_commit\"`` raises inside the
+    write transaction so callers can prove atomic rollback.
     """
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":
         return ProposeFromCvResult(
@@ -196,6 +208,7 @@ async def propose_profile_from_cv(
         original_name = attachment.original_name
 
         # --- Active: return approved profile without extraction/draft ---
+        # Legacy active rows without cv_documents stay usable; no synthesis.
         if state == ATTACHMENT_STATE_ACTIVE:
             profile_row = await profile_repo.get_active_profile(session)
             if profile_row is None or profile_row.active_attachment_id != attachment_id:
@@ -261,7 +274,7 @@ async def propose_profile_from_cv(
                 attachment_id=attachment_id,
             )
 
-    # --- New staged extraction (outside the read transaction above) ---
+    # --- New staged document-first extraction (outside any write transaction) ---
     if not storage.exists(storage_path):
         await _mark_failed(session_factory, attachment_id, ERROR_FILE_MISSING)
         return ProposeFromCvResult(
@@ -276,8 +289,9 @@ async def propose_profile_from_cv(
 
     absolute = storage.resolve_path(storage_path)
     try:
-        outcome = extract_profile_from_pdf(
+        artifacts = extract_document_publication_from_pdf(
             absolute,
+            attachment_id=attachment_id,
             invoker=invoker,
             normalizer=normalizer,
             extract_text_fn=extract_text_fn,
@@ -295,53 +309,109 @@ async def propose_profile_from_cv(
             attachment_id=attachment_id,
         )
 
-    draft_payload = outcome.draft
+    draft_payload = artifacts.draft
     draft_json = draft_payload.model_dump(mode="json")
-    # Full model already validated by extract_profile_from_pdf / parse helpers.
+    # Full model already validated by document projection / parse helpers.
     parse_profile_draft_payload(draft_json)
+    if not artifacts.source_hash or not artifacts.chunks:
+        await _mark_failed(
+            session_factory, attachment_id, "INVALID_STRUCTURED_OUTPUT"
+        )
+        return ProposeFromCvResult(
+            kind="new_draft",
+            tool_result=_tool_fail(
+                "INVALID_STRUCTURED_OUTPUT",
+                "document publication artifacts incomplete",
+                {"attachment_id": attachment_id},
+            ),
+            attachment_id=attachment_id,
+        )
 
     prior_storage_path: str | None = None
     prior_attachment_id: str | None = None
 
-    async with _short_transaction(session_factory) as session:
-        # Re-check attachment still staged (no concurrent approval assumed for MVP).
-        row = await att_repo.get_by_id(session, attachment_id)
-        if row is None or row.state != ATTACHMENT_STATE_STAGED:
+    try:
+        async with _short_transaction(session_factory) as session:
+            # Re-check attachment still staged (no concurrent approval assumed).
+            row = await att_repo.get_by_id(session, attachment_id)
+            if row is None or row.state != ATTACHMENT_STATE_STAGED:
+                return ProposeFromCvResult(
+                    kind="new_draft",
+                    tool_result=_tool_fail(
+                        ERROR_ATTACHMENT_NOT_PROCESSABLE,
+                        "attachment is no longer staged for proposal",
+                        {"attachment_id": attachment_id},
+                    ),
+                    attachment_id=attachment_id,
+                )
+
+            existing = await profile_repo.get_current_draft(session)
+            if existing is not None and existing.source_attachment_id is not None:
+                prior_id = existing.source_attachment_id
+                if prior_id != attachment_id:
+                    prior = await att_repo.get_by_id(session, prior_id)
+                    if prior is not None and prior.state == ATTACHMENT_STATE_STAGED:
+                        prior_attachment_id = prior.id
+                        prior_storage_path = prior.storage_path
+
+            # One atomic write owner: profile draft + document draft + chunks.
+            await profile_repo.upsert_current_draft(
+                session,
+                draft_json=draft_json,
+                source_attachment_id=attachment_id,
+            )
+            await cv_doc_repo.upsert_draft(
+                session,
+                attachment_id=attachment_id,
+                document_json=artifacts.document_json,
+                profile_json=artifacts.profile_json,
+                outline_json=artifacts.outline_json,
+                extraction_version=artifacts.extraction_version,
+                source_hash=artifacts.source_hash,
+            )
+            await persist_canonical_chunks(
+                session,
+                attachment_id=attachment_id,
+                chunks=artifacts.chunks,
+            )
+
+            if publish_failpoint == "before_commit":
+                raise RuntimeError("test publish failpoint before_commit")
+
+            if prior_attachment_id is not None:
+                # Remove prior unreferenced staged row only after new draft succeeds.
+                # Cascade removes prior chunks/document drafts with the attachment.
+                await att_repo.delete(session, prior_attachment_id)
+    except Exception as exc:
+        if publish_failpoint == "before_commit":
+            logger.info(
+                "publish failpoint rolled back attachment=%s",
+                attachment_id,
+            )
             return ProposeFromCvResult(
                 kind="new_draft",
                 tool_result=_tool_fail(
-                    ERROR_ATTACHMENT_NOT_PROCESSABLE,
-                    "attachment is no longer staged for proposal",
+                    "DRAFT_PUBLISH_FAILED",
+                    "atomic draft publication rolled back at failpoint",
                     {"attachment_id": attachment_id},
                 ),
                 attachment_id=attachment_id,
             )
-
-        existing = await profile_repo.get_current_draft(session)
-        if existing is not None and existing.source_attachment_id is not None:
-            prior_id = existing.source_attachment_id
-            if prior_id != attachment_id:
-                prior = await att_repo.get_by_id(session, prior_id)
-                if prior is not None and prior.state == ATTACHMENT_STATE_STAGED:
-                    prior_attachment_id = prior.id
-                    prior_storage_path = prior.storage_path
-
-        await profile_repo.upsert_current_draft(
-            session,
-            draft_json=draft_json,
-            source_attachment_id=attachment_id,
+        logger.exception(
+            "atomic draft publication failed attachment=%s", attachment_id
         )
-        # Canonical chunks used as model input — same successful draft txn.
-        await persist_canonical_chunks(
-            session,
+        return ProposeFromCvResult(
+            kind="new_draft",
+            tool_result=_tool_fail(
+                "DRAFT_PUBLISH_FAILED",
+                "failed to persist document/profile draft atomically",
+                {
+                    "attachment_id": attachment_id,
+                    "errors": str(exc)[:200],
+                },
+            ),
             attachment_id=attachment_id,
-            chunks=outcome.chunks,
         )
-
-        if prior_attachment_id is not None:
-            # Remove prior unreferenced staged row only after new draft succeeds.
-            # att_repo.delete clears child chunks first (FK RESTRICT).
-            await att_repo.delete(session, prior_attachment_id)
 
     if prior_storage_path is not None:
         # Best-effort file cleanup after SQLite commit (never rolls draft back).
@@ -358,21 +428,23 @@ async def propose_profile_from_cv(
         "attachment_id": attachment_id,
         "reused": False,
         "kind": "new_draft",
-        "schema_repairs_used": outcome.schema_repairs_used,
-        "provider_retries_used": outcome.provider_retries_used,
+        "schema_repairs_used": artifacts.schema_repairs_used,
+        "provider_retries_used": artifacts.provider_retries_used,
         "prior_staged_removed": prior_attachment_id is not None,
+        "extraction_version": artifacts.extraction_version,
+        "source_hash": artifacts.source_hash,
         **compact_draft_summary(draft_payload),
     }
     return ProposeFromCvResult(
         kind="new_draft",
         tool_result=_tool_ok(
-            "created validated current profile draft from staged CV",
+            "created validated document and profile drafts from staged CV",
             data,
         ),
         draft=draft_payload,
         attachment_id=attachment_id,
-        schema_repairs_used=outcome.schema_repairs_used,
-        provider_retries_used=outcome.provider_retries_used,
+        schema_repairs_used=artifacts.schema_repairs_used,
+        provider_retries_used=artifacts.provider_retries_used,
     )
 
 
