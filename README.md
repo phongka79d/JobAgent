@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch03 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 9 Batch04 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01 added the
 data-preserving SQLite foundation (`0003_add_cv_documents_and_ownership`):
@@ -31,8 +31,17 @@ interrupt lock); `propose_profile_from_cv(reprocess=true)` writes drafts only;
 Save Profile verifies document-draft/hash coupling, archives the prior active
 only when IDs differ, activates staged or archived targets, promotes document
 drafts, and clears drafts with a one-active invariant; graph failure after
-SQLite commit remains truthful (`NEO4J_SYNC_FAILED`, no rollback). Deletion
-coordination, complete CV graph projection/rebuild, Agent active-CV tools, and
+SQLite commit remains truthful (`NEO4J_SYNC_FAILED`, no rollback). Plan 9
+Batch04 adds retryable complete non-active CV deletion: `DELETE /api/cvs/{attachment_id}`
+rejects active rows before mutation (`409 CV_ACTIVE_DELETE_FORBIDDEN`); one
+coordinator (`services/cv_manager.py`) marks `deleting`, redacts owned chat to
+`[CV deleted]`, clears matching profile drafts, then idempotently removes
+CV-scoped checkpoints, retained file storage, the exact Neo4j `CV.id` branch
+(`graph/delete_cv.py`), CV-owned runs/tools, and the attachment so documents/
+chunks cascade; historical ownership uses a structured-map resolver only (no
+free-form regex). External faults retain `deleting` plus a stable retry code on
+the wire and resume on the same DELETE; `204` only after the attachment row is
+gone. Complete CV graph sync/rebuild/observability, Agent active-CV tools, and
 frontend CV Manager remain later batches. Six typed `GET /api/observability/*`
 routes and the CV sidebar inspector from Plan 8 are unchanged. Synthetic
 observability smoke evidence remains in
@@ -48,6 +57,9 @@ JobAgent provides:
   chunk publish), and interrupt-guarded Save Profile / Request Changes approval.
 - Active/archived CV reprocess via `POST /api/cvs/{attachment_id}/reprocess`
   (normal SSE/approval contract; draft-only until Save Profile activation).
+- Retryable complete non-active CV deletion via
+  `DELETE /api/cvs/{attachment_id}` (active forbidden; SQLite/file/checkpoint/
+  exact graph branch cleanup; `204` only when fully gone).
 - Immutable archived prior CVs after approved replacement (retained PDF bytes and
   metadata; not selectable profile versions) and canonical parsed-text chunks
   for successful digital-PDF extraction.
@@ -81,12 +93,12 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | Layer | Owns |
 |---|---|
 | `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**`), approval/saved-job/match cards, single SSE reducer, typed API clients |
-| `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, profile reads, chat history/turn/resume, read-only observability |
-| `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
+| `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
+| `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, JD, matching, tool execution, history, observability assembly) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs) and observability cross-table read projections |
-| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild, allowlisted observability projection |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives) and observability cross-table read projections |
+| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, exact CV-branch delete, revision consistency, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
 | `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
@@ -103,6 +115,7 @@ Public functional endpoints (Master §14 core plus Plan 8 observability):
 - `GET /api/health`
 - `POST /api/attachments/cv`
 - `POST /api/cvs/{attachment_id}/reprocess`
+- `DELETE /api/cvs/{attachment_id}`
 - `GET /api/profile`
 - `GET /api/profile/cv`
 - `GET /api/chat/history`
@@ -279,6 +292,20 @@ terminal resume idempotency):
 ```powershell
 Set-Location backend
 py -3.13 -m pytest tests/integration/test_cv_manager_api.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 9 Batch04 retryable complete non-active CV deletion gate (active
+guard, fault/retry matrix, chat redaction, checkpoint/file/exact-graph cleanup,
+preservation of active/profile/Jobs/Skills/unrelated, API 204/404/409):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/integration/test_cv_manager_deletion.py -q
+py -3.13 -m pytest tests/integration/test_cv_manager_api.py tests/integration/test_interrupt_resume.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..
@@ -513,6 +540,8 @@ not commit cleanup of real user CVs, JD text, or secrets.
 | SSE / client disconnect | Visible frontend disconnect/failure; durable run/tool truth remains | Reload history; do not force-replay terminal tools |
 | Duplicate CV / JD identity | Exact-hash reuse or failed-row retry on the same identity | Re-upload or re-save only when intentionally new content |
 | Repeated Save / Request Changes / terminal resume | One accepted action; no graph/tool replay side effects | Use a new turn for a new decision |
+| Active CV delete attempted | `409 CV_ACTIVE_DELETE_FORBIDDEN`; no mutation | Archive via approved replacement first; never delete active |
+| Non-active CV delete partial failure (checkpoint/file/graph/finalize) | Attachment stays `deleting`; stable retry code on the response; no false `204` | Retry the same `DELETE /api/cvs/{id}` until `204` |
 | Tool loop overflow | Controlled run failure after configured `TOOL_LOOP_LIMIT` | Narrow the request; inspect durable tool statuses |
 | Embedding model/dimension mismatch on rebuild | Rebuild exits non-zero before delete; no partial wipe | Restore locked embedding settings; re-run rebuild |
 

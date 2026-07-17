@@ -17,6 +17,7 @@ from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
+    ATTACHMENT_STATE_DELETING,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
     Attachment,
@@ -24,17 +25,25 @@ from app.db.models.attachments import (
 from app.repositories import attachment_text_chunks as chunk_repo
 
 # Approved transitions only (Master §6.2 attachments):
-# staged → active | failed
-# failed → staged  (explicit same-file retry)
+# staged → active | failed | deleting
+# failed → staged | deleting  (retry or explicit delete)
 # active → archived  (approved replacement; never restore to active)
-# archived is terminal (immutable history).
+# archived → deleting  (explicit non-active delete; never restore to active)
+# deleting is terminal until the row is removed by the deletion coordinator
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     ATTACHMENT_STATE_STAGED: frozenset(
-        {ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_FAILED}
+        {
+            ATTACHMENT_STATE_ACTIVE,
+            ATTACHMENT_STATE_FAILED,
+            ATTACHMENT_STATE_DELETING,
+        }
     ),
-    ATTACHMENT_STATE_FAILED: frozenset({ATTACHMENT_STATE_STAGED}),
+    ATTACHMENT_STATE_FAILED: frozenset(
+        {ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_DELETING}
+    ),
     ATTACHMENT_STATE_ACTIVE: frozenset({ATTACHMENT_STATE_ARCHIVED}),
-    ATTACHMENT_STATE_ARCHIVED: frozenset(),
+    ATTACHMENT_STATE_ARCHIVED: frozenset({ATTACHMENT_STATE_DELETING}),
+    ATTACHMENT_STATE_DELETING: frozenset(),
 }
 
 
@@ -225,11 +234,40 @@ async def mark_archived(
     )
 
 
+async def mark_deleting(
+    session: AsyncSession,
+    attachment_id: str,
+) -> Attachment:
+    """Transition eligible non-active rows to ``deleting`` (or no-op resume).
+
+    Allowed sources: ``staged``, ``failed``, ``archived``. Already-``deleting``
+    rows return unchanged (idempotent resume). Active rows raise
+    :class:`InvalidAttachmentTransitionError`. Clears ``failure_code`` so the
+    deleting CHECK coupling stays satisfied. Does not finalize the unit of work.
+    """
+    row = await session.get(Attachment, attachment_id)
+    if row is None:
+        raise AttachmentNotFoundError(
+            f"attachment {attachment_id!r} not found"
+        )
+    if row.state == ATTACHMENT_STATE_DELETING:
+        return row
+    return await _transition(
+        session,
+        attachment_id,
+        to_state=ATTACHMENT_STATE_DELETING,
+        page_count=None,
+        failure_code=None,
+    )
+
+
 async def delete(session: AsyncSession, attachment_id: str) -> None:
     """Delete the attachment row by primary key after a successful flush.
 
-    Removes child ``attachment_text_chunks`` first (FK RESTRICT). Callers
-    must ensure other FK safety (e.g. profile already repointed). Raises
+    Removes child ``attachment_text_chunks`` first when still present. Allowed
+    for ``deleting`` (coordinator finalization) and unreferenced ``staged`` /
+    ``failed`` cleanup (draft replacement). Blocks ``active`` and ``archived``
+    (archived must enter ``deleting`` first). Raises
     :class:`AttachmentNotFoundError` when the row is missing. Does not
     finalize the caller's unit of work or delete filesystem bytes.
     """
@@ -238,9 +276,13 @@ async def delete(session: AsyncSession, attachment_id: str) -> None:
         raise AttachmentNotFoundError(
             f"attachment {attachment_id!r} not found"
         )
+    if row.state == ATTACHMENT_STATE_ACTIVE:
+        raise AttachmentRepositoryError(
+            "active attachments cannot be deleted"
+        )
     if row.state == ATTACHMENT_STATE_ARCHIVED:
         raise AttachmentRepositoryError(
-            "archived attachments are immutable history and cannot be deleted"
+            "archived attachments must enter deleting before row removal"
         )
     await chunk_repo.delete_for_attachment(session, attachment_id)
     await session.delete(row)
@@ -290,6 +332,9 @@ async def _transition(
         row.failure_code = None
     elif to_state == ATTACHMENT_STATE_ARCHIVED:
         # Immutable history: keep page_count/metadata; no failure_code.
+        row.failure_code = None
+    elif to_state == ATTACHMENT_STATE_DELETING:
+        # Coordinator marker: failure_code must be null (CHECK coupling).
         row.failure_code = None
     else:
         raise InvalidAttachmentTransitionError(

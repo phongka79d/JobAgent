@@ -67,11 +67,35 @@ async def delete_run_checkpoint(
     """Delete only the checkpoint rows for ``run_id`` (thread_id).
 
     Uses the package-supported per-thread deletion API. Never deletes another
-    run's continuation and never touches application tables.
+    run's continuation and never touches application tables. Idempotent when
+    no checkpoint rows exist for the thread.
     """
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
     await saver.adelete_thread(run_id)
+
+
+async def delete_run_checkpoints(
+    saver: AsyncSqliteSaver,
+    run_ids: list[str] | tuple[str, ...],
+) -> None:
+    """Delete checkpoints for each distinct non-empty *run_ids* entry.
+
+    Each thread is removed independently via :func:`delete_run_checkpoint`.
+    Order is stable (first-seen). Empty input is a no-op.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in run_ids:
+        if not isinstance(raw, str):
+            continue
+        rid = raw.strip()
+        if rid == "" or rid in seen:
+            continue
+        seen.add(rid)
+        ordered.append(rid)
+    for run_id in ordered:
+        await delete_run_checkpoint(saver, run_id)
 
 
 async def thread_has_checkpoints(

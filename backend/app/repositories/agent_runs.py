@@ -129,6 +129,41 @@ async def list_runs_for_user_message_ids(
     return list(result.scalars().all())
 
 
+async def list_by_source_attachment_id(
+    session: AsyncSession,
+    attachment_id: str,
+) -> list[AgentRun]:
+    """Return runs with explicit CV ``source_attachment_id`` ownership.
+
+    Does not finalize the caller's unit of work.
+    """
+    if not isinstance(attachment_id, str) or attachment_id.strip() == "":
+        raise AgentRunRepositoryError(
+            "attachment_id must be a non-empty string"
+        )
+    stmt = select(AgentRun).where(
+        AgentRun.source_attachment_id == attachment_id.strip()
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def delete_run(session: AsyncSession, run_id: str) -> bool:
+    """Delete one agent run by primary key (cascades tool executions).
+
+    Returns ``True`` when a row was deleted, ``False`` when already absent.
+    Does not finalize the caller's unit of work or touch checkpoints.
+    """
+    if not isinstance(run_id, str) or run_id.strip() == "":
+        raise AgentRunRepositoryError("run_id must be a non-empty string")
+    row = await session.get(AgentRun, run_id.strip())
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.flush()
+    return True
+
+
 async def interrupt_run(
     session: AsyncSession,
     run_id: str,

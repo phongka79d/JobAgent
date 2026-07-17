@@ -109,6 +109,65 @@ async def list_for_run_ids(
     return list(result.scalars().all())
 
 
+async def list_by_source_attachment_id(
+    session: AsyncSession,
+    attachment_id: str,
+) -> list[ToolExecution]:
+    """Return tool executions with explicit CV ``source_attachment_id``.
+
+    Does not finalize the caller's unit of work.
+    """
+    if not isinstance(attachment_id, str) or attachment_id.strip() == "":
+        raise ToolExecutionRepositoryError(
+            "attachment_id must be a non-empty string"
+        )
+    stmt = (
+        select(ToolExecution)
+        .where(ToolExecution.source_attachment_id == attachment_id.strip())
+        .order_by(ToolExecution.created_at.asc(), ToolExecution.id.asc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def list_with_argument_or_result_json(
+    session: AsyncSession,
+) -> list[ToolExecution]:
+    """Return tools that still carry argument summaries or terminal results.
+
+    Supports historical ownership resolution when ``source_attachment_id`` was
+    not stamped. Does not finalize the unit of work.
+    """
+    stmt = (
+        select(ToolExecution)
+        .where(
+            (ToolExecution.arguments_summary_json.is_not(None))
+            | (ToolExecution.result_json.is_not(None))
+        )
+        .order_by(ToolExecution.created_at.asc(), ToolExecution.id.asc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def delete_execution(session: AsyncSession, execution_id: str) -> bool:
+    """Delete one tool execution by primary key.
+
+    Returns ``True`` when deleted, ``False`` when already absent. Does not
+    finalize the caller's unit of work.
+    """
+    if not isinstance(execution_id, str) or execution_id.strip() == "":
+        raise ToolExecutionRepositoryError(
+            "execution_id must be a non-empty string"
+        )
+    row = await session.get(ToolExecution, execution_id.strip())
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.flush()
+    return True
+
+
 async def get_or_create_pending(
     session: AsyncSession,
     *,

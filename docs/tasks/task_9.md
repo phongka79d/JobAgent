@@ -333,7 +333,7 @@ Own deletion eligibility, legacy ownership resolution, chat redaction, exact gra
 
 ### Tasks
 
-- [ ] (04A): Delete one non-active CV completely through the retryable coordinator
+- [x] (04A): Delete one non-active CV completely through the retryable coordinator
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch04 - Retryable Complete Non-Active CV Deletion` > `(04A)`
