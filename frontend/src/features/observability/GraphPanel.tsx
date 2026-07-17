@@ -1,7 +1,5 @@
 import {Banner} from '@astryxdesign/core/Banner';
-import {Button} from '@astryxdesign/core/Button';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
-import {HStack} from '@astryxdesign/core/HStack';
 import {Skeleton} from '@astryxdesign/core/Skeleton';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
@@ -10,6 +8,8 @@ import {useMemo} from 'react';
 import {GraphCanvas} from './GraphCanvas';
 import {toGraphModel} from './graphPresentation';
 import {GraphSemanticList} from './GraphSemanticList';
+import {GraphVisualizationBoundary} from './GraphVisualizationBoundary';
+import {ObservabilityPanelHeader} from './ObservabilityPanelHeader';
 import {formatObservabilityDateTime} from './observabilityFormat';
 import type {CachedResource} from './state';
 import type {GraphSnapshot} from './types';
@@ -74,16 +74,13 @@ export function GraphPanel({resource, onRefresh}: GraphPanelProps) {
       id="jobagent-obs-panel-graph"
       aria-labelledby="jobagent-obs-tab-graph"
     >
-      <HStack gap={2} hAlign="between" vAlign="center">
-        <Text type="label">Neo4j graph</Text>
-        <Button
-          label="Refresh"
-          variant="ghost"
-          size="sm"
-          onClick={onRefresh}
-          data-testid="jobagent-obs-graph-refresh"
-        />
-      </HStack>
+      <ObservabilityPanelHeader
+        eyebrow="Graph projection"
+        title="Neo4j graph"
+        onRefresh={onRefresh}
+        isRefreshing={resource.phase === 'loading'}
+        refreshTestId="jobagent-obs-graph-refresh"
+      />
 
       {resource.phase === 'loading' && !snapshot ? (
         <GraphLoadingSkeleton />
@@ -121,7 +118,11 @@ export function GraphPanel({resource, onRefresh}: GraphPanelProps) {
 
           {statusBanner(snapshot)}
 
-          {model ? <GraphCanvas model={model} /> : null}
+          {model ? (
+            <GraphVisualizationBoundary key={model.identity}>
+              <GraphCanvas model={model} />
+            </GraphVisualizationBoundary>
+          ) : null}
 
           {snapshot.status !== 'unavailable' && nodeCount === 0 ? (
             <EmptyState

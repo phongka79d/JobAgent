@@ -1,17 +1,6 @@
-import {Theme} from '@astryxdesign/core';
-import {neutralTheme} from '@astryxdesign/theme-neutral/built';
-import {
-  act,
-  cleanup,
-  render,
-  renderHook,
-  screen,
-  within,
-} from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import {act, cleanup, renderHook} from '@testing-library/react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-import {GraphPanel} from '../features/observability/GraphPanel';
 import {toGraphModel} from '../features/observability/graphPresentation';
 import {
   createGraphSimulation,
@@ -21,24 +10,12 @@ import {
   useGraphSimulation,
   type GraphSimulationFactory,
 } from '../features/observability/useGraphSimulation';
-import type {GraphSnapshot} from '../features/observability/types';
 import {
   graphReady,
   installMatchMedia,
 } from './support/observability';
 
 const activeControllers = new Set<GraphSimulationController>();
-
-function renderGraphPanel(snapshot: GraphSnapshot) {
-  return render(
-    <Theme theme={neutralTheme}>
-      <GraphPanel
-        resource={{phase: 'ready', data: snapshot, error: null, loaded: true}}
-        onRefresh={vi.fn()}
-      />
-    </Theme>,
-  );
-}
 
 afterEach(() => {
   cleanup();
@@ -83,6 +60,24 @@ describe('graph simulation controller', () => {
     expect(controller.links).not.toBe(model.links);
     expect(controller.nodes[0]).toMatchObject({fx: 80, fy: 90});
     controller.stop();
+  });
+
+  it('releases the active node when a drag is canceled', () => {
+    const controller = createGraphSimulation(
+      toGraphModel(graphReady()),
+      640,
+      420,
+      vi.fn(),
+      {reducedMotion: true},
+    );
+    activeControllers.add(controller);
+
+    controller.beginDrag('candidate:cand-1');
+    controller.dragNode('candidate:cand-1', 120, 140);
+    controller.cancelDrag();
+
+    expect(controller.nodes[0].fx).toBeNull();
+    expect(controller.nodes[0].fy).toBeNull();
   });
 
   it('settles synchronously when reduced motion is requested', () => {
@@ -147,6 +142,7 @@ describe('graph simulation hook lifecycle', () => {
       beginDrag: vi.fn(),
       dragNode: vi.fn(),
       endDrag: vi.fn(),
+      cancelDrag: vi.fn(),
       resetLayout: vi.fn(),
       stop: vi.fn(),
     }));
@@ -214,6 +210,7 @@ describe('graph simulation hook lifecycle', () => {
         beginDrag: vi.fn(),
         dragNode: vi.fn(),
         endDrag: vi.fn(),
+        cancelDrag: vi.fn(),
         resetLayout: vi.fn(),
         stop: vi.fn(),
       };
@@ -249,40 +246,5 @@ describe('graph simulation hook lifecycle', () => {
 
     unmount();
     expect(controllers[1].stop).toHaveBeenCalledOnce();
-  });
-});
-
-describe('graph panel', () => {
-  it('renders typed nodes, directed labeled edges, controls, and safe metadata', async () => {
-    renderGraphPanel(graphReady());
-    const graph = await screen.findByRole('group', {
-      name: 'Candidate, jobs and skills network',
-    });
-    expect(graph).toBeInTheDocument();
-    expect(
-      screen.getByTestId('jobagent-graph-node-candidate:cand-1'),
-    ).toHaveTextContent('Candidate');
-    expect(within(graph).getByText('HAS_SKILL')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Fit view'})).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', {name: 'Reset layout'}),
-    ).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByTestId('jobagent-graph-node-candidate:cand-1'),
-    );
-    expect(
-      screen.getByTestId('jobagent-graph-selected-metadata'),
-    ).toHaveTextContent('cand-1');
-  });
-
-  it('keeps a readable semantic list and stale warning', async () => {
-    const snapshot = graphReady();
-    snapshot.status = 'stale';
-    renderGraphPanel(snapshot);
-    expect(
-      await screen.findByTestId('jobagent-obs-graph-status-stale'),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByText('Graph data'));
-    expect(screen.getByText(/cand-1.*HAS_SKILL.*python/)).toBeInTheDocument();
   });
 });

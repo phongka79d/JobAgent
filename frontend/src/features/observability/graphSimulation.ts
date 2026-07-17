@@ -19,6 +19,7 @@ export type GraphSimulationController = {
   beginDrag: (key: string) => void;
   dragNode: (key: string, x: number, y: number) => void;
   endDrag: () => void;
+  cancelDrag: () => void;
   resetLayout: () => void;
   stop: () => void;
 };
@@ -41,6 +42,7 @@ export function createGraphSimulation(
     target: typeof link.target === 'string' ? link.target : link.target.key,
   }));
   const nodesByKey = new Map(nodes.map((node) => [node.key, node]));
+  let activeDragKey: string | null = null;
   const reducedMotion = options.reducedMotion === true;
   const simulation = forceSimulation(nodes)
     .force(
@@ -82,6 +84,7 @@ export function createGraphSimulation(
     },
     beginDrag(key) {
       if (!nodesByKey.has(key)) return;
+      activeDragKey = key;
       simulation.alphaTarget(0.3);
       if (!reducedMotion) simulation.restart();
     },
@@ -95,10 +98,27 @@ export function createGraphSimulation(
       if (reducedMotion) onTick();
     },
     endDrag() {
+      activeDragKey = null;
       simulation.alphaTarget(0);
       if (reducedMotion) simulation.stop();
     },
+    cancelDrag() {
+      const node = activeDragKey ? nodesByKey.get(activeDragKey) : null;
+      if (node) {
+        node.fx = null;
+        node.fy = null;
+      }
+      activeDragKey = null;
+      simulation.alphaTarget(0);
+      if (reducedMotion) {
+        simulation.stop();
+        onTick();
+      } else {
+        simulation.alpha(0.3).restart();
+      }
+    },
     resetLayout() {
+      activeDragKey = null;
       for (const node of nodes) {
         node.fx = null;
         node.fy = null;

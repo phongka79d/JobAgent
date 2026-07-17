@@ -144,6 +144,13 @@
   user-select: none;
 }
 
+.jobagent-graph-node-label {
+  paint-order: stroke;
+  stroke: var(--color-background-surface);
+  stroke-width: calc(var(--border-width) * 4);
+  stroke-linejoin: round;
+}
+
 .jobagent-graph-node {
   cursor: grab;
   outline: var(--border-width) solid transparent;

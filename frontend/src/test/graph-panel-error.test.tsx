@@ -1,0 +1,50 @@
+import {Theme} from '@astryxdesign/core';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
+import {cleanup, render, screen} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+
+import {GraphPanel} from '../features/observability/GraphPanel';
+import {graphReady} from './support/observability';
+
+vi.mock('../features/observability/GraphCanvas', () => ({
+  GraphCanvas() {
+    throw new Error('Forced graph canvas failure');
+  },
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe('graph visualization failure isolation', () => {
+  it('keeps the semantic fallback mounted when the canvas fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const snapshot = graphReady();
+
+    expect(() =>
+      render(
+        <Theme theme={neutralTheme}>
+          <GraphPanel
+            resource={{
+              phase: 'ready',
+              data: snapshot,
+              error: null,
+              loaded: true,
+            }}
+            onRefresh={vi.fn()}
+          />
+        </Theme>,
+      ),
+    ).not.toThrow();
+    expect(
+      screen.getByTestId('jobagent-graph-visualization-error'),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Graph data'));
+    expect(screen.getByTestId('jobagent-obs-graph-edges')).toHaveTextContent(
+      'cand-1 —HAS_SKILL→ python',
+    );
+  });
+});

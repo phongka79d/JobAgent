@@ -9,6 +9,7 @@ import {VStack} from '@astryxdesign/core/VStack';
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -20,10 +21,12 @@ import type {
   GraphModel,
   GraphNodeDatum,
 } from './graphPresentation';
+import {getParallelEdgeOffsets} from './graphEdgeLayout';
 import {useGraphSimulation} from './useGraphSimulation';
 import {useGraphViewport} from './useGraphViewport';
 
 const NODE_RADIUS = 24;
+const MAX_NODE_LABEL_LENGTH = 18;
 
 type GraphCanvasProps = {
   model: GraphModel;
@@ -32,9 +35,11 @@ type GraphCanvasProps = {
 type GraphEdgeViewProps = {
   link: GraphLinkDatum;
   markerId: string;
+  offset: number;
+  labelOffset: number;
 };
 
-function GraphEdgeView({link, markerId}: GraphEdgeViewProps) {
+function GraphEdgeView({link, markerId, offset, labelOffset}: GraphEdgeViewProps) {
   const source = typeof link.source === 'string' ? null : link.source;
   const target = typeof link.target === 'string' ? null : link.target;
   const sourceX = source?.x ?? 0;
@@ -46,12 +51,14 @@ function GraphEdgeView({link, markerId}: GraphEdgeViewProps) {
   const distance = Math.hypot(deltaX, deltaY) || 1;
   const unitX = deltaX / distance;
   const unitY = deltaY / distance;
-  const startX = sourceX + unitX * NODE_RADIUS;
-  const startY = sourceY + unitY * NODE_RADIUS;
-  const endX = targetX - unitX * (NODE_RADIUS + 4);
-  const endY = targetY - unitY * (NODE_RADIUS + 4);
-  const labelX = (sourceX + targetX) / 2;
-  const labelY = (sourceY + targetY) / 2;
+  const normalX = -unitY;
+  const normalY = unitX;
+  const startX = sourceX + unitX * NODE_RADIUS + normalX * offset;
+  const startY = sourceY + unitY * NODE_RADIUS + normalY * offset;
+  const endX = targetX - unitX * (NODE_RADIUS + 4) + normalX * offset;
+  const endY = targetY - unitY * (NODE_RADIUS + 4) + normalY * offset;
+  const labelX = (sourceX + targetX) / 2 + normalX * labelOffset;
+  const labelY = (sourceY + targetY) / 2 + normalY * labelOffset;
   const labelWidth = link.type.length * 7 + 12;
 
   return (
@@ -82,6 +89,7 @@ type GraphNodeViewProps = {
   onDragStart: (key: string) => void;
   onDrag: (key: string, clientX: number, clientY: number) => void;
   onDragEnd: () => void;
+  onDragCancel: () => void;
 };
 
 function GraphNodeView({
@@ -91,11 +99,14 @@ function GraphNodeView({
   onDragStart,
   onDrag,
   onDragEnd,
+  onDragCancel,
 }: GraphNodeViewProps) {
   const x = node.x ?? 0;
   const y = node.y ?? 0;
   const visibleLabel =
-    node.label.length > 18 ? `${node.label.slice(0, 17)}...` : node.label;
+    node.label.length > MAX_NODE_LABEL_LENGTH
+      ? `${node.label.slice(0, MAX_NODE_LABEL_LENGTH - 3)}...`
+      : node.label;
 
   function handleKeyDown(event: KeyboardEvent<SVGGElement>) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -114,11 +125,20 @@ function GraphNodeView({
     onDrag(node.key, event.clientX, event.clientY);
   }
 
-  function handlePointerEnd(event: PointerEvent<SVGGElement>) {
+  function releasePointer(event: PointerEvent<SVGGElement>) {
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
+  }
+
+  function handlePointerEnd(event: PointerEvent<SVGGElement>) {
+    releasePointer(event);
     onDragEnd();
+  }
+
+  function handlePointerCancel(event: PointerEvent<SVGGElement>) {
+    releasePointer(event);
+    onDragCancel();
   }
 
   return (
@@ -132,14 +152,17 @@ function GraphNodeView({
       data-graph-node=""
       data-testid={`jobagent-graph-node-${node.key}`}
       onClick={() => onSelect(node)}
+      onFocus={() => onSelect(node)}
       onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
+      onPointerCancel={handlePointerCancel}
     >
       <circle r={NODE_RADIUS} />
-      <text>{visibleLabel}</text>
+      <text className="jobagent-graph-node-label" y={NODE_RADIUS + 14}>
+        {visibleLabel}
+      </text>
     </g>
   );
 }
@@ -159,6 +182,7 @@ function GraphCanvasInner({model}: GraphCanvasProps) {
   const {controller} = useGraphSimulation(model, size.width, size.height);
   const nodes = controller?.nodes ?? model.nodes;
   const links = controller?.links ?? model.links;
+  const edgeOffsets = useMemo(() => getParallelEdgeOffsets(links), [links]);
   const selectedNode = nodes.find((node) => node.key === selectedKey) ?? null;
 
   useEffect(() => {
@@ -208,6 +232,8 @@ function GraphCanvasInner({model}: GraphCanvasProps) {
                 key={link.key}
                 link={link}
                 markerId={arrowMarkerId}
+                offset={edgeOffsets.get(link.key)?.edge ?? 0}
+                labelOffset={edgeOffsets.get(link.key)?.label ?? 0}
               />
             ))}
             {nodes.map((node) => (
@@ -219,6 +245,7 @@ function GraphCanvasInner({model}: GraphCanvasProps) {
                 onDragStart={(key) => controller?.beginDrag(key)}
                 onDrag={dragNode}
                 onDragEnd={() => controller?.endDrag()}
+                onDragCancel={() => controller?.cancelDrag()}
               />
             ))}
           </g>
