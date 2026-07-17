@@ -116,18 +116,28 @@ async def get_or_create_pending(
     tool_call_id: str,
     tool_name: str,
     arguments_summary_json: dict[str, Any] | None = None,
+    source_attachment_id: str | None = None,
 ) -> tuple[ToolExecution, bool]:
     """Get existing row by identity or insert a new ``pending`` execution.
 
     Race-safe under the unique constraint ``uq_tool_executions__run_tool_call``:
-    concurrent inserts recover via savepoint + re-select. Returns
-    ``(row, created)`` where *created* is ``True`` only when this call inserted
-    the row. Does not finalize the caller's unit of work.
+    concurrent inserts recover via savepoint + re-select. Optional
+    *source_attachment_id* records CV tool ownership on insert only (existing
+    rows are returned unchanged). Returns ``(row, created)`` where *created*
+    is ``True`` only when this call inserted the row. Does not finalize the
+    caller's unit of work.
     """
     if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
         raise ToolExecutionRepositoryError("tool_call_id must be a non-empty string")
     if not isinstance(tool_name, str) or tool_name.strip() == "":
         raise ToolExecutionRepositoryError("tool_name must be a non-empty string")
+    if source_attachment_id is not None and (
+        not isinstance(source_attachment_id, str)
+        or source_attachment_id.strip() == ""
+    ):
+        raise ToolExecutionRepositoryError(
+            "source_attachment_id must be a non-empty string when set"
+        )
 
     existing = await get_by_identity(
         session, run_id=run_id, tool_call_id=tool_call_id
@@ -143,6 +153,8 @@ async def get_or_create_pending(
     }
     if arguments_summary_json is not None:
         kwargs["arguments_summary_json"] = arguments_summary_json
+    if source_attachment_id is not None:
+        kwargs["source_attachment_id"] = source_attachment_id
 
     row = ToolExecution(**kwargs)
     try:

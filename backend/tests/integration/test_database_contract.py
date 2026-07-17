@@ -88,9 +88,9 @@ def test_migrated_schema_exact_model_parity(db_path: Path) -> None:
                     )
 
                 await c.run_sync(_check)
-            # Programmatic completeness: none of the 50/5 expected missing.
-            assert len(expected_named_constraints()) == 50
-            assert len(expected_indexes()) == 5
+            # Programmatic completeness: none of the 63/8 expected missing.
+            assert len(expected_named_constraints()) == 63
+            assert len(expected_indexes()) == 8
         finally:
             await e.dispose()
 
@@ -181,6 +181,94 @@ def test_fk_restrict_and_cascade_chains(db_path: Path) -> None:
                 assert await _cnt(s, "chat_messages") == 0
                 assert await _cnt(s, "agent_runs") == 0
                 assert await _cnt(s, "tool_executions") == 0
+        finally:
+            await e.dispose()
+
+    run_async(_c())
+
+
+def test_cv_ownership_cascade_and_set_null(db_path: Path) -> None:
+    """Chunk/document CASCADE; message SET NULL; run/tool CASCADE on attach delete."""
+
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with f() as s:
+                await _x(s, _att("att-own", "hown", "pown"))
+                await _x(s, _att("att-keep", "hkeep", "pkeep"))
+                for sql in (
+                    "INSERT INTO attachment_text_chunks ("
+                    "id, attachment_id, ordinal, text, preview, "
+                    "char_count, token_estimate, created_at) VALUES "
+                    f"('chk1', 'att-own', 0, 'body', 'body', 4, 1, '{TS}')",
+                    "INSERT INTO cv_documents ("
+                    "attachment_id, document_json, profile_json, outline_json, "
+                    "extraction_version, source_hash, created_at, updated_at) "
+                    f"VALUES ('att-own', '{{}}', '{{}}', '{{}}', 'v1', 'h1', "
+                    f"'{TS}', '{TS}')",
+                    "INSERT INTO cv_document_drafts ("
+                    "attachment_id, document_json, profile_json, outline_json, "
+                    "extraction_version, source_hash, created_at, updated_at) "
+                    f"VALUES ('att-own', '{{}}', '{{}}', '{{}}', 'v1', 'h1', "
+                    f"'{TS}', '{TS}')",
+                    "INSERT INTO chat_messages ("
+                    "id, conversation_id, role, content, source_attachment_id, "
+                    f"created_at, updated_at) VALUES "
+                    f"('msg-own', 'main', 'user', 'cv note', 'att-own', "
+                    f"'{TS}', '{TS}')",
+                    "INSERT INTO chat_messages ("
+                    "id, conversation_id, role, content, "
+                    f"created_at, updated_at) VALUES "
+                    f"('msg-plain', 'main', 'user', 'plain', '{TS}', '{TS}')",
+                    "INSERT INTO agent_runs ("
+                    "id, user_message_id, source_attachment_id, state, "
+                    f"created_at, updated_at) VALUES "
+                    f"('run-own', 'msg-own', 'att-own', 'running', "
+                    f"'{TS}', '{TS}')",
+                    "INSERT INTO agent_runs ("
+                    "id, user_message_id, state, created_at, updated_at) "
+                    f"VALUES ('run-plain', 'msg-plain', 'running', "
+                    f"'{TS}', '{TS}')",
+                    "INSERT INTO tool_executions ("
+                    "id, run_id, source_attachment_id, tool_call_id, tool_name, "
+                    "status, created_at, updated_at) VALUES "
+                    f"('tool-own', 'run-plain', 'att-own', 'tc-own', 'read', "
+                    f"'pending', '{TS}', '{TS}')",
+                ):
+                    await _x(s, sql)
+                await s.commit()
+            async with f() as s:
+                await _x(s, "DELETE FROM attachments WHERE id = 'att-own'")
+                await s.commit()
+                assert await _cnt(s, "attachment_text_chunks") == 0
+                assert await _cnt(s, "cv_documents") == 0
+                assert await _cnt(s, "cv_document_drafts") == 0
+                assert await _cnt(s, "agent_runs") == 1
+                assert await _cnt(s, "tool_executions") == 0
+                msg_src = (
+                    await _x(
+                        s,
+                        "SELECT source_attachment_id, content "
+                        "FROM chat_messages WHERE id = 'msg-own'",
+                    )
+                ).one()
+                assert msg_src[0] is None
+                assert msg_src[1] == "cv note"
+                assert await _cnt(s, "attachments") == 1
+            async with f() as s:
+                await _x(
+                    s,
+                    "UPDATE attachments SET state = 'deleting' "
+                    "WHERE id = 'att-keep'",
+                )
+                await s.commit()
+                st = (
+                    await _x(
+                        s, "SELECT state FROM attachments WHERE id = 'att-keep'"
+                    )
+                ).scalar_one()
+                assert st == "deleting"
         finally:
             await e.dispose()
 

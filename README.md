@@ -11,28 +11,23 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 8 Batch04 complete on worktree):** Batch01 retention/
-chunks, Batch02 bounded read-only observability APIs, Batch03 accessible lazy
-sidebar inspector, and Batch04 synthetic local smoke plus final regression
-evidence are on the worktree under audit. Approved CV replacement archives the
-former active attachment (file and metadata retained; no restore path).
-Successful digital-PDF extraction persists the exact deterministic
-`"\n\n"`-joined chunk sequence in `attachment_text_chunks`. Migration head
-remains `0002_add_attachment_text_chunks` under the single root
-`backend/migrations/versions/`. Six typed `GET /api/observability/*` routes
-expose cursor-paginated CV history, retained-PDF stream, chunk list/detail,
-durable run history, and a cap-aware Neo4j Candidate/Job/Skill snapshot with
-`ready|stale|unavailable` states—no SQLite/Neo4j/chat/Agent mutation. The CV
-sidebar keeps Overview upload/replace/download and the interaction lock, and
-adds cached CV history / LLM chunks / Neo4j graph / Agent runs tabs that lazy-
-load on first select, retain safe prior data after failed refresh, expand full
-chunk text only on demand, and use an `aria-expanded` collapse control (mobile
-Escape via AppShell MobileNav). Synthetic-data-only direct smoke and final
-regression gates are recorded in
-`docs/acceptance/observability_sidebar_checklist.md` (archive replacement,
-retained open/download, chunk expand, runs, ready/truncated/fallback graph,
-collapse dual evidence, console hygiene, secret prohibition; Compose health
-`overall=available`).
+**Current status (Plan 9 Batch01 on worktree):** Plan 8 Batch01–Batch04
+(retention/chunks, observability APIs, accessible lazy sidebar inspector, and
+synthetic local smoke) remain the reuse baseline. Plan 9 Batch01 adds the
+data-preserving SQLite foundation for approved/draft CV documents, explicit CV
+ownership, deleting lifecycle, and Master §6.3 cascades—without external calls
+or legacy document synthesis. Migration head is
+`0003_add_cv_documents_and_ownership` under the single root
+`backend/migrations/versions/`. New tables `cv_documents` and
+`cv_document_drafts` store per-attachment document/profile/outline JSON;
+attachment state includes `deleting`; chunk FK is `ON DELETE CASCADE`; nullable
+`source_attachment_id` (and `redacted_at` on chat messages) land on
+chat/run/tool rows with named FKs and indexes. Flush-only repositories expose
+document upsert/delete and optional ownership kwargs; extraction, approval,
+deletion coordination, graph, Agent/tools, and frontend remain later batches.
+Six typed `GET /api/observability/*` routes and the CV sidebar inspector from
+Plan 8 are unchanged. Synthetic observability smoke evidence remains in
+`docs/acceptance/observability_sidebar_checklist.md`.
 
 ## Purpose and scope
 
@@ -78,7 +73,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/agent/` | Agent state/context, graph factory, request-scoped checkpoint/runner |
 | `backend/app/tools/` | Production registry of exactly six tools (three profile + `save_job` / `query_jobs` / `match_jobs`) |
 | `backend/app/services/` | Domain orchestration (CV, profile approval/extraction/drafts, JD, matching, tool execution, history, observability assembly) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`) and observability cross-table read projections |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job sync, revision consistency, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
@@ -86,9 +81,10 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `infrastructure/` | Compose, Dockerfiles, Neo4j skills seed, host diagnostics and rebuild help wrapper |
 
 SQLite is the sole durable source of truth for profiles, attachments (including
-immutable `archived` history), attachment text chunks, jobs, messages, runs, and
-tool results. Neo4j is a derived Candidate/Job/Skill index and vector retrieval
-surface. ShopAIKey is the only external model provider.
+immutable `archived` history and `deleting` lifecycle), attachment text chunks,
+per-CV approved/draft documents, jobs, messages, runs, and tool results (with
+optional CV ownership columns). Neo4j is a derived Candidate/Job/Skill index and
+vector retrieval surface. ShopAIKey is the only external model provider.
 
 Public functional endpoints (Master §14 core plus Plan 8 observability):
 
@@ -236,8 +232,21 @@ python -m pytest tests/e2e/test_demo_flow.py -q
 Set-Location ..
 ```
 
+Focused Plan 9 Batch01 CV document and ownership persistence gate (migration
+head `0003`, schema/ownership cascades, no document synthesis, ORM parity):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/integration/test_migrations.py tests/integration/test_database_contract.py -q
+py -3.13 -m pytest tests/unit/test_attachment_profile_models.py tests/unit/test_chat_models.py tests/unit/test_cv_document_models.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
 Focused Plan 8 Batch01 retention/chunk gate (archive lifecycle + canonical
-chunks + migration head):
+chunks; still valid regression surface):
 
 ```powershell
 Set-Location backend

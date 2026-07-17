@@ -26,26 +26,33 @@ _COLS: dict[str, tuple[set[str], set[str], str]] = {
     "chat_messages": (
         {
             "id", "conversation_id", "role", "content", "structured_payload",
-            "created_at", "updated_at",
+            "source_attachment_id", "redacted_at", "created_at", "updated_at",
         },
-        {"structured_payload"},
+        {"structured_payload", "source_attachment_id", "redacted_at"},
         "pk_chat_messages",
     ),
     "agent_runs": (
         {
-            "id", "user_message_id", "state", "pending_approval_json", "error_code",
-            "completed_at", "created_at", "updated_at",
+            "id", "user_message_id", "source_attachment_id", "state",
+            "pending_approval_json", "error_code", "completed_at", "created_at",
+            "updated_at",
         },
-        {"pending_approval_json", "error_code", "completed_at"},
+        {
+            "source_attachment_id", "pending_approval_json", "error_code",
+            "completed_at",
+        },
         "pk_agent_runs",
     ),
     "tool_executions": (
         {
-            "id", "run_id", "tool_call_id", "tool_name", "arguments_summary_json",
-            "status", "duration_ms", "error_code", "result_json", "created_at",
-            "updated_at",
+            "id", "run_id", "source_attachment_id", "tool_call_id", "tool_name",
+            "arguments_summary_json", "status", "duration_ms", "error_code",
+            "result_json", "created_at", "updated_at",
         },
-        {"arguments_summary_json", "duration_ms", "error_code", "result_json"},
+        {
+            "source_attachment_id", "arguments_summary_json", "duration_ms",
+            "error_code", "result_json",
+        },
         "pk_tool_executions",
     ),
 }
@@ -79,16 +86,28 @@ _CHECKS: dict[str, dict[str, tuple[str, ...]]] = {
 _FKS = (
     ("chat_messages", "fk_chat_messages__conversation_id", "conversation_id",
      "conversation", "id", "CASCADE"),
+    ("chat_messages", "fk_chat_messages__source_attachment_id",
+     "source_attachment_id", "attachments", "id", "SET NULL"),
     ("agent_runs", "fk_agent_runs__user_message_id", "user_message_id",
      "chat_messages", "id", "CASCADE"),
+    ("agent_runs", "fk_agent_runs__source_attachment_id",
+     "source_attachment_id", "attachments", "id", "CASCADE"),
     ("tool_executions", "fk_tool_executions__run_id", "run_id",
      "agent_runs", "id", "CASCADE"),
+    ("tool_executions", "fk_tool_executions__source_attachment_id",
+     "source_attachment_id", "attachments", "id", "CASCADE"),
 )
 _IXS = (
     ("chat_messages", "ix_chat_messages__conversation_created_at",
      ["conversation_id", "created_at", "id"]),
+    ("chat_messages", "ix_chat_messages__source_attachment_id",
+     ["source_attachment_id"]),
     ("agent_runs", "ix_agent_runs__state", ["state"]),
+    ("agent_runs", "ix_agent_runs__source_attachment_id",
+     ["source_attachment_id"]),
     ("tool_executions", "ix_tool_executions__run_status", ["run_id", "status"]),
+    ("tool_executions", "ix_tool_executions__source_attachment_id",
+     ["source_attachment_id"]),
 )
 
 
@@ -251,19 +270,26 @@ def test_tool_executions_status_unique_and_types() -> None:
 
 
 def test_chat_family_fks_and_indexes() -> None:
+    by_table: dict[str, list[ForeignKeyConstraint]] = {}
     for table_name, fk_name, column, parent, parent_col, ondelete in _FKS:
-        fks = [
-            c
-            for c in _t(table_name).constraints
-            if isinstance(c, ForeignKeyConstraint)
-        ]
-        assert len(fks) == 1
-        fk, el = fks[0], list(fks[0].elements)
-        assert fk.name == fk_name and len(el) == 1
+        fks = by_table.setdefault(
+            table_name,
+            [
+                c
+                for c in _t(table_name).constraints
+                if isinstance(c, ForeignKeyConstraint)
+            ],
+        )
+        match = next(c for c in fks if c.name == fk_name)
+        el = list(match.elements)
+        assert len(el) == 1
         assert el[0].parent.name == column
         assert el[0].column.table.name == parent
         assert el[0].column.name == parent_col
         assert el[0].ondelete == ondelete
+    assert len(by_table["chat_messages"]) == 2
+    assert len(by_table["agent_runs"]) == 2
+    assert len(by_table["tool_executions"]) == 2
     for table_name, ix_name, columns in _IXS:
         matches = [ix for ix in _t(table_name).indexes if ix.name == ix_name]
         assert len(matches) == 1

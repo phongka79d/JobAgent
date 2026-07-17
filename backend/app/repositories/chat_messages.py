@@ -36,12 +36,15 @@ async def insert_message(
     role: str,
     content: str,
     structured_payload: dict[str, Any] | None = None,
+    source_attachment_id: str | None = None,
+    redacted_at: datetime | None = None,
 ) -> ChatMessage:
     """Insert one message into the singleton conversation.
 
     Always sets ``conversation_id`` to :data:`CONVERSATION_ID`. Rejects the
-    provider tool role and any other non-durable role before flush. Does not
-    finalize the caller's unit of work.
+    provider tool role and any other non-durable role before flush. Optional
+    *source_attachment_id* / *redacted_at* expose CV ownership fields without
+    lifecycle logic. Does not finalize the caller's unit of work.
     """
     if role not in CHAT_MESSAGE_ROLES:
         raise InvalidMessageRoleError(
@@ -50,6 +53,13 @@ async def insert_message(
     if content == "" and structured_payload is None:
         raise ChatMessageRepositoryError(
             "message requires non-empty content or structured_payload"
+        )
+    if source_attachment_id is not None and (
+        not isinstance(source_attachment_id, str)
+        or source_attachment_id.strip() == ""
+    ):
+        raise ChatMessageRepositoryError(
+            "source_attachment_id must be a non-empty string when set"
         )
 
     # Omit structured_payload when absent so the JSON column stays SQL NULL
@@ -61,6 +71,10 @@ async def insert_message(
     }
     if structured_payload is not None:
         kwargs["structured_payload"] = structured_payload
+    if source_attachment_id is not None:
+        kwargs["source_attachment_id"] = source_attachment_id
+    if redacted_at is not None:
+        kwargs["redacted_at"] = redacted_at
     message = ChatMessage(**kwargs)
     session.add(message)
     await session.flush()

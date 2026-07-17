@@ -46,13 +46,13 @@ def _sqlite_type_name(col_type: TypeEngine[Any]) -> str:
 
 
 def accepted_metadata() -> MetaData:
-    """Return the registered application metadata (ten tables)."""
+    """Return the registered application metadata (twelve tables)."""
     assert set(Base.metadata.tables) == APPLICATION_TABLE_NAMES
     return Base.metadata
 
 
 def expected_named_constraints() -> frozenset[str]:
-    """All named PK/UQ/CK/FK constraints from accepted models (56)."""
+    """All named PK/UQ/CK/FK constraints from accepted models (63)."""
     names: set[str] = set()
     for table in accepted_metadata().tables.values():
         for constraint in table.constraints:
@@ -226,12 +226,13 @@ def assert_migrated_matches_accepted_models(
     and every FK target/delete action.
     """
     expected_constraints = expected_named_constraints()
-    # 0001 baseline had 50; +pk/fk/uq + 3 checks on attachment_text_chunks = 56.
-    assert len(expected_constraints) == 56
+    # 0002 had 56; +2 pk + 2 cv FKs + 3 ownership FKs = 63 named constraints.
+    assert len(expected_constraints) == 63
     expected_cols = expected_columns()
     expected_fks = expected_foreign_keys()
     expected_ix = expected_indexes()
-    assert len(expected_ix) == 5
+    # Prior 5 + 3 source_attachment_id indexes.
+    assert len(expected_ix) == 8
 
     observed = observe_schema(connection)
     if exact_tables is not None:
@@ -256,7 +257,7 @@ def assert_migrated_matches_accepted_models(
     }
     assert not missing_c, f"missing named constraints: {sorted(missing_c)}"
     assert not extra_app_c, f"unexpected named constraints: {sorted(extra_app_c)}"
-    assert len(expected_constraints & observed["named_constraints"]) == 56
+    assert len(expected_constraints & observed["named_constraints"]) == 63
 
     missing_fk = expected_fks - observed["foreign_keys"]
     extra_fk = observed["foreign_keys"] - expected_fks

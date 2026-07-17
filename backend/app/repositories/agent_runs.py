@@ -68,18 +68,30 @@ async def create_run(
     session: AsyncSession,
     *,
     user_message_id: str,
+    source_attachment_id: str | None = None,
 ) -> AgentRun:
     """Create one ``running`` run bound uniquely to *user_message_id*.
 
     Initial fields: ``state='running'`` with SQL-null approval/error/completion
-    columns. Uniqueness is enforced by the ``user_message_id`` unique
+    columns. Optional *source_attachment_id* records CV-scoped ownership without
+    lifecycle logic. Uniqueness is enforced by the ``user_message_id`` unique
     constraint; a second create for the same message fails at flush. Does not
     finalize the caller's unit of work.
     """
-    run = AgentRun(
-        user_message_id=user_message_id,
-        state=AGENT_RUN_STATE_RUNNING,
-    )
+    if source_attachment_id is not None and (
+        not isinstance(source_attachment_id, str)
+        or source_attachment_id.strip() == ""
+    ):
+        raise AgentRunRepositoryError(
+            "source_attachment_id must be a non-empty string when set"
+        )
+    kwargs: dict[str, Any] = {
+        "user_message_id": user_message_id,
+        "state": AGENT_RUN_STATE_RUNNING,
+    }
+    if source_attachment_id is not None:
+        kwargs["source_attachment_id"] = source_attachment_id
+    run = AgentRun(**kwargs)
     session.add(run)
     await session.flush()
     return run

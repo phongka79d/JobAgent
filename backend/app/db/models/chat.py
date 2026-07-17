@@ -121,6 +121,7 @@ class ChatMessage(Base):
             "created_at",
             "id",
         ),
+        Index("ix_chat_messages__source_attachment_id", "source_attachment_id"),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
@@ -133,6 +134,14 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     structured_payload: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True
+    )
+    source_attachment_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("attachments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    redacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
@@ -175,6 +184,7 @@ class AgentRun(Base):
             name="completed_at_coupling",
         ),
         Index("ix_agent_runs__state", "state"),
+        Index("ix_agent_runs__source_attachment_id", "source_attachment_id"),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
@@ -183,6 +193,11 @@ class AgentRun(Base):
         ForeignKey("chat_messages.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
+    )
+    source_attachment_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("attachments.id", ondelete="CASCADE"),
+        nullable=True,
     )
     state: Mapped[str] = mapped_column(
         Text,
@@ -255,6 +270,7 @@ class ToolExecution(Base):
             name="uq_tool_executions__run_tool_call",
         ),
         Index("ix_tool_executions__run_status", "run_id", "status"),
+        Index("ix_tool_executions__source_attachment_id", "source_attachment_id"),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
@@ -262,6 +278,11 @@ class ToolExecution(Base):
         Text,
         ForeignKey("agent_runs.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    source_attachment_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("attachments.id", ondelete="CASCADE"),
+        nullable=True,
     )
     tool_call_id: Mapped[str] = mapped_column(Text, nullable=False)
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)

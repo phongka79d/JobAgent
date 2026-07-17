@@ -13,7 +13,9 @@ from app.db.models import Attachment, CandidateProfile, JobPreferences, ProfileD
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_DEFAULT,
+    ATTACHMENT_STATE_DELETING,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
     ATTACHMENT_STATES,
@@ -200,10 +202,15 @@ def test_attachment_pk_constants_and_construct_defaults() -> None:
     assert table.primary_key is not None
     assert table.primary_key.name == "pk_attachments"
     assert ATTACHMENT_STATES == frozenset({
-        ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_ACTIVE, ATTACHMENT_STATE_FAILED,
+        ATTACHMENT_STATE_STAGED,
+        ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_ARCHIVED,
+        ATTACHMENT_STATE_FAILED,
+        ATTACHMENT_STATE_DELETING,
     })
     assert ATTACHMENT_MIME_TYPE_PDF == "application/pdf"
     assert ATTACHMENT_STATE_DEFAULT == ATTACHMENT_STATE_STAGED == "staged"
+    assert ATTACHMENT_STATE_DELETING == "deleting"
     assert _default_name(Attachment.__table__.c.id) == "new_uuid"
     state_default = Attachment.__table__.c.state.default
     assert state_default is not None and state_default.arg == ATTACHMENT_STATE_DEFAULT

@@ -99,7 +99,7 @@ Own one Alembic revision, ORM models, flush-only repositories, and direct migrat
 
 ### Tasks
 
-- [ ] (01A): Migrate CV document, lifecycle, and ownership persistence
+- [x] (01A): Migrate CV document, lifecycle, and ownership persistence
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch01 - CV Document and Ownership Persistence` > `(01A)`

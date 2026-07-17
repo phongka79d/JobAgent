@@ -58,7 +58,7 @@ class AttachmentTextChunk(Base):
     )
     attachment_id: Mapped[str] = mapped_column(
         Text,
-        ForeignKey("attachments.id", ondelete="RESTRICT"),
+        ForeignKey("attachments.id", ondelete="CASCADE"),
         nullable=False,
     )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
