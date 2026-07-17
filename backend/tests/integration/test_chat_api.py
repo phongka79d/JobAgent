@@ -75,20 +75,28 @@ from tests.support.public_api import (
 def test_public_routes_are_exactly_seven_master_endpoints(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Master §14: health, CV upload, profile/CV reads, three chat routes."""
+    """Public inventory after Plan 8/9: chat + CV manager + observability."""
+    del chat_env
+    expected = [
+        ("DELETE", "/api/cvs/{attachment_id}"),
+        ("GET", "/api/chat/history"),
+        ("GET", "/api/health"),
+        ("GET", "/api/observability/cvs"),
+        ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
+        ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
+        ("GET", "/api/observability/cvs/{attachment_id}/file"),
+        ("GET", "/api/observability/graph"),
+        ("GET", "/api/observability/runs"),
+        ("GET", "/api/profile"),
+        ("GET", "/api/profile/cv"),
+        ("POST", "/api/attachments/cv"),
+        ("POST", "/api/chat/runs/{run_id}/resume"),
+        ("POST", "/api/chat/turns"),
+        ("POST", "/api/cvs/{attachment_id}/reprocess"),
+    ]
     with health_client() as client:
         routes = sorted(public_api_routes(client.app))
-    assert routes == sorted(
-        [
-            ("GET", "/api/health"),
-            ("POST", "/api/attachments/cv"),
-            ("GET", "/api/profile"),
-            ("GET", "/api/profile/cv"),
-            ("GET", "/api/chat/history"),
-            ("POST", "/api/chat/turns"),
-            ("POST", "/api/chat/runs/{run_id}/resume"),
-        ]
-    )
+    assert routes == sorted(expected)
     # No profile write CRUD.
     for method, path in routes:
         if path.startswith("/api/profile"):

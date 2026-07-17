@@ -36,6 +36,8 @@ EXPECTED_FIELDS: dict[str, type[Any]] = {
     "URL_FETCH_TIMEOUT_SECONDS": int,
     "URL_MAX_RESPONSE_MB": int,
     "TOOL_LOOP_LIMIT": int,
+    # Plan 9 document-first batch ceiling.
+    "CV_DOCUMENT_BATCH_MAX_CHARS": int,
 }
 
 EXPECTED_DEFAULTS: dict[str, Any] = {
@@ -49,6 +51,7 @@ EXPECTED_DEFAULTS: dict[str, Any] = {
     "URL_FETCH_TIMEOUT_SECONDS": 10,
     "URL_MAX_RESPONSE_MB": 5,
     "TOOL_LOOP_LIMIT": 6,
+    "CV_DOCUMENT_BATCH_MAX_CHARS": 6000,
 }
 
 REQUIRED_WITHOUT_DEFAULT: frozenset[str] = frozenset(

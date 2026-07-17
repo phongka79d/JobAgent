@@ -154,21 +154,44 @@ async def test_ensure_base_schema_is_repeat_safe() -> None:
     # Two full passes of the same IF NOT EXISTS statements; no extra DDL.
     assert driver.queries == list(SCHEMA_STATEMENTS) * 2
     assert all("IF NOT EXISTS" in q for q in driver.queries)
-    assert len(driver.queries) == 8
+    # Plan 9: Candidate + CV + CVSection + CVEntry + Job + Skill + vector index.
+    assert len(SCHEMA_STATEMENTS) == 7
+    assert len(driver.queries) == 14
 
 
 def test_schema_statements_exact_constraints_and_vector_index() -> None:
+    from app.graph.constraints import (
+        CV_ENTRY_ID_UNIQUE,
+        CV_ID_UNIQUE,
+        CV_SECTION_ID_UNIQUE,
+    )
+
     assert SCHEMA_STATEMENTS == (
         CANDIDATE_ID_UNIQUE,
+        CV_ID_UNIQUE,
+        CV_SECTION_ID_UNIQUE,
+        CV_ENTRY_ID_UNIQUE,
         JOB_ID_UNIQUE,
         SKILL_CANONICAL_KEY_UNIQUE,
         JOB_EMBEDDING_VECTOR_INDEX,
     )
-    assert len(SCHEMA_STATEMENTS) == 4
+    assert len(SCHEMA_STATEMENTS) == 7
 
     assert CANDIDATE_ID_UNIQUE == (
         "CREATE CONSTRAINT candidate_id_unique IF NOT EXISTS "
         "FOR (c:Candidate) REQUIRE c.id IS UNIQUE"
+    )
+    assert CV_ID_UNIQUE == (
+        "CREATE CONSTRAINT cv_id_unique IF NOT EXISTS "
+        "FOR (cv:CV) REQUIRE cv.id IS UNIQUE"
+    )
+    assert CV_SECTION_ID_UNIQUE == (
+        "CREATE CONSTRAINT cv_section_id_unique IF NOT EXISTS "
+        "FOR (s:CVSection) REQUIRE s.id IS UNIQUE"
+    )
+    assert CV_ENTRY_ID_UNIQUE == (
+        "CREATE CONSTRAINT cv_entry_id_unique IF NOT EXISTS "
+        "FOR (e:CVEntry) REQUIRE e.id IS UNIQUE"
     )
     assert JOB_ID_UNIQUE == (
         "CREATE CONSTRAINT job_id_unique IF NOT EXISTS "

@@ -783,7 +783,9 @@ def test_raw_cv_text_absent_from_compact_outputs() -> None:
     assert "CV TEXT" not in dumped
     assert "---" not in dumped
     args = arguments_summary_for_propose_cv("att-1")
-    assert args == {"attachment_id": "att-1"}
+    assert args == {"attachment_id": "att-1", "reprocess": False}
+    args_re = arguments_summary_for_propose_cv("att-1", reprocess=True)
+    assert args_re == {"attachment_id": "att-1", "reprocess": True}
 
 
 # ---------------------------------------------------------------------------
@@ -1196,7 +1198,9 @@ def test_tool_boundary_compact_and_not_production_registered(
                 oai.get("function", {}).get("parameters", {}).get("properties")
                 or {}
             )
-            assert set(props) == {"attachment_id"}
+            # Plan 9: optional reprocess flag is LLM-visible; injected hidden
+            # fields remain excluded.
+            assert set(props) == {"attachment_id", "reprocess"}
             assert "tool_call_id" not in props
             assert "state" not in props
             assert "run_id" not in props

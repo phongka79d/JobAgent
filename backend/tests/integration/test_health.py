@@ -141,7 +141,8 @@ def test_health_does_not_mutate_schema(
     monkeypatch.setattr(Base.metadata, "create_all", create_all)
     with health_client() as client:
         startup_queries = list(fake.queries)
-        assert ensure_calls["count"] == 1 and len(startup_queries) == 4
+        # Plan 9 base schema: 6 uniqueness constraints + 1 vector index.
+        assert ensure_calls["count"] == 1 and len(startup_queries) == 7
         assert client.get("/api/health").status_code == 200
         assert ensure_calls["count"] == 1 and fake.queries == startup_queries
     create_all.assert_not_called()
@@ -225,19 +226,26 @@ def test_partial_startup_failure_cleans_up_resources(
 def test_only_public_functional_routes_are_health_chat_cv_and_profile(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Public surface: health, chat, CV upload, and profile reads (seven routes)."""
+    """Public surface after Plan 8/9: health, chat, CV, profile, observability."""
+    expected = [
+        ("DELETE", "/api/cvs/{attachment_id}"),
+        ("GET", "/api/chat/history"),
+        ("GET", "/api/health"),
+        ("GET", "/api/observability/cvs"),
+        ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
+        ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
+        ("GET", "/api/observability/cvs/{attachment_id}/file"),
+        ("GET", "/api/observability/graph"),
+        ("GET", "/api/observability/runs"),
+        ("GET", "/api/profile"),
+        ("GET", "/api/profile/cv"),
+        ("POST", "/api/attachments/cv"),
+        ("POST", "/api/chat/runs/{run_id}/resume"),
+        ("POST", "/api/chat/turns"),
+        ("POST", "/api/cvs/{attachment_id}/reprocess"),
+    ]
     with health_client() as client:
-        assert sorted(public_api_routes(client.app)) == sorted(
-            [
-                ("GET", "/api/health"),
-                ("POST", "/api/attachments/cv"),
-                ("GET", "/api/chat/history"),
-                ("POST", "/api/chat/turns"),
-                ("POST", "/api/chat/runs/{run_id}/resume"),
-                ("GET", "/api/profile"),
-                ("GET", "/api/profile/cv"),
-            ]
-        )
+        assert sorted(public_api_routes(client.app)) == sorted(expected)
         # Jobs remain non-public; profile GETs exist (wrong method is 405, not 404).
         assert client.get("/api/jobs").status_code == 404
         assert client.post("/api/jobs").status_code == 404
@@ -261,16 +269,36 @@ def test_source_tree_has_no_other_route_decorators() -> None:
         [
             "attachments.py:post_cv_upload:router.post("
             "'/attachments/cv', response_model=CvUploadResponse)",
-            "health.py:get_health:router.get("
-            "'/health', response_model=HealthResponse)",
-            history_dec,
-            "chat.py:post_chat_turn:router.post('/chat/turns')",
+            "chat.py:get_chat_history:router.get("
+            "'/chat/history', response_model=HistoryPage)",
             "chat.py:post_chat_resume:router.post("
             "'/chat/runs/{run_id}/resume')",
+            "chat.py:post_chat_turn:router.post('/chat/turns')",
+            "cvs.py:delete_cv_attachment:router.delete("
+            "'/cvs/{attachment_id}', status_code=204, response_class=Response)",
+            "cvs.py:post_cv_reprocess:router.post("
+            "'/cvs/{attachment_id}/reprocess')",
+            "health.py:get_health:router.get("
+            "'/health', response_model=HealthResponse)",
+            "observability.py:get_observability_chunk_detail:router.get("
+            "'/observability/cvs/{attachment_id}/chunks/{ordinal}', "
+            "response_model=ChunkDetail)",
+            "observability.py:get_observability_chunks:router.get("
+            "'/observability/cvs/{attachment_id}/chunks', "
+            "response_model=ChunkListPage)",
+            "observability.py:get_observability_cv_file:router.get("
+            "'/observability/cvs/{attachment_id}/file')",
+            "observability.py:get_observability_cvs:router.get("
+            "'/observability/cvs', response_model=CvHistoryPage)",
+            "observability.py:get_observability_graph:router.get("
+            "'/observability/graph', response_model=GraphSnapshot)",
+            "observability.py:get_observability_runs:router.get("
+            "'/observability/runs', response_model=RunHistoryPage)",
             profile_dec,
             "profile.py:get_profile_cv:router.get('/profile/cv')",
         ]
     )
+    del history_dec
 
 
 def test_lifespan_opens_resources_once(

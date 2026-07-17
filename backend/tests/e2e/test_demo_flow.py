@@ -61,6 +61,7 @@ from tests.support.public_api import (
     override_chat_deps,
     parse_sse_wire,
 )
+from tests.unit.test_profile_extraction import CoveringDocumentInvoker
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 CV_PDF = FIXTURES / "cv" / "digital_cv_01.pdf"
@@ -236,7 +237,8 @@ def test_demo_flow_greeting_to_matching_public_boundary(
     db_path, files_dir = demo_env
     assert CV_PDF.is_file()
 
-    profile_invoker = ScriptedStructuredInvoker([_extracted_profile()])
+    # Plan 9: propose path is document-first; profile-first invokers are ignored.
+    profile_invoker = CoveringDocumentInvoker()
     jd_invoker = ScriptedStructuredInvoker([_extracted_jd()])
     embedder = FakeEmbeddingClient()
     job_sync = _RecordingJobSync()
@@ -374,7 +376,8 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         )
         commit_run_id = approval["run_id"]
         _assert_no_false_success(propose.text)
-        assert profile_invoker.call_count == 1
+        # Document-first path may issue one batch (+ optional consolidate).
+        assert len(profile_invoker.calls) >= 1
 
         async def _assert_draft() -> None:
             factory = get_session_factory()
@@ -384,7 +387,9 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 assert draft.id == PROFILE_DRAFT_ID
                 assert draft.source_attachment_id == attachment_id
                 profile = draft.draft_json["candidate_profile"]
-                assert profile["current_title"] == "Backend Engineer"
+                # Document-first projection from CoveringDocumentInvoker.
+                assert isinstance(profile.get("current_title"), str)
+                assert profile["current_title"]
                 assert any(
                     s["skill"]["canonical_key"] == "python"
                     for s in profile["skills"]
@@ -427,9 +432,8 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 active = await profile_repo.get_active_profile(session)
                 assert active is not None
                 assert active.active_attachment_id == attachment_id
-                assert (
-                    active.profile_json["current_title"] == "Backend Engineer"
-                )
+                title = active.profile_json.get("current_title")
+                assert isinstance(title, str) and title
                 att = await session.get(Attachment, attachment_id)
                 assert att is not None
                 assert att.state == ATTACHMENT_STATE_ACTIVE

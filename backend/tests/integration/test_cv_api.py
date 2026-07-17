@@ -19,6 +19,7 @@ from app.core.ids import new_uuid
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
     Attachment,
@@ -209,10 +210,11 @@ def test_staged_to_active_and_failed_to_staged_retry(db_path: Path) -> None:
                     storage_path="only.pdf",
                     page_count=2,
                 )
-                # Replace prior active: delete first (no profile FK yet).
+                # Replace prior active: archive first (active is never deleted).
                 prior = await att_repo.get_active(session)
                 assert prior is not None
-                await att_repo.delete(session, prior.id)
+                archived = await att_repo.mark_archived(session, prior.id)
+                assert archived.state == ATTACHMENT_STATE_ARCHIVED
                 done = await att_repo.mark_active(session, only.id)
                 assert done.state == ATTACHMENT_STATE_ACTIVE
                 assert done.page_count == 2
@@ -540,9 +542,12 @@ def test_repository_source_has_no_commit_or_io() -> None:
     assert "ATTACHMENT_STATE_STAGED" in src
     assert "ATTACHMENT_STATE_ACTIVE" in src
     assert "ATTACHMENT_STATE_FAILED" in src
-    # No invented states.
+    assert "ATTACHMENT_STATE_ARCHIVED" in src
+    assert "ATTACHMENT_STATE_DELETING" in src
+    # No invented states / soft-delete frameworks.
     assert "processing" not in src
-    assert "deleted" not in src
+    assert "soft_delete" not in src
+    assert "is_deleted" not in src
 
 
 def test_create_rejects_invalid_scalars(db_path: Path) -> None:
@@ -1256,4 +1261,5 @@ def test_profile_routes_have_no_write_crud_and_are_thin() -> None:
     for method, path in routes:
         if path in {"/api/profile", "/api/profile/cv"}:
             assert method == "GET"
-    assert len(routes) == 7
+    # Plan 8/9 expanded public surface (observability + CV manager).
+    assert len(routes) == 15
