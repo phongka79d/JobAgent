@@ -274,6 +274,7 @@ export function observabilityReducer(
       const prev = state.chunkDetails[key] ?? emptyResource<ChunkDetail>();
       return {
         ...state,
+        expandedChunkOrdinal: action.ordinal,
         chunkDetails: {
           ...state.chunkDetails,
           [key]: applyLoading(prev),
@@ -293,7 +294,6 @@ export function observabilityReducer(
             loaded: true,
           },
         },
-        expandedChunkOrdinal: action.ordinal,
       };
     }
     case 'chunk_detail_error': {
