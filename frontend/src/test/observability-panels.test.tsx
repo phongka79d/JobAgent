@@ -1,10 +1,11 @@
-import {act, cleanup, screen} from '@testing-library/react';
+import {act, cleanup, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   ATTACHMENT_ID,
   chunkDetail,
+  chunkListPage,
   installMatchMedia,
   mockObservabilityApi,
   renderObservabilitySidebar,
@@ -28,10 +29,13 @@ describe('Observability list panels', () => {
       `jobagent-obs-cv-select-${ATTACHMENT_ID}`,
     );
     await userEvent.click(item);
+    const panel = screen.getByTestId('jobagent-obs-cv-history');
+    const detail = within(panel).getByTestId('jobagent-obs-cv-detail');
     expect(item).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('jobagent-obs-cv-detail')).toHaveTextContent(
-      'abcdef012345',
-    );
+    expect(item).not.toContainElement(detail);
+    expect(within(panel).getAllByRole('list', {name: 'CV history'})).toHaveLength(1);
+    expect(within(panel).getAllByTestId('jobagent-obs-cv-detail')).toHaveLength(1);
+    expect(detail).toHaveTextContent('abcdef012345');
     expect(
       screen.getByTestId(`jobagent-obs-cv-open-${ATTACHMENT_ID}`),
     ).toBeEnabled();
@@ -53,7 +57,7 @@ describe('Observability list panels', () => {
     ).toHaveTextContent('Full expanded chunk body for inspection');
   });
 
-  it('selects a pending chunk and ignores late success after collapse', async () => {
+  it('deduplicates a pending chunk after collapse and re-expansion', async () => {
     let resolveDetail!: (detail: ReturnType<typeof chunkDetail>) => void;
     const pendingDetail = new Promise<ReturnType<typeof chunkDetail>>(
       (resolve) => {
@@ -77,15 +81,20 @@ describe('Observability list panels', () => {
 
     await userEvent.click(row);
     expect(row).not.toHaveAttribute('aria-selected');
+
+    await userEvent.click(row);
+    expect(row).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Loading full text...')).toBeInTheDocument();
+    expect(api.fetchChunkDetail).toHaveBeenCalledTimes(1);
+
     await act(async () => {
       resolveDetail(chunkDetail());
       await pendingDetail;
     });
 
-    expect(row).not.toHaveAttribute('aria-selected');
     expect(
-      screen.queryByTestId('jobagent-obs-chunk-fulltext-0'),
-    ).not.toBeInTheDocument();
+      await screen.findByTestId('jobagent-obs-chunk-fulltext-0'),
+    ).toHaveTextContent('Full expanded chunk body for inspection');
   });
 
   it('keeps a rejected chunk selected and shows only the safe error', async () => {
@@ -113,5 +122,41 @@ describe('Observability list panels', () => {
     expect(banner).toHaveTextContent('Chunk detail unavailable');
     expect(banner).toHaveTextContent('DETAIL_FAILED');
     expect(screen.queryByText('raw-secret-chunk-payload')).not.toBeInTheDocument();
+  });
+
+  it('keeps cached chunk rows after a safe refresh error', async () => {
+    const {ChatApiError} = await import('../lib/api/chat');
+    const error = Object.assign(
+      new ChatApiError(500, 'CHUNK_LIST_FAILED', 'Chunk list refresh failed'),
+      {raw_payload: 'raw-secret-list-payload'},
+    );
+    const fetchChunkList = vi
+      .fn()
+      .mockResolvedValueOnce(chunkListPage())
+      .mockRejectedValueOnce(error);
+    const api = mockObservabilityApi({fetchChunkList});
+    renderObservabilitySidebar(api);
+    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(
+      await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
+    );
+    await userEvent.click(screen.getByRole('tab', {name: 'LLM chunks'}));
+    const row = await screen.findByTestId('jobagent-obs-chunk-toggle-0');
+    expect(
+      screen.queryByTestId('jobagent-obs-chunk-fulltext-0'),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('jobagent-obs-chunks-refresh'));
+    await waitFor(() => {
+      expect(fetchChunkList).toHaveBeenCalledTimes(2);
+    });
+    const banner = await screen.findByTestId('jobagent-obs-chunks-error');
+    expect(row).toBeInTheDocument();
+    expect(banner).toHaveTextContent('Chunk list refresh failed');
+    expect(banner).toHaveTextContent('CHUNK_LIST_FAILED');
+    expect(screen.queryByText('raw-secret-list-payload')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-obs-chunk-fulltext-0'),
+    ).not.toBeInTheDocument();
   });
 });

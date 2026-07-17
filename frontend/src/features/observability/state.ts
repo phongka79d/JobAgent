@@ -458,7 +458,10 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
     ) => {
       const key = chunkDetailKey(attachmentId, ordinal);
       const cached = state.chunkDetails[key];
-      if (cached?.loaded && cached.data) {
+      if (
+        cached?.phase === 'loading' ||
+        (cached?.loaded && cached.data)
+      ) {
         dispatch({type: 'set_expanded_chunk', ordinal});
         return;
       }
