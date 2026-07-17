@@ -61,6 +61,20 @@ describe('observability navigation', () => {
     ).toBeInTheDocument();
   });
 
+  it('does not expose the presentational tab strip as navigation', async () => {
+    renderObservabilitySidebar();
+    const tablist = await screen.findByRole('tablist', {
+      name: 'Observability inspector',
+    });
+    expect(tablist).toHaveAttribute('aria-orientation', 'vertical');
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    expect(tablist.firstElementChild).toHaveAttribute('role', 'presentation');
+    expect(tablist.firstElementChild).not.toHaveAttribute('aria-label');
+    expect(
+      screen.queryByRole('navigation', {name: 'Tabs'}),
+    ).not.toBeInTheDocument();
+  });
+
   it('keeps tabs in the collapsed rail and expands the selected view', async () => {
     renderObservabilitySidebar();
     await userEvent.click(

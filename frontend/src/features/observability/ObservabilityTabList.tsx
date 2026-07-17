@@ -15,6 +15,9 @@ const VERTICAL_TAB_LIST_STYLE = {
   flexDirection: 'column',
 } as const;
 
+// Astryx 0.1.4 defaults undefined to "Tabs"; remove when the component supports presentational composition.
+const OMITTED_ARIA_LABEL = null as unknown as string;
+
 const TABS: ReadonlyArray<{
   id: ObservabilityTabId;
   label: string;
@@ -45,6 +48,7 @@ export function ObservabilityTabList({
     >
       <TabList
         role="presentation"
+        aria-label={OMITTED_ARIA_LABEL}
         value={value}
         onChange={(next) => {
           const tab = TABS.find((item) => item.id === next);
