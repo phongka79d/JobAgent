@@ -47,6 +47,8 @@ export function emptyProfile(): ProfileReadResponse {
   };
 }
 
+export const ACTIVE_ATTACHMENT_ID = '11111111-2222-4333-8444-555555555555';
+
 export function cvHistoryPage(available = true): CvHistoryPage {
   return {
     items: [
@@ -65,6 +67,81 @@ export function cvHistoryPage(available = true): CvHistoryPage {
       },
     ],
     next_cursor: null,
+  };
+}
+
+/** Active + archived pair for CV Manager action tests. */
+export function cvManagerHistoryPage(available = true): CvHistoryPage {
+  return {
+    items: [
+      {
+        id: ACTIVE_ATTACHMENT_ID,
+        original_name: 'active.pdf',
+        mime_type: 'application/pdf',
+        size_bytes: 1000,
+        page_count: 2,
+        state: 'active',
+        failure_code: null,
+        file_hash_abbreviated: 'aaaaaaaaaaaa',
+        file_available: available,
+        created_at: '2024-07-01T13:00:00Z',
+        updated_at: '2024-07-01T13:00:00Z',
+      },
+      {
+        id: ATTACHMENT_ID,
+        original_name: 'archived.pdf',
+        mime_type: 'application/pdf',
+        size_bytes: 2048,
+        page_count: 1,
+        state: 'archived',
+        failure_code: null,
+        file_hash_abbreviated: 'abcdef012345',
+        file_available: available,
+        created_at: '2024-07-01T12:00:00Z',
+        updated_at: '2024-07-01T12:00:00Z',
+      },
+    ],
+    next_cursor: null,
+  };
+}
+
+/** Graph snapshot with active CV branch for presentation tests. */
+export function graphWithCvBranch(): GraphSnapshot {
+  const base = graphReady();
+  return {
+    ...base,
+    cv: {
+      id: ATTACHMENT_ID,
+      original_name: 'active.pdf',
+      extraction_version: 'v1',
+      revision: 'cv-r1',
+    },
+    sections: [
+      {
+        id: 'sec-1',
+        heading: 'Experience',
+        kind: 'experience',
+        ordinal: 0,
+        entry_count: 1,
+      },
+    ],
+    entries: [
+      {
+        id: 'ent-1',
+        section_id: 'sec-1',
+        ordinal: 0,
+        title: 'Engineer',
+        subtitle: 'Acme',
+        date_text: '2020-2024',
+        preview: 'Built systems',
+      },
+    ],
+    edges: [
+      ...base.edges,
+      {source_id: 'cand-1', target_id: ATTACHMENT_ID, type: 'PROJECTS_TO'},
+      {source_id: ATTACHMENT_ID, target_id: 'sec-1', type: 'HAS_SECTION'},
+      {source_id: 'sec-1', target_id: 'ent-1', type: 'HAS_ENTRY'},
+    ],
   };
 }
 
@@ -156,6 +233,8 @@ export function mockObservabilityApi(
     fetchGraphSnapshot: vi.fn().mockResolvedValue(graphReady()),
     getRetainedCvUrl: (id: string) =>
       `http://api.test/api/observability/cvs/${id}/file`,
+    deleteCv: vi.fn().mockResolvedValue(undefined),
+    streamCvReprocess: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

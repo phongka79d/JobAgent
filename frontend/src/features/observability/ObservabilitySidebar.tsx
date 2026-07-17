@@ -9,7 +9,7 @@ import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 
 import {ChunkPanel} from './ChunkPanel';
-import {CvHistoryPanel} from './CvHistoryPanel';
+import {CvManagerPanel} from './CvManagerPanel';
 import {GraphPanel} from './GraphPanel';
 import {ObservabilityTabList} from './ObservabilityTabList';
 import {RunHistoryPanel} from './RunHistoryPanel';
@@ -28,12 +28,21 @@ export type ObservabilitySidebarProps = {
     cvName: string | null;
   };
   observability: ReturnType<typeof useObservabilityState>;
+  /**
+   * CV Manager reprocess → App → ChatPage stream path.
+   * Returns false when composition refuses (locked/duplicate).
+   */
+  onCvReprocess?: (attachmentId: string) => boolean;
+  /** After confirmed delete success (profile summary may need refresh). */
+  onCvDeleted?: () => void;
 };
 
 export function ObservabilitySidebar({
   overview,
   collapsedStatus,
   observability: obs,
+  onCvReprocess,
+  onCvDeleted,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
@@ -72,6 +81,28 @@ export function ObservabilitySidebar({
 
   const handleOpenFile = (item: CvHistoryItem) => {
     obs.openRetainedFile(item.id, item.file_available);
+  };
+
+  const handleReprocess = (item: CvHistoryItem) => {
+    if (!obs.beginReprocess(item.id)) {
+      return;
+    }
+    if (onCvReprocess) {
+      const accepted = onCvReprocess(item.id);
+      if (!accepted) {
+        obs.endReprocess(item.id);
+      }
+    }
+  };
+
+  const handleConfirmDelete = async (
+    item: CvHistoryItem,
+  ): Promise<'success' | 'duplicate' | 'error'> => {
+    const outcome = await obs.confirmDelete(item.id);
+    if (outcome === 'success') {
+      onCvDeleted?.();
+    }
+    return outcome;
   };
 
   const chunkList = state.selectedAttachmentId
@@ -137,14 +168,19 @@ export function ObservabilitySidebar({
         ) : null}
 
         {state.selectedTab === 'cv-history' ? (
-          <CvHistoryPanel
+          <CvManagerPanel
             resource={state.cvHistory}
             selectedAttachmentId={state.selectedAttachmentId}
+            pendingByAttachment={state.cvManager.pendingByAttachment}
+            errorsByAttachment={state.cvManager.errorsByAttachment}
             onSelect={handleSelectAttachment}
             onOpenFile={handleOpenFile}
             onRefresh={() => {
               void obs.loadCvHistory({force: true});
             }}
+            onReprocess={handleReprocess}
+            onConfirmDelete={handleConfirmDelete}
+            onClearError={obs.clearActionError}
           />
         ) : null}
 

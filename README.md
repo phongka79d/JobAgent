@@ -11,29 +11,29 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch06 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 9 Batch07 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
-synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch05 remain
+synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch06 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
 drafts, approval-gated reprocess/activation, retryable non-active CV deletion
-(exact `CV.id` graph branch via `graph/delete_cv.py`), and owned CV graph
+(exact `CV.id` graph branch via `graph/delete_cv.py`), owned CV graph
 projection/rebuild (`graph/sync_cv.py` fixed labels `CV` / `CVSection` /
 `CVEntry`, exclusive active `PROJECTS_TO`, provider-free rebuild, bounded
-observability caps and document-revision staleness). Plan 9 Batch06 adds
-bounded active-CV Agent retrieval: production chat turns load compact
-outline-only `active_cv_context` (active attachment ID, revision/source hash,
-section ids/headings/kinds/counts/ranges or legacy reprocess-required; never
-bodies/chunks/paths) beside candidate/recent context and inject it into graph
-initial state before model execution; pure active-only `section` / `search` /
-`chunk` reader with dual caps, opaque cursors, and switch invalidation; seventh
-production tool `read_active_cv` on the existing single ToolNode with durable
-source-attachment ownership, terminal identity replay, selector-only argument
-summaries, and prompt policy for narrowest mode without automatic cursor
-exhaustion. Six-iteration guard and one decision + one ToolNode topology are
-unchanged. Frontend CV Manager remains a later batch. Six typed
-`GET /api/observability/*` routes and the CV sidebar inspector from Plan 8
-remain. Synthetic observability smoke evidence remains in
-`docs/acceptance/observability_sidebar_checklist.md`.
+observability caps and document-revision staleness), and bounded active-CV Agent
+retrieval (`active_cv_context` outline injection, pure `section`/`search`/`chunk`
+reader, seventh tool `read_active_cv` on the existing single ToolNode with
+durable ownership/replay/redaction). Plan 9 Batch07 converts the CV History
+inspector into an accessible **CV Manager**: typed reprocess/delete transport
+and sidebar-local pending/error state with focused cache invalidation; reprocess
+SSE reuses the sole `streamCvReprocess` → chat reducer path and focuses the
+existing approval card; panel/dialog action matrix (Active badge; active
+Open/Re-extract only; non-active Open/Make active/Delete with named confirmation);
+graph display mapping for fixed CV/section/entry nodes without changing D3
+simulation/viewport semantics; refreshed rail, `13/47/40` proportions, and
+responsive shell preserved. Six typed `GET /api/observability/*` routes remain.
+Synthetic observability smoke evidence remains in
+`docs/acceptance/observability_sidebar_checklist.md`. Batch08 still owns the
+synthetic direct FE smoke checklist and live console/screenshot evidence.
 
 ## Purpose and scope
 
@@ -54,9 +54,10 @@ JobAgent provides:
 - Read-only observability APIs for CV history, retained-file stream, selected
   chunk text, durable Agent-run history, and a bounded Neo4j graph snapshot
   (typed status, allowlisted labels/edges including active CV branch,
-  hard caps, safe errors/redaction), with a matching accessible sidebar
-  inspector (lazy tabs, query cache, safe display, semantic graph list
-  fallback—frontend D3 still Plan-8-shaped until a later FE task).
+  hard caps, safe errors/redaction), with an accessible **CV Manager** sidebar
+  (lazy tabs, query cache, reprocess/delete actions, focused invalidation,
+  confirmation dialog, CV-branch graph display + semantic list fallback; D3
+  simulation/pan/zoom/fit/reset semantics unchanged).
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
 - Hybrid top-N matching with skill coverage, preference components, quality
@@ -85,7 +86,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**`), approval/saved-job/match cards, single SSE reducer, typed API clients |
+| `frontend/` | Astryx chat shell, CV sidebar + CV Manager observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed API clients |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -330,6 +331,22 @@ Set-Location backend
 py -3.13 -m pytest tests/unit/test_active_cv_reader.py tests/integration/test_active_cv_tool.py tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/integration/test_agent_runner.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 9 Batch07 CV Manager frontend gate (typed reprocess/delete
+transport, sidebar pending/error + focused invalidation, sole SSE reprocess
+path, accessible panel/dialog action matrix, graph CV-branch display, layout/
+D3 regression):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/cv-manager.test.tsx src/test/cv-manager-api.test.ts src/test/observability-sidebar.test.tsx src/test/observability-navigation.test.tsx src/test/observability-panels.test.tsx src/test/graph-interaction.test.tsx
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
 Set-Location ..
 git diff --check
 ```

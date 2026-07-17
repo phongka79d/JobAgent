@@ -1,16 +1,28 @@
 /**
  * Sidebar-local observability state: tabs, selection, query cache, request status.
- * Does not own profile/upload or chat/SSE state.
+ * CV Manager pending actions + focused invalidation (Plan 9).
+ * Does not own profile/upload or chat/SSE state (reprocess streams via ChatPage).
  */
 
-import {useCallback, useReducer} from 'react';
+import {useCallback, useReducer, useRef} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
 import type {ObservabilityApi} from './api';
 import {defaultObservabilityApi} from './api';
+import {
+  dropActionError,
+  dropPendingAttachment,
+  initialCvManagerActionSlice,
+  isCvActionPending,
+  selectSafeRemainingAttachmentId,
+  type CvManagerActionSlice,
+  type CvManagerDispatchAction,
+} from './cvManagerState';
+import {toCvManagerActionError} from './cvManagerTypes';
 import type {
   ChunkDetail,
   ChunkListPage,
+  CvHistoryItem,
   CvHistoryPage,
   GraphSnapshot,
   ObservabilitySafeError,
@@ -18,6 +30,12 @@ import type {
   RunHistoryPage,
 } from './types';
 import {useLatestRequest} from './useLatestRequest';
+
+export type {
+  CvManagerActionKind,
+  CvManagerActionSlice,
+} from './cvManagerState';
+export {isCvActionPending, selectSafeRemainingAttachmentId};
 
 export type RequestPhase =
   | 'idle'
@@ -46,6 +64,8 @@ export type ObservabilityState = {
   chunkDetails: Record<string, CachedResource<ChunkDetail>>;
   runs: CachedResource<RunHistoryPage>;
   graph: CachedResource<GraphSnapshot>;
+  /** Sidebar-local CV Manager pending/error maps (Master §15.6). */
+  cvManager: CvManagerActionSlice;
 };
 
 const emptyResource = <T,>(): CachedResource<T> => ({
@@ -65,6 +85,7 @@ export const initialObservabilityState: ObservabilityState = {
   chunkDetails: {},
   runs: emptyResource(),
   graph: emptyResource(),
+  cvManager: initialCvManagerActionSlice,
 };
 
 export function chunkDetailKey(attachmentId: string, ordinal: number): string {
@@ -140,7 +161,8 @@ type Action =
       attachmentId: string;
       ordinal: number;
       error: ObservabilitySafeError;
-    };
+    }
+  | CvManagerDispatchAction;
 
 function phaseForPage(itemCount: number): RequestPhase {
   return itemCount === 0 ? 'empty' : 'ready';
@@ -308,6 +330,127 @@ export function observabilityReducer(
         },
       };
     }
+    case 'cv_action_begin': {
+      if (isCvActionPending(state.cvManager, action.attachmentId)) {
+        return state;
+      }
+      return {
+        ...state,
+        cvManager: {
+          pendingByAttachment: {
+            ...state.cvManager.pendingByAttachment,
+            [action.attachmentId]: action.kind,
+          },
+          errorsByAttachment: dropActionError(
+            state.cvManager.errorsByAttachment,
+            action.attachmentId,
+          ),
+        },
+      };
+    }
+    case 'cv_action_end': {
+      return {
+        ...state,
+        cvManager: {
+          ...state.cvManager,
+          pendingByAttachment: dropPendingAttachment(
+            state.cvManager.pendingByAttachment,
+            action.attachmentId,
+          ),
+        },
+      };
+    }
+    case 'cv_action_error': {
+      return {
+        ...state,
+        cvManager: {
+          pendingByAttachment: dropPendingAttachment(
+            state.cvManager.pendingByAttachment,
+            action.attachmentId,
+          ),
+          errorsByAttachment: {
+            ...state.cvManager.errorsByAttachment,
+            [action.attachmentId]: action.error,
+          },
+        },
+      };
+    }
+    case 'cv_clear_action_error': {
+      return {
+        ...state,
+        cvManager: {
+          ...state.cvManager,
+          errorsByAttachment: dropActionError(
+            state.cvManager.errorsByAttachment,
+            action.attachmentId,
+          ),
+        },
+      };
+    }
+    case 'cv_delete_success': {
+      // Invalidate only CV list, chunks for deleted id, runs, and graph.
+      const remainingItems = action.remainingItems as CvHistoryItem[];
+      const nextSelection = selectSafeRemainingAttachmentId(
+        remainingItems,
+        action.attachmentId,
+        state.selectedAttachmentId,
+      );
+      const nextChunkLists: Record<string, CachedResource<ChunkListPage>> = {
+        ...state.chunkLists,
+      };
+      delete nextChunkLists[action.attachmentId];
+      const nextChunkDetails: Record<string, CachedResource<ChunkDetail>> = {};
+      const prefix = `${action.attachmentId}:`;
+      for (const [key, value] of Object.entries(state.chunkDetails)) {
+        if (!key.startsWith(prefix)) {
+          nextChunkDetails[key] = value;
+        }
+      }
+      const page: CvHistoryPage = {
+        items: remainingItems,
+        next_cursor: state.cvHistory.data?.next_cursor ?? null,
+      };
+      return {
+        ...state,
+        selectedAttachmentId: nextSelection,
+        expandedChunkOrdinal:
+          state.selectedAttachmentId === action.attachmentId
+            ? null
+            : state.expandedChunkOrdinal,
+        cvHistory: {
+          phase: remainingItems.length === 0 ? 'empty' : 'ready',
+          data: page,
+          error: null,
+          loaded: true,
+        },
+        chunkLists: nextChunkLists,
+        chunkDetails: nextChunkDetails,
+        runs: emptyResource<RunHistoryPage>(),
+        graph: emptyResource<GraphSnapshot>(),
+        cvManager: {
+          pendingByAttachment: dropPendingAttachment(
+            state.cvManager.pendingByAttachment,
+            action.attachmentId,
+          ),
+          errorsByAttachment: dropActionError(
+            state.cvManager.errorsByAttachment,
+            action.attachmentId,
+          ),
+        },
+      };
+    }
+    case 'cv_invalidate_activation': {
+      // After approval activates a reprocessed CV — force list/chunks/runs/graph reload.
+      // Active selection stays until list refresh; profile summary is composition-owned.
+      return {
+        ...state,
+        cvHistory: emptyResource<CvHistoryPage>(),
+        chunkLists: {},
+        chunkDetails: {},
+        runs: emptyResource<RunHistoryPage>(),
+        graph: emptyResource<GraphSnapshot>(),
+      };
+    }
     default:
       return state;
   }
@@ -327,6 +470,8 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
     initialObservabilityState,
   );
   const beginLatestRequest = useLatestRequest();
+  /** Synchronous pending guard so rapid double-clicks cannot race re-render. */
+  const actionInFlightRef = useRef<Set<string>>(new Set());
 
   const selectTab = useCallback((tab: ObservabilityTabId) => {
     dispatch({type: 'select_tab', tab});
@@ -513,6 +658,99 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
     [api],
   );
 
+  /**
+   * Mark reprocess pending for one attachment. Returns false when duplicate.
+   * Actual SSE stream is owned by ChatPage via streamCvReprocess.
+   */
+  const beginReprocess = useCallback((attachmentId: string): boolean => {
+    if (actionInFlightRef.current.has(attachmentId)) {
+      return false;
+    }
+    actionInFlightRef.current.add(attachmentId);
+    dispatch({
+      type: 'cv_action_begin',
+      attachmentId,
+      kind: 'reprocess',
+    });
+    return true;
+  }, []);
+
+  /** Clear reprocess pending after stream terminal / HTTP error (composition). */
+  const endReprocess = useCallback((attachmentId: string) => {
+    actionInFlightRef.current.delete(attachmentId);
+    dispatch({type: 'cv_action_end', attachmentId});
+  }, []);
+
+  /** Record reprocess transport failure; retain list cache/selection. */
+  const failReprocess = useCallback((attachmentId: string, err: unknown) => {
+    actionInFlightRef.current.delete(attachmentId);
+    const safe = toCvManagerActionError(err);
+    dispatch({
+      type: 'cv_action_error',
+      attachmentId,
+      error: {code: safe.code, summary: safe.summary},
+    });
+  }, []);
+
+  /**
+   * Confirmed delete: call DELETE, then invalidate only documented caches and
+   * select a safe remaining row. Partial failure retains row/cache + retry text.
+   */
+  const confirmDelete = useCallback(
+    async (
+      attachmentId: string,
+      opts?: {signal?: AbortSignal},
+    ): Promise<'success' | 'duplicate' | 'error'> => {
+      if (actionInFlightRef.current.has(attachmentId)) {
+        return 'duplicate';
+      }
+      actionInFlightRef.current.add(attachmentId);
+      dispatch({type: 'cv_action_begin', attachmentId, kind: 'delete'});
+      try {
+        await api.deleteCv(attachmentId, opts?.signal);
+        if (opts?.signal?.aborted) {
+          actionInFlightRef.current.delete(attachmentId);
+          dispatch({type: 'cv_action_end', attachmentId});
+          return 'error';
+        }
+        const priorItems = state.cvHistory.data?.items ?? [];
+        const remainingItems = priorItems.filter(
+          (item) => item.id !== attachmentId,
+        );
+        actionInFlightRef.current.delete(attachmentId);
+        dispatch({
+          type: 'cv_delete_success',
+          attachmentId,
+          remainingItems,
+        });
+        return 'success';
+      } catch (err) {
+        actionInFlightRef.current.delete(attachmentId);
+        if (opts?.signal?.aborted) {
+          dispatch({type: 'cv_action_end', attachmentId});
+          return 'error';
+        }
+        const safe = toCvManagerActionError(err);
+        dispatch({
+          type: 'cv_action_error',
+          attachmentId,
+          error: {code: safe.code, summary: safe.summary},
+        });
+        return 'error';
+      }
+    },
+    [api, state.cvHistory.data?.items],
+  );
+
+  /** Invalidate CV/chunk/run/graph caches after Save Profile activation. */
+  const invalidateAfterActivation = useCallback(() => {
+    dispatch({type: 'cv_invalidate_activation'});
+  }, []);
+
+  const clearActionError = useCallback((attachmentId: string) => {
+    dispatch({type: 'cv_clear_action_error', attachmentId});
+  }, []);
+
   return {
     state,
     api,
@@ -526,5 +764,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
     loadChunkList,
     expandChunk,
     openRetainedFile,
+    beginReprocess,
+    endReprocess,
+    failReprocess,
+    confirmDelete,
+    invalidateAfterActivation,
+    clearActionError,
   };
 }

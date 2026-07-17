@@ -24,7 +24,7 @@ const TABS: ReadonlyArray<{
   icon: IconName;
 }> = [
   {id: 'overview', label: 'Overview', icon: 'info'},
-  {id: 'cv-history', label: 'CV history', icon: 'clock'},
+  {id: 'cv-history', label: 'CV Manager', icon: 'clock'},
   {id: 'chunks', label: 'LLM chunks', icon: 'viewColumns'},
   {id: 'graph', label: 'Neo4j graph', icon: 'arrowsUpDown'},
   {id: 'runs', label: 'Agent runs', icon: 'wrench'},

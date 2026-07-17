@@ -45,7 +45,7 @@ export function ChunkPanel({
       >
         <EmptyState
           title="No CV selected"
-          description="Select a CV from CV history to inspect LLM chunks."
+          description="Select a CV from CV Manager to inspect LLM chunks."
           isCompact
           data-testid="jobagent-obs-chunks-no-selection"
         />

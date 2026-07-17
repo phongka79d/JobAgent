@@ -2,7 +2,13 @@ import type {SimulationLinkDatum, SimulationNodeDatum} from 'd3-force';
 
 import type {GraphEdgeType, GraphSnapshot} from './types';
 
-export type GraphNodeKind = 'candidate' | 'job' | 'skill';
+export type GraphNodeKind =
+  | 'candidate'
+  | 'job'
+  | 'skill'
+  | 'cv'
+  | 'cv_section'
+  | 'cv_entry';
 
 export type GraphNodeDatum = SimulationNodeDatum & {
   key: string;
@@ -39,12 +45,17 @@ function uniqueByKey<T extends {key: string}>(items: T[]): T[] {
 }
 
 function sourceKey(type: GraphEdgeType, id: string): string {
-  if (type === 'HAS_SKILL') return `candidate:${id}`;
+  if (type === 'HAS_SKILL' || type === 'PROJECTS_TO') return `candidate:${id}`;
   if (type === 'REQUIRES' || type === 'PREFERS') return `job:${id}`;
+  if (type === 'HAS_SECTION') return `cv:${id}`;
+  if (type === 'HAS_ENTRY') return `cv_section:${id}`;
   return `skill:${id}`;
 }
 
-function targetKey(id: string): string {
+function targetKey(type: GraphEdgeType, id: string): string {
+  if (type === 'PROJECTS_TO') return `cv:${id}`;
+  if (type === 'HAS_SECTION') return `cv_section:${id}`;
+  if (type === 'HAS_ENTRY') return `cv_entry:${id}`;
   return `skill:${id}`;
 }
 
@@ -64,6 +75,55 @@ export function toGraphModel(snapshot: GraphSnapshot): GraphModel {
       metadata: [
         ['ID', snapshot.candidate.id],
         ['Revision', snapshot.candidate.revision],
+      ],
+    });
+  }
+
+  if (snapshot.cv) {
+    nodes.push({
+      key: `cv:${snapshot.cv.id}`,
+      rawId: snapshot.cv.id,
+      kind: 'cv',
+      label: snapshot.cv.original_name || 'Active CV',
+      metadata: [
+        ['ID', snapshot.cv.id],
+        ['Name', snapshot.cv.original_name],
+        ['Extraction version', snapshot.cv.extraction_version],
+        ['Revision', snapshot.cv.revision],
+      ],
+    });
+  }
+
+  for (const section of snapshot.sections ?? []) {
+    nodes.push({
+      key: `cv_section:${section.id}`,
+      rawId: section.id,
+      kind: 'cv_section',
+      label: section.heading || section.id,
+      metadata: [
+        ['ID', section.id],
+        ['Heading', section.heading],
+        ['Kind', section.kind],
+        ['Ordinal', String(section.ordinal)],
+        ['Entries', String(section.entry_count)],
+      ],
+    });
+  }
+
+  for (const entry of snapshot.entries ?? []) {
+    nodes.push({
+      key: `cv_entry:${entry.id}`,
+      rawId: entry.id,
+      kind: 'cv_entry',
+      label: entry.title || entry.preview || entry.id,
+      metadata: [
+        ['ID', entry.id],
+        ['Section', entry.section_id],
+        ['Ordinal', String(entry.ordinal)],
+        ['Title', entry.title ?? ''],
+        ['Subtitle', entry.subtitle ?? ''],
+        ['Date', entry.date_text ?? ''],
+        ['Preview', entry.preview],
       ],
     });
   }
@@ -102,7 +162,7 @@ export function toGraphModel(snapshot: GraphSnapshot): GraphModel {
   const links = uniqueByKey(
     snapshot.edges.flatMap((edge): GraphLinkDatum[] => {
       const source = sourceKey(edge.type, edge.source_id);
-      const target = targetKey(edge.target_id);
+      const target = targetKey(edge.type, edge.target_id);
       if (!nodeKeys.has(source) || !nodeKeys.has(target)) return [];
       const escapedSource = escapeLinkEndpoint(source);
       const escapedTarget = escapeLinkEndpoint(target);

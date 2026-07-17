@@ -257,10 +257,22 @@ function GraphCanvasInner({model}: GraphCanvasProps) {
         className="jobagent-graph-legend"
         aria-label="Graph node legend"
       >
-        {(['candidate', 'job', 'skill'] as const).map((kind) => (
-          <span key={kind} className={`jobagent-graph-legend-item jobagent-graph-legend-item--${kind}`}>
+        {(
+          [
+            ['candidate', 'Candidate'],
+            ['job', 'Job'],
+            ['skill', 'Skill'],
+            ['cv', 'CV'],
+            ['cv_section', 'Section'],
+            ['cv_entry', 'Entry'],
+          ] as const
+        ).map(([kind, label]) => (
+          <span
+            key={kind}
+            className={`jobagent-graph-legend-item jobagent-graph-legend-item--${kind}`}
+          >
             <span aria-hidden="true" />
-            {kind[0].toUpperCase() + kind.slice(1)}
+            {label}
           </span>
         ))}
       </HStack>

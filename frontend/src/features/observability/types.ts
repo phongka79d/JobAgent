@@ -23,7 +23,10 @@ export type GraphEdgeType =
   | 'HAS_SKILL'
   | 'REQUIRES'
   | 'PREFERS'
-  | 'RELATED_TO';
+  | 'RELATED_TO'
+  | 'PROJECTS_TO'
+  | 'HAS_SECTION'
+  | 'HAS_ENTRY';
 
 export type ObservabilityTabId =
   | 'overview'
@@ -107,6 +110,34 @@ export type GraphCandidateNode = {
   revision: string;
 };
 
+/** Allowlisted active CV node (no body/arbitrary attributes). */
+export type GraphCvNode = {
+  id: string;
+  original_name: string;
+  extraction_version: string;
+  revision: string;
+};
+
+/** Allowlisted CVSection fields only. */
+export type GraphCvSectionNode = {
+  id: string;
+  heading: string;
+  kind: string;
+  ordinal: number;
+  entry_count: number;
+};
+
+/** Allowlisted CVEntry fields only (bounded preview; no body/bullets). */
+export type GraphCvEntryNode = {
+  id: string;
+  section_id: string;
+  ordinal: number;
+  title: string | null;
+  subtitle: string | null;
+  date_text: string | null;
+  preview: string;
+};
+
 export type GraphJobNode = {
   id: string;
   title: string;
@@ -129,6 +160,13 @@ export type GraphSnapshot = {
   code: string | null;
   summary: string;
   rebuild_instruction: string | null;
+  /**
+   * Active CV branch (Plan 9). Optional on hand-built fixtures so Plan-8 tests
+   * stay type-valid; parseGraphSnapshot always materializes defaults.
+   */
+  cv?: GraphCvNode | null;
+  sections?: GraphCvSectionNode[];
+  entries?: GraphCvEntryNode[];
   candidate: GraphCandidateNode | null;
   jobs: GraphJobNode[];
   skills: GraphSkillNode[];
@@ -163,6 +201,9 @@ const GRAPH_EDGE_TYPES: ReadonlySet<string> = new Set([
   'REQUIRES',
   'PREFERS',
   'RELATED_TO',
+  'PROJECTS_TO',
+  'HAS_SECTION',
+  'HAS_ENTRY',
 ]);
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
@@ -467,6 +508,71 @@ export function parseGraphSnapshot(raw: unknown): GraphSnapshot {
     throw new Error('graph snapshot.status is invalid');
   }
   const summary = requireString(raw, 'summary', 'graph snapshot');
+  let cv: GraphCvNode | null = null;
+  if (raw.cv !== null && raw.cv !== undefined) {
+    if (!isObject(raw.cv)) {
+      throw new Error('graph snapshot.cv must be object or null');
+    }
+    rejectForbiddenKeys(raw.cv, 'graph cv');
+    cv = {
+      id: requireString(raw.cv, 'id', 'graph cv'),
+      original_name: requireString(raw.cv, 'original_name', 'graph cv'),
+      extraction_version: requireString(
+        raw.cv,
+        'extraction_version',
+        'graph cv',
+      ),
+      revision: requireString(raw.cv, 'revision', 'graph cv'),
+    };
+  }
+  const sectionsRaw = raw.sections;
+  const sections: GraphCvSectionNode[] = [];
+  if (sectionsRaw !== undefined && sectionsRaw !== null) {
+    if (!Array.isArray(sectionsRaw)) {
+      throw new Error('graph snapshot.sections must be an array');
+    }
+    for (let index = 0; index < sectionsRaw.length; index += 1) {
+      const item = sectionsRaw[index];
+      if (!isObject(item)) {
+        throw new Error(`graph section[${index}] must be an object`);
+      }
+      rejectForbiddenKeys(item, `graph section[${index}]`);
+      sections.push({
+        id: requireString(item, 'id', `graph section[${index}]`),
+        heading: requireString(item, 'heading', `graph section[${index}]`),
+        kind: requireString(item, 'kind', `graph section[${index}]`),
+        ordinal: requireNonNegInt(item, 'ordinal', `graph section[${index}]`),
+        entry_count: requireNonNegInt(
+          item,
+          'entry_count',
+          `graph section[${index}]`,
+        ),
+      });
+    }
+  }
+  const entriesRaw = raw.entries;
+  const entries: GraphCvEntryNode[] = [];
+  if (entriesRaw !== undefined && entriesRaw !== null) {
+    if (!Array.isArray(entriesRaw)) {
+      throw new Error('graph snapshot.entries must be an array');
+    }
+    for (let index = 0; index < entriesRaw.length; index += 1) {
+      const item = entriesRaw[index];
+      if (!isObject(item)) {
+        throw new Error(`graph entry[${index}] must be an object`);
+      }
+      rejectForbiddenKeys(item, `graph entry[${index}]`);
+      entries.push({
+        id: requireString(item, 'id', `graph entry[${index}]`),
+        section_id: requireString(item, 'section_id', `graph entry[${index}]`),
+        ordinal: requireNonNegInt(item, 'ordinal', `graph entry[${index}]`),
+        title: optionalString(item, 'title', `graph entry[${index}]`),
+        subtitle: optionalString(item, 'subtitle', `graph entry[${index}]`),
+        date_text: optionalString(item, 'date_text', `graph entry[${index}]`),
+        preview: asString(item.preview) ?? '',
+      });
+    }
+  }
   let candidate: GraphCandidateNode | null = null;
   if (raw.candidate !== null && raw.candidate !== undefined) {
     if (!isObject(raw.candidate)) {
@@ -535,6 +641,9 @@ export function parseGraphSnapshot(raw: unknown): GraphSnapshot {
       'rebuild_instruction',
       'graph snapshot',
     ),
+    cv,
+    sections,
+    entries,
     candidate,
     jobs,
     skills,

@@ -174,6 +174,28 @@ export async function streamChatResume(
   await consumeWithMappedErrors(response, callbacks, signal);
 }
 
+/**
+ * POST /api/cvs/{attachment_id}/reprocess and consume validated SSE.
+ * Same consumeSseResponse / StreamCallbacks path as chat turns — no second stream.
+ */
+export async function streamCvReprocess(
+  attachmentId: string,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/cvs/${encodeURIComponent(attachmentId)}/reprocess`),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+      signal,
+    },
+  );
+  await consumeWithMappedErrors(response, callbacks, signal);
+}
+
 async function consumeWithMappedErrors(
   response: Response,
   callbacks: StreamCallbacks,

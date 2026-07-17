@@ -39,13 +39,35 @@ export type CvSidebarDeps = {
   observability?: Partial<ObservabilityApi>;
 };
 
+/** Terminal notice from ChatPage reprocess stream (clear pending / record error). */
+export type CvReprocessTerminalNotice = {
+  requestKey: number;
+  attachmentId: string;
+  kind: 'completed' | 'failed' | 'interrupted' | 'http_error';
+  error?: {code: string; summary: string};
+};
+
 export type CvSidebarProps = {
   /** True while a run is connecting/streaming/interrupted - disables upload. */
   isUploadDisabled: boolean;
   /** Called after a successful upload so the chat can start an ID-only turn. */
   onSidebarUploadSuccess: (result: CvUploadResponse) => void;
+  /**
+   * CV Manager reprocess request → App → ChatPage stream path.
+   * Returns false when composition refuses (locked/duplicate).
+   */
+  onCvReprocess?: (attachmentId: string) => boolean;
+  /** After confirmed delete success (profile summary may need refresh). */
+  onCvDeleted?: () => void;
+  /** Latest reprocess terminal event from ChatPage (via App). */
+  reprocessTerminal?: CvReprocessTerminalNotice | null;
   /** Increment / change to force a profile reload (e.g. after Save Profile). */
   refreshKey?: number;
+  /**
+   * Increment after activation (Save Profile) so CV Manager caches invalidate
+   * without changing selection until approved data reloads.
+   */
+  activationKey?: number;
   deps?: CvSidebarDeps;
 };
 
@@ -123,10 +145,15 @@ export function CvSidebar(props: CvSidebarProps) {
 function CvSidebarController({
   isUploadDisabled,
   onSidebarUploadSuccess,
+  onCvReprocess,
+  onCvDeleted,
+  reprocessTerminal = null,
   refreshKey = 0,
+  activationKey = 0,
   deps,
 }: CvSidebarProps) {
   const observability = useObservabilityState({api: deps?.observability});
+  const {endReprocess, failReprocess, invalidateAfterActivation} = observability;
   const loadProfile = deps?.loadProfile ?? fetchProfile;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
@@ -137,6 +164,33 @@ function CvSidebarController({
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const loadedRefreshKey = useRef(refreshKey);
+  const loadedActivationKey = useRef(activationKey);
+  const handledTerminalKey = useRef<number | null>(null);
+
+  // After Save Profile activation: invalidate CV/chunk/run/graph caches only.
+  useEffect(() => {
+    if (loadedActivationKey.current === activationKey) {
+      return;
+    }
+    loadedActivationKey.current = activationKey;
+    invalidateAfterActivation();
+  }, [activationKey, invalidateAfterActivation]);
+
+  // Clear reprocess pending / record transport error from ChatPage terminal.
+  useEffect(() => {
+    if (!reprocessTerminal) {
+      return;
+    }
+    if (handledTerminalKey.current === reprocessTerminal.requestKey) {
+      return;
+    }
+    handledTerminalKey.current = reprocessTerminal.requestKey;
+    if (reprocessTerminal.kind === 'http_error' && reprocessTerminal.error) {
+      failReprocess(reprocessTerminal.attachmentId, reprocessTerminal.error);
+    } else {
+      endReprocess(reprocessTerminal.attachmentId);
+    }
+  }, [endReprocess, failReprocess, reprocessTerminal]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -265,6 +319,8 @@ function CvSidebarController({
           cvName: displayCvName,
         }}
         observability={observability}
+        onCvReprocess={onCvReprocess}
+        onCvDeleted={onCvDeleted}
       />
     </CvSidebarShell>
   );

@@ -221,6 +221,10 @@ describe('observability parsers', () => {
     expect(snapshot.status).toBe('ready');
     expect(snapshot.nodes_truncated).toBe(true);
     expect(snapshot.omitted_node_count).toBe(3);
+    // Plan-8 payloads without CV branch default empty.
+    expect(snapshot.cv).toBeNull();
+    expect(snapshot.sections).toEqual([]);
+    expect(snapshot.entries).toEqual([]);
 
     const stale = parseGraphSnapshot({
       status: 'stale',
@@ -238,6 +242,46 @@ describe('observability parsers', () => {
       checked_at: '2024-07-01T12:00:00Z',
     });
     expect(stale.status).toBe('stale');
+  });
+
+  it('accepts active CV branch fields and structural edge types', () => {
+    const snapshot = parseGraphSnapshot({
+      status: 'ready',
+      code: null,
+      summary: 'ready with CV',
+      rebuild_instruction: null,
+      cv: {
+        id: ATTACHMENT_ID,
+        original_name: 'cv.pdf',
+        extraction_version: 'doc-v1',
+        revision: 'rev-cv',
+      },
+      sections: [
+        {
+          id: 's1',
+          heading: 'Skills',
+          kind: 'skills',
+          ordinal: 0,
+          entry_count: 0,
+        },
+      ],
+      entries: [],
+      candidate: {id: 'cand-1', revision: 'r1'},
+      jobs: [],
+      skills: [],
+      edges: [
+        {source_id: 'cand-1', target_id: ATTACHMENT_ID, type: 'PROJECTS_TO'},
+        {source_id: ATTACHMENT_ID, target_id: 's1', type: 'HAS_SECTION'},
+      ],
+      nodes_truncated: false,
+      edges_truncated: false,
+      omitted_node_count: 0,
+      omitted_edge_count: 0,
+      checked_at: '2024-07-01T12:00:00Z',
+    });
+    expect(snapshot.cv?.id).toBe(ATTACHMENT_ID);
+    expect(snapshot.sections?.[0]?.heading).toBe('Skills');
+    expect(snapshot.edges[0]?.type).toBe('PROJECTS_TO');
   });
 });
 

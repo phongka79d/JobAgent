@@ -10,6 +10,11 @@ type GraphSemanticListProps = {
 };
 
 export function GraphSemanticList({snapshot}: GraphSemanticListProps) {
+  const sections = snapshot.sections ?? [];
+  const entries = snapshot.entries ?? [];
+  const hasCvBranch =
+    Boolean(snapshot.cv) || sections.length > 0 || entries.length > 0;
+
   return (
     <Collapsible trigger="Graph data" defaultIsOpen={false}>
       <VStack gap={2} width="100%">
@@ -40,6 +45,45 @@ export function GraphSemanticList({snapshot}: GraphSemanticListProps) {
             ) : null}
           </List>
         </section>
+
+        {hasCvBranch ? (
+          <section data-testid="jobagent-obs-graph-cv">
+            <List density="compact" hasDividers header="Active CV branch">
+              {snapshot.cv ? (
+                <ListItem
+                  label={snapshot.cv.original_name || 'Active CV'}
+                  description={`${snapshot.cv.id} · extraction ${snapshot.cv.extraction_version} · revision ${snapshot.cv.revision}`}
+                  data-testid="jobagent-obs-graph-cv-node"
+                />
+              ) : null}
+              {sections.map((section) => (
+                <ListItem
+                  key={section.id}
+                  label={section.heading || section.id}
+                  description={`${section.kind} · ordinal ${section.ordinal} · ${section.entry_count} entries`}
+                  data-testid={`jobagent-obs-graph-cv-section-${section.id}`}
+                />
+              ))}
+              {entries.map((entry) => (
+                <ListItem
+                  key={entry.id}
+                  label={entry.title || entry.preview || entry.id}
+                  description={[
+                    entry.section_id,
+                    entry.subtitle,
+                    entry.date_text,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  data-testid={`jobagent-obs-graph-cv-entry-${entry.id}`}
+                />
+              ))}
+              {!snapshot.cv && sections.length === 0 && entries.length === 0 ? (
+                <ListItem label="No active CV branch in snapshot" />
+              ) : null}
+            </List>
+          </section>
+        ) : null}
 
         <section data-testid="jobagent-obs-graph-skills">
           <List density="compact" hasDividers header="Skills">

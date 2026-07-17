@@ -1,14 +1,25 @@
 /**
- * Typed observability transport (Plan 8).
+ * Typed observability + CV Manager transport (Plan 8/9).
  * Uses only VITE_API_BASE_URL via shared chat API origin helpers.
  * Never stores or returns raw PDF bytes, storage paths, or secrets.
+ * Reprocess SSE is owned by streamCvReprocess in lib/api/chat.ts.
  */
 
 import {
   apiUrl,
   ChatApiError,
   parseErrorBody,
+  streamCvReprocess,
 } from '../../lib/api/chat';
+import {
+  asCvDeleteErrorCode,
+  asCvReprocessErrorCode,
+  CV_DELETE_ERROR_CODES,
+  CV_DELETE_RETRY_SUMMARY,
+  CV_REPROCESS_ERROR_CODES,
+  isRetryableDeleteError,
+  toCvManagerActionError,
+} from './cvManagerTypes';
 import {
   parseChunkDetail,
   parseChunkListPage,
@@ -22,7 +33,16 @@ import {
   type RunHistoryPage,
 } from './types';
 
-export {ChatApiError};
+export {ChatApiError, streamCvReprocess};
+export {
+  asCvDeleteErrorCode,
+  asCvReprocessErrorCode,
+  CV_DELETE_ERROR_CODES,
+  CV_DELETE_RETRY_SUMMARY,
+  CV_REPROCESS_ERROR_CODES,
+  isRetryableDeleteError,
+  toCvManagerActionError,
+};
 
 export type ObservabilityPageQuery = {
   limit?: number;
@@ -165,6 +185,94 @@ export async function fetchGraphSnapshot(
   }
 }
 
+/**
+ * DELETE /api/cvs/{attachment_id} — complete non-active delete.
+ * 204 = success (no body). Maps documented codes; partial cleanup stays retryable.
+ * Rejects JSON bodies that smuggle forbidden internal fields on error responses.
+ */
+export async function deleteCv(
+  attachmentId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/cvs/${encodeURIComponent(attachmentId)}`),
+    {
+      method: 'DELETE',
+      headers: {Accept: 'application/json'},
+      signal,
+    },
+  );
+  if (response.status === 204 || response.status === 200) {
+    // 204 is the contract; treat empty 200 as success only when body is empty.
+    if (response.status === 204) {
+      return;
+    }
+    const text = await response.text();
+    if (text.trim() === '') {
+      return;
+    }
+    throw new ChatApiError(
+      response.status,
+      'INVALID_DELETE_PAYLOAD',
+      'Delete success body must be empty',
+    );
+  }
+  const text = await response.text();
+  // Reject forbidden keys if a JSON error body includes them.
+  try {
+    const json = JSON.parse(text) as unknown;
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+      const forbidden = [
+        'storage_path',
+        'file_hash',
+        'checkpoint',
+        'api_key',
+        'SHOPAIKEY_API_KEY',
+      ];
+      for (const key of forbidden) {
+        if (key in (json as Record<string, unknown>)) {
+          throw new ChatApiError(
+            response.status,
+            'FORBIDDEN_FIELD',
+            `Delete error must not include ${key}`,
+          );
+        }
+        const detail = (json as {detail?: unknown}).detail;
+        if (
+          detail &&
+          typeof detail === 'object' &&
+          !Array.isArray(detail) &&
+          key in (detail as Record<string, unknown>)
+        ) {
+          throw new ChatApiError(
+            response.status,
+            'FORBIDDEN_FIELD',
+            `Delete error must not include ${key}`,
+          );
+        }
+      }
+    }
+  } catch (err) {
+    if (err instanceof ChatApiError && err.code === 'FORBIDDEN_FIELD') {
+      throw err;
+    }
+    // non-JSON handled by parseErrorBody
+  }
+  const mapped = parseErrorBody(response.status, text);
+  const known = asCvDeleteErrorCode(mapped.code);
+  if (known && isRetryableDeleteError(known)) {
+    throw new ChatApiError(
+      response.status,
+      known,
+      CV_DELETE_RETRY_SUMMARY,
+    );
+  }
+  if (known) {
+    throw new ChatApiError(response.status, known, mapped.summary);
+  }
+  throw mapped;
+}
+
 export type ObservabilityApi = {
   fetchCvHistory: typeof fetchCvHistory;
   fetchChunkList: typeof fetchChunkList;
@@ -172,6 +280,8 @@ export type ObservabilityApi = {
   fetchRunHistory: typeof fetchRunHistory;
   fetchGraphSnapshot: typeof fetchGraphSnapshot;
   getRetainedCvUrl: typeof getRetainedCvUrl;
+  deleteCv: typeof deleteCv;
+  streamCvReprocess: typeof streamCvReprocess;
 };
 
 export const defaultObservabilityApi: ObservabilityApi = {
@@ -181,4 +291,6 @@ export const defaultObservabilityApi: ObservabilityApi = {
   fetchRunHistory,
   fetchGraphSnapshot,
   getRetainedCvUrl,
+  deleteCv,
+  streamCvReprocess,
 };

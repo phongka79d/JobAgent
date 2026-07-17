@@ -180,6 +180,21 @@
   stroke: var(--color-border-blue);
 }
 
+.jobagent-graph-node--cv circle {
+  fill: var(--color-background-teal);
+  stroke: var(--color-border-teal);
+}
+
+.jobagent-graph-node--cv_section circle {
+  fill: var(--color-background-orange);
+  stroke: var(--color-border-orange);
+}
+
+.jobagent-graph-node--cv_entry circle {
+  fill: var(--color-background-cyan);
+  stroke: var(--color-border-cyan);
+}
+
 .jobagent-graph-node:focus-visible {
   outline-color: var(--color-accent);
 }
@@ -223,6 +238,27 @@
 .jobagent-graph-legend-item--skill > span {
   background: var(--color-background-blue);
   border-color: var(--color-border-blue);
+}
+
+.jobagent-graph-legend-item--cv > span {
+  background: var(--color-background-teal);
+  border-color: var(--color-border-teal);
+}
+
+.jobagent-graph-legend-item--cv_section > span {
+  background: var(--color-background-orange);
+  border-color: var(--color-border-orange);
+}
+
+.jobagent-graph-legend-item--cv_entry > span {
+  background: var(--color-background-cyan);
+  border-color: var(--color-border-cyan);
+}
+
+/* Dense CV Manager action row: wrap without overlapping metadata. */
+.jobagent-obs-cv-actions {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .jobagent-graph-skeleton-canvas {

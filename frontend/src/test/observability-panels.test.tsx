@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {ChunkPanel} from '../features/observability/ChunkPanel';
-import {CvHistoryPanel} from '../features/observability/CvHistoryPanel';
+import {CvManagerPanel} from '../features/observability/CvManagerPanel';
 import {RunHistoryPanel} from '../features/observability/RunHistoryPanel';
 import {
   ATTACHMENT_ID,
@@ -30,15 +30,20 @@ beforeEach(() => {
 describe('Observability list panels', () => {
   it.each([
     {
-      name: 'CV history',
+      name: 'CV Manager',
       testId: 'jobagent-obs-cv-history-refresh',
       panel: (
-        <CvHistoryPanel
+        <CvManagerPanel
           resource={{phase: 'loading', data: null, error: null, loaded: false}}
           selectedAttachmentId={null}
+          pendingByAttachment={{}}
+          errorsByAttachment={{}}
           onSelect={vi.fn()}
           onOpenFile={vi.fn()}
           onRefresh={vi.fn()}
+          onReprocess={vi.fn()}
+          onConfirmDelete={vi.fn().mockResolvedValue('success')}
+          onClearError={vi.fn()}
         />
       ),
     },
@@ -98,7 +103,7 @@ describe('Observability list panels', () => {
   it('selects a CV from one divided Astryx list and shows details outside the row', async () => {
     const api = mockObservabilityApi();
     renderObservabilitySidebar(api);
-    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(screen.getByRole('tab', {name: 'CV Manager'}));
     const item = await screen.findByTestId(
       `jobagent-obs-cv-select-${ATTACHMENT_ID}`,
     );
@@ -107,7 +112,7 @@ describe('Observability list panels', () => {
     const detail = within(panel).getByTestId('jobagent-obs-cv-detail');
     expect(item).toHaveAttribute('aria-selected', 'true');
     expect(item).not.toContainElement(detail);
-    expect(within(panel).getAllByRole('list', {name: 'CV history'})).toHaveLength(1);
+    expect(within(panel).getAllByRole('list', {name: 'CV Manager'})).toHaveLength(1);
     expect(within(panel).getAllByTestId('jobagent-obs-cv-detail')).toHaveLength(1);
     expect(detail).toHaveTextContent('abcdef012345');
     expect(
@@ -118,7 +123,7 @@ describe('Observability list panels', () => {
   it('loads one chunk detail from the selected list row', async () => {
     const api = mockObservabilityApi();
     renderObservabilitySidebar(api);
-    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(screen.getByRole('tab', {name: 'CV Manager'}));
     await userEvent.click(
       await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
     );
@@ -142,7 +147,7 @@ describe('Observability list panels', () => {
       fetchChunkDetail: vi.fn().mockReturnValue(pendingDetail),
     });
     renderObservabilitySidebar(api);
-    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(screen.getByRole('tab', {name: 'CV Manager'}));
     await userEvent.click(
       await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
     );
@@ -181,7 +186,7 @@ describe('Observability list panels', () => {
       fetchChunkDetail: vi.fn().mockRejectedValue(error),
     });
     renderObservabilitySidebar(api);
-    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(screen.getByRole('tab', {name: 'CV Manager'}));
     await userEvent.click(
       await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
     );
@@ -210,7 +215,7 @@ describe('Observability list panels', () => {
       .mockRejectedValueOnce(error);
     const api = mockObservabilityApi({fetchChunkList});
     renderObservabilitySidebar(api);
-    await userEvent.click(screen.getByRole('tab', {name: 'CV history'}));
+    await userEvent.click(screen.getByRole('tab', {name: 'CV Manager'}));
     await userEvent.click(
       await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
     );

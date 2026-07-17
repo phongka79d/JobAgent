@@ -23,6 +23,7 @@ import {
   fetchChatHistory,
   streamChatResume,
   streamChatTurn,
+  streamCvReprocess,
   type StreamCallbacks,
 } from '../../lib/api/chat';
 import {uploadCv as defaultUploadCv} from '../profile/api';
@@ -40,6 +41,8 @@ export type ChatPageDeps = {
   sendTurn?: typeof streamChatTurn;
   /** Injectable resume transport for approval actions. */
   resumeRun?: typeof streamChatResume;
+  /** Injectable CV reprocess SSE transport (defaults to streamCvReprocess). */
+  reprocessCv?: typeof streamCvReprocess;
   /** Shared CV upload used by composer attachment (same as sidebar). */
   uploadCv?: typeof defaultUploadCv;
 };
@@ -52,6 +55,19 @@ export type SidebarAttachmentTurnRequest = {
   message: string;
 };
 
+/** CV Manager reprocess request composed through App (same SSE owner as turns). */
+export type CvReprocessRequest = {
+  requestKey: number;
+  attachmentId: string;
+  message: string;
+};
+
+export type CvReprocessTerminal =
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'http_error';
+
 export type ChatPageProps = {
   /** Injectable transport for tests; defaults to Plan 3/4 API clients. */
   deps?: ChatPageDeps;
@@ -60,6 +76,16 @@ export type ChatPageProps = {
   /** Sidebar successful upload → start one normal turn with attachment_id. */
   sidebarAttachmentTurn?: SidebarAttachmentTurnRequest | null;
   onSidebarAttachmentTurnHandled?: (requestKey: number) => void;
+  /** CV Manager reprocess → sole streamCvReprocess + chatReducer path. */
+  cvReprocessRequest?: CvReprocessRequest | null;
+  onCvReprocessHandled?: (requestKey: number) => void;
+  /** Notify sidebar when reprocess stream ends (clear pending / surface error). */
+  onCvReprocessTerminal?: (
+    requestKey: number,
+    attachmentId: string,
+    kind: CvReprocessTerminal,
+    error?: {code: string; summary: string},
+  ) => void;
   /** After save_profile completes successfully — refresh approved sidebar. */
   onProfileSaved?: () => void;
 };
@@ -78,11 +104,15 @@ export function ChatPage({
   onInteractionLockChange,
   sidebarAttachmentTurn,
   onSidebarAttachmentTurnHandled,
+  cvReprocessRequest,
+  onCvReprocessHandled,
+  onCvReprocessTerminal,
   onProfileSaved,
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
   const resumeRun = deps?.resumeRun ?? streamChatResume;
+  const reprocessCv = deps?.reprocessCv ?? streamCvReprocess;
   const doUpload = deps?.uploadCv ?? defaultUploadCv;
 
   const [state, dispatch] = useReducer(
@@ -107,6 +137,7 @@ export function ChatPage({
   /** Set true synchronously when a turn/resume starts; cleared on terminal UI phases. */
   const inFlightRef = useRef(false);
   const handledSidebarKeysRef = useRef<Set<number>>(new Set());
+  const handledReprocessKeysRef = useRef<Set<number>>(new Set());
   /** Guards rapid double-clicks before React re-renders disabled buttons. */
   const approvalInFlightRef = useRef<Set<string>>(new Set());
   const composerInputRef = useRef<ChatComposerInputHandle | null>(null);
@@ -114,6 +145,8 @@ export function ChatPage({
   stateRef.current = state;
   const onProfileSavedRef = useRef(onProfileSaved);
   onProfileSavedRef.current = onProfileSaved;
+  const onCvReprocessTerminalRef = useRef(onCvReprocessTerminal);
+  onCvReprocessTerminalRef.current = onCvReprocessTerminal;
 
   useEffect(() => {
     if (
@@ -327,6 +360,33 @@ export function ChatPage({
     }
   }, []);
 
+  /** Focus the existing approval card after reprocess reaches approval_required. */
+  const focusApprovalCard = useCallback(() => {
+    const focus = () => {
+      const card = document.querySelector(
+        '[data-testid="jobagent-approval-card"]',
+      );
+      if (card instanceof HTMLElement) {
+        card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+        const action = card.querySelector(
+          '[data-testid="jobagent-approval-save"]',
+        );
+        if (action instanceof HTMLElement) {
+          action.focus();
+        } else {
+          card.focus();
+        }
+      }
+    };
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(() => {
+        requestAnimationFrame(focus);
+      });
+    } else {
+      setTimeout(focus, 0);
+    }
+  }, []);
+
   const handleApprovalAction = useCallback(
     (runId: string, action: ProfileApprovalAction) => {
       // One accepted action per run: ignore rapid repeats and second store.
@@ -415,6 +475,100 @@ export function ChatPage({
     sidebarAttachmentTurn,
     runTurn,
     onSidebarAttachmentTurnHandled,
+    state.streamPhase,
+    state.pendingApproval,
+    state.messages,
+  ]);
+
+  // CV Manager reprocess → streamCvReprocess into the same reducer; focus approval.
+  useEffect(() => {
+    if (!cvReprocessRequest) {
+      return;
+    }
+    const {requestKey, attachmentId, message} = cvReprocessRequest;
+    if (handledReprocessKeysRef.current.has(requestKey)) {
+      return;
+    }
+    if (isComposerLocked(stateRef.current) || inFlightRef.current) {
+      return;
+    }
+    handledReprocessKeysRef.current.add(requestKey);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const clientKey = newClientKey('user');
+    inFlightRef.current = true;
+    dispatch({type: 'turn/start', clientKey, message});
+
+    const callbacks = makeStreamCallbacks({
+      onTerminal: (kind) => {
+        onCvReprocessTerminalRef.current?.(requestKey, attachmentId, kind);
+        if (kind === 'interrupted') {
+          focusApprovalCard();
+        }
+      },
+    });
+
+    // Focus approval as soon as the interrupt event lands (before terminal settle).
+    const wrapped: StreamCallbacks = {
+      onEvent: (event) => {
+        callbacks.onEvent(event);
+        if (event.event === 'approval_required') {
+          focusApprovalCard();
+        }
+      },
+      onMalformed: callbacks.onMalformed,
+      onDisconnected: callbacks.onDisconnected,
+    };
+
+    void (async () => {
+      try {
+        await reprocessCv(attachmentId, wrapped, controller.signal);
+        onCvReprocessHandled?.(requestKey);
+      } catch (err) {
+        if (controller.signal.aborted) {
+          onCvReprocessHandled?.(requestKey);
+          return;
+        }
+        inFlightRef.current = false;
+        if (err instanceof ChatApiError) {
+          dispatch({
+            type: 'stream/http_failed',
+            code: err.code,
+            summary: err.summary,
+          });
+          onCvReprocessTerminalRef.current?.(
+            requestKey,
+            attachmentId,
+            'http_error',
+            {code: err.code, summary: err.summary},
+          );
+        } else {
+          const summary =
+            err instanceof Error ? err.message : 'Reprocess failed unexpectedly';
+          dispatch({
+            type: 'stream/http_failed',
+            code: 'STREAM_ERROR',
+            summary,
+          });
+          onCvReprocessTerminalRef.current?.(
+            requestKey,
+            attachmentId,
+            'http_error',
+            {code: 'STREAM_ERROR', summary},
+          );
+        }
+        onCvReprocessHandled?.(requestKey);
+      }
+    })();
+  }, [
+    cvReprocessRequest,
+    focusApprovalCard,
+    makeStreamCallbacks,
+    onCvReprocessHandled,
+    reprocessCv,
     state.streamPhase,
     state.pendingApproval,
     state.messages,

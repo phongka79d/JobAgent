@@ -55,7 +55,12 @@ function GraphLoadingSkeleton() {
 export function GraphPanel({resource, onRefresh}: GraphPanelProps) {
   const snapshot = resource.data;
   const nodeCount = snapshot
-    ? (snapshot.candidate ? 1 : 0) + snapshot.jobs.length + snapshot.skills.length
+    ? (snapshot.candidate ? 1 : 0) +
+      (snapshot.cv ? 1 : 0) +
+      (snapshot.sections?.length ?? 0) +
+      (snapshot.entries?.length ?? 0) +
+      snapshot.jobs.length +
+      snapshot.skills.length
     : 0;
   const canRenderGraph =
     snapshot !== null &&
@@ -130,7 +135,7 @@ export function GraphPanel({resource, onRefresh}: GraphPanelProps) {
           {snapshot.status !== 'unavailable' && nodeCount === 0 ? (
             <EmptyState
               title="No graph nodes available"
-              description="The current projection has no candidate, job, or skill nodes."
+              description="The current projection has no candidate, CV, job, or skill nodes."
               isCompact
             />
           ) : null}

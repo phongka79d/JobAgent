@@ -617,7 +617,7 @@ Own typed CV Manager transport/parsing, sidebar-local action state, existing-SSE
 
 ### Tasks
 
-- [ ] (07A): Add typed CV Manager actions and existing-SSE/cache integration
+- [x] (07A): Add typed CV Manager actions and existing-SSE/cache integration
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch07 - CV Manager Frontend Actions` > `(07A)`
@@ -663,7 +663,7 @@ Own typed CV Manager transport/parsing, sidebar-local action state, existing-SSE
   - Blocked Condition: A required second SSE/cache owner is `BLOCKED_SCOPE_CONFLICT`; undocumented backend response ambiguity is `BLOCKED_SOURCE_CONFLICT`; unavailable Node tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `frontend/src/features/observability/{api,types,state,cvManagerTypes,cvManagerState}.ts`, `frontend/src/app/App.tsx`, `frontend/src/features/profile/CvSidebar.tsx`, `frontend/src/features/chat/ChatPage.tsx`, `frontend/src/features/chat/reducer.ts`, `frontend/src/lib/api/chat.ts`, `frontend/src/test/{cv-manager-api,observability-api,observability-state,sse-reducer}.test.ts*`.
 
-- [ ] (07B): Render the accessible CV Manager without redesigning the refreshed UI
+- [x] (07B): Render the accessible CV Manager without redesigning the refreshed UI
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_9.md` > `## Mandatory Batch07 - CV Manager Frontend Actions` > `(07B)`

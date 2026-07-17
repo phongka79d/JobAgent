@@ -711,6 +711,84 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
   });
 });
 
+describe('CV Manager reprocess via sole SSE reducer', () => {
+  it('reprocess-shaped events use the same turn/start + sse/event path', () => {
+    let state = createInitialChatState();
+    state = chatReducer(state, {
+      type: 'turn/start',
+      clientKey: 'user:reprocess-1',
+      message:
+        'Re-extract the retained CV and prepare the current draft for approval.',
+    });
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-reprocess',
+          tool_name: 'propose_profile_from_cv',
+          status: 'running',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-reprocess',
+          tool_name: 'propose_profile_from_cv',
+          status: 'completed',
+          duration_ms: 40,
+          summary: 'draft ready',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_D, 'approval_required', {
+          state: 'interrupted',
+          kind: 'profile_commit',
+          allowed_actions: ['save_profile', 'request_changes'],
+          card: {
+            tool_name: 'propose_profile_from_cv',
+            current_title: 'Engineer',
+            draft_id: 'current',
+          },
+        }),
+      ),
+    ]);
+
+    expect(state.messages[0]?.role).toBe('user');
+    expect(state.messages[0]?.content).toContain('Re-extract');
+    expect(state.pendingApproval?.kind).toBe('profile_commit');
+    expect(state.messages.some((m) => m.run?.state === 'interrupted')).toBe(
+      true,
+    );
+    // No second store: streamPhase settles idle on interrupt like normal turns.
+    expect(state.streamPhase).toBe('idle');
+    expect(isComposerLocked(state)).toBe(true);
+  });
+
+  it('reprocess HTTP precondition failure does not invent completion', () => {
+    let state = createInitialChatState();
+    state = chatReducer(state, {
+      type: 'turn/start',
+      clientKey: 'user:reprocess-2',
+      message: 'Re-extract',
+    });
+    state = chatReducer(state, {
+      type: 'stream/http_failed',
+      code: 'CV_NOT_REPROCESSABLE',
+      summary: 'Attachment is not reprocessable',
+    });
+    expect(state.streamPhase).toBe('failed');
+    expect(state.streamError?.code).toBe('CV_NOT_REPROCESSABLE');
+    expect(
+      state.messages.every(
+        (m) => m.run === null || m.run.state !== 'completed',
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('History hydration and load-older', () => {
   function historyPage(overrides?: Partial<HistoryPage>): HistoryPage {
     const page: HistoryPage = {
