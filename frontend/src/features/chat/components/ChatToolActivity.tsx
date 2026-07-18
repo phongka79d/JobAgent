@@ -18,6 +18,10 @@ import {
 } from '@astryxdesign/core/Chat';
 import {Text} from '@astryxdesign/core/Text';
 
+import {
+  REVIEW_JD_LABEL,
+  shouldLabelReviewJd,
+} from '../jobSaveConfirmation';
 import type {ClientToolActivity} from '../reducer';
 import type {ToolStatus} from '../types';
 
@@ -94,12 +98,18 @@ export function shortToolOutcome(tool: ClientToolActivity): string | undefined {
   return undefined;
 }
 
-function toCallItem(tool: ClientToolActivity): ChatToolCallItem {
+function toCallItem(
+  tool: ClientToolActivity,
+  reviewJdActive: boolean,
+): ChatToolCallItem {
   const exactStatus = tool.status;
   const outcome = shortToolOutcome(tool);
+  const name = shouldLabelReviewJd(tool.toolName, exactStatus, reviewJdActive)
+    ? REVIEW_JD_LABEL
+    : friendlyToolLabel(tool.toolName);
   return {
     key: tool.toolExecutionId,
-    name: friendlyToolLabel(tool.toolName),
+    name,
     // Visual icon status only (Astryx vocabulary); not stored in client state.
     status: toAstryxVisualToolStatus(exactStatus),
     duration: formatToolDuration(tool.durationMs),
@@ -116,16 +126,24 @@ function toCallItem(tool: ClientToolActivity): ChatToolCallItem {
 
 export type ChatToolActivityProps = {
   tools: readonly ClientToolActivity[];
+  /**
+   * When true, running/pending save_job is labelled Review JD (presentation only).
+   * Terminal completed/failed save_job returns to normal Save Job wording.
+   */
+  reviewJdActive?: boolean;
 };
 
 /**
  * Renders durable/stream tool activity through public ChatToolCalls.
  * Returns null when there are no tools.
  */
-export function ChatToolActivity({tools}: ChatToolActivityProps) {
+export function ChatToolActivity({
+  tools,
+  reviewJdActive = false,
+}: ChatToolActivityProps) {
   if (tools.length === 0) {
     return null;
   }
-  const calls = tools.map(toCallItem);
+  const calls = tools.map((tool) => toCallItem(tool, reviewJdActive));
   return <ChatToolCalls calls={calls} defaultIsExpanded />;
 }

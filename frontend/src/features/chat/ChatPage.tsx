@@ -28,9 +28,14 @@ import {
 } from '../../lib/api/chat';
 import {saveAndEvaluateJob as defaultSaveAndEvaluateJob} from '../jobs/api';
 import {uploadCv as defaultUploadCv} from '../profile/api';
-import type {ProfileApprovalAction} from '../profile/ApprovalCard';
 import type {PendingPdfAttachment} from '../profile/types';
 import {ChatMessages} from './components/ChatMessages';
+import type {ChatApprovalAction} from './components/ChatMessageRow';
+import {
+  CANCEL_SAVE_JOB_ACTION,
+  historyPageHasCommittedSaveJob,
+  SAVE_JOB_ACTION,
+} from './jobSaveConfirmation';
 import {
   chatReducer,
   createInitialChatState,
@@ -164,11 +169,19 @@ export function ChatPage({
   const handledReprocessKeysRef = useRef<Set<number>>(new Set());
   /** Guards rapid double-clicks before React re-renders disabled buttons. */
   const approvalInFlightRef = useRef<Set<string>>(new Set());
+  /**
+   * After save_job resume, wait for terminal rehydrate proof of
+   * sqlite_committed=true before invalidating saved-JD state (once per run).
+   */
+  const pendingSaveJobInvalidateRunIdsRef = useRef<Set<string>>(new Set());
+  const invalidatedSaveJobRunIdsRef = useRef<Set<string>>(new Set());
   const composerInputRef = useRef<ChatComposerInputHandle | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const onProfileSavedRef = useRef(onProfileSaved);
   onProfileSavedRef.current = onProfileSaved;
+  const onSavedJobsInvalidatedRef = useRef(onSavedJobsInvalidated);
+  onSavedJobsInvalidatedRef.current = onSavedJobsInvalidated;
   const onCvReprocessTerminalRef = useRef(onCvReprocessTerminal);
   onCvReprocessTerminalRef.current = onCvReprocessTerminal;
 
@@ -259,11 +272,26 @@ export function ChatPage({
    * After a terminal turn, re-fetch durable history so ToolResult.data
    * (including compact save_job cards) replaces stream-null resultData.
    * Live and restart paths share history/rehydrate — no second store.
+   * Committed save_job invalidation fires only after validated rehydrate proof.
    */
   const rehydrateDurableHistory = useCallback(async () => {
     try {
       const page = await loadHistory({limit: 50});
       dispatch({type: 'history/rehydrate', page});
+      for (const runId of [
+        ...pendingSaveJobInvalidateRunIdsRef.current,
+      ]) {
+        if (invalidatedSaveJobRunIdsRef.current.has(runId)) {
+          pendingSaveJobInvalidateRunIdsRef.current.delete(runId);
+          continue;
+        }
+        if (historyPageHasCommittedSaveJob(page, runId)) {
+          invalidatedSaveJobRunIdsRef.current.add(runId);
+          pendingSaveJobInvalidateRunIdsRef.current.delete(runId);
+          // Exactly once per accepted committed save — never on cancel/action alone.
+          onSavedJobsInvalidatedRef.current?.();
+        }
+      }
     } catch {
       // Leave stream/reducer state; do not invent tool results.
     }
@@ -412,7 +440,7 @@ export function ChatPage({
   }, []);
 
   const handleApprovalAction = useCallback(
-    (runId: string, action: ProfileApprovalAction) => {
+    (runId: string, action: ChatApprovalAction) => {
       // One accepted action per run: ignore rapid repeats and second store.
       if (
         approvalInFlightRef.current.has(runId) ||
@@ -420,12 +448,17 @@ export function ChatPage({
       ) {
         return;
       }
+      // Lock both buttons before transport (shared first-click rule).
       approvalInFlightRef.current.add(runId);
       setApprovalLockedRunIds((prev) => {
         const next = new Set(prev);
         next.add(runId);
         return next;
       });
+      // Arm committed-save invalidation only for save_job (never cancel).
+      if (action === SAVE_JOB_ACTION) {
+        pendingSaveJobInvalidateRunIdsRef.current.add(runId);
+      }
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -441,6 +474,11 @@ export function ChatPage({
             } else if (action === 'request_changes') {
               focusComposer();
             }
+            // save_job invalidation waits for rehydrateDurableHistory proof.
+            // cancel_save_job: no SavedJobCard path and no invalidation arm.
+            if (action === CANCEL_SAVE_JOB_ACTION) {
+              pendingSaveJobInvalidateRunIdsRef.current.delete(runId);
+            }
           }
         },
       });
@@ -454,6 +492,7 @@ export function ChatPage({
           }
           approvalInFlightRef.current.delete(runId);
           // Keep buttons locked after an accepted action; surface failure truthfully.
+          // Ambiguous transport errors stay locked until refresh (no auto-unlock).
           // Terminal no-op or HTTP errors never invent success.
           if (err instanceof ChatApiError) {
             dispatch({

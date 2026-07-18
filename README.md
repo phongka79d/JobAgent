@@ -11,16 +11,17 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 12 Batch01–Batch03 accepted — backend Agent policy /
-pasted-JD confirmation, durable active-CV evidence projection, and assistant
-Markdown + Nguồn source dialog; worktree commit-ready pending orchestrator
-commit):** Plan 12 Batch01 delivers the backend half of passive pasted-JD
-confirmation and Agent policy without changing topology, public endpoints,
-registry count, schema migrations, or evaluation behavior. Task **01A** adds
-strict `SaveJobInput` three-way source union (`url` | `text` |
-`source='current_message'`), bounded presentation-only preview, separate
-cancellation model, and focused `backend/app/services/job_save_confirmation.py`
-(pure opt-out/sole-URL/obvious-JD predicates with required `ponytail:`, durable
+**Current status (Plan 12 Batch01–Batch04 accepted — backend Agent policy /
+pasted-JD confirmation, durable active-CV evidence projection, assistant
+Markdown + Nguồn source dialog, and restart-safe JD confirmation UI; worktree
+commit-ready pending orchestrator commit):** Plan 12 Batch01 delivers the
+backend half of passive pasted-JD confirmation and Agent policy without changing
+topology, public endpoints, registry count, schema migrations, or evaluation
+behavior. Task **01A** adds strict `SaveJobInput` three-way source union
+(`url` | `text` | `source='current_message'`), bounded presentation-only
+preview, separate cancellation model, and focused
+`backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/obvious-JD
+predicates with required `ponytail:`, durable
 `run_id → user_message_id → chat_messages` resolve, redacted
 `job_save_confirmation` projection, no-mutation cancel ToolResult; service
 below 300 lines; no `app.tools` import). Task **01B** integrates current-message
@@ -58,14 +59,29 @@ places exactly one **Nguồn** citation after the first safe lead paragraph
 content). `ActiveCvSourceDialog` shows every page/record in durable order with
 partial disclosure, zero evidence fetch, and **Mở CV gốc** via existing
 `getRetainedCvUrl` with `_blank` + `noopener,noreferrer`. `ChatMessageRow`
-minimally composes the selector and assistant body; `ChatMessages` unchanged.
-Combined A3 revalidation on the accepted Batch03 worktree: 59 focused tests
-(15 assistant-response + 26 active-cv-source + 18 chat-page) plus 66 card
+minimally composes the selector and assistant body.
+
+Plan 12 **Batch04** (task **04A**) adds the sole frontend
+`job_save_confirmation` vocabulary owner
+`frontend/src/features/chat/jobSaveConfirmation.ts` (strict kind/actions/card/
+source/bounds, forbidden raw/message/URL/hash/argument/prompt/provider/stack
+keys, row selector, Review JD helper, durable `sqlite_committed` proof) and
+Astryx `JobSaveConfirmationCard` with exact Vietnamese heading **Đã nhận diện
+nội dung JD**, sentence **JD này chưa được lưu. Bạn có muốn lưu JD này không?**,
+optional bounded preview, and **Lưu JD** then **Không lưu**. Shared
+`ChatPage` resume reuses `approvalLockedRunIds` / `approvalInFlightRef` /
+`streamChatResume`; first-click locks both buttons before transport; cancel
+skips SavedJobCard and invalidation; committed save invalidates saved-JD state
+exactly once only after terminal rehydrate proves `sqlite_committed=true`.
+Presentation-only **Review JD** labels running/pending `save_job` while the
+valid card owns the row. Live SSE, history, and restart share one card host
+without a second store, reducer shape change, endpoint, package, or evaluate
+dispatch. Combined A3 revalidation on the accepted Batch04 worktree: 72 focused
+tests (20 job-save-confirmation + 18 chat-page + 34 sse-reducer) plus 66 card
 regressions, lint, and typecheck all exit 0; product/test paths stay inside the
-seven authorized Batch03 files (six touched; ChatMessages intentionally
-untouched) plus orchestrator task checkbox vs base `a99e40b`. JD confirmation
-card remains Plan 12 Batch04. Plan 11 complete (Batch01+Batch02) remains the
-prior accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10
+authorized Batch04 set vs base `705c00d`. Desktop English cancel / Vietnamese
+save/dedupe remains Plan 12 Batch05. Plan 11 complete (Batch01+Batch02) remains
+the prior accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10
 Batch08 remains the earlier product baseline on HEAD `e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy

@@ -531,7 +531,7 @@ and mobile/responsive work.
 
 ### Tasks
 
-- [ ] (04A): Render and resume one strict pasted-JD confirmation card
+- [x] (04A): Render and resume one strict pasted-JD confirmation card
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch04 - Restart-Safe JD Save Confirmation UI` > `(04A)`

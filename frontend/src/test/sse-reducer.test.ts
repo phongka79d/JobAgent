@@ -502,6 +502,111 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
     expect(state.messages[0]?.run?.tools[0]?.status).toBe('running');
   });
 
+  it('records and hydrates job_save_confirmation interrupt without a second store', () => {
+    let state = createInitialChatState();
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-jd-1',
+          tool_name: 'save_job',
+          status: 'running',
+          duration_ms: null,
+          summary: null,
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'approval_required', {
+          state: 'interrupted',
+          kind: 'job_save_confirmation',
+          allowed_actions: ['save_job', 'cancel_save_job'],
+          card: {
+            tool_name: 'save_job',
+            tool_call_id: 'tc-jd-1',
+            source: 'current_message',
+            text_length: 500,
+            preview: {title: 'Role', company: null, skills: ['Go']},
+          },
+        }),
+      ),
+    ]);
+    expect(state.pendingApproval?.kind).toBe('job_save_confirmation');
+    expect(state.pendingApproval?.allowed_actions).toEqual([
+      'save_job',
+      'cancel_save_job',
+    ]);
+    expect(isComposerLocked(state)).toBe(true);
+
+    const page: HistoryPage = {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'pasted jd',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'interrupted',
+            pending_approval: {
+              kind: 'job_save_confirmation',
+              allowed_actions: ['save_job', 'cancel_save_job'],
+              card: {
+                tool_name: 'save_job',
+                tool_call_id: 'tc-jd-1',
+                source: 'current_message',
+                text_length: 500,
+                preview: {title: 'Role', company: null, skills: ['Go']},
+              },
+            },
+            error_code: null,
+            completed_at: null,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc-jd-1',
+                tool_name: 'save_job',
+                status: 'running',
+                duration_ms: null,
+                error_code: null,
+                result: null,
+                arguments_summary: {source: 'current_message'},
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'unsaved',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+    const hydrated = chatReducer(createInitialChatState(), {
+      type: 'history/reset',
+      page,
+    });
+    expect(hydrated.pendingApproval?.kind).toBe('job_save_confirmation');
+    expect(hydrated.activeRunId).toBe(RUN_ID);
+    expect(isComposerLocked(hydrated)).toBe(true);
+    expect(hydrated.messages[0]?.run?.tools[0]?.toolName).toBe('save_job');
+    expect(hydrated.messages[0]?.run?.tools[0]?.status).toBe('running');
+  });
+
   it('run_failed sets failed phase and never completed', () => {
     let state = createInitialChatState();
     state = reduceAll(state, [

@@ -29,6 +29,10 @@ import {
   type ProfileApprovalAction,
 } from '../../profile/ApprovalCard';
 import {activeCvEvidenceForTools} from '../activeCvEvidence';
+import {
+  type JobSaveConfirmationAction,
+  type JobSaveConfirmationProjection,
+} from '../jobSaveConfirmation';
 import type {JsonObject} from '../types';
 import type {
   ClientMessage,
@@ -38,6 +42,12 @@ import type {
 import {AssistantResponse} from './AssistantResponse';
 import {ChatToolActivity} from './ChatToolActivity';
 import {EmptyMatchResultCard} from './EmptyMatchResultCard';
+import {JobSaveConfirmationCard} from './JobSaveConfirmationCard';
+
+/** Profile + JD confirmation resume actions (shared lock/transport). */
+export type ChatApprovalAction =
+  | ProfileApprovalAction
+  | JobSaveConfirmationAction;
 
 export type ChatMessageRowProps = {
   message: ClientMessage;
@@ -45,7 +55,12 @@ export type ChatMessageRowProps = {
   /** Durable initiating user message for tools projected onto this row. */
   sourceMessageId: string | null;
   profileCommit: {run: ClientRun; pending: JsonObject} | null;
-  onApprovalAction?: (runId: string, action: ProfileApprovalAction) => void;
+  /** Validated job_save_confirmation host for this row (null when absent/malformed). */
+  jobSaveConfirmation?: {
+    run: ClientRun;
+    projection: JobSaveConfirmationProjection;
+  } | null;
+  onApprovalAction?: (runId: string, action: ChatApprovalAction) => void;
   approvalLocked: boolean;
   /** Zero-result recovery presentation (local to recovery hook, not chat store). */
   recoveryPending?: boolean;
@@ -297,6 +312,7 @@ export function ChatMessageRow({
   tools,
   sourceMessageId,
   profileCommit,
+  jobSaveConfirmation = null,
   onApprovalAction,
   approvalLocked,
   recoveryPending = false,
@@ -322,6 +338,10 @@ export function ChatMessageRow({
     profileCommit !== null &&
     (message.role === 'assistant' || message.role === 'user');
 
+  const showJdCard =
+    jobSaveConfirmation !== null &&
+    (message.role === 'assistant' || message.role === 'user');
+
   const savedJob =
     message.role === 'assistant' ? saveJobResultForTools(tools) : null;
   const matchJobs =
@@ -332,8 +352,9 @@ export function ChatMessageRow({
     sourceMessageId !== null &&
     onSaveAndEvaluate !== undefined;
 
+  // Malformed/unknown interrupt: generic notice only — no JSON or unvalidated actions.
   const showGenericInterrupted =
-    runState === 'interrupted' && !showApprovalCard && parsed === null;
+    runState === 'interrupted' && !showApprovalCard && !showJdCard;
 
   const activeCvEvidence =
     message.role === 'assistant' ? activeCvEvidenceForTools(tools) : null;
@@ -341,7 +362,9 @@ export function ChatMessageRow({
   return (
     <ChatMessage key={message.clientKey} sender={senderOf(message.role)}>
       <VStack gap={1}>
-        {showTools ? <ChatToolActivity tools={tools} /> : null}
+        {showTools ? (
+          <ChatToolActivity tools={tools} reviewJdActive={showJdCard} />
+        ) : null}
         {message.content !== '' || message.isStreaming ? (
           <ChatMessageBubble
             variant={message.role === 'assistant' ? 'ghost' : 'filled'}
@@ -388,6 +411,17 @@ export function ChatMessageRow({
             runId={profileCommit.run.id}
             onAction={(action) => {
               onApprovalAction?.(profileCommit.run.id, action);
+            }}
+          />
+        ) : null}
+        {showJdCard && jobSaveConfirmation ? (
+          <JobSaveConfirmationCard
+            card={jobSaveConfirmation.projection.card}
+            allowedActions={jobSaveConfirmation.projection.allowedActions}
+            isDisabled={approvalLocked}
+            runId={jobSaveConfirmation.run.id}
+            onAction={(action) => {
+              onApprovalAction?.(jobSaveConfirmation.run.id, action);
             }}
           />
         ) : null}

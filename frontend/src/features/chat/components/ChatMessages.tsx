@@ -9,7 +9,7 @@ import {
 } from '@astryxdesign/core/Chat';
 
 import type {CompactMatchResult} from '../../jobs/matchResult';
-import type {ProfileApprovalAction} from '../../profile/ApprovalCard';
+import {jobSaveConfirmationForRow} from '../jobSaveConfirmation';
 import type {
   ClientMessage,
   StreamErrorInfo,
@@ -20,6 +20,7 @@ import {
   profileCommitForRow,
   sourceMessageIdForAssistantDisplay,
   toolsForAssistantDisplay,
+  type ChatApprovalAction,
 } from './ChatMessageRow';
 import type {RecoveryEntry} from '../useSavedJobRecovery';
 
@@ -32,7 +33,7 @@ export type ChatMessagesProps = {
   onLoadOlder?: () => Promise<void>;
   isStreaming: boolean;
   /** First accepted approval action for a run (buttons stay disabled). */
-  onApprovalAction?: (runId: string, action: ProfileApprovalAction) => void;
+  onApprovalAction?: (runId: string, action: ChatApprovalAction) => void;
   /** Run ids whose approval action was already accepted (local lock only). */
   approvalLockedRunIds?: ReadonlySet<string> | readonly string[];
   /** Local recovery lookup by durable source_message_id (not chat reducer). */
@@ -123,8 +124,14 @@ export function ChatMessages({
     >
       {messages.map((message, index) => {
         const profileCommit = profileCommitForRow(messages, index);
-        const locked = profileCommit
-          ? isApprovalLocked(profileCommit.run.id, approvalLockedRunIds)
+        const jobSaveConfirmation = jobSaveConfirmationForRow(
+          messages,
+          index,
+        );
+        const interruptRunId =
+          profileCommit?.run.id ?? jobSaveConfirmation?.run.id ?? null;
+        const locked = interruptRunId
+          ? isApprovalLocked(interruptRunId, approvalLockedRunIds)
           : false;
         const sourceMessageId = sourceMessageIdForAssistantDisplay(
           messages,
@@ -143,6 +150,7 @@ export function ChatMessages({
             tools={toolsForAssistantDisplay(messages, index)}
             sourceMessageId={sourceMessageId}
             profileCommit={profileCommit}
+            jobSaveConfirmation={jobSaveConfirmation}
             onApprovalAction={onApprovalAction}
             approvalLocked={locked}
             recoveryPending={
