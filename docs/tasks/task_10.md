@@ -268,7 +268,7 @@ Own exact Job graph deletion, focused SQLite delete primitives, one application 
 
 ### Tasks
 
-- [ ] (03A): Coordinate exact graph-first and SQLite-second Job deletion
+- [x] (03A): Coordinate exact graph-first and SQLite-second Job deletion
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch03 - Retry-Safe Exact Job Deletion` > `(03A)`

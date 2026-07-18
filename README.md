@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch02 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch03 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -45,8 +45,17 @@ through the same component/explanation owners (no formula fork); exact
 `evaluate_job` reuses a current context row with zero repeat provider/graph/
 explanation work, otherwise runs consistency → embed once → exact score
 outside SQLite transactions → context revalidation → short insert (or race
-reload), returning safe codes including `EVALUATION_CONTEXT_CHANGED`. Public
-saved-JD routes, deletion, and frontend evaluation wiring remain later batches.
+reload), returning safe codes including `EVALUATION_CONTEXT_CHANGED`.
+
+Plan 10 Batch03 completes retry-safe exact Job deletion (P9-JD-05): one
+application coordinator (`services/job_deletion.py`) verifies SQLite existence,
+idempotently deletes only `(:Job {id: $job_id})` via allowlisted
+`graph/delete_job.py` (missing graph node is success), then deletes the SQLite
+Job so `job_evaluations` cascade; graph failures preserve SQLite for retry;
+shared Skills, seed edges, Candidate/CV branches, and unrelated Jobs survive;
+repeat after complete deletion returns `JOB_NOT_FOUND` without mutation. Public
+saved-JD routes, cache invalidation, and frontend evaluation/delete wiring
+remain later batches.
 
 ## Purpose and scope
 
@@ -73,6 +82,9 @@ JobAgent provides:
   simulation/pan/zoom/fit/reset semantics unchanged).
 - Job description save from public URL or raw text, with durable extract/embed/
   sync outcomes and exact-hash duplicate/retry semantics.
+- Retry-safe complete Job deletion service (exact Neo4j `Job.id` first, SQLite
+  Job + evaluation cascade second; graph-fault preservation and shared-graph
+  integrity). Public DELETE transport remains a later batch.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
 - Compact active-CV outline in Agent prompt context plus durable
@@ -103,9 +115,9 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, JD, top-N `match_jobs`, tool execution, history, observability assembly) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup) and observability cross-table read projections |
-| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), top-50 vector retrieval + exact `Job.id` cosine semantic read, provider-free rebuild, allowlisted observability projection |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, graph-first/SQLite-second `job_deletion` coordinator, JD, top-N `match_jobs`, tool execution, history, observability assembly) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup, narrow Job `delete_by_id` + focused `job_deletion` cascade primitive) and observability cross-table read projections |
+| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, exact Job-node delete (`delete_job.py` allowlisted `Job.id`), revision consistency (Candidate/Job + active-CV observability), top-50 vector retrieval + exact `Job.id` cosine semantic read, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
 | `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
@@ -289,6 +301,21 @@ context reuse with zero repeat external calls, context drift
 ```powershell
 Set-Location backend
 py -3.13 -m pytest tests/unit/test_match_components.py tests/unit/test_match_explanations.py tests/unit/test_match_ordering.py tests/unit/test_evaluation_context.py tests/unit/test_job_evaluation.py tests/integration/test_job_evaluations.py tests/integration/test_match_jobs.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch03 retry-safe exact Job deletion gate (parameterized
+allowlisted `(:Job {id: $job_id})` delete, graph-first/SQLite-second cascade,
+graph-fault SQLite preservation, retry completion, missing-node success, repeat
+`JOB_NOT_FOUND` without mutation, shared Skill/seed/Candidate/CV/other Job
+survival, exact-delete ≠ rebuild `CLEAR_JOB_CYPHER`):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_job_graph_deletion.py tests/integration/test_job_deletion.py tests/integration/test_graph_rebuild_contracts.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..

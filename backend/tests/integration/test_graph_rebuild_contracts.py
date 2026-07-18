@@ -10,6 +10,11 @@ from app.graph import rebuild as rebuild_mod
 from app.graph import rebuild_ops as rebuild_ops_mod
 from app.graph import rebuild_snapshot as rebuild_snapshot_mod
 from app.graph import rebuild_target as rebuild_target_mod
+from app.graph.delete_job import (
+    DELETE_JOB_CYPHER,
+    assert_delete_job_query_allowlisted,
+    delete_job_cypher,
+)
 from app.graph.rebuild import format_counts
 from app.graph.rebuild_ops import RebuildCounts
 from app.graph.sync_candidate import sync_candidate
@@ -181,3 +186,21 @@ def test_sole_rebuild_path_projects_approved_cvs() -> None:
     # Sole public rebuild service entry remains rebuild_graph.
     assert "async def rebuild_graph" in public
     assert public.count("async def rebuild_") == 1
+
+
+def test_exact_job_delete_is_not_rebuild_label_clear() -> None:
+    """Complete Job delete targets one id; rebuild clear remains label-wide."""
+    exact = delete_job_cypher()
+    assert exact == DELETE_JOB_CYPHER
+    assert_delete_job_query_allowlisted(exact)
+    assert exact != rebuild_ops_mod.CLEAR_JOB_CYPHER
+    assert "$job_id" in exact
+    assert "$job_id" not in rebuild_ops_mod.CLEAR_JOB_CYPHER
+    assert "MATCH (j:Job {id: $job_id})" in exact
+    assert rebuild_ops_mod.CLEAR_JOB_CYPHER == "MATCH (j:Job) DETACH DELETE j"
+    # Rebuild path must not import or call exact Job delete (ownership split).
+    rebuild_src = inspect.getsource(rebuild_mod)
+    ops_src = inspect.getsource(rebuild_ops_mod)
+    assert "delete_job" not in rebuild_src
+    assert "delete_job" not in ops_src
+    assert "DELETE_JOB_CYPHER" not in rebuild_src

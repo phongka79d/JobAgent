@@ -314,6 +314,18 @@ async def delete_url_placeholder(session: AsyncSession, job_id: str) -> None:
     await session.flush()
 
 
+async def delete_by_id(session: AsyncSession, job_id: str) -> None:
+    """Delete any ``job_posts`` row by primary key (flush only).
+
+    ``job_evaluations`` rows cascade via FK. Missing IDs raise
+    ``JobNotFoundError``. Callers own the commit; graph ordering lives in the
+    deletion coordinator, not here.
+    """
+    row = await _require_job(session, job_id)
+    await session.delete(row)
+    await session.flush()
+
+
 async def list_compact(
     session: AsyncSession,
     *,
