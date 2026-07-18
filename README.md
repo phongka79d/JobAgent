@@ -11,13 +11,14 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 12 Batch01 accepted — backend Agent policy and pasted-JD
-confirmation; worktree commit-ready pending orchestrator commit):** Plan 12
-Batch01 delivers the backend half of passive pasted-JD confirmation and Agent
-policy without changing topology, public endpoints, registry count, schema
-migrations, or evaluation behavior. Task **01A** adds strict `SaveJobInput`
-three-way source union (`url` | `text` | `source='current_message'`), bounded
-presentation-only preview, separate cancellation model, and focused
+**Current status (Plan 12 Batch01+Batch02 accepted — backend Agent policy /
+pasted-JD confirmation and durable active-CV evidence projection; worktree
+commit-ready pending orchestrator commit):** Plan 12 Batch01 delivers the
+backend half of passive pasted-JD confirmation and Agent policy without changing
+topology, public endpoints, registry count, schema migrations, or evaluation
+behavior. Task **01A** adds strict `SaveJobInput` three-way source union
+(`url` | `text` | `source='current_message'`), bounded presentation-only
+preview, separate cancellation model, and focused
 `backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/
 obvious-JD predicates with required `ponytail:`, durable
 `run_id → user_message_id → chat_messages` resolve, redacted
@@ -33,13 +34,28 @@ extends the existing system prompt (conclusion-first answers, narrow
 `match_jobs`/evaluate) and the single decision node (opt-out → Plan 11
 exact-name → sole-URL exclude → one obvious-JD repair or fixed refusal;
 ToolResult-only save/cancel narration) while keeping one Agent/decision/ToolNode,
-seven tools, and `TOOL_LOOP_LIMIT=6`. Combined A3 revalidation on the accepted
-worktree: 135 focused unit/integration tests, ruff, and mypy all exit 0; only
-authorized Batch01 product/test paths plus orchestrator task checkboxes differ
-from base `ea7025eb`. Frontend Markdown/citation and JD confirmation card remain
-later Plan 12 batches. Plan 11 complete (Batch01+Batch02) remains the prior
-accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10 Batch08
-remains the earlier product baseline on HEAD `e429c10`.
+seven tools, and `TOOL_LOOP_LIMIT=6`.
+
+Plan 12 **Batch02** (task **02A**) adds the sole frontend active-CV evidence
+vocabulary owner `frontend/src/features/chat/activeCvEvidence.ts` and chains
+`projectActiveCvResultData` after save/match projectors in
+`history.projectToolResultData`. Terminal history projects only allowlisted
+successful durable `read_active_cv` pages (entry/entry_match/chunk/chunk_match
+records, bounds 1..10 records / 0..12000 `returned_chars`, `has_more` derived
+from non-null `next_cursor` with cursor discarded). Row selector
+`activeCvEvidenceForTools` requires exact tool name, `completed`, no
+`errorCode`, ≥1 valid page, and attachment/extraction/source revision agreement
+across multipage evidence; failed/malformed/empty/non-CV/stream-only or
+conflicting revisions yield no bundle. Stream `tool_status` remains
+`resultData=null`; no reducer/types/backend/UI dialog/fetch changes. Combined A3
+revalidation on the accepted Batch02 worktree: 55 focused frontend tests
+(22 active-cv-source + 33 sse-reducer), lint, and typecheck all exit 0; only the
+four authorized Batch02 product/test paths plus orchestrator task checkboxes
+differ from base `b1fc24ce`. Frontend Markdown/citation/Nguồn dialog and JD
+confirmation card remain later Plan 12 batches. Plan 11 complete
+(Batch01+Batch02) remains the prior accepted desktop baseline on product HEAD
+`04fa5f8` / P11B1. Plan 10 Batch08 remains the earlier product baseline on HEAD
+`e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
 sidebar inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
@@ -177,7 +193,9 @@ JobAgent provides:
   durable initiating message and reuses MatchCard on success.
 - Compact active-CV outline in Agent prompt context plus durable
   `read_active_cv` tool for bounded section/search/chunk evidence (active-only,
-  dual caps, cursors; no automatic full-document walk).
+  dual caps, cursors; no automatic full-document walk). Frontend terminal history
+  projects only a strict allowlisted page/record bundle; stream tool status
+  never carries durable active-CV bodies.
 - Derived Neo4j Candidate/Job/Skill plus fixed CV/CVSection/CVEntry index
   rebuildable from SQLite stored artifacts/embeddings without calling the
   provider.
@@ -199,7 +217,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
+| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), durable history projection (`history.ts` chains save/match/`read_active_cv`; sole active-CV vocabulary in `activeCvEvidence.ts`), typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -381,6 +399,19 @@ Set-Location backend
 py -3.13 -m pytest tests/unit/test_job_save_confirmation.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py tests/integration/test_job_tools.py tests/integration/test_chat_api.py -q
 py -3.13 -m ruff check app/schemas/jobs.py app/services/job_save_confirmation.py app/tools/jobs.py app/agent/prompt.py app/agent/graph.py tests/unit/test_job_save_confirmation.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py tests/integration/test_job_tools.py tests/integration/test_chat_api.py --no-cache
 py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 12 Batch02 durable active-CV evidence projection gate (allowlist/
+bounds/order, derived `has_more`, forbidden-key strip, completed-success +
+revision binding, stream-null vs terminal/restart hydration; fakes only):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/active-cv-source.test.tsx src/test/sse-reducer.test.ts
+npm run lint
+npm run typecheck
 Set-Location ..
 git diff --check
 ```

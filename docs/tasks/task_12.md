@@ -381,7 +381,7 @@ rendering, dialogs, network fetches, sidebar state, and JD confirmation.
 
 ### Tasks
 
-- [ ] (02A): Project and bind strict durable active-CV evidence
+- [x] (02A): Project and bind strict durable active-CV evidence
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch02 - Durable Active-CV Evidence Projection` > `(02A)`

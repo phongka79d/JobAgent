@@ -7,6 +7,7 @@
 
 import {projectMatchJobsResultData} from '../jobs/matchResult';
 import {projectCompactResultData} from '../jobs/types';
+import {projectActiveCvResultData} from './activeCvEvidence';
 import type {
   AgentRunView,
   ApprovalRequiredPayload,
@@ -22,8 +23,9 @@ import type {
 } from './reducer';
 
 /**
- * Durable ToolResult.data projection: save_job and match_jobs allowlists only.
+ * Durable ToolResult.data projection: save_job, match_jobs, then read_active_cv.
  * Unrelated tools retain null resultData (no second store or parser fork).
+ * Stream tool_status keeps resultData null; only terminal history supplies evidence.
  */
 export function projectToolResultData(
   toolName: string,
@@ -31,7 +33,8 @@ export function projectToolResultData(
 ): JsonObject | null {
   return (
     projectCompactResultData(toolName, data) ??
-    projectMatchJobsResultData(toolName, data)
+    projectMatchJobsResultData(toolName, data) ??
+    projectActiveCvResultData(toolName, data)
   );
 }
 
@@ -47,7 +50,7 @@ export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity 
     summary: tool.result?.summary ?? null,
     errorCode: tool.error_code,
     source: 'history',
-    // save_job + match_jobs allowlists only — unrelated tools retain no resultData.
+    // save_job + match_jobs + read_active_cv allowlists — unrelated tools retain no resultData.
     resultData: projectToolResultData(tool.tool_name, rawData),
   };
 }

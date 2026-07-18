@@ -1094,3 +1094,157 @@ describe('Reducer integration via sse/raw', () => {
     );
   });
 });
+
+describe('read_active_cv stream-null vs terminal history projection', () => {
+  const ATTACHMENT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+  function activeCvToolData(
+    overrides: Record<string, unknown> = {},
+  ): import('../features/chat/types').JsonObject {
+    return {
+      attachment_id: ATTACHMENT,
+      extraction_version: 'v1',
+      source_hash: 'hash-1',
+      mode: 'section',
+      records: [
+        {
+          kind: 'entry',
+          section_id: 'sec',
+          entry_id: 'e1',
+          ordinal: 0,
+          title: 'Cert',
+          subtitle: null,
+          date_text: null,
+          location: null,
+          body: 'One certificate',
+          bullets: [],
+          source_chunk_ordinals: [0],
+        },
+      ],
+      returned_chars: 15,
+      truncated: false,
+      next_cursor: null,
+      ...overrides,
+    } as import('../features/chat/types').JsonObject;
+  }
+
+  it('stream tool_status for read_active_cv keeps resultData null', () => {
+    const state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-cv',
+          tool_name: 'read_active_cv',
+          status: 'completed',
+          duration_ms: 10,
+          summary: 'stream never carries body',
+          error_code: null,
+        }),
+      ),
+    ]);
+    const tools = state.messages.find((m) => m.role === 'assistant')?.run?.tools;
+    expect(tools?.[0].toolName).toBe('read_active_cv');
+    expect(tools?.[0].status).toBe('completed');
+    expect(tools?.[0].source).toBe('stream');
+    expect(tools?.[0].resultData).toBeNull();
+  });
+
+  it('terminal rehydrate and restart hydrate projected read_active_cv evidence', () => {
+    const state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-cv',
+          tool_name: 'read_active_cv',
+          status: 'running',
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'run_completed', {state: 'completed'}),
+      ),
+    ]);
+    expect(
+      state.messages.find((m) => m.role === 'assistant')?.run?.tools[0]
+        .resultData,
+    ).toBeNull();
+
+    const durablePage: HistoryPage = {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'How many certs?',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'completed',
+            pending_approval: null,
+            error_code: null,
+            completed_at: TS,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc-cv',
+                tool_name: 'read_active_cv',
+                status: 'completed',
+                duration_ms: 20,
+                error_code: null,
+                result: {
+                  ok: true,
+                  code: null,
+                  summary: '1 record',
+                  data: activeCvToolData({
+                    next_cursor: 'opaque',
+                    storage_path: '/secret.pdf',
+                  }),
+                },
+                arguments_summary: null,
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'You have one certificate.',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+
+    const rehydrated = rehydrateWithDurableTruth(state.messages, durablePage);
+    const userTools = rehydrated.messages.find((m) => m.id === MSG_USER)?.run
+      ?.tools;
+    expect(userTools?.[0].source).toBe('history');
+    expect(userTools?.[0].status).toBe('completed');
+    expect(userTools?.[0].resultData).not.toBeNull();
+    expect(userTools?.[0].resultData?.has_more).toBe(true);
+    expect(userTools?.[0].resultData).not.toHaveProperty('next_cursor');
+    expect(userTools?.[0].resultData).not.toHaveProperty('storage_path');
+    expect(
+      (userTools?.[0].resultData?.records as Array<Record<string, unknown>>)[0]
+        .body,
+    ).toBe('One certificate');
+
+    const cold = hydrateFromHistoryPage(durablePage);
+    const coldTools = cold.messages.find((m) => m.id === MSG_USER)?.run?.tools;
+    expect(coldTools?.[0].resultData).toEqual(userTools?.[0].resultData);
+  });
+});
