@@ -366,7 +366,16 @@ rather than enlarging current files into God files.
 | Future A1 implementation | Executable migration/service/API/frontend/test sequence | Task identifies reusable owners, test-first gates, exact commands, safe error/deletion contracts, and 300-line modularity ceiling. |
 | Future A2/A3 review | Independent functional/scope acceptance boundary | Evidence proves one-context reuse, explicit stale recompute, deterministic recovery, exact deletion preservation, regression safety, and no out-of-scope infrastructure. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_11.md` consumes the completed saved-JD/revision-keyed-evaluation product
+baseline, the existing sidebar-local cache and activation signals, the seven-tool
+single-Agent runtime, and the verified cross-store deletion services. It alone owns
+the authorized desktop functional repair increment for `F-01` through `F-05`; it
+must not reopen Plan 10 schema/scoring ownership or add security, mobile, or new
+product scope.
+
+### Historical Completion Contract
 
 Plan 10 planning is complete only when Master Version 1.8 explicitly authorizes the
 saved-JD/revision-keyed-evaluation capability, Plan 9 hands its implemented baseline
@@ -376,4 +385,5 @@ deterministic source binding, ingestion/scoring reuse, schema/currentness rule,
 saved-JD list/detail/action, explicit stale recomputation, exact cross-store deletion,
 concise responsive UX, failure/recovery behavior, and verification requirement has
 one owner. No product code or `task_10.md` is created, and the required next action is
-a fresh full portfolio review before task writing or execution.
+a fresh full portfolio review before task writing or execution. This historical
+completion evidence remains the baseline consumed by Plan 11.
