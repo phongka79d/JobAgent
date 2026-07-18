@@ -85,6 +85,19 @@ async def insert_message(
     return message
 
 
+async def get_by_id(
+    session: AsyncSession,
+    message_id: str,
+) -> ChatMessage | None:
+    """Return the chat message with primary key *message_id*, or ``None``.
+
+    Does not finalize the caller's unit of work.
+    """
+    if not isinstance(message_id, str) or message_id.strip() == "":
+        return None
+    return await session.get(ChatMessage, message_id.strip())
+
+
 async def list_messages(session: AsyncSession) -> list[ChatMessage]:
     """Return all main-conversation messages ordered by ``(created_at, id)``.
 

@@ -79,8 +79,11 @@ def test_public_routes_are_exactly_seven_master_endpoints(
     del chat_env
     expected = [
         ("DELETE", "/api/cvs/{attachment_id}"),
+        ("DELETE", "/api/jobs/{job_id}"),
         ("GET", "/api/chat/history"),
         ("GET", "/api/health"),
+        ("GET", "/api/jobs"),
+        ("GET", "/api/jobs/{job_id}"),
         ("GET", "/api/observability/cvs"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
@@ -93,6 +96,8 @@ def test_public_routes_are_exactly_seven_master_endpoints(
         ("POST", "/api/chat/runs/{run_id}/resume"),
         ("POST", "/api/chat/turns"),
         ("POST", "/api/cvs/{attachment_id}/reprocess"),
+        ("POST", "/api/jobs/save-and-evaluate"),
+        ("POST", "/api/jobs/{job_id}/evaluate"),
     ]
     with health_client() as client:
         routes = sorted(public_api_routes(client.app))

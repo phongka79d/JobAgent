@@ -329,7 +329,7 @@ Own saved-JD public schemas, list/detail read assembly, exact source authorizati
 
 ### Tasks
 
-- [ ] (04A): Serve bounded redacted saved-JD list and selected detail
+- [x] (04A): Serve bounded redacted saved-JD list and selected detail
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch04 - Deterministic Saved-JD Public API` > `(04A)`
@@ -375,7 +375,7 @@ Own saved-JD public schemas, list/detail read assembly, exact source authorizati
   - Blocked Condition: A cursor/currentness authority conflict is `BLOCKED_SOURCE_CONFLICT`; a root fix outside Allowed Files is `BLOCKED_SCOPE_CONFLICT`; unavailable API test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/api/jobs.py`, `backend/app/main.py`, `backend/app/services/saved_jobs.py`, `backend/app/repositories/saved_jobs.py`, `backend/app/repositories/jobs.py`, `backend/app/repositories/job_evaluations.py`, `backend/app/schemas/job_evaluations.py`, `backend/tests/integration/test_saved_jobs_api.py`
 
-- [ ] (04B): Bind save/evaluate/delete mutations to accepted service owners
+- [x] (04B): Bind save/evaluate/delete mutations to accepted service owners
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch04 - Deterministic Saved-JD Public API` > `(04B)`

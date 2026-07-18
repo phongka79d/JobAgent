@@ -371,10 +371,14 @@ def test_production_registry_exactly_seven_tools_order() -> None:
 
 
 def test_no_job_route_and_single_registry_owner() -> None:
+    """Agent tools stay transport-free; registry owns the seven tool builders."""
     app_root = BACKEND_ROOT / "app"
-    for path in app_root.rglob("*.py"):
-        text_src = path.read_text(encoding="utf-8")
-        assert "/api/jobs" not in text_src
+    # Tools / agent / tool-execution must not hardcode public job HTTP paths.
+    for rel in ("tools", "agent"):
+        for path in (app_root / rel).rglob("*.py"):
+            text_src = path.read_text(encoding="utf-8")
+            assert "/api/jobs" not in text_src, f"unexpected /api/jobs in {path}"
+            assert "APIRouter" not in text_src or path.name == "__init__.py"
     reg_src = (app_root / "tools" / "registry.py").read_text(encoding="utf-8")
     assert "build_production_job_tools" in reg_src
     assert "build_production_profile_tools" in reg_src

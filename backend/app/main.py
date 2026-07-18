@@ -9,8 +9,8 @@ closes any opened Neo4j driver and disposes the SQLite engine on every exit
 path, including partial startup failures.
 
 Public functional surface (Master §14): health, CV upload, profile/profile-CV
-reads, the three Plan 3 chat endpoints, and Plan 8 read-only observability
-routes. No profile write CRUD.
+reads, the three Plan 3 chat endpoints, Plan 8 read-only observability
+routes, and Plan 10 saved-JD list/detail reads. No profile write CRUD.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.cvs import router as cvs_router
 from app.api.health import router as health_router
+from app.api.jobs import router as jobs_router
 from app.api.observability import router as observability_router
 from app.api.profile import router as profile_router
 from app.core.settings import Settings, get_settings
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     application.include_router(cvs_router, prefix="/api")
     application.include_router(profile_router, prefix="/api")
     application.include_router(chat_router, prefix="/api")
+    application.include_router(jobs_router, prefix="/api")
     application.include_router(observability_router, prefix="/api")
     return application
 

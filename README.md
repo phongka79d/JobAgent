@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch03 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch04 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -53,9 +53,18 @@ idempotently deletes only `(:Job {id: $job_id})` via allowlisted
 `graph/delete_job.py` (missing graph node is success), then deletes the SQLite
 Job so `job_evaluations` cascade; graph failures preserve SQLite for retry;
 shared Skills, seed edges, Candidate/CV branches, and unrelated Jobs survive;
-repeat after complete deletion returns `JOB_NOT_FOUND` without mutation. Public
-saved-JD routes, cache invalidation, and frontend evaluation/delete wiring
-remain later batches.
+repeat after complete deletion returns `JOB_NOT_FOUND` without mutation.
+
+Plan 10 Batch04 completes the deterministic saved-JD public API (P9-JD-01/02/04/05
+API surface): bounded redacted `GET /api/jobs` and `GET /api/jobs/{job_id}` with
+opaque newest-first cursor paging (`limit` 1..50), compact list projections,
+server-derived `none|current|stale` + latest score, and safe `JOB_NOT_FOUND`;
+plus source-bound `POST /api/jobs/save-and-evaluate` (durable zero-result
+`match_jobs` authorization only), `POST /api/jobs/{job_id}/evaluate` (current-
+context create/reuse), and `DELETE /api/jobs/{job_id}` (accepted graph-first
+deletion coordinator). Thin routes delegate to accepted ingestion/evaluation/
+deletion owners; public outcomes map internal ingest `returned` → `existing`.
+Frontend typed client, sidebar, and zero-result chat recovery remain later batches.
 
 ## Purpose and scope
 
@@ -84,7 +93,10 @@ JobAgent provides:
   sync outcomes and exact-hash duplicate/retry semantics.
 - Retry-safe complete Job deletion service (exact Neo4j `Job.id` first, SQLite
   Job + evaluation cascade second; graph-fault preservation and shared-graph
-  integrity). Public DELETE transport remains a later batch.
+  integrity) exposed via public `DELETE /api/jobs/{job_id}`.
+- Deterministic saved-JD public API: cursor-paginated redacted list/detail,
+  source-bound save-and-evaluate, explicit current-context evaluate, and
+  complete delete through thin FastAPI adapters over accepted service owners.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
 - Compact active-CV outline in Agent prompt context plus durable
@@ -112,11 +124,11 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | Layer | Owns |
 |---|---|
 | `frontend/` | Astryx chat shell, CV sidebar + CV Manager observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed API clients |
-| `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
+| `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, graph-first/SQLite-second `job_deletion` coordinator, JD, top-N `match_jobs`, tool execution, history, observability assembly) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup, narrow Job `delete_by_id` + focused `job_deletion` cascade primitive) and observability cross-table read projections |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, graph-first/SQLite-second `job_deletion` coordinator, saved-JD read assembly + source-bound mutation orchestration (`saved_jobs.py`), JD, top-N `match_jobs`, tool execution, history, observability assembly) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup, narrow Job `delete_by_id` + focused `job_deletion` cascade primitive, focused `saved_jobs` cursor-page queries, chat_messages `get_by_id`) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, exact Job-node delete (`delete_job.py` allowlisted `Job.id`), revision consistency (Candidate/Job + active-CV observability), top-50 vector retrieval + exact `Job.id` cosine semantic read, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
@@ -130,7 +142,8 @@ messages, runs, and tool results (with optional CV ownership columns). Neo4j is
 a derived Candidate/Job/Skill and fixed CV-branch index plus vector retrieval
 surface. ShopAIKey is the only external model provider.
 
-Public functional endpoints (Master §14 core plus Plan 8 observability):
+Public functional endpoints (Master §14 core plus Plan 8 observability and Plan 10
+saved-JD API):
 
 - `GET /api/health`
 - `POST /api/attachments/cv`
@@ -141,6 +154,11 @@ Public functional endpoints (Master §14 core plus Plan 8 observability):
 - `GET /api/chat/history`
 - `POST /api/chat/turns`
 - `POST /api/chat/runs/{run_id}/resume`
+- `GET /api/jobs`
+- `GET /api/jobs/{job_id}`
+- `POST /api/jobs/save-and-evaluate`
+- `POST /api/jobs/{job_id}/evaluate`
+- `DELETE /api/jobs/{job_id}`
 - `GET /api/observability/cvs`
 - `GET /api/observability/cvs/{attachment_id}/file`
 - `GET /api/observability/cvs/{attachment_id}/chunks`
@@ -316,6 +334,21 @@ survival, exact-delete ≠ rebuild `CLEAR_JOB_CYPHER`):
 ```powershell
 Set-Location backend
 py -3.13 -m pytest tests/unit/test_job_graph_deletion.py tests/integration/test_job_deletion.py tests/integration/test_graph_rebuild_contracts.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch04 deterministic saved-JD public API gate (cursor list/detail
+redaction and currentness, durable zero-result source binding, URL/text ingest
+delegation, exact-hash/current-context reuse, unavailable without false success,
+delete 204/`JOB_NOT_FOUND`, safe errors, Agent/chat/tool compatibility):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/integration/test_saved_jobs_api.py tests/integration/test_job_evaluations.py tests/integration/test_job_ingestion.py tests/integration/test_job_deletion.py -q
+py -3.13 -m pytest tests/unit/test_agent_graph.py tests/integration/test_chat_api.py tests/integration/test_job_tools.py tests/e2e/test_demo_flow.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..
