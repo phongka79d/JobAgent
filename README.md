@@ -11,25 +11,25 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch07 on worktree):** Plan 8 Batch01–Batch04
-(retention/chunks, observability APIs, accessible lazy sidebar inspector, and
-synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
-as delivered: SQLite document foundation, document-first extraction and atomic
-drafts, approval-gated reprocess/activation, retryable non-active CV deletion
-(exact `CV.id` graph branch via `graph/delete_cv.py`), owned CV graph
-projection/rebuild (`graph/sync_cv.py` fixed labels `CV` / `CVSection` /
-`CVEntry`, exclusive active `PROJECTS_TO`, provider-free rebuild, bounded
-observability caps and document-revision staleness), bounded active-CV Agent
-retrieval (`active_cv_context` outline injection, pure `section`/`search`/`chunk`
-reader, seventh tool `read_active_cv` on the existing single ToolNode with
-durable ownership/replay/redaction), and the accessible **CV Manager** sidebar
-(typed reprocess/delete transport, sidebar-local pending/error state, focused
-cache invalidation, sole `streamCvReprocess` SSE path, panel/dialog action
-matrix, CV-branch graph display without changing D3 simulation/viewport
-semantics). Six typed `GET /api/observability/*` routes remain. Synthetic
-observability smoke evidence remains in
-`docs/acceptance/observability_sidebar_checklist.md`. Plan 9 Batch08 still owns
-the synthetic direct FE smoke checklist and live console/screenshot evidence.
+**Current status (Plan 10 Batch08 complete on product HEAD `e429c10`):** Plan 8
+Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy sidebar
+inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
+Batch01–Batch07 remain as delivered: SQLite document foundation, document-first
+extraction and atomic drafts, approval-gated reprocess/activation, retryable
+non-active CV deletion (exact `CV.id` graph branch via `graph/delete_cv.py`),
+owned CV graph projection/rebuild (`graph/sync_cv.py` fixed labels `CV` /
+`CVSection` / `CVEntry`, exclusive active `PROJECTS_TO`, provider-free rebuild,
+bounded observability caps and document-revision staleness), bounded active-CV
+Agent retrieval (`active_cv_context` outline injection, pure
+`section`/`search`/`chunk` reader, seventh tool `read_active_cv` on the existing
+single ToolNode with durable ownership/replay/redaction), and the accessible
+**CV Manager** sidebar (typed reprocess/delete transport, sidebar-local
+pending/error state, focused cache invalidation, sole `streamCvReprocess` SSE
+path, panel/dialog action matrix, CV-branch graph display without changing D3
+simulation/viewport semantics). Six typed `GET /api/observability/*` routes
+remain. Synthetic observability smoke evidence remains in
+`docs/acceptance/observability_sidebar_checklist.md`. Plan 9 CV Manager release
+evidence remains in `docs/acceptance/cv_manager_checklist.md`.
 
 Plan 10 Batch01 added structural-only evaluation persistence and pure
 server-side context/currentness: Alembic head `0004_add_job_evaluations`, ORM/
@@ -92,8 +92,16 @@ lại**; durable initiating `source_message_id` from the same user/run/tool
 projection as tool activity (no composer/latest inference); local
 `useSavedJobRecovery` pending/error state outside chatReducer/SSE; created/
 reused success reuses existing `MatchCard`; unavailable/error keeps truthful
-retry UI; App→CvSidebar remount invalidates saved-JD sidebar caches. Synthetic
-release smoke and final full-stack evidence remain Batch08.
+retry UI; App→CvSidebar remount invalidates saved-JD sidebar caches.
+
+Plan 10 Batch08 completes synthetic saved-JD release evidence (P9-JD-01 through
+P9-JD-07 final validation): full backend ruff/mypy/pytest, full frontend
+test/lint/typecheck/build, shared plan-structure validator through Plan 10,
+three-service Compose health, and direct synthetic smoke for source-bound
+save-and-evaluate, same-context reuse, stale-after-CV-change without auto-run,
+explicit re-evaluate, exact Job delete preservation, and desktop/mobile
+label/a11y dual evidence. Dated PASS rows live in
+`docs/acceptance/saved_jd_evaluation_checklist.md` on product HEAD `e429c10`.
 
 ## Purpose and scope
 
@@ -436,6 +444,29 @@ Set-Location ..\backend
 py -3.13 -m pytest tests/integration/test_saved_jobs_api.py tests/integration/test_chat_api.py tests/integration/test_job_tools.py tests/e2e/test_demo_flow.py -q
 Set-Location ..
 git diff --check
+```
+
+Plan 10 Batch08 full release gate (automated + Compose + synthetic checklist;
+fresh final-attempt evidence only; no product/config edits):
+
+```powershell
+Set-Location backend
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+py -3.13 -m pytest -q
+Set-Location ..\frontend
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+Set-Location ..
+python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d --wait --wait-timeout 180
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+# Execute every row in docs/acceptance/saved_jd_evaluation_checklist.md
+# with synthetic CVs/JDs only (desktop/mobile dual-evidence allowed).
+git diff --check
+git status --short
 ```
 
 Focused Plan 9 Batch01 CV document and ownership persistence gate (migration
@@ -799,8 +830,11 @@ Local-demo safeguards:
   document bodies, or stack traces.
 - Rebuild is choice-C only; host wrapper cannot destroy graph data.
 - Release evidence owners: `docs/acceptance/local_release_checklist.md`
-  (Plan 7 baseline) and `docs/acceptance/observability_sidebar_checklist.md`
-  (Plan 8 synthetic observability smoke).
+  (Plan 7 baseline), `docs/acceptance/observability_sidebar_checklist.md`
+  (Plan 8 synthetic observability smoke),
+  `docs/acceptance/cv_manager_checklist.md` (Plan 9 CV Manager smoke), and
+  `docs/acceptance/saved_jd_evaluation_checklist.md` (Plan 10 saved-JD
+  synthetic release smoke).
 
 Explicit limitations (not production claims):
 
@@ -844,6 +878,8 @@ CI workflows/evaluation datasets or metrics/production security subsystem
   owner (package script, pytest path, Compose file, or infrastructure script).
 - **Evidence, not phase diaries.** Completion status for release checks is
   recorded with dated PASS rows in
-  `docs/acceptance/local_release_checklist.md` and Plan 8 observability smoke
-  in `docs/acceptance/observability_sidebar_checklist.md`, not by expanding
-  this README into historical batch notes.
+  `docs/acceptance/local_release_checklist.md`, Plan 8 observability smoke in
+  `docs/acceptance/observability_sidebar_checklist.md`, Plan 9 CV Manager smoke
+  in `docs/acceptance/cv_manager_checklist.md`, and Plan 10 saved-JD smoke in
+  `docs/acceptance/saved_jd_evaluation_checklist.md`, not by expanding this
+  README into historical batch notes.

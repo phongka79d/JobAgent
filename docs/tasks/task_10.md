@@ -628,7 +628,7 @@ Own `docs/acceptance/saved_jd_evaluation_checklist.md`, completed-behavior READM
 
 ### Tasks
 
-- [ ] (08A): Publish and run the synthetic saved-JD checklist and final regressions
+- [x] (08A): Publish and run the synthetic saved-JD checklist and final regressions
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch08 - Synthetic Saved-JD Release Evidence` > `(08A)`
