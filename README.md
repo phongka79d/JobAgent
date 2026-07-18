@@ -11,15 +11,13 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 12 Batch01–Batch04 accepted — backend Agent policy /
-pasted-JD confirmation, durable active-CV evidence projection, assistant
-Markdown + Nguồn source dialog, and restart-safe JD confirmation UI; worktree
-commit-ready pending orchestrator commit):** Plan 12 Batch01 delivers the
-backend half of passive pasted-JD confirmation and Agent policy without changing
-topology, public endpoints, registry count, schema migrations, or evaluation
-behavior. Task **01A** adds strict `SaveJobInput` three-way source union
-(`url` | `text` | `source='current_message'`), bounded presentation-only
-preview, separate cancellation model, and focused
+**Current status (Plan 12 complete — Batch01–Batch05 accepted on product HEAD
+`887d4f6` / P12B4; worktree commit-ready pending orchestrator final commit):**
+Plan 12 Batch01 delivers the backend half of passive pasted-JD confirmation and
+Agent policy without changing topology, public endpoints, registry count, schema
+migrations, or evaluation behavior. Task **01A** adds strict `SaveJobInput`
+three-way source union (`url` | `text` | `source='current_message'`), bounded
+presentation-only preview, separate cancellation model, and focused
 `backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/obvious-JD
 predicates with required `ponytail:`, durable
 `run_id → user_message_id → chat_messages` resolve, redacted
@@ -76,12 +74,24 @@ exactly once only after terminal rehydrate proves `sqlite_committed=true`.
 Presentation-only **Review JD** labels running/pending `save_job` while the
 valid card owns the row. Live SSE, history, and restart share one card host
 without a second store, reducer shape change, endpoint, package, or evaluate
-dispatch. Combined A3 revalidation on the accepted Batch04 worktree: 72 focused
-tests (20 job-save-confirmation + 18 chat-page + 34 sse-reducer) plus 66 card
-regressions, lint, and typecheck all exit 0; product/test paths stay inside the
-authorized Batch04 set vs base `705c00d`. Desktop English cancel / Vietnamese
-save/dedupe remains Plan 12 Batch05. Plan 11 complete (Batch01+Batch02) remains
-the prior accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10
+dispatch.
+
+Plan 12 **Batch05** (task **05A**, evidence-only) proves the integrated release
+on final accepted product HEAD `887d4f6` with **no product/test/docs edit** by
+05A: focused + full backend ruff/mypy/pytest, focused + full frontend
+Vitest/lint/typecheck/build, contiguous plan-structure validator (Plans 1–12),
+scope hygiene, named disposable Compose project `jobagent-plan12-smoke` health
+`overall=available`, and desktop-only synthetic matrix at `localhost:5173`
+(simple/long readable answers, Certificate active-CV count + one **Nguồn** /
+exact records / retained PDF / history, negative provenance, English cancel +
+restart, Vietnamese save + exact-hash dedupe with zero auto-evaluation, sole
+URL / direct text / opt-out / ambiguous compatibility). Smoke resources were
+torn down with `--volumes` and the normal `infrastructure` stack restored
+healthy. A3 revalidation on the Batch05 tip: focused BE unit **94** +
+integration **49**, ruff/mypy exit 0; FE Plan12 **113** + card regressions
+**66**, lint/typecheck exit 0; plan validator `valid: true`; only orchestrator
+task checkbox dirty vs HEAD. Plan 11 complete (Batch01+Batch02) remains the
+prior accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10
 Batch08 remains the earlier product baseline on HEAD `e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
@@ -247,7 +257,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), durable history projection (`history.ts` chains save/match/`read_active_cv`; sole active-CV vocabulary in `activeCvEvidence.ts`), assistant-only Markdown + exact-one **Nguồn** citation (`AssistantResponse.tsx`) and exact-evidence source dialog (`ActiveCvSourceDialog.tsx`) composed from `ChatMessageRow`, typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
+| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), durable history projection (`history.ts` chains save/match/`read_active_cv`; sole active-CV vocabulary in `activeCvEvidence.ts`), assistant-only Markdown + exact-one **Nguồn** citation (`AssistantResponse.tsx`) and exact-evidence source dialog (`ActiveCvSourceDialog.tsx`) composed from `ChatMessageRow`, strict pasted-JD confirmation parser/card (`jobSaveConfirmation.ts` / `JobSaveConfirmationCard.tsx` reusing shared resume locks), typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -459,6 +469,36 @@ npm run lint
 npm run typecheck
 Set-Location ..
 git diff --check
+```
+
+Plan 12 Batch05 integrated release gate (evidence-only; final product HEAD
+`887d4f6`; focused + full automated gates, plan validator, named disposable
+Compose project, desktop synthetic matrix, then named teardown only):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_shopaikey_chat.py tests/unit/test_job_save_confirmation.py tests/unit/test_agent_graph.py -q
+py -3.13 -m pytest tests/integration/test_job_tools.py tests/integration/test_chat_api.py tests/integration/test_active_cv_tool.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+py -3.13 -m pytest -q
+Set-Location ..\frontend
+npm test -- --run src/test/active-cv-source.test.tsx src/test/assistant-response.test.tsx src/test/job-save-confirmation.test.tsx src/test/chat-page.test.tsx src/test/sse-reducer.test.ts
+npm test -- --run src/test/empty-match-card.test.tsx src/test/saved-job-card.test.tsx src/test/match-card.test.tsx src/test/approval-card.test.tsx
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+Set-Location ..
+python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json
+docker compose -p jobagent-plan12-smoke --env-file .env -f infrastructure/docker-compose.yml up --build -d --wait --wait-timeout 180
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+# Desktop-only synthetic cases from docs/plans/Plan_12.md Verification
+# (simple/long answers, Certificate Nguồn, EN cancel/restart, VI save/dedupe,
+# direct/opt-out/ambiguous). No mobile/security acceptance.
+docker compose -p jobagent-plan12-smoke --env-file .env -f infrastructure/docker-compose.yml down --volumes --remove-orphans
+git diff --check
+git status --short
 ```
 
 Focused Plan 10 Batch01 evaluation persistence and canonical currentness gate

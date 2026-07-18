@@ -611,7 +611,7 @@ data, raw payloads, security tests, and mobile/narrow-layout checks.
 
 ### Tasks
 
-- [ ] (05A): Prove readable responses, CV provenance, and both JD branches on final code
+- [x] (05A): Prove readable responses, CV provenance, and both JD branches on final code
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch05 - Integrated Desktop Release Evidence` > `(05A)`
