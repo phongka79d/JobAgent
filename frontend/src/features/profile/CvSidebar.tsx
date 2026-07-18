@@ -68,6 +68,11 @@ export type CvSidebarProps = {
    * without changing selection until approved data reloads.
    */
   activationKey?: number;
+  /**
+   * Increment after chat zero-result save/evaluate so sidebar-local saved-JD
+   * state remounts (list/detail cache invalidation without a second store).
+   */
+  savedJobsInvalidateKey?: number;
   deps?: CvSidebarDeps;
 };
 
@@ -150,6 +155,7 @@ function CvSidebarController({
   reprocessTerminal = null,
   refreshKey = 0,
   activationKey = 0,
+  savedJobsInvalidateKey = 0,
   deps,
 }: CvSidebarProps) {
   const observability = useObservabilityState({api: deps?.observability});
@@ -312,6 +318,7 @@ function CvSidebarController({
   return (
     <CvSidebarShell>
       <ObservabilitySidebar
+        key={`saved-jobs-cache-${savedJobsInvalidateKey}`}
         overview={overview}
         collapsedStatus={{
           label: state.text,

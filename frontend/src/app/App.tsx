@@ -51,6 +51,11 @@ export function App({deps}: AppProps = {}) {
     useState<CvReprocessTerminalNotice | null>(null);
   /** Bumps after activation/delete so sidebar invalidates profile + CV caches. */
   const [activationKey, setActivationKey] = useState(0);
+  /**
+   * Bumps after chat zero-result save/evaluate so ObservabilitySidebar remounts
+   * its sidebar-local useSavedJobsState (list/detail cache invalidation).
+   */
+  const [savedJobsInvalidateKey, setSavedJobsInvalidateKey] = useState(0);
   const requestKeyRef = useRef(0);
 
   const handleSidebarUploadSuccess = useCallback(
@@ -118,6 +123,10 @@ export function App({deps}: AppProps = {}) {
     setProfileRefreshKey((k) => k + 1);
   }, []);
 
+  const handleSavedJobsInvalidated = useCallback(() => {
+    setSavedJobsInvalidateKey((k) => k + 1);
+  }, []);
+
   return (
     <AppShell
       contentPadding={0}
@@ -132,6 +141,7 @@ export function App({deps}: AppProps = {}) {
           reprocessTerminal={reprocessTerminal}
           refreshKey={profileRefreshKey}
           activationKey={activationKey}
+          savedJobsInvalidateKey={savedJobsInvalidateKey}
           deps={deps?.sidebar}
         />
       }
@@ -145,6 +155,7 @@ export function App({deps}: AppProps = {}) {
         onCvReprocessHandled={handleCvReprocessHandled}
         onCvReprocessTerminal={handleCvReprocessTerminal}
         onProfileSaved={handleProfileSaved}
+        onSavedJobsInvalidated={handleSavedJobsInvalidated}
       />
     </AppShell>
   );

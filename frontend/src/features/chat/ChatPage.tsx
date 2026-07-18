@@ -26,6 +26,7 @@ import {
   streamCvReprocess,
   type StreamCallbacks,
 } from '../../lib/api/chat';
+import {saveAndEvaluateJob as defaultSaveAndEvaluateJob} from '../jobs/api';
 import {uploadCv as defaultUploadCv} from '../profile/api';
 import type {ProfileApprovalAction} from '../profile/ApprovalCard';
 import type {PendingPdfAttachment} from '../profile/types';
@@ -35,6 +36,7 @@ import {
   createInitialChatState,
   isComposerLocked,
 } from './reducer';
+import {useSavedJobRecovery} from './useSavedJobRecovery';
 
 export type ChatPageDeps = {
   loadHistory?: typeof fetchChatHistory;
@@ -45,6 +47,8 @@ export type ChatPageDeps = {
   reprocessCv?: typeof streamCvReprocess;
   /** Shared CV upload used by composer attachment (same as sidebar). */
   uploadCv?: typeof defaultUploadCv;
+  /** Injectable save-and-evaluate for zero-result recovery tests. */
+  saveAndEvaluateJob?: typeof defaultSaveAndEvaluateJob;
 };
 
 /** One concise sidebar-driven turn: attachment ID only, no PDF body. */
@@ -88,6 +92,8 @@ export type ChatPageProps = {
   ) => void;
   /** After save_profile completes successfully — refresh approved sidebar. */
   onProfileSaved?: () => void;
+  /** After zero-result save/evaluate — invalidate saved-JD sidebar caches. */
+  onSavedJobsInvalidated?: () => void;
 };
 
 function newClientKey(prefix: string): string {
@@ -108,12 +114,30 @@ export function ChatPage({
   onCvReprocessHandled,
   onCvReprocessTerminal,
   onProfileSaved,
+  onSavedJobsInvalidated,
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
   const resumeRun = deps?.resumeRun ?? streamChatResume;
   const reprocessCv = deps?.reprocessCv ?? streamCvReprocess;
   const doUpload = deps?.uploadCv ?? defaultUploadCv;
+  const saveAndEvaluate =
+    deps?.saveAndEvaluateJob ?? defaultSaveAndEvaluateJob;
+
+  const {
+    getEntry: getRecoveryEntry,
+    isPending: isRecoveryPending,
+    recover: recoverSavedJob,
+  } = useSavedJobRecovery({
+    api: {saveAndEvaluateJob: saveAndEvaluate},
+    onInvalidated: onSavedJobsInvalidated,
+  });
+  const handleSaveAndEvaluate = useCallback(
+    (sourceMessageId: string) => {
+      void recoverSavedJob(sourceMessageId);
+    },
+    [recoverSavedJob],
+  );
 
   const [state, dispatch] = useReducer(
     chatReducer,
@@ -770,6 +794,9 @@ export function ChatPage({
             isStreaming={isStreaming}
             onApprovalAction={handleApprovalAction}
             approvalLockedRunIds={approvalLockedRunIds}
+            getRecoveryEntry={getRecoveryEntry}
+            isRecoveryPending={isRecoveryPending}
+            onSaveAndEvaluate={handleSaveAndEvaluate}
           />
         ) : null}
       </ChatLayout>

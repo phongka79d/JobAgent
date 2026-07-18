@@ -563,7 +563,7 @@ Own strict zero-result presentation/action state, durable initiating-message pro
 
 ### Tasks
 
-- [ ] (07A): Bind the zero-result recovery card to its durable initiating message
+- [x] (07A): Bind the zero-result recovery card to its durable initiating message
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch07 - Durable Zero-Result Chat Recovery` > `(07A)`

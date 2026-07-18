@@ -8,6 +8,7 @@ import {
   ChatSystemMessage,
 } from '@astryxdesign/core/Chat';
 
+import type {CompactMatchResult} from '../../jobs/matchResult';
 import type {ProfileApprovalAction} from '../../profile/ApprovalCard';
 import type {
   ClientMessage,
@@ -17,8 +18,10 @@ import type {
 import {
   ChatMessageRow,
   profileCommitForRow,
+  sourceMessageIdForAssistantDisplay,
   toolsForAssistantDisplay,
 } from './ChatMessageRow';
+import type {RecoveryEntry} from '../useSavedJobRecovery';
 
 export type ChatMessagesProps = {
   messages: readonly ClientMessage[];
@@ -32,6 +35,10 @@ export type ChatMessagesProps = {
   onApprovalAction?: (runId: string, action: ProfileApprovalAction) => void;
   /** Run ids whose approval action was already accepted (local lock only). */
   approvalLockedRunIds?: ReadonlySet<string> | readonly string[];
+  /** Local recovery lookup by durable source_message_id (not chat reducer). */
+  getRecoveryEntry?: (sourceMessageId: string) => RecoveryEntry;
+  isRecoveryPending?: (sourceMessageId: string) => boolean;
+  onSaveAndEvaluate?: (sourceMessageId: string) => void;
 };
 
 function isApprovalLocked(
@@ -104,6 +111,9 @@ export function ChatMessages({
   isStreaming,
   onApprovalAction,
   approvalLockedRunIds,
+  getRecoveryEntry,
+  isRecoveryPending,
+  onSaveAndEvaluate,
 }: ChatMessagesProps) {
   return (
     <ChatMessageList
@@ -116,14 +126,33 @@ export function ChatMessages({
         const locked = profileCommit
           ? isApprovalLocked(profileCommit.run.id, approvalLockedRunIds)
           : false;
+        const sourceMessageId = sourceMessageIdForAssistantDisplay(
+          messages,
+          index,
+        );
+        const recovery =
+          sourceMessageId && getRecoveryEntry
+            ? getRecoveryEntry(sourceMessageId)
+            : null;
+        const recoveredMatch: CompactMatchResult | null =
+          recovery?.recoveredMatch ?? null;
         return (
           <ChatMessageRow
             key={message.clientKey}
             message={message}
             tools={toolsForAssistantDisplay(messages, index)}
+            sourceMessageId={sourceMessageId}
             profileCommit={profileCommit}
             onApprovalAction={onApprovalAction}
             approvalLocked={locked}
+            recoveryPending={
+              sourceMessageId
+                ? (isRecoveryPending?.(sourceMessageId) ?? false)
+                : false
+            }
+            recoveredMatch={recoveredMatch}
+            recoveryFailureHint={recovery?.failureHint ?? null}
+            onSaveAndEvaluate={onSaveAndEvaluate}
           />
         );
       })}

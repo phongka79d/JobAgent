@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch06 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch07 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -84,7 +84,16 @@ currentness action matrix (`Đánh giá với CV` / `Đánh giá lại` / no eva
 current, `Xoá JD` with Job-named confirmation); stale `Cần đánh giá lại` badge
 and banner; persisted evaluation via existing `MatchCard`/`formatDisplayScore`
 (no score-map fork); shell/rail/drawer/`13/47/40` proportions preserved.
-Zero-result chat recovery remains Batch07.
+
+Plan 10 Batch07 completes durable zero-result chat recovery
+(P9-JD-01/P9-JD-06 zero-result rows): strict successful `match_jobs` `count=0`
+gate only; exact card copy **Chưa có kết quả đánh giá** / **Lưu JD & đánh giá
+lại**; durable initiating `source_message_id` from the same user/run/tool
+projection as tool activity (no composer/latest inference); local
+`useSavedJobRecovery` pending/error state outside chatReducer/SSE; created/
+reused success reuses existing `MatchCard`; unavailable/error keeps truthful
+retry UI; App→CvSidebar remount invalidates saved-JD sidebar caches. Synthetic
+release smoke and final full-stack evidence remain Batch08.
 
 ## Purpose and scope
 
@@ -123,7 +132,9 @@ JobAgent provides:
   tab (compact list/detail, currentness actions, Job-named delete
   confirmation, MatchCard reuse); no second observability state architecture.
 - Hybrid top-N matching with skill coverage, preference components, quality
-  multipliers, and collapsible score explanations in chat.
+  multipliers, and collapsible score explanations in chat; successful zero-result
+  `match_jobs` rows show one source-bound recovery card that save/evaluates the
+  durable initiating message and reuses MatchCard on success.
 - Compact active-CV outline in Agent prompt context plus durable
   `read_active_cv` tool for bounded section/search/chunk evidence (active-only,
   dual caps, cursors; no automatic full-document walk).
@@ -405,6 +416,24 @@ npm test -- --run
 npm run lint
 npm run typecheck
 npm run build
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch07 durable zero-result chat recovery gate (exact Vietnamese
+copy, zero-only gating, durable `source_message_id`, pending dedup, created/
+reused MatchCard, unavailable/error truth, saved-JD invalidation, Agent/chat
+API compatibility):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/empty-match-card.test.tsx src/test/saved-jobs-api.test.ts src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-navigation.test.tsx src/test/match-card.test.tsx src/test/chat-page.test.tsx
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+Set-Location ..\backend
+py -3.13 -m pytest tests/integration/test_saved_jobs_api.py tests/integration/test_chat_api.py tests/integration/test_job_tools.py tests/e2e/test_demo_flow.py -q
 Set-Location ..
 git diff --check
 ```

@@ -16,6 +16,7 @@ import {
   isMatchJobsToolName,
   parseMatchJobsResultData,
   type CompactMatchJobsResult,
+  type CompactMatchResult,
 } from '../../jobs/matchResult';
 import {SavedJobCard} from '../../jobs/SavedJobCard';
 import {
@@ -34,13 +35,21 @@ import type {
   ClientToolActivity,
 } from '../reducer';
 import {ChatToolActivity} from './ChatToolActivity';
+import {EmptyMatchResultCard} from './EmptyMatchResultCard';
 
 export type ChatMessageRowProps = {
   message: ClientMessage;
   tools: readonly ClientToolActivity[];
+  /** Durable initiating user message for tools projected onto this row. */
+  sourceMessageId: string | null;
   profileCommit: {run: ClientRun; pending: JsonObject} | null;
   onApprovalAction?: (runId: string, action: ProfileApprovalAction) => void;
   approvalLocked: boolean;
+  /** Zero-result recovery presentation (local to recovery hook, not chat store). */
+  recoveryPending?: boolean;
+  recoveredMatch?: CompactMatchResult | null;
+  recoveryFailureHint?: string | null;
+  onSaveAndEvaluate?: (sourceMessageId: string) => void;
 };
 
 /**
@@ -211,6 +220,67 @@ export function matchJobsResultForTools(
   return null;
 }
 
+/**
+ * Successful completed match_jobs with count=0 only.
+ * Failed/malformed/non-match_jobs/nonzero never qualify for recovery CTA.
+ */
+export function isZeroResultMatchJobs(
+  tools: readonly ClientToolActivity[],
+): boolean {
+  for (const tool of tools) {
+    if (!isMatchJobsToolName(tool.toolName)) {
+      continue;
+    }
+    if (tool.status !== 'completed' || tool.errorCode) {
+      // Failed or non-success terminal — no recovery CTA.
+      return false;
+    }
+    const parsed = parseMatchJobsResultData(tool.resultData);
+    if (!parsed) {
+      return false;
+    }
+    return parsed.count === 0;
+  }
+  return false;
+}
+
+/**
+ * Durable initiating user message id for tools shown on an assistant row.
+ * Same user-message/run/tool relationship as toolsForAssistantDisplay —
+ * never composer text or "latest message" inference.
+ */
+export function sourceMessageIdForAssistantDisplay(
+  messages: readonly ClientMessage[],
+  index: number,
+): string | null {
+  const message = messages[index];
+  if (!message || message.role !== 'assistant') {
+    return null;
+  }
+  const displayTools = toolsForAssistantDisplay(messages, index);
+  if (displayTools.length === 0) {
+    return null;
+  }
+
+  const ownTools = message.run?.tools ?? [];
+  if (ownTools.length > 0) {
+    const fromRun = message.run?.userMessageId;
+    return fromRun && fromRun.trim() !== '' ? fromRun : null;
+  }
+
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const prev = messages[i];
+    if (prev.role === 'user') {
+      // Durable history message id owns the projected tool executions.
+      return prev.id && prev.id.trim() !== '' ? prev.id : null;
+    }
+    if (prev.role === 'assistant') {
+      return null;
+    }
+  }
+  return null;
+}
+
 function senderOf(
   role: ClientMessage['role'],
 ): 'user' | 'assistant' | 'system' {
@@ -223,9 +293,14 @@ function senderOf(
 export function ChatMessageRow({
   message,
   tools,
+  sourceMessageId,
   profileCommit,
   onApprovalAction,
   approvalLocked,
+  recoveryPending = false,
+  recoveredMatch = null,
+  recoveryFailureHint = null,
+  onSaveAndEvaluate,
 }: ChatMessageRowProps) {
   if (message.role === 'system') {
     return (
@@ -249,6 +324,11 @@ export function ChatMessageRow({
     message.role === 'assistant' ? saveJobResultForTools(tools) : null;
   const matchJobs =
     message.role === 'assistant' ? matchJobsResultForTools(tools) : null;
+  const showZeroRecovery =
+    message.role === 'assistant' &&
+    isZeroResultMatchJobs(tools) &&
+    sourceMessageId !== null &&
+    onSaveAndEvaluate !== undefined;
 
   const showGenericInterrupted =
     runState === 'interrupted' && !showApprovalCard && parsed === null;
@@ -273,11 +353,20 @@ export function ChatMessageRow({
             errorCode={savedJob.errorCode}
           />
         ) : null}
-        {matchJobs
+        {matchJobs && matchJobs.count > 0
           ? matchJobs.results.map((result) => (
               <MatchCard key={result.jobId} data={result} />
             ))
           : null}
+        {showZeroRecovery && sourceMessageId && onSaveAndEvaluate ? (
+          <EmptyMatchResultCard
+            sourceMessageId={sourceMessageId}
+            isPending={recoveryPending}
+            recoveredMatch={recoveredMatch}
+            failureHint={recoveryFailureHint}
+            onSaveAndEvaluate={onSaveAndEvaluate}
+          />
+        ) : null}
         {showApprovalCard && parsed && profileCommit ? (
           <ApprovalCard
             card={parsed.card}
