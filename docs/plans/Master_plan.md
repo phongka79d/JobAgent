@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 1.8
-**Date:** 2026-07-17
-**Status:** Amended for Phase 9 saved JD library and revision-keyed evaluations; full plan portfolio requires fresh review before task writing
+**Version:** 1.9
+**Date:** 2026-07-18
+**Status:** Amended for Plan 12 readable Agent responses, active-CV sources, and pasted-JD save confirmation; full plan portfolio requires fresh review before task writing
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -27,6 +27,8 @@ The system must let the user:
 12. Let the Agent inspect only the active CV through bounded, explicit retrieval instead of injecting the whole document into every prompt.
 13. Keep a compact saved-JD library with detail, explicit evaluation, and complete deletion actions in the existing sidebar.
 14. Persist at most one evaluation for the same JD and active CV/profile/preferences/scoring revision, mark older results as **Cần đánh giá lại**, and recompute only after an explicit user action.
+15. Render Agent answers as readable, conclusion-first Markdown and show an exact active-CV source dialog only when durable `read_active_cv` evidence exists.
+16. Recognize a passively pasted raw JD, show a concise preview, and require an explicit **Lưu JD** or **Không lưu** decision before any persistence, extraction, embedding, evaluation, or graph mutation.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
@@ -61,6 +63,7 @@ Otherwise, it remains outside the MVP.
 - Candidate Profile draft and approval flow.
 - Structured long-term memory for profile corrections and job preferences.
 - Manual JD input through public URL or raw text.
+- Conditional in-chat confirmation for passively pasted raw JD text before the input becomes an accepted Job.
 - JD persistence, quality classification, duplicate handling, and extraction.
 - A compact saved-JD sidebar tab with detail, explicit evaluate/re-evaluate, and complete delete actions.
 - Revision-keyed persisted JD evaluations that are reused for the same current context and become visibly stale after CV, profile, preference, or scoring-contract changes.
@@ -71,6 +74,7 @@ Otherwise, it remains outside the MVP.
 - Transparent hybrid scoring.
 - Skill-gap and score-breakdown explanation.
 - Visible tool activity in chat.
+- Readable assistant-only Markdown plus evidence-backed active-CV source citations/dialogs.
 - Local Docker Compose deployment.
 - Local automated tests and a manual demo checklist.
 
@@ -402,7 +406,7 @@ The table contains exactly one row after application initialization.
 | `conversation_id` | `TEXT` | No | FK to `conversation.id`; `ON DELETE CASCADE` |
 | `role` | `TEXT` | No | `user | assistant | system` |
 | `content` | `TEXT` | No | May be empty only when `structured_payload` is present |
-| `structured_payload` | `JSON` | Yes | Approval card or match card payload |
+| `structured_payload` | `JSON` | Yes | Profile/JD confirmation card or match card payload |
 | `source_attachment_id` | `TEXT` | Yes | FK to `attachments.id`; `ON DELETE SET NULL`; set on CV extraction/approval messages |
 | `redacted_at` | `DATETIME` | Yes | Set only when CV deletion replaces content with the fixed deleted-CV marker |
 | `created_at`, `updated_at` | `DATETIME` | No | UTC |
@@ -428,7 +432,7 @@ Add `uq_agent_runs__user_message_id` and `ix_agent_runs__state`.
 
 Deleting a non-active CV removes its CV-scoped Agent runs and cascades their tool executions after associated chat messages have been redacted. The checkpoint service deletes each matching LangGraph checkpoint before the final attachment row is removed. Runs not scoped to that attachment are preserved.
 
-`pending_approval_json` is non-null exactly when `state='interrupted'`. `completed_at` is non-null exactly when `state in ('completed', 'failed')`.
+`pending_approval_json` is non-null exactly when `state='interrupted'`. It may contain a compact profile-commit or pasted-JD-save confirmation projection, never a raw CV/JD body. `completed_at` is non-null exactly when `state in ('completed', 'failed')`.
 
 #### `tool_executions`
 
@@ -448,7 +452,7 @@ Deleting a non-active CV removes its CV-scoped Agent runs and cascades their too
 
 Add `uq_tool_executions__run_tool_call` on `(run_id, tool_call_id)` and `ix_tool_executions__run_status` on `(run_id, status)`.
 
-`duration_ms` and `result_json` are required for completed or failed executions. `error_code` is required only for failed executions. A repeated `(run_id, tool_call_id)` returns the stored result instead of repeating a side effect; do not add a second idempotency-key mechanism.
+`duration_ms` and `result_json` are required for completed or failed executions. `error_code` is required only for failed executions. A repeated `(run_id, tool_call_id)` returns the stored result instead of repeating a side effect; do not add a second idempotency-key mechanism. An interrupted `save_job` confirmation keeps the same execution at `running`, exactly like the guarded profile commit.
 
 Allowed transitions are `pending → running → completed | failed`. An interrupted approval keeps its existing tool execution at `running`; it does not create a second execution row.
 
@@ -482,7 +486,8 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 - **Document extraction/reprocessing:** parse and chunk outside a transaction, extract every bounded batch into ordered `CVSection`/`CVEntry` data, run one consolidation pass for section continuity and omissions, derive `CandidateProfile` only from the validated complete `CVDocument`, then atomically replace the attachment's chunks and `cv_document_drafts` row and upsert `profile_drafts('current')`. A failed attempt leaves the current chunks, approved document, and active profile intact.
 - **Profile approval:** validate the profile/document drafts, their staged/archived/active attachment, stored file, source hash, and derived profile before opening the transaction. In one SQLite transaction, archive the previous active attachment only when selecting a different CV, mark the selected attachment active, upsert its `cv_documents` row from `cv_document_drafts`, upsert `candidate_profile('active')`, update preferences when changed, delete both draft rows, and verify one active attachment/document/profile before commit. Re-extracting the current active CV changes no attachment state. Direct active-CV Neo4j synchronization occurs after commit.
 - **CV deletion:** reject the active attachment. Mark an eligible attachment `deleting`, redact its linked chat messages, and clear any draft in a short transaction; delete matching checkpoints, its retained file, and only its CV-owned Neo4j subgraph with idempotent operations; then delete CV-scoped runs plus every directly CV-owned tool execution and delete the attachment in a final transaction so chunks/documents cascade. Retrying `DELETE` resumes a `deleting` row. Shared `Job`, `Skill`, seed relationships, unrelated runs/messages, and the active Candidate projection are never deleted. A partial failure keeps the row in `deleting` with a stable safe code and retry guidance; the UI must not report success until the row and file are gone and the CV subgraph delete succeeded.
-- **Approval decision:** both approval buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
+- **Profile approval decision:** both profile buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
+- **Pasted-JD confirmation:** a passive raw-JD paste first calls `save_job` with the durable current-message source. Validate and interrupt before any Job row, JD extraction/embedding provider call, evaluation, or graph write. The Agent's recognition decision may use its normal LLM call. `save_job` resumes the same `(run_id, tool_call_id)` and only then enters normal ingestion; `cancel_save_job` completes with `committed=false` and performs no ingestion side effect.
 - **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
 - **JD evaluation:** resolve the current evaluation context from SQLite. Return a current persisted evaluation before any provider or graph scoring call. Otherwise compute one exact-Job result outside a transaction and insert it in a short transaction under the unique context key; a concurrent duplicate reloads the committed row. CV/profile/preference changes only alter the derived current hash and never launch background recomputation.
 - **JD deletion:** reject an unknown ID without mutation; idempotently delete only the exact Neo4j `Job.id` node and its incident Job relationships first, then delete the SQLite `job_posts` row in a short transaction so `job_evaluations` cascade. Preserve every shared `Skill` node, seed `RELATED_TO` relationship, Candidate/CV branch, and unrelated Job. Return success only after both stores confirm completion; a graph failure keeps SQLite data available for retry.
@@ -881,7 +886,23 @@ If the later Neo4j sync fails, the approved SQLite profile remains committed. Re
 - Public HTTP/HTTPS URL.
 - Raw JD text pasted into chat.
 
-### 11.2 Simple URL fetching
+### 11.2 Pasted-text confirmation boundary
+
+A user message that is predominantly a recognizable raw JD is not yet an accepted
+Job input. The Agent uses the existing `save_job` tool with
+`source='current_message'`; the tool resolves the exact initiating durable user
+message from `run_id`, validates it, and interrupts before mutation. The compact
+confirmation card contains only bounded best-effort title/company/skill preview
+fields and text length, never the raw JD or message ID.
+
+`save_job` resumes the same run/tool identity and accepts the message only after
+**Lưu JD**. **Không lưu** (`cancel_save_job`) creates no Job row and makes no
+extraction, embedding, evaluation, or Neo4j call. A sole public URL and an explicit
+direct save request keep their existing direct tool path. The deterministic public
+**Lưu JD & đánh giá lại** action is already explicit and does not add this
+confirmation.
+
+### 11.3 Simple URL fetching
 
 - Allow only HTTP and HTTPS.
 - Ten-second download timeout.
@@ -891,10 +912,10 @@ If the later Neo4j sync fails, the approved SQLite profile remains committed. Re
 
 If Trafilatura cannot obtain meaningful text, ask the user to paste the JD text.
 
-### 11.3 Persistence-first processing
+### 11.4 Persistence-first processing
 
 ```text
-URL/text
+accepted URL/text
 → for URL, save a source_url placeholder with processing_status=received and fetch it
 → compute and check raw_content_hash before inserting text or updating the URL placeholder
 → on an exact match, return the existing non-failed job or reuse the failed row for retry
@@ -911,7 +932,7 @@ URL/text
 
 The submitted URL or pasted text is retained when fetching fails. Fetched/pasted `raw_content` is retained when extraction later fails.
 
-### 11.4 Exact duplicate policy
+### 11.5 Exact duplicate policy
 
 1. Exact `raw_content_hash` match:
    - If the existing row is not failed, return it without extraction or embedding.
@@ -938,14 +959,14 @@ flowchart TD
     SAVE --> END["End run"]
 ```
 
-Approval is implemented with `interrupt()` inside the guarded commit path.
+Profile approval and passive pasted-JD save confirmation are implemented with `interrupt()` inside their guarded tool paths.
 
 ### 12.2 Per-turn runs
 
 - The application has one persistent conversation in SQLite.
 - Every user turn creates a new `agent_run_id` and LangGraph `thread_id`.
 - An interrupted run uses the same ID when resumed.
-- While a run is interrupted, reject a new chat turn with `APPROVAL_ACTION_REQUIRED`; the user must choose an approval action first.
+- While a run is interrupted, reject a new chat turn with `APPROVAL_ACTION_REQUIRED`; the user must choose the pending profile or JD confirmation action first.
 - `request_changes` completes the interrupted run without committing the draft; the correction itself is a new user turn/run.
 - After a run reaches `completed` or `failed`, delete only that run's checkpoint data.
 - Conversation continuity comes from application data, not permanent LangGraph checkpoints.
@@ -959,7 +980,7 @@ running → completed
 running → failed
 ```
 
-Entering `interrupted` stores `pending_approval_json`. Resume atomically returns the same run to `running` and clears that projection before graph execution continues. The LangGraph checkpoint is the resumable state; `agent_runs` is durable UI/recovery metadata. No profile/preference side effect occurs before `interrupt()` returns an approval action.
+Entering `interrupted` stores `pending_approval_json`. Resume atomically returns the same run to `running` and clears that projection before graph execution continues. The LangGraph checkpoint is the resumable state; `agent_runs` is durable UI/recovery metadata. No guarded profile/preference or pasted-JD save side effect occurs before `interrupt()` returns an allowed action.
 
 ### 12.3 Agent state
 
@@ -977,7 +998,7 @@ AgentState
 - error
 ```
 
-Large PDF/JD bodies are stored out of state and referenced by IDs. `active_cv_context` contains only active attachment ID, extraction version/source hash, and a compact section outline; it never contains section bodies or chunks.
+Large stored PDF/JD bodies are not copied into Agent state and are referenced by IDs; the initiating chat text remains the existing current-turn message supplied to the LLM. For passive pasted-JD confirmation, the `save_job` tool call and pending projection add only `source='current_message'` plus bounded preview metadata, never a second JD-body copy, and the tool reloads the exact durable initiating message by `run_id` after confirmation. `active_cv_context` contains only active attachment ID, extraction version/source hash, and a compact section outline; it never contains section bodies or chunks.
 
 ### 12.4 Memory policy
 
@@ -1001,6 +1022,9 @@ The Agent may answer greetings, casual conversation, and general knowledge quest
 - Call JobAgent tools only for CVs, Candidate Profile, job preferences, JDs, saved jobs, matching, and skill gaps.
 - Do not invent or expose general-purpose tools for unrelated requests.
 - Keep the response language aligned with the user's language when practical.
+- When the current message is predominantly a passively pasted raw JD, call `save_job` with `source='current_message'` to show confirmation instead of claiming it was saved or invoking ingestion directly.
+- Respect an explicit `không lưu`/`do not save` instruction and do not create a confirmation or mutation.
+- Lead with the direct answer; simple answers need no heading, and longer answers use at most three short user-facing groups.
 
 Example:
 
@@ -1058,11 +1082,24 @@ Input: `draft_id`.
 
 ### 13.4 `save_job`
 
-Input: exactly one of URL or raw text.
+Input: exactly one of public URL, explicit raw text, or
+`source='current_message'`, plus optional bounded presentation-only preview fields.
 
-- Persists the accepted URL or text before extraction.
+- A URL or explicit direct raw-text save keeps the current persistence-first path.
+- `source='current_message'` resolves the initiating durable user message
+  server-side and interrupts before persistence with
+  `kind='job_save_confirmation'` and actions
+  `save_job | cancel_save_job`.
+- The pending card may contain bounded best-effort title, company, and at most
+  five skill labels. It never contains the raw JD, message ID, prompt, or
+  provider data, and preview values are never canonical Job facts.
+- `save_job` resumes the same invocation and then persists the accepted text
+  before extraction. `cancel_save_job` completes with `committed=false` and
+  performs no Job ingestion/extraction/embedding/graph side effect.
 - Handles fetch, extraction, validation, exact-hash deduplication, and direct Neo4j synchronization.
-- Does not require approval.
+- Requires confirmation only for the passive current-message source. Existing
+  direct URL/text tool requests and deterministic public saved-JD actions remain
+  explicit and do not add another approval.
 
 ### 13.5 `query_jobs`
 
@@ -1178,7 +1215,7 @@ run_failed
 
 Every event includes `event_id`, `run_id`, `timestamp`, and an event-specific validated payload.
 
-`tool_status.payload.status` and the frontend state use exactly `pending | running | completed | failed`; do not introduce aliases such as `complete` or `error`. `run_started` carries `state='running'` and `resumed: bool`; `approval_required` carries `state='interrupted'`; terminal events carry their matching run state. A failed tool may still lead to a completed run that explains the failure, but the Agent must not claim the operation succeeded.
+`tool_status.payload.status` and the frontend state use exactly `pending | running | completed | failed`; do not introduce aliases such as `complete` or `error`. `run_started` carries `state='running'` and `resumed: bool`; `approval_required` carries `state='interrupted'` plus a compact kind/action/card projection for profile commit or JD save confirmation; terminal events carry their matching run state. A failed tool may still lead to a completed run that explains the failure, but the Agent must not claim the operation succeeded.
 
 FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may be non-streaming. The final text may stream from ShopAIKey when compatibility is confirmed.
 
@@ -1214,11 +1251,13 @@ Do not add a full profile editor, arbitrary graph-query UI, a developer console,
 | Messages | `ChatMessageList`, `ChatMessage` |
 | Composer and PDF token | `ChatComposer` |
 | Tool activity | `ChatToolCalls` |
-| Approval actions | `ButtonGroup`, `Button` |
+| Profile/JD confirmation actions | `ButtonGroup`, `Button` |
 | System status | `ChatSystemMessage` |
 | Structured job details | `Card`, `MetadataList`, `Badge` |
 | Score details | `Collapsible`, `ProgressBar` |
 | Notifications | `Banner`, `Toast` |
+| Assistant rich text | `Markdown` |
+| Active-CV provenance | `Citation`, `Dialog`, `DialogHeader` |
 
 Before implementing any Astryx component, run its CLI documentation command against the pinned package version. Do not invent props or depend on undocumented internals.
 
@@ -1230,6 +1269,7 @@ Display concise user-facing statuses:
 - `pending`, `running`, `completed`, or `failed`.
 - Duration.
 - Short outcome summary.
+- An interrupted passive JD save uses the friendly label **Review JD** and never implies that a Job already exists.
 
 The activity component does not need a developer-oriented arguments or stack-trace view.
 
@@ -1254,6 +1294,29 @@ cache successful pages by query, and keep independent loading, empty, and error
 states. The graph panel renders the Master allowlisted bounded snapshot and its
 truncation metadata; it does not infer hidden properties or query for more nodes.
 Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Saved-JD reads/actions extend the same sidebar-local request/cache pattern with independent list/detail/action state. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, run, and evaluation-currentness caches; saved-JD evaluate/delete invalidates only affected job list/detail, graph, and visible chat-card state.
+
+### 15.7 Readable Agent responses and pasted-JD confirmation
+
+Assistant messages render with the pinned Astryx `Markdown` component using
+compact density, shifted heading levels, and the existing streaming flag. User
+and system messages remain literal. The Agent puts the direct answer first; a
+simple answer uses no heading, and a longer answer uses no more than three clear
+groups.
+
+When the same durable run contains successful bounded `read_active_cv` evidence,
+show one adjacent **Nguồn** citation. Its dialog renders exactly the returned
+entry/chunk records, discloses partial/truncated evidence, and provides
+**Mở CV gốc** for that evidence attachment. No successful durable evidence means
+no citation, and the dialog fetches no additional chunks.
+
+A passive pasted raw JD renders one `job_save_confirmation` card while the
+existing `save_job` execution remains `running`. The card states
+**JD này chưa được lưu. Bạn có muốn lưu JD này không?**, may show bounded
+best-effort title/company/skill preview, and exposes exactly **Lưu JD** and
+**Không lưu**. It contains no raw JD or message identifier. The first accepted
+action disables both buttons. Save resumes existing ingestion; cancel completes
+without a Job or JD extraction/embedding/graph work. Do not add a second chat reducer, approval
+endpoint, or frontend confirmation store.
 
 ---
 
@@ -1411,7 +1474,9 @@ The developer validates JD behavior directly during local testing. No labeled JD
 
 Use a small, disposable set of representative JDs to check:
 
-- A public URL and pasted text both create a saved job.
+- A public URL and confirmed pasted text both create a saved Job; cancelling a
+  passive paste creates none and performs no JD extraction/embedding/graph/
+  evaluation work.
 - Full, partial, and unscorable JDs receive the expected quality status.
 - Title, required/preferred skills, seniority, location, and work mode look reasonable in the saved result.
 - A processed exact duplicate returns the existing Job without reprocessing; a failed exact match retries the same row.
@@ -1436,6 +1501,8 @@ These checks are manual product acceptance only. Automated functional tests rema
 | Partial CV deletion | Keep attachment in `deleting`; return safe retry guidance and never report success |
 | Unsupported/oversized PDF | Reject before creating a persistent file or attachment row |
 | URL unsupported or unavailable | Ask user to paste JD text |
+| Passive pasted JD awaiting confirmation | Keep `save_job` running with no Job/JD-extraction/embedding/graph side effect; the normal Agent recognition call is allowed; require one allowed resume action |
+| User chooses **Không lưu** | Complete with `committed=false`; create no Job and make no extraction, embedding, evaluation, or Neo4j call |
 | JD extraction failure | Keep raw record with failed status |
 | Exact JD content match | Return an existing non-failed job; retry a failed row in place |
 | Neo4j unavailable during sync | Keep SQLite data; report `NEO4J_SYNC_FAILED` and offer the local rebuild command |
@@ -1556,6 +1623,7 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Evaluation-context canonicalization, current/stale derivation, unique-row reuse, and scoring-contract invalidation.
 - Exact saved-Job evaluation reuses matching components/explanations and does not require top-50 retrieval membership.
 - General conversation produces a direct answer without JobAgent tool calls.
+- Pasted-JD recognition fallback, opt-out handling, current-message source selection, bounded preview validation, and one-repair limit.
 - Tool preconditions for approval and required state.
 - Idempotent Neo4j `MERGE` payloads.
 
@@ -1568,12 +1636,14 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - LangGraph interrupt/resume.
 - `request_changes` completes the original run, deletes its checkpoint, preserves the draft, and lets the next correction start a new run.
 - `commit_profile_draft` remains `running` at interrupt; both approval actions emit one terminal `completed` tool status, while execution errors emit `failed`.
+- Passive pasted-JD `save_job` remains `running` at confirmation; **Lưu JD** resumes existing persistence-first ingestion and **Không lưu** creates no Job/JD-extraction/embedding/graph side effect.
 - An interrupted approval blocks new chat turns and CV uploads with `APPROVAL_ACTION_REQUIRED` before any new input is persisted.
 - Re-entering the same `(run_id, tool_call_id)` replays one stored ToolResult and one SQLite side effect.
 - Chat-history hydration joins tool activity from `tool_executions` without persisted `role='tool'` messages.
 - SQLite PRAGMAs, named constraints, indexes, foreign-key cascades, singleton seeding, and Alembic migrations.
 - Direct Neo4j synchronization and the local rebuild command.
 - URL and raw-text JD ingestion.
+- Exact initiating-message resolution for pasted-JD confirmation, both resume actions, duplicate-click/terminal replay, cancellation call counts, and direct URL/text compatibility.
 - Active, staged, and failed CV hash reuse plus exact JD return/retry behavior.
 - `match_jobs` with deterministic fake embeddings.
 - Saved-JD list/detail pagination and redaction, one-click message/source binding, exact-hash save reuse, current evaluation reuse without provider calls, explicit stale re-evaluation, and no automatic recomputation after CV/profile/preference changes.
@@ -1597,11 +1667,13 @@ Normal automated tests must not call the real ShopAIKey API.
 - `ChatToolCalls` event mapping.
 - Frontend tool state accepts only `pending | running | completed | failed`.
 - Approval buttons and idempotent disable state.
+- Pasted-JD confirmation card preview, exact **Lưu JD**/**Không lưu** actions, composer lock, restart hydration, cancellation without SavedJobCard, and save success reuse.
 - Sidebar attachment state.
 - Chat history hydration.
 - Load-older chat history pagination.
 - Match-card score breakdown.
 - Zero-result card with **Chưa có kết quả đánh giá**, one-click **Lưu JD & đánh giá lại**, pending/error/retry behavior, and no blank successful state.
+- Assistant-only Markdown, literal user/system text, active-CV **Nguồn** gating/dialog, and exact durable evidence projection.
 - Error and disconnected stream states.
 - Observability tabs: lazy load, cache, collapsed/expanded accessibility, chunk
   preview-to-detail expansion, empty/loading/error states, and narrow layouts.
@@ -1621,10 +1693,13 @@ Send greeting
 → reprocess the archived first CV and approve it active
 → verify Neo4j and Agent bounded reads use the first CV
 → delete the now-archived second CV and verify owned SQLite/file/graph/run data is gone
-→ submit JD text
-→ receive a visible zero-result card when no Job was saved
-→ click Lưu JD & đánh giá lại once
-→ save/sync the exact JD and display its persisted score and skill gaps
+→ paste synthetic JD text
+→ receive a preview stating the JD is not saved
+→ click Không lưu and verify no Job/JD-extraction/embedding/graph/evaluation side effect
+→ paste the same JD again
+→ click Lưu JD once
+→ save/deduplicate/sync the exact initiating message without automatic evaluation
+→ explicitly evaluate the saved JD with the active CV and display its persisted score and skill gaps
 → repeat evaluation with the same active context and verify the stored result is reused without provider scoring
 → activate an approved different CV and verify the saved JD shows Cần đánh giá lại without automatic recomputation
 → click Đánh giá lại and verify one new revision-keyed result
@@ -1873,6 +1948,27 @@ Exit gate:
 
 ---
 
+### Phase 10 - Readable Agent responses, active-CV sources, and pasted-JD save confirmation
+
+Tasks:
+
+- [ ] Render assistant-only output with pinned compact Astryx Markdown while user/system text remains literal, and enforce direct-answer-first low-clutter prompt policy.
+- [ ] Project successful durable `read_active_cv` records through a strict frontend allowlist and show one adjacent **Nguồn** citation plus exact evidence/original-CV dialog.
+- [ ] Recognize passively pasted English/Vietnamese JD text and use `save_job(source='current_message')` to create one pre-mutation confirmation interrupt.
+- [ ] Reuse the existing run/tool/checkpoint/resume path for **Lưu JD** and **Không lưu**, preserving exact source binding, replay, direct ingestion, and cancellation with zero side effects.
+- [ ] Add the focused Astryx JD preview card without raw JD/message IDs and preserve current direct URL/text, saved-JD, evaluation, and zero-result actions.
+- [ ] Verify prompt/tool topology, both confirmation branches, history/restart, readable output, CV provenance, no automatic evaluation, and desktop-only local acceptance.
+
+Exit gate:
+
+- Simple/long Agent answers are readable for non-technical users and raw Markdown markers no longer clutter assistant output.
+- Active-CV source controls appear only for successful durable `read_active_cv` evidence and display exactly what the Agent read.
+- A passive JD paste visibly remains unsaved until one confirmation action; cancel creates no Job/JD-extraction/embedding/graph side effect, while save processes the exact durable initiating message once.
+- The same Job content still deduplicates, save does not evaluate automatically, and existing explicit evaluation/delete/recovery actions remain intact.
+- One Agent, one decision node, one ToolNode, seven tools, six passes, current public APIs/schema/dependencies, and desktop product flows remain green.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -1889,8 +1985,9 @@ Recommended sequence for one intern developer:
 | Phase 7 | 4–6 days |
 | Phase 8 | 5–8 days |
 | Phase 9 | 4–6 days |
+| Phase 10 | 5–8 days |
 
-This is approximately 3–5 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
+This is approximately 4–7 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
 ---
 
@@ -1908,6 +2005,7 @@ JobAgent MVP is done only when all conditions are true:
 - Agent context carries a compact active-CV outline and bounded `read_active_cv` retrieval never exposes an archived CV or unbounded document body.
 - The Agent remembers approved corrections across restarts.
 - The user can submit public URL or raw JD text.
+- A passively pasted raw JD shows a concise unsaved preview and requires **Lưu JD** or **Không lưu** before any Job persistence, JD extraction/embedding, evaluation, or graph side effect; the normal Agent recognition call is allowed.
 - Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
 - A successful zero-result match renders **Chưa có kết quả đánh giá** with a deterministic one-click **Lưu JD & đánh giá lại** recovery path.
 - The saved-JD library exposes compact list/detail and explicit evaluate/re-evaluate/delete actions directly below Agent runs.
@@ -1916,6 +2014,7 @@ JobAgent MVP is done only when all conditions are true:
 - Scorable jobs synchronize to Neo4j.
 - Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
 - Tool activity is visible and concise.
+- Assistant responses are readable semantic Markdown, user/system text remains literal, and active-CV source controls never appear without successful durable evidence.
 - The sidebar exposes CV Manager, opt-in chunk detail, Agent-run history, and the active-CV-derived graph without exposing internal data or redesigning the implemented observability shell.
 - Failure paths do not report false success.
 - Automated functional tests pass and the developer completes the manual JD acceptance checklist.
@@ -1946,11 +2045,11 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Phases 0-8 and the completed CV Manager/observability implementation form the baseline. This Version 1.8 amendment locks the Phase 9 saved-JD and revision-keyed-evaluation increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-10 receive a fresh portfolio review.
+Phases 0-9 plus the completed Plan 11 desktop reliability repairs form the baseline. This Version 1.9 amendment locks the Phase 10 readable-response, active-CV-source, and pasted-JD save-confirmation increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-12 receive a fresh portfolio review.
 
 The project remains intentionally narrow:
 
-> One user, one natural conversation, one approved active CV selected through CV Manager, one Agent with bounded active-document access, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, a compact saved-JD library, and explicit revision-keyed transparent evaluation.
+> One user, one natural readable conversation, one approved active CV selected through CV Manager, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a compact saved-JD library, and explicit revision-keyed transparent evaluation.
 
 ---
 

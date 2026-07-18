@@ -255,7 +255,19 @@ Do not create a parallel cache, parser, CORS, Agent, or acceptance-report owner.
 | `task-writing-agent` after approval | `docs/tasks/task_11.md` | One authoritative task maps F11-01 through F11-06 to implementation and A1/A2/A3 evidence. |
 | Future A1/A2/A3 execution | Focused repair sequence and regression boundary | Automated/full/desktop evidence proves all five failures resolved without scope expansion. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_12.md` consumes the completed desktop-reliability baseline, the existing
+assistant-row/history projection owners, the seven-tool single-Agent runtime, the
+bounded `read_active_cv` ToolResult contract, and the truthful `save_job` outcome
+postcondition. Under authorized Master Version 1.9, it alone owns readable
+responses, active-CV source citations, and conditional confirmation before saving a
+passively pasted JD. It may extend the existing `save_job` interrupt/resume and
+frontend approval-card composition, but must not reopen unrelated Plan 11 repairs,
+duplicate durable tool results, or add security, mobile, migration, endpoint,
+dependency, Agent, ToolNode, or evaluation scope.
+
+### Historical Completion Contract
 
 Plan 11 is complete only when all five original desktop reproductions pass from
 current output: both frontend deletes reach their accepted coordinators; approved
@@ -266,5 +278,5 @@ processed-unscorable detail renders despite an empty extraction summary. Focused
 full local gates, Compose health, desktop evidence, scope hygiene, and the contiguous
 plan validator must pass. Security and mobile testing remain excluded, and no Master
 amendment, schema migration, new product capability, task file, or product code is
-created by this planning phase. The required next action is a fresh full portfolio
-review before task writing or execution.
+created by this planning phase. This historical evidence is the baseline consumed by
+Plan 12 and is not reopened by the successor plan.
