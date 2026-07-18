@@ -11,16 +11,16 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 12 Batch01+Batch02 accepted — backend Agent policy /
-pasted-JD confirmation and durable active-CV evidence projection; worktree
-commit-ready pending orchestrator commit):** Plan 12 Batch01 delivers the
-backend half of passive pasted-JD confirmation and Agent policy without changing
-topology, public endpoints, registry count, schema migrations, or evaluation
-behavior. Task **01A** adds strict `SaveJobInput` three-way source union
-(`url` | `text` | `source='current_message'`), bounded presentation-only
-preview, separate cancellation model, and focused
-`backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/
-obvious-JD predicates with required `ponytail:`, durable
+**Current status (Plan 12 Batch01–Batch03 accepted — backend Agent policy /
+pasted-JD confirmation, durable active-CV evidence projection, and assistant
+Markdown + Nguồn source dialog; worktree commit-ready pending orchestrator
+commit):** Plan 12 Batch01 delivers the backend half of passive pasted-JD
+confirmation and Agent policy without changing topology, public endpoints,
+registry count, schema migrations, or evaluation behavior. Task **01A** adds
+strict `SaveJobInput` three-way source union (`url` | `text` |
+`source='current_message'`), bounded presentation-only preview, separate
+cancellation model, and focused `backend/app/services/job_save_confirmation.py`
+(pure opt-out/sole-URL/obvious-JD predicates with required `ponytail:`, durable
 `run_id → user_message_id → chat_messages` resolve, redacted
 `job_save_confirmation` projection, no-mutation cancel ToolResult; service
 below 300 lines; no `app.tools` import). Task **01B** integrates current-message
@@ -47,15 +47,26 @@ from non-null `next_cursor` with cursor discarded). Row selector
 `errorCode`, ≥1 valid page, and attachment/extraction/source revision agreement
 across multipage evidence; failed/malformed/empty/non-CV/stream-only or
 conflicting revisions yield no bundle. Stream `tool_status` remains
-`resultData=null`; no reducer/types/backend/UI dialog/fetch changes. Combined A3
-revalidation on the accepted Batch02 worktree: 55 focused frontend tests
-(22 active-cv-source + 33 sse-reducer), lint, and typecheck all exit 0; only the
-four authorized Batch02 product/test paths plus orchestrator task checkboxes
-differ from base `b1fc24ce`. Frontend Markdown/citation/Nguồn dialog and JD
-confirmation card remain later Plan 12 batches. Plan 11 complete
-(Batch01+Batch02) remains the prior accepted desktop baseline on product HEAD
-`04fa5f8` / P11B1. Plan 10 Batch08 remains the earlier product baseline on HEAD
-`e429c10`.
+`resultData=null`; no reducer/types/backend changes.
+
+Plan 12 **Batch03** (task **03A**) renders assistant-only compact streaming
+Astryx Markdown (`AssistantResponse.tsx`: `density=compact`,
+`headingLevelStart={4}`, `isStreaming`) while user/system text stays literal.
+When the row has a Batch02 evidence bundle, an ephemeral display-only transform
+places exactly one **Nguồn** citation after the first safe lead paragraph
+(post-body fallback otherwise; reserved marker never mutates stored/reducer
+content). `ActiveCvSourceDialog` shows every page/record in durable order with
+partial disclosure, zero evidence fetch, and **Mở CV gốc** via existing
+`getRetainedCvUrl` with `_blank` + `noopener,noreferrer`. `ChatMessageRow`
+minimally composes the selector and assistant body; `ChatMessages` unchanged.
+Combined A3 revalidation on the accepted Batch03 worktree: 59 focused tests
+(15 assistant-response + 26 active-cv-source + 18 chat-page) plus 66 card
+regressions, lint, and typecheck all exit 0; product/test paths stay inside the
+seven authorized Batch03 files (six touched; ChatMessages intentionally
+untouched) plus orchestrator task checkbox vs base `a99e40b`. JD confirmation
+card remains Plan 12 Batch04. Plan 11 complete (Batch01+Batch02) remains the
+prior accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10
+Batch08 remains the earlier product baseline on HEAD `e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
 sidebar inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
@@ -195,7 +206,10 @@ JobAgent provides:
   `read_active_cv` tool for bounded section/search/chunk evidence (active-only,
   dual caps, cursors; no automatic full-document walk). Frontend terminal history
   projects only a strict allowlisted page/record bundle; stream tool status
-  never carries durable active-CV bodies.
+  never carries durable active-CV bodies. Assistant prose renders as compact
+  Astryx Markdown with exactly one adjacent **Nguồn** citation and exact-evidence
+  dialog when same-row durable `read_active_cv` evidence exists; user/system
+  content remains literal and the dialog never fetches additional chunks.
 - Derived Neo4j Candidate/Job/Skill plus fixed CV/CVSection/CVEntry index
   rebuildable from SQLite stored artifacts/embeddings without calling the
   provider.
@@ -217,7 +231,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), durable history projection (`history.ts` chains save/match/`read_active_cv`; sole active-CV vocabulary in `activeCvEvidence.ts`), typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
+| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), durable history projection (`history.ts` chains save/match/`read_active_cv`; sole active-CV vocabulary in `activeCvEvidence.ts`), assistant-only Markdown + exact-one **Nguồn** citation (`AssistantResponse.tsx`) and exact-evidence source dialog (`ActiveCvSourceDialog.tsx`) composed from `ChatMessageRow`, typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -410,6 +424,21 @@ revision binding, stream-null vs terminal/restart hydration; fakes only):
 ```powershell
 Set-Location frontend
 npm test -- --run src/test/active-cv-source.test.tsx src/test/sse-reducer.test.ts
+npm run lint
+npm run typecheck
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 12 Batch03 assistant Markdown + active-CV source dialog gate
+(semantic/compact/stream Markdown, exact-one **Nguồn** placement, dialog order/
+partial/no-fetch/original-CV options, accessibility close/Escape, negative
+evidence, history hydration, card/order regressions; fakes only):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/assistant-response.test.tsx src/test/active-cv-source.test.tsx src/test/chat-page.test.tsx
+npm test -- --run src/test/empty-match-card.test.tsx src/test/saved-job-card.test.tsx src/test/match-card.test.tsx src/test/approval-card.test.tsx
 npm run lint
 npm run typecheck
 Set-Location ..

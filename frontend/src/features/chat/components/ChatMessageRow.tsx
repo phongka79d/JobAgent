@@ -28,12 +28,14 @@ import {
   parseProfileCommitProjection,
   type ProfileApprovalAction,
 } from '../../profile/ApprovalCard';
+import {activeCvEvidenceForTools} from '../activeCvEvidence';
 import type {JsonObject} from '../types';
 import type {
   ClientMessage,
   ClientRun,
   ClientToolActivity,
 } from '../reducer';
+import {AssistantResponse} from './AssistantResponse';
 import {ChatToolActivity} from './ChatToolActivity';
 import {EmptyMatchResultCard} from './EmptyMatchResultCard';
 
@@ -333,6 +335,9 @@ export function ChatMessageRow({
   const showGenericInterrupted =
     runState === 'interrupted' && !showApprovalCard && parsed === null;
 
+  const activeCvEvidence =
+    message.role === 'assistant' ? activeCvEvidenceForTools(tools) : null;
+
   return (
     <ChatMessage key={message.clientKey} sender={senderOf(message.role)}>
       <VStack gap={1}>
@@ -343,7 +348,15 @@ export function ChatMessageRow({
           >
             {message.content === '' && message.isStreaming
               ? '…'
-              : message.content}
+              : message.role === 'assistant' ? (
+                  <AssistantResponse
+                    content={message.content}
+                    isStreaming={message.isStreaming}
+                    evidence={activeCvEvidence}
+                  />
+                ) : (
+                  message.content
+                )}
           </ChatMessageBubble>
         ) : null}
         {savedJob ? (

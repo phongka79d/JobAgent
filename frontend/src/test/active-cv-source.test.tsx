@@ -3,7 +3,11 @@
  * Covers allowlists, bounds, forbidden-key stripping, completed-success gating,
  * revision consistency, multipage order, and row isolation.
  */
-import {describe, expect, it} from 'vitest';
+import {cleanup, render, screen} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {Theme} from '@astryxdesign/core';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   activeCvEvidenceForTools,
@@ -11,6 +15,10 @@ import {
   projectActiveCvResultData,
   READ_ACTIVE_CV_TOOL_NAME,
 } from '../features/chat/activeCvEvidence';
+import {
+  ActiveCvSourceDialog,
+  ACTIVE_CV_PARTIAL_NOTICE,
+} from '../features/chat/components/ActiveCvSourceDialog';
 import {
   projectToolResultData,
   toolViewToActivity,
@@ -29,6 +37,7 @@ import {
   type ToolExecutionView,
   type ToolResult,
 } from '../features/chat/types';
+import {getRetainedCvUrl} from '../features/observability/api';
 
 const ATTACHMENT =
   'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -887,5 +896,200 @@ describe('stream vs terminal active-CV evidence', () => {
     expect(activeCvEvidenceForTools(t2)?.pages[0].records[0]).toMatchObject({
       entry_id: 'turn-b',
     });
+  });
+});
+
+describe('ActiveCvSourceDialog exact evidence and original CV', () => {
+  beforeEach(() => {
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function showModal() {
+        this.setAttribute('open', '');
+      };
+    }
+    if (!HTMLDialogElement.prototype.close) {
+      HTMLDialogElement.prototype.close = function close() {
+        this.removeAttribute('open');
+      };
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function evidenceBundle(
+    pages: JsonObject[] = [rawPage([entryRecord()])],
+  ): NonNullable<ReturnType<typeof activeCvEvidenceForTools>> {
+    const tools = pages.map((page, i) =>
+      activityFrom(
+        projectActiveCvResultData(READ_ACTIVE_CV_TOOL_NAME, page),
+        {
+          toolExecutionId: i === 0 ? TOOL_EXEC : TOOL_EXEC_2,
+          toolCallId: `tc-${i}`,
+        },
+      ),
+    );
+    const bundle = activeCvEvidenceForTools(tools);
+    if (!bundle) {
+      throw new Error('expected bundle');
+    }
+    return bundle;
+  }
+
+  it('renders every page and record in durable order without deduplication', () => {
+    const page1 = rawPage(
+      [
+        entryRecord({entry_id: 'e0', body: 'First exact body'}),
+        entryRecord({entry_id: 'e1', body: 'Second exact body', ordinal: 1}),
+      ],
+      {next_cursor: 'more'},
+    );
+    const page2 = rawPage(
+      [
+        chunkRecord({ordinal: 0, text: 'Chunk zero text', char_count: 15}),
+        chunkMatchRecord({
+          ordinal: 1,
+          text: 'Chunk match text',
+          char_count: 16,
+          excerpt: 'match hit',
+        }),
+      ],
+      {mode: 'search', next_cursor: null},
+    );
+    // Duplicate body intentionally retained — Agent saw both.
+    const page3 = rawPage(
+      [entryRecord({entry_id: 'e0', body: 'First exact body'})],
+      {mode: 'section', next_cursor: null},
+    );
+
+    const evidence = evidenceBundle([page1, page2, page3]);
+    render(
+      <Theme theme={neutralTheme}>
+        <ActiveCvSourceDialog
+          isOpen
+          onOpenChange={() => {}}
+          evidence={evidence}
+        />
+      </Theme>,
+    );
+
+    expect(screen.getByText('Nguồn từ CV')).toBeInTheDocument();
+    const pages = screen.getAllByTestId('jobagent-active-cv-evidence-page');
+    expect(pages).toHaveLength(3);
+    const records = screen.getAllByTestId('jobagent-active-cv-evidence-record');
+    expect(records).toHaveLength(5);
+    // Exact content preserved including duplicate.
+    expect(screen.getAllByText('First exact body')).toHaveLength(2);
+    expect(screen.getByText('Second exact body')).toBeInTheDocument();
+    expect(screen.getByText('Chunk zero text')).toBeInTheDocument();
+    expect(screen.getByText('Chunk match text')).toBeInTheDocument();
+    expect(screen.getByText(/Excerpt: match hit/)).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-active-cv-partial-notice'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(ACTIVE_CV_PARTIAL_NOTICE)).toBeInTheDocument();
+  });
+
+  it('opens the answer attachment via getRetainedCvUrl with required options', async () => {
+    const prev = import.meta.env.VITE_API_BASE_URL;
+    // @ts-expect-error test mutation
+    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
+    try {
+      const openSpy = vi
+        .spyOn(window, 'open')
+        .mockImplementation(() => null);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const evidence = evidenceBundle([
+        rawPage([entryRecord()], {attachment_id: ATTACHMENT}),
+      ]);
+
+      const user = userEvent.setup();
+      render(
+        <Theme theme={neutralTheme}>
+          <ActiveCvSourceDialog
+            isOpen
+            onOpenChange={() => {}}
+            evidence={evidence}
+          />
+        </Theme>,
+      );
+
+      await user.click(screen.getByTestId('jobagent-active-cv-open-original'));
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(openSpy).toHaveBeenCalledWith(
+        getRetainedCvUrl(ATTACHMENT),
+        '_blank',
+        'noopener,noreferrer',
+      );
+      // Zero evidence/chunk network requests from the dialog.
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      // @ts-expect-error restore
+      import.meta.env.VITE_API_BASE_URL = prev;
+    }
+  });
+
+  it('closes via button and Escape without fetching', async () => {
+    const onOpenChange = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const user = userEvent.setup();
+    render(
+      <Theme theme={neutralTheme}>
+        <ActiveCvSourceDialog
+          isOpen
+          onOpenChange={onOpenChange}
+          evidence={evidenceBundle()}
+        />
+      </Theme>,
+    );
+
+    await user.click(screen.getByTestId('jobagent-active-cv-close'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    onOpenChange.mockClear();
+    await user.keyboard('{Escape}');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows entry metadata, bullets, and search excerpts; no hash/cursor as primary copy', () => {
+    const evidence = evidenceBundle([
+      rawPage(
+        [
+          entryMatchRecord({
+            title: 'AWS Certified',
+            subtitle: 'Foundational',
+            date_text: '2024',
+            location: 'Remote',
+            excerpt: 'Cloud practitioner certificate.',
+            bullets: ['Exam passed'],
+          }),
+        ],
+        {mode: 'search', source_hash: 'secret-hash', next_cursor: null},
+      ),
+    ]);
+
+    render(
+      <Theme theme={neutralTheme}>
+        <ActiveCvSourceDialog
+          isOpen
+          onOpenChange={() => {}}
+          evidence={evidence}
+        />
+      </Theme>,
+    );
+
+    expect(screen.getByText('AWS Certified')).toBeInTheDocument();
+    expect(screen.getByText('Foundational')).toBeInTheDocument();
+    expect(screen.getByText('2024')).toBeInTheDocument();
+    expect(screen.getByText('Remote')).toBeInTheDocument();
+    expect(screen.getByText(/• Exam passed/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Excerpt: Cloud practitioner certificate\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('secret-hash')).not.toBeInTheDocument();
+    expect(screen.queryByText(/next_cursor/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/read_active_cv/i)).not.toBeInTheDocument();
   });
 });

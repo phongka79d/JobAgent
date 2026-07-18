@@ -835,3 +835,130 @@ describe('ChatPage PDF attachment token (04A)', () => {
     });
   });
 });
+
+describe('ChatPage active-CV source from durable history (03A)', () => {
+  const CV_ATTACHMENT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+  function historyWithActiveCv(): HistoryPage {
+    return {
+      items: [
+        {
+          id: MSG_USER,
+          role: 'user',
+          content: 'Tôi có mấy Certificate?',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: {
+            id: RUN_ID,
+            user_message_id: MSG_USER,
+            state: 'completed',
+            pending_approval: null,
+            error_code: null,
+            completed_at: TS,
+            created_at: TS,
+            updated_at: TS,
+            tool_executions: [
+              {
+                id: TOOL_EXEC,
+                tool_call_id: 'tc-cv-1',
+                tool_name: 'read_active_cv',
+                status: 'completed',
+                duration_ms: 40,
+                error_code: null,
+                result: {
+                  ok: true,
+                  code: null,
+                  summary: 'Read active CV page',
+                  data: {
+                    attachment_id: CV_ATTACHMENT,
+                    extraction_version: 'v1',
+                    source_hash: 'hash-abc',
+                    mode: 'section',
+                    returned_chars: 40,
+                    truncated: false,
+                    next_cursor: null,
+                    records: [
+                      {
+                        kind: 'entry',
+                        section_id: 'sec-certs',
+                        entry_id: 'entry-1',
+                        ordinal: 0,
+                        title: 'AWS Certified',
+                        subtitle: null,
+                        date_text: '2024',
+                        location: null,
+                        body: 'Cloud practitioner certificate.',
+                        bullets: ['Exam passed'],
+                        source_chunk_ordinals: [0, 1],
+                      },
+                    ],
+                  },
+                },
+                arguments_summary: null,
+                created_at: TS,
+                updated_at: TS,
+              },
+            ],
+          },
+        },
+        {
+          id: MSG_ASST,
+          role: 'assistant',
+          content: 'Bạn có **1** Certificate.',
+          structured_payload: null,
+          created_at: TS,
+          updated_at: TS,
+          run: null,
+        },
+      ],
+      next_cursor: null,
+    };
+  }
+
+  it('hydrates history with one Nguồn citation and exact dialog evidence', async () => {
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function showModal() {
+        this.setAttribute('open', '');
+      };
+    }
+    if (!HTMLDialogElement.prototype.close) {
+      HTMLDialogElement.prototype.close = function close() {
+        this.removeAttribute('open');
+      };
+    }
+
+    const loadHistory = vi.fn().mockResolvedValueOnce(historyWithActiveCv());
+    const user = userEvent.setup();
+    renderChat({loadHistory, sendTurn: vi.fn()});
+
+    await waitFor(() => {
+      expect(screen.getByText(/Bạn có/)).toBeInTheDocument();
+    });
+    // Markdown: raw ** not visible; citation present exactly once.
+    expect(screen.queryByText(/\*\*1\*\*/)).not.toBeInTheDocument();
+    const citations = screen.getAllByTestId('jobagent-active-cv-citation');
+    expect(citations).toHaveLength(1);
+    expect(citations[0]).toHaveTextContent('Nguồn');
+
+    await user.click(citations[0]);
+    await waitFor(() => {
+      expect(screen.getByText('Nguồn từ CV')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText('Cloud practitioner certificate.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('AWS Certified')).toBeInTheDocument();
+  });
+
+  it('shows no citation for history without successful active-CV evidence', async () => {
+    const loadHistory = vi.fn().mockResolvedValueOnce(historyWithMessages());
+    renderChat({loadHistory, sendTurn: vi.fn()});
+    await waitFor(() => {
+      expect(screen.getByText('History assistant reply')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByTestId('jobagent-active-cv-citation'),
+    ).not.toBeInTheDocument();
+  });
+});

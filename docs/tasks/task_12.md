@@ -454,7 +454,7 @@ and mobile/responsive work.
 
 ### Tasks
 
-- [ ] (03A): Render assistant Markdown with one exact active-CV source dialog
+- [x] (03A): Render assistant Markdown with one exact active-CV source dialog
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch03 - Readable Assistant Responses and CV Source Dialog` > `(03A)`
