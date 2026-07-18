@@ -10,6 +10,7 @@ from app.agent.graph import (
     DECISION_NODE_NAME,
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
     MESSAGES_KEY,
+    NAMED_SAVE_JOB_NO_ACTION_TEXT,
     TOOLS_NODE_NAME,
     AgentGraphBundle,
     _build_model_messages,
@@ -18,6 +19,7 @@ from app.agent.graph import (
     initial_graph_state,
 )
 from app.agent.state import AGENT_STATE_FIELDS
+from app.tools.jobs import SAVE_JOB_NAME
 from app.tools.registry import ToolRegistry, production_registry
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
@@ -56,6 +58,72 @@ def fail_tool(reason: str = "boom") -> dict[str, Any]:
 def counter_tool() -> str:
     """Side-effect-free counter tool for loop-limit tests."""
     return "tick"
+
+
+# F-04 exact initiating request (failure report reproduction text).
+F04_NAMED_SAVE_JOB_REQUEST = (
+    "Use save_job once again with the exact URL https://example.com and "
+    "report whether the existing Job is reused. Do not call other tools."
+)
+
+_SAVE_JOB_RETURNED_PAYLOAD: dict[str, Any] = {
+    "ok": True,
+    "code": None,
+    "summary": "Returned existing job for exact content match (processed/full)",
+    "data": {
+        "job_id": "job-dup-1",
+        "title": "Backend Engineer",
+        "company": "Acme",
+        "source_url": "https://example.com",
+        "processing_status": "processed",
+        "jd_quality": "full",
+        "outcome": "returned",
+        "sqlite_committed": True,
+        "sync_ok": True,
+        "failure_code": None,
+        "rebuild_instruction": None,
+        "paste_instruction": None,
+    },
+}
+
+
+@tool(SAVE_JOB_NAME)
+def save_job_tool(
+    url: str | None = None,
+    text: str | None = None,
+) -> dict[str, Any]:
+    """Test-only save_job returning a validated returned ToolResult shape."""
+    del text
+    payload = dict(_SAVE_JOB_RETURNED_PAYLOAD)
+    data = dict(payload["data"])  # type: ignore[arg-type]
+    data["source_url"] = url
+    payload["data"] = data
+    return payload
+
+
+@tool(SAVE_JOB_NAME)
+def save_job_created_tool(
+    url: str | None = None,
+    text: str | None = None,
+) -> dict[str, Any]:
+    """Test-only save_job returning created outcome."""
+    del text
+    return {
+        "ok": True,
+        "code": None,
+        "summary": "Saved job description (processed/full)",
+        "data": {
+            "job_id": "job-new-1",
+            "title": "Backend Engineer",
+            "company": "Acme",
+            "source_url": url,
+            "processing_status": "processed",
+            "jd_quality": "full",
+            "outcome": "created",
+            "sqlite_committed": True,
+            "sync_ok": True,
+        },
+    }
 
 
 def _ai_text(content: str) -> AIMessage:
@@ -522,3 +590,240 @@ def test_production_registry_model_prompt_lists_seven_tools() -> None:
     assert "read_active_cv" in system
     assert "narrowest mode" in system.lower()
     assert "synthetic" not in system.lower()
+    # Explicit write-tool truthfulness for named save_job (F-04 / Plan 11).
+    assert "save_job truthfulness" in system
+    assert "before a ToolResult exists" in system
+    assert "returned exact-duplicate" in system.lower() or "returned" in system
+
+
+# ---------------------------------------------------------------------------
+# F-04: truthful explicitly named save_job execution
+# ---------------------------------------------------------------------------
+
+
+def test_named_save_job_plain_text_is_discarded_and_repaired_once() -> None:
+    """First plain-text mutation claim is discarded; one repair sole call runs."""
+    model = FakeChatModel(
+        responses=[
+            _ai_text(
+                "I created a new Job entry for https://example.com successfully."
+            ),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com"},
+                call_id="save-repair-1",
+            ),
+            # Would invent "created" after tool; projection must ignore it.
+            _ai_text("Created a brand new Job for you."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=F04_NAMED_SAVE_JOB_REQUEST)
+    )
+    assert out["error"] is None
+    assert out["tool_iteration_count"] == 1
+    # First plain text discarded + one repair decision + no final model call
+    # (ToolResult projection). Fake may still have unused scripted responses.
+    assert model.invoke_count == 2
+    tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    assert getattr(tool_msgs[0], "name", None) == SAVE_JOB_NAME
+    ai_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)]
+    # Tool-call AI + projected final AI only; discarded false claim never stored.
+    assert len(ai_msgs) == 2
+    assert _has_tool_calls_local(ai_msgs[0])
+    final = ai_msgs[-1]
+    assert not (final.tool_calls or [])
+    final_text = str(final.content)
+    assert "returned" in final_text.lower() or "reused" in final_text.lower()
+    assert "job-dup-1" in final_text
+    assert "brand new" not in final_text.lower()
+    assert "I created a new Job entry" not in " ".join(
+        str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
+    )
+
+
+def _has_tool_calls_local(message: AIMessage) -> bool:
+    return bool(message.tool_calls)
+
+
+def test_named_save_job_repair_refusal_yields_fixed_no_action() -> None:
+    """Repair that still omits sole save_job → fixed no-action, zero tools."""
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Created the job already; it was reused."),
+            _ai_text("Still not calling tools; the job is created."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=F04_NAMED_SAVE_JOB_REQUEST)
+    )
+    assert out["error"] is None
+    assert out["tool_iteration_count"] == 0
+    assert model.invoke_count == 2  # first + one repair
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    final = out[MESSAGES_KEY][-1]
+    assert isinstance(final, AIMessage)
+    assert final.content == NAMED_SAVE_JOB_NO_ACTION_TEXT
+    joined = " ".join(
+        str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
+    )
+    assert "Created the job already" not in joined
+    assert "Still not calling tools" not in joined
+
+
+def test_named_save_job_invalid_repair_tool_is_no_action() -> None:
+    """Repair that calls a non-save tool is rejected; no tool executes."""
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Done, job created."),
+            _ai_tool_call("echo_tool", {"text": "nope"}, call_id="wrong-1"),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool, echo_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=F04_NAMED_SAVE_JOB_REQUEST)
+    )
+    assert out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == NAMED_SAVE_JOB_NO_ACTION_TEXT
+
+
+def test_named_save_job_sole_call_projects_returned_from_tool_result() -> None:
+    """Successful sole save_job path projects returned, never 'created'."""
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com"},
+                call_id="save-1",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=F04_NAMED_SAVE_JOB_REQUEST)
+    )
+    assert out["error"] is None
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 1  # projection skips second model call
+    final = out[MESSAGES_KEY][-1]
+    assert isinstance(final, AIMessage)
+    text = str(final.content).lower()
+    assert "returned" in text or "reused" in text
+    assert "job-dup-1" in str(final.content)
+    assert "no new job was created" in text
+    # Must not narrate duplicate as newly created.
+    assert "brand new" not in text
+    assert not str(final.content).lower().startswith("created")
+
+
+def test_named_save_job_created_outcome_projection() -> None:
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com/new"},
+                call_id="save-new",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_created_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(
+            run_id=RUN_ID,
+            user_text=(
+                "Please call save_job with url https://example.com/new "
+                "and report the outcome."
+            ),
+        )
+    )
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert "job-new-1" in final
+    assert "Saved job description" in final
+
+
+def test_named_save_job_already_called_skips_second_repair() -> None:
+    """After save_job ToolResult exists, projection does not re-invoke repair."""
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com"},
+                call_id="save-once",
+            ),
+            _ai_text("should not be used"),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=F04_NAMED_SAVE_JOB_REQUEST)
+    )
+    assert model.invoke_count == 1
+    assert out["tool_iteration_count"] == 1
+    assert "job-dup-1" in str(out[MESSAGES_KEY][-1].content)
+
+
+def test_unnamed_save_request_and_greeting_paths_unchanged() -> None:
+    """Greetings and non-named turns stay on the normal decision path."""
+    greet_model = FakeChatModel(responses=[_ai_text("Hello! How can I help?")])
+    greet_bundle = _bundle(greet_model, [save_job_tool])
+    greet_out = greet_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text="Xin chào")
+    )
+    assert greet_out["tool_iteration_count"] == 0
+    assert greet_model.invoke_count == 1
+    assert greet_out[MESSAGES_KEY][-1].content == "Hello! How can I help?"
+
+    # Unnamed save-ish prose without the registered token is not gated.
+    unnamed_model = FakeChatModel(
+        responses=[_ai_text("I can help save that URL if you like.")]
+    )
+    unnamed_bundle = _bundle(unnamed_model, [save_job_tool])
+    unnamed_out = unnamed_bundle.compiled.invoke(
+        initial_graph_state(
+            run_id=RUN_ID,
+            user_text="Please save https://example.com for me.",
+        )
+    )
+    assert unnamed_model.invoke_count == 1
+    assert unnamed_out[MESSAGES_KEY][-1].content == (
+        "I can help save that URL if you like."
+    )
+    assert not any(isinstance(m, ToolMessage) for m in unnamed_out[MESSAGES_KEY])
+
+
+def test_normal_non_save_tool_path_unchanged() -> None:
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call("echo_tool", {"text": "abc"}, call_id="e1"),
+            _ai_text("You said abc"),
+        ]
+    )
+    bundle = _bundle(model, [echo_tool, save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text="echo abc please")
+    )
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 2
+    assert out[MESSAGES_KEY][-1].content == "You said abc"
+
+
+def test_named_save_job_gate_has_ponytail_and_topology_intact() -> None:
+    graph_text = (APP_AGENT / "graph.py").read_text(encoding="utf-8")
+    assert "ponytail:" in graph_text
+    assert "mutation-intent contract" in graph_text
+    assert "exact-name gate" in graph_text
+    assert "NAMED_SAVE_JOB_NO_ACTION_TEXT" in graph_text
+
+    model = FakeChatModel(responses=[_ai_text("hi")])
+    bundle = _bundle(model, [save_job_tool])
+    app_nodes = {
+        n
+        for n in bundle.compiled.get_graph().nodes
+        if n not in {"__start__", "__end__", "START", "END"}
+    }
+    assert app_nodes == {DECISION_NODE_NAME, TOOLS_NODE_NAME}
+    assert bundle.tool_loop_limit == 6

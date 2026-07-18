@@ -172,7 +172,7 @@ unrelated UI changes.
 
 ### Tasks
 
-- [ ] (01A): Permit existing CV and Job DELETE requests through CORS
+- [x] (01A): Permit existing CV and Job DELETE requests through CORS
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_11.md` > `## Mandatory Batch01 - Root-Cause Functional Repairs` > `(01A)`
@@ -215,7 +215,7 @@ unrelated UI changes.
   - Blocked Condition: Missing accepted Plan 10 evidence is `BLOCKED_MISSING_REF`; a route/middleware authority conflict is `BLOCKED_SOURCE_CONFLICT`; a root fix outside Allowed Files is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/main.py`, `backend/tests/integration/test_chat_api.py`
 
-- [ ] (01B): Repair activation-driven CV Manager and saved-JD cache coherence
+- [x] (01B): Repair activation-driven CV Manager and saved-JD cache coherence
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_11.md` > `## Mandatory Batch01 - Root-Cause Functional Repairs` > `(01B)`
@@ -262,7 +262,7 @@ unrelated UI changes.
   - Blocked Condition: Missing accepted Plan 10 state owners/evidence is `BLOCKED_MISSING_REF`; conflicting automatic-evaluation or currentness authority is `BLOCKED_SOURCE_CONFLICT`; a root fix outside Allowed Files is `BLOCKED_SCOPE_CONFLICT`; unavailable Node/npm tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `frontend/src/app/App.tsx`, `frontend/src/features/profile/CvSidebar.tsx`, `frontend/src/features/observability/state.ts`, `frontend/src/features/observability/ObservabilitySidebar.tsx`, `frontend/src/features/jobs/savedJobsState.ts`, `frontend/src/test/approval-card.test.tsx`, `frontend/src/test/observability-state.test.tsx`, `frontend/src/test/observability-sidebar.test.tsx`, `frontend/src/test/cv-manager.test.tsx`, `frontend/src/test/saved-jobs-state.test.tsx`
 
-- [ ] (01C): Enforce truthful explicitly named save_job execution
+- [x] (01C): Enforce truthful explicitly named save_job execution
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_11.md` > `## Mandatory Batch01 - Root-Cause Functional Repairs` > `(01C)`
@@ -309,7 +309,7 @@ unrelated UI changes.
   - Blocked Condition: Missing accepted Agent/ToolResult baseline evidence is `BLOCKED_MISSING_REF`; conflicting tool-result or persistence authority is `BLOCKED_SOURCE_CONFLICT`; a truthful root fix requiring state, topology, registry, runner, or other out-of-bound changes is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/agent/prompt.py`, `backend/app/agent/graph.py`, `backend/tests/unit/test_agent_graph.py`, `backend/tests/integration/test_job_tools.py`
 
-- [ ] (01D): Accept and render valid empty extraction summaries
+- [x] (01D): Accept and render valid empty extraction summaries
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_11.md` > `## Mandatory Batch01 - Root-Cause Functional Repairs` > `(01D)`

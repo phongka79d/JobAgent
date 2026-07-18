@@ -326,6 +326,78 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     );
   });
 
+  it('renders No summary available for empty extraction summary with metadata retained', () => {
+    const unscorable = listItem(JOB_NONE, {
+      title: 'Contact form role',
+      company: 'Sparse Co',
+      processing_status: 'processed',
+      jd_quality: 'unscorable',
+      evaluation_state: 'none',
+      source_type: 'url',
+      source_url: 'https://example.com',
+    });
+    const detail = readyDetail(unscorable, {
+      withEvaluation: false,
+      raw: 'Please email careers@example.com',
+    });
+    detail.data!.extraction = {
+      ...detail.data!.extraction!,
+      title: 'Contact form role',
+      company: 'Sparse Co',
+      summary: '',
+      seniority: 'unknown',
+      work_mode: 'unknown',
+      location: null,
+      extraction_confidence: 0.1,
+    };
+
+    renderPanel({
+      items: [unscorable],
+      selectedJobId: JOB_NONE,
+      details: {[JOB_NONE]: detail},
+    });
+
+    const extraction = screen.getByTestId('jobagent-saved-job-extraction');
+    expect(extraction).toHaveTextContent('No summary available');
+    expect(extraction).toHaveTextContent('Contact form role');
+    expect(extraction).toHaveTextContent('Sparse Co');
+    expect(extraction).toHaveTextContent('unknown');
+    expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
+      'Please email careers@example.com',
+    );
+    expect(screen.getByTestId('jobagent-saved-job-detail-meta')).toHaveTextContent(
+      'unscorable',
+    );
+    expect(
+      screen.queryByText(/INVALID_SAVED_JOB_DETAIL_PAYLOAD/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders No summary available for whitespace-only extraction summary', () => {
+    const job = listItem(JOB_NONE, {
+      evaluation_state: 'none',
+      jd_quality: 'unscorable',
+    });
+    const detail = readyDetail(job, {withEvaluation: false});
+    detail.data!.extraction = {
+      ...detail.data!.extraction!,
+      summary: '  \n\t  ',
+    };
+
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_NONE,
+      details: {[JOB_NONE]: detail},
+    });
+
+    expect(
+      screen.getByTestId('jobagent-saved-job-extraction'),
+    ).toHaveTextContent('No summary available');
+    expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
+      'raw jd text',
+    );
+  });
+
   it('shows Đánh giá với CV for none and no evaluate for current', () => {
     const none = listItem(JOB_NONE, {evaluation_state: 'none'});
     const current = listItem(JOB_CURRENT, {

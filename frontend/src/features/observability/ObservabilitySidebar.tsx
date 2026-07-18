@@ -4,7 +4,7 @@
  * Saved-JD list/detail/actions compose focused jobs modules (Plan 10 / Master §15.6).
  */
 
-import {useCallback, useEffect, type ReactNode} from 'react';
+import {useCallback, useEffect, useRef, type ReactNode} from 'react';
 import {useSideNavCollapse} from '@astryxdesign/core/SideNav';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
@@ -32,6 +32,11 @@ export type ObservabilitySidebarProps = {
   };
   observability: ReturnType<typeof useObservabilityState>;
   /**
+   * Activation / zero-result invalidation signal for sidebar-local saved-JD
+   * currentness (reducer signal — not a remount key).
+   */
+  savedJobsInvalidateKey?: number;
+  /**
    * CV Manager reprocess → App → ChatPage stream path.
    * Returns false when composition refuses (locked/duplicate).
    */
@@ -44,12 +49,14 @@ export function ObservabilitySidebar({
   overview,
   collapsedStatus,
   observability: obs,
+  savedJobsInvalidateKey = 0,
   onCvReprocess,
   onCvDeleted,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
   const savedJobs = useSavedJobsState();
+  const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
 
   const loadSavedJobsList = useCallback(() => {
     void savedJobs.loadList();
@@ -77,8 +84,13 @@ export function ObservabilitySidebar({
     return () => {
       controller.abort();
     };
-    // load* skip cached resources; tab/selection are the intentional load triggers (Plan 8 pattern).
-  }, [state.selectedTab, state.selectedAttachmentId]);
+    // Tab/selection plus activation generation: open tabs auto-reload after
+    // Save Profile without requiring a manual refresh (Plan 11 F-03).
+  }, [
+    state.selectedTab,
+    state.selectedAttachmentId,
+    state.activationGeneration,
+  ]);
 
   useEffect(() => {
     if (state.selectedTab !== 'saved-jobs') {
@@ -95,6 +107,25 @@ export function ObservabilitySidebar({
     };
     // Selection-driven detail load; loadDetail is cache-aware.
   }, [state.selectedTab, savedJobs.state.selectedJobId]);
+
+  // Saved-JD invalidation signal: mark list/selected detail non-current; force
+  // open-tab GETs; closed tab refreshes lazily on next selection/mount.
+  useEffect(() => {
+    if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
+      return;
+    }
+    handledSavedJobsInvalidateKey.current = savedJobsInvalidateKey;
+    const selectedJobId = savedJobs.state.selectedJobId;
+    const tabOpen = state.selectedTab === 'saved-jobs';
+    savedJobs.invalidateCurrentness();
+    if (tabOpen) {
+      void savedJobs.loadList({}, {force: true});
+      if (selectedJobId) {
+        void savedJobs.loadDetail(selectedJobId, {force: true});
+      }
+    }
+    // Signal-only trigger; selection/tab captured at invalidation time (Plan 11).
+  }, [savedJobsInvalidateKey]);
 
   // Evaluate/delete success bumps graph generation; force-refresh when graph was loaded.
   useEffect(() => {

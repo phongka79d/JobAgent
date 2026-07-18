@@ -456,4 +456,157 @@ describe('saved-JD actions, invalidation, and selection', () => {
     expect(result.current.state.list.data?.items[1]?.id).toBe(JOB_B);
     expect(result.current.state.externalInvalidation.graphGeneration).toBe(1);
   });
+
+  it('invalidate_currentness preserves selection and safe data without evaluate', () => {
+    let state = initialSavedJobsState;
+    const currentCompact = listItem(JOB_A, {
+      evaluation_state: 'current',
+      latest_score: 0.9,
+    });
+    const selectedDetail: SavedJobDetail = {
+      compact: currentCompact,
+      extraction: null,
+      raw_content: 'raw-a',
+      latest_evaluation: {
+        id: EVAL_ID,
+        job_id: JOB_A,
+        evaluation_state: 'current',
+        evaluation_context_hash: 'ctx-1',
+        result: matchResult(JOB_A, 0.9),
+        created_at: TS,
+        updated_at: TS,
+      },
+    };
+    state = savedJobsReducer(state, {
+      type: 'list_success',
+      data: listPage([currentCompact, listItem(JOB_B)]),
+    });
+    state = savedJobsReducer(state, {type: 'select_job', jobId: JOB_A});
+    state = savedJobsReducer(state, {
+      type: 'detail_success',
+      jobId: JOB_A,
+      data: selectedDetail,
+    });
+    // Unselected detail stays cached but is not marked non-current.
+    state = savedJobsReducer(state, {
+      type: 'detail_success',
+      jobId: JOB_B,
+      data: detailFor(JOB_B),
+    });
+    const priorList = state.list.data;
+    const priorSelectedDetail = state.details[JOB_A]?.data;
+    const priorB = state.details[JOB_B];
+    const priorGraph = state.externalInvalidation.graphGeneration;
+
+    state = savedJobsReducer(state, {type: 'invalidate_currentness'});
+
+    expect(state.selectedJobId).toBe(JOB_A);
+    expect(state.list.loaded).toBe(false);
+    expect(state.list.phase).toBe('loading');
+    expect(state.list.data).toEqual(priorList);
+    expect(state.list.data?.items[0]?.evaluation_state).toBe('current');
+    expect(state.details[JOB_A]?.loaded).toBe(false);
+    expect(state.details[JOB_A]?.phase).toBe('loading');
+    expect(state.details[JOB_A]?.data).toEqual(priorSelectedDetail);
+    expect(state.details[JOB_B]).toEqual(priorB);
+    // No automatic evaluate and no external generation bump.
+    expect(state.externalInvalidation.graphGeneration).toBe(priorGraph);
+    expect(state.actions.pendingByJob[JOB_A]).toBeUndefined();
+  });
+
+  it('invalidateCurrentness forces open-tab list/detail GET; closed tab lazy refresh', async () => {
+    const currentPage = listPage([
+      listItem(JOB_A, {evaluation_state: 'current', latest_score: 0.91}),
+    ]);
+    const stalePage = listPage([
+      listItem(JOB_A, {evaluation_state: 'stale', latest_score: 0.91}),
+    ]);
+    const currentDetail: SavedJobDetail = {
+      compact: listItem(JOB_A, {
+        evaluation_state: 'current',
+        latest_score: 0.91,
+      }),
+      extraction: null,
+      raw_content: 'raw',
+      latest_evaluation: {
+        id: EVAL_ID,
+        job_id: JOB_A,
+        evaluation_state: 'current',
+        evaluation_context_hash: 'ctx-1',
+        result: matchResult(JOB_A, 0.91),
+        created_at: TS,
+        updated_at: TS,
+      },
+    };
+    const staleDetail: SavedJobDetail = {
+      compact: listItem(JOB_A, {
+        evaluation_state: 'stale',
+        latest_score: 0.91,
+      }),
+      extraction: null,
+      raw_content: 'raw',
+      latest_evaluation: {
+        id: EVAL_ID,
+        job_id: JOB_A,
+        evaluation_state: 'stale',
+        evaluation_context_hash: 'ctx-old',
+        result: matchResult(JOB_A, 0.91),
+        created_at: TS,
+        updated_at: TS,
+      },
+    };
+    const fetchSavedJobs = vi
+      .fn()
+      .mockResolvedValueOnce(currentPage)
+      .mockResolvedValueOnce(stalePage);
+    const fetchSavedJobDetail = vi
+      .fn()
+      .mockResolvedValueOnce(currentDetail)
+      .mockResolvedValueOnce(staleDetail);
+    const evaluateSavedJob = vi.fn();
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {fetchSavedJobs, fetchSavedJobDetail, evaluateSavedJob},
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadList();
+      await result.current.loadDetail(JOB_A);
+    });
+    act(() => {
+      result.current.selectJob(JOB_A);
+    });
+    expect(result.current.state.list.data?.items[0]?.evaluation_state).toBe(
+      'current',
+    );
+    expect(fetchSavedJobs).toHaveBeenCalledTimes(1);
+    expect(fetchSavedJobDetail).toHaveBeenCalledTimes(1);
+
+    // Closed-tab path: mark non-current but do not fetch until next use.
+    act(() => {
+      result.current.invalidateCurrentness();
+    });
+    expect(result.current.state.list.loaded).toBe(false);
+    expect(result.current.state.details[JOB_A]?.loaded).toBe(false);
+    expect(result.current.state.selectedJobId).toBe(JOB_A);
+    expect(fetchSavedJobs).toHaveBeenCalledTimes(1);
+    expect(fetchSavedJobDetail).toHaveBeenCalledTimes(1);
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+
+    // Open-tab / next-use path: force list + selected detail GET; server stale.
+    await act(async () => {
+      await result.current.loadList({}, {force: true});
+      await result.current.loadDetail(JOB_A, {force: true});
+    });
+    expect(fetchSavedJobs).toHaveBeenCalledTimes(2);
+    expect(fetchSavedJobDetail).toHaveBeenCalledTimes(2);
+    expect(result.current.state.list.data?.items[0]?.evaluation_state).toBe(
+      'stale',
+    );
+    expect(
+      result.current.state.details[JOB_A]?.data?.compact.evaluation_state,
+    ).toBe('stale');
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
 });

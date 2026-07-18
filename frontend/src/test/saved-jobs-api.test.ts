@@ -197,6 +197,62 @@ describe('saved-JD strict parsers', () => {
     ).toThrow(/extra keys/);
   });
 
+  it('accepts empty and whitespace extraction summaries while remaining strict', () => {
+    const emptySummary = parseJobPostExtraction({
+      ...extractionPayload(),
+      summary: '',
+    });
+    expect(emptySummary.summary).toBe('');
+    expect(emptySummary.title).toBe('Backend Engineer');
+    expect(emptySummary.seniority).toBe('mid');
+
+    const whitespaceSummary = parseJobPostExtraction({
+      ...extractionPayload(),
+      summary: '   \t',
+    });
+    expect(whitespaceSummary.summary).toBe('   \t');
+
+    expect(() =>
+      parseJobPostExtraction({
+        ...extractionPayload(),
+        summary: null,
+      }),
+    ).toThrow(/extraction\.summary must be a string/);
+
+    expect(() =>
+      parseJobPostExtraction({
+        ...extractionPayload(),
+        summary: 42,
+      }),
+    ).toThrow(/extraction\.summary must be a string/);
+
+    const missingSummary = {...extractionPayload()} as Record<string, unknown>;
+    delete missingSummary.summary;
+    expect(() => parseJobPostExtraction(missingSummary)).toThrow(
+      /missing required key summary/,
+    );
+
+    expect(() =>
+      parseJobPostExtraction({
+        ...extractionPayload(),
+        extra_field: true,
+      }),
+    ).toThrow(/extra keys/);
+
+    const detail = parseSavedJobDetail({
+      compact: listItemPayload(JOB_A, {
+        processing_status: 'processed',
+        jd_quality: 'unscorable',
+        evaluation_state: 'none',
+      }),
+      extraction: {...extractionPayload(), summary: ''},
+      raw_content: 'contact only',
+      latest_evaluation: null,
+    });
+    expect(detail.extraction?.summary).toBe('');
+    expect(detail.compact.jd_quality).toBe('unscorable');
+  });
+
   it('rejects malformed evaluation.result via MatchResult owner', () => {
     expect(() =>
       parseJobEvaluationView({

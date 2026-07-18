@@ -534,6 +534,11 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
             assert second.data is not None
             assert second.data["outcome"] == "returned"
             assert second.data["job_id"] == job_id
+            # F-04 / Plan 11: exact-duplicate ToolResult must expose returned
+            # vocabulary that agent projection can narrate (never "created").
+            assert "Returned existing job" in second.summary
+            assert "created" not in second.summary.lower()
+            assert second.data["outcome"] != "created"
             # Duplicate return: no second extract/embed/graph; still one Job.
             assert len(invoker.calls) == 1
             assert len(embedder.calls) == 1

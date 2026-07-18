@@ -105,8 +105,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.FRONTEND_ORIGIN],
         allow_credentials=True,
-        # Plan 3/4 need POST for turns/resume/upload; keep origin restricted.
-        allow_methods=["GET", "POST"],
+        # Public surface needs GET/POST/DELETE; keep origin restricted.
+        # Starlette owns OPTIONS preflight; DELETE serves CV and Job removal.
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
     application.include_router(health_router, prefix="/api")

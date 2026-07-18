@@ -52,8 +52,8 @@ export function App({deps}: AppProps = {}) {
   /** Bumps after activation/delete so sidebar invalidates profile + CV caches. */
   const [activationKey, setActivationKey] = useState(0);
   /**
-   * Bumps after chat zero-result save/evaluate so ObservabilitySidebar remounts
-   * its sidebar-local useSavedJobsState (list/detail cache invalidation).
+   * Bumps after activation / chat zero-result save/evaluate so sidebar-local
+   * saved-JD list/detail currentness invalidates without remounting the sidebar.
    */
   const [savedJobsInvalidateKey, setSavedJobsInvalidateKey] = useState(0);
   const requestKeyRef = useRef(0);
@@ -110,12 +110,14 @@ export function App({deps}: AppProps = {}) {
   );
 
   /**
-   * Save Profile success → reload profile summary and invalidate observability
-   * caches so active badge / graph refresh only after approval.
+   * Save Profile success → one coherent activation fan-out: profile refresh,
+   * observability CV/chunk/run/graph invalidation, and saved-JD currentness
+   * invalidation (no remount; no automatic evaluate).
    */
   const handleProfileSaved = useCallback(() => {
     setProfileRefreshKey((k) => k + 1);
     setActivationKey((k) => k + 1);
+    setSavedJobsInvalidateKey((k) => k + 1);
   }, []);
 
   /** Delete success → profile summary may change if only non-active rows removed. */

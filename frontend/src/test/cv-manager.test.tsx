@@ -125,6 +125,51 @@ describe('canDeleteCv guard', () => {
   });
 });
 
+describe('CV Manager activation loading presentation', () => {
+  it('retains prior rows while phase is loading (not header-only idle)', () => {
+    const page = cvManagerHistoryPage();
+    renderPanel({
+      resource: {
+        phase: 'loading',
+        data: page,
+        error: null,
+        loaded: false,
+      },
+      selectedAttachmentId: ATTACHMENT_ID,
+    });
+
+    expect(screen.getByTestId('jobagent-obs-cv-history')).toBeInTheDocument();
+    expect(screen.getByText('active.pdf')).toBeInTheDocument();
+    expect(screen.getByText('archived.pdf')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-obs-cv-history-empty'),
+    ).not.toBeInTheDocument();
+    // Loading without data would show skeleton; with retained data, rows stay.
+    expect(
+      screen.queryByTestId('jobagent-obs-cv-history-loading'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows established skeleton when loading with no retained rows', () => {
+    renderPanel({
+      resource: {
+        phase: 'loading',
+        data: null,
+        error: null,
+        loaded: false,
+      },
+      selectedAttachmentId: null,
+    });
+
+    expect(
+      screen.getByTestId('jobagent-obs-cv-history-loading'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-obs-cv-history-empty'),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('CV Manager panel actions', () => {
   it('shows one Active badge and only Open/Re-extract for the active row', () => {
     renderPanel({selectedAttachmentId: ACTIVE_ATTACHMENT_ID});

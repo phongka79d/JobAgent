@@ -580,6 +580,40 @@ def test_cors_allows_configured_origin_get_and_post(
         assert post_resp.headers.get("access-control-allow-origin") == FRONTEND_ORIGIN
 
 
+def test_cors_allows_configured_origin_delete_preflight(
+    chat_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    """Representative Job and CV DELETE preflights succeed and advertise DELETE."""
+    db_path, _files, _fake = chat_env
+    job_id = new_uuid()
+    attachment_id = new_uuid()
+    with _client_with_fake(db_path, _direct_model()) as client:
+        for path in (
+            f"/api/jobs/{job_id}",
+            f"/api/cvs/{attachment_id}",
+        ):
+            preflight = client.options(
+                path,
+                headers={
+                    "Origin": FRONTEND_ORIGIN,
+                    "Access-Control-Request-Method": "DELETE",
+                },
+            )
+            assert preflight.status_code in (200, 204)
+            assert (
+                preflight.headers.get("access-control-allow-origin")
+                == FRONTEND_ORIGIN
+            )
+            allow_methods = preflight.headers.get(
+                "access-control-allow-methods", ""
+            )
+            methods_upper = allow_methods.upper()
+            assert "DELETE" in methods_upper
+            # Retained GET/POST advertisement on the same allowlist.
+            assert "GET" in methods_upper
+            assert "POST" in methods_upper
+
+
 def test_cors_rejects_disallowed_origin(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:

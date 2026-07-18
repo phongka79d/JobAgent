@@ -273,6 +273,13 @@ type Action =
       type: 'save_success';
       sourceMessageId: string;
       response: SaveAndEvaluateResponse;
+    }
+  | {
+      /**
+       * Activation / zero-result: mark list + selected detail non-current while
+       * preserving selection and last safe data (no evaluate, no remount).
+       */
+      type: 'invalidate_currentness';
     };
 
 export function savedJobsReducer(
@@ -546,6 +553,31 @@ export function savedJobsReducer(
         externalInvalidation: bumpExternal(state.externalInvalidation),
       };
     }
+    case 'invalidate_currentness': {
+      // Preserve selection and last safe list/selected-detail data; server GET
+      // remains authoritative for none|current|stale (no client rewrite).
+      const nextDetails = {...state.details};
+      const selectedId = state.selectedJobId;
+      if (selectedId !== null && nextDetails[selectedId]) {
+        const prev = nextDetails[selectedId];
+        nextDetails[selectedId] = {
+          phase: 'loading',
+          data: prev.data,
+          error: null,
+          loaded: false,
+        };
+      }
+      return {
+        ...state,
+        list: {
+          phase: 'loading',
+          data: state.list.data,
+          error: null,
+          loaded: false,
+        },
+        details: nextDetails,
+      };
+    }
     default:
       return state;
   }
@@ -751,6 +783,11 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     [api],
   );
 
+  /** Mark list + selected detail non-current after activation / zero-result. */
+  const invalidateCurrentness = useCallback(() => {
+    dispatch({type: 'invalidate_currentness'});
+  }, []);
+
   return {
     state,
     selectJob,
@@ -760,6 +797,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     evaluateJob,
     confirmDelete,
     saveAndEvaluate,
+    invalidateCurrentness,
     isJobActionPending: (jobId: string) =>
       isJobActionPending(state.actions, jobId),
     isJobActionKindPending: (jobId: string, kind: SavedJobActionKind) =>

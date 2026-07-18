@@ -1,18 +1,25 @@
 /**
  * Observability sidebar UI: lazy tabs, cache, expand, collapse, safe errors (03A).
+ * Plan 11: open-tab activation reload without blank idle CV Manager.
  */
+import {useState} from 'react';
+import {Theme} from '@astryxdesign/core';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {
   cleanup,
+  render,
   screen,
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {CvSidebar} from '../features/profile/CvSidebar';
 import {
   ATTACHMENT_ID,
   RUN_ID,
   cvHistoryPage,
+  emptyProfile,
   mockObservabilityApi,
   renderObservabilitySidebar,
 } from './support/observability';
@@ -244,5 +251,81 @@ describe('ObservabilitySidebar composition', () => {
       await screen.findByTestId('jobagent-obs-runs-error'),
     ).toBeInTheDocument();
     expect(screen.getByText(/Runs offline/)).toBeInTheDocument();
+  });
+
+  it('activation with CV Manager open retains rows and issues one history reload', async () => {
+    let resolveSecond!: (value: ReturnType<typeof cvHistoryPage>) => void;
+    const secondPromise = new Promise<ReturnType<typeof cvHistoryPage>>(
+      (resolve) => {
+        resolveSecond = resolve;
+      },
+    );
+    const first = cvHistoryPage();
+    const second = cvHistoryPage();
+    second.items[0] = {
+      ...second.items[0]!,
+      original_name: 'activated.pdf',
+      state: 'active',
+    };
+    const fetchCvHistory = vi
+      .fn()
+      .mockResolvedValueOnce(first)
+      .mockReturnValueOnce(secondPromise);
+    const api = mockObservabilityApi({fetchCvHistory});
+    const loadProfile = vi.fn().mockResolvedValue(emptyProfile());
+
+    function Harness() {
+      const [activationKey, setActivationKey] = useState(0);
+      return (
+        <>
+          <button
+            type="button"
+            data-testid="test-bump-activation"
+            onClick={() => setActivationKey((k) => k + 1)}
+          >
+            activate
+          </button>
+          <CvSidebar
+            isUploadDisabled={false}
+            onSidebarUploadSuccess={vi.fn()}
+            activationKey={activationKey}
+            deps={{
+              loadProfile,
+              uploadCv: vi.fn(),
+              observability: api,
+            }}
+          />
+        </>
+      );
+    }
+
+    render(
+      <Theme theme={neutralTheme}>
+        <Harness />
+      </Theme>,
+    );
+
+    await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
+    expect(await screen.findByText('archived.pdf')).toBeInTheDocument();
+    expect(fetchCvHistory).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByTestId('test-bump-activation'));
+
+    await waitFor(() => {
+      expect(fetchCvHistory).toHaveBeenCalledTimes(2);
+    });
+    // Prior safe row remains visible while the activation reload is in flight
+    // (not header-only idle / empty).
+    expect(screen.getByText('archived.pdf')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-obs-cv-history-empty'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-obs-cv-history-loading'),
+    ).not.toBeInTheDocument();
+
+    resolveSecond(second);
+    expect(await screen.findByText('activated.pdf')).toBeInTheDocument();
+    expect(screen.queryByText('archived.pdf')).not.toBeInTheDocument();
   });
 });

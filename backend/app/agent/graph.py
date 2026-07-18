@@ -17,6 +17,7 @@ defaults to the seven production tools via :func:`production_registry`.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
@@ -42,6 +43,7 @@ from app.agent.prompt import build_system_prompt
 from app.agent.state import AGENT_CONVERSATION_ID, AGENT_STATE_FIELDS
 from app.core.settings import Settings, get_settings
 from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.tools.jobs import SAVE_JOB_NAME
 from app.tools.profile import (
     COMMIT_PROFILE_DRAFT_NAME,
     ERROR_INVALID_PROFILE_UPDATE,
@@ -53,6 +55,22 @@ from app.tools.registry import ToolRegistry, production_registry
 # Stable controlled-failure code when the tool loop would exceed the limit.
 ERROR_TOOL_LOOP_LIMIT_EXCEEDED: str = "TOOL_LOOP_LIMIT_EXCEEDED"
 ERROR_PROFILE_UPDATE_FAILED: str = "PROFILE_UPDATE_FAILED"
+
+# Fixed truthful fallback when an explicitly named save_job turn never executes.
+NAMED_SAVE_JOB_NO_ACTION_TEXT: str = (
+    "No action occurred: save_job was not executed, so no Job was created "
+    "or reused."
+)
+
+# Exact registered token only (word boundary). Not NL paraphrase detection.
+_SAVE_JOB_NAME_IN_REQUEST = re.compile(rf"\b{re.escape(SAVE_JOB_NAME)}\b")
+
+_NAMED_SAVE_JOB_REPAIR_INSTRUCTION: str = (
+    "Required repair: the user explicitly named the registered save_job tool. "
+    "Call exactly one valid save_job with the user's url or text argument. "
+    "Do not call any other tool. Do not answer with plain text. Do not claim "
+    "that a Job was created, returned, or reused until a ToolResult exists."
+)
 
 # Graph node names — exactly one decision node and one ToolNode.
 DECISION_NODE_NAME: str = "agent"
@@ -434,6 +452,156 @@ def _has_invalid_profile_update_result(state: AgentGraphState) -> bool:
     return False
 
 
+def _message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    return str(content) if content is not None else ""
+
+
+def _initiating_user_text(state: AgentGraphState) -> str:
+    """Return the first HumanMessage text for this turn (initiating request)."""
+    raw_messages = state.get(MESSAGES_KEY)
+    messages: list[Any] = (
+        list(raw_messages) if isinstance(raw_messages, list) else []
+    )
+    for item in messages:
+        if isinstance(item, HumanMessage):
+            return _message_text(item.content)
+    return ""
+
+
+def _request_names_save_job(
+    user_text: str,
+    *,
+    save_job_registered: bool,
+) -> bool:
+    """True when the initiating text names the registered save_job tool."""
+    # ponytail: exact-name gate is intentionally narrow — only the literal
+    # registered save_job token in the initiating user text (word boundary), not
+    # natural-language paraphrase detection. Acceptable while the verified F-04
+    # failure surface is explicit named requests. If natural-language mutation
+    # reliability later remains insufficient, replace this gate with a typed
+    # mutation-intent contract rather than expanding keyword heuristics.
+    if not save_job_registered or not user_text:
+        return False
+    return _SAVE_JOB_NAME_IN_REQUEST.search(user_text) is not None
+
+
+def _turn_already_called_save_job(messages: Sequence[Any]) -> bool:
+    for item in messages:
+        if isinstance(item, AIMessage):
+            for call in item.tool_calls or []:
+                if _tool_call_name(call) == SAVE_JOB_NAME:
+                    return True
+        if (
+            isinstance(item, ToolMessage)
+            and getattr(item, "name", None) == SAVE_JOB_NAME
+        ):
+            return True
+    return False
+
+
+def _is_sole_save_job_call(message: AIMessage | None) -> bool:
+    if message is None:
+        return False
+    calls = list(message.tool_calls or [])
+    if len(calls) != 1:
+        return False
+    return _tool_call_name(calls[0]) == SAVE_JOB_NAME
+
+
+def _latest_save_job_tool_result(
+    messages: Sequence[Any],
+) -> dict[str, Any] | None:
+    """Return the newest validated save_job ToolResult payload, if any."""
+    save_call_ids: set[str] = set()
+    for item in messages:
+        if not isinstance(item, AIMessage):
+            continue
+        for call in item.tool_calls or []:
+            if _tool_call_name(call) != SAVE_JOB_NAME:
+                continue
+            call_id: Any
+            if isinstance(call, dict):
+                call_id = call.get("id")
+            else:
+                call_id = getattr(call, "id", None)
+            if isinstance(call_id, str) and call_id.strip():
+                save_call_ids.add(call_id)
+
+    for item in reversed(list(messages)):
+        if not isinstance(item, ToolMessage):
+            continue
+        name = getattr(item, "name", None)
+        call_id = getattr(item, "tool_call_id", None)
+        if name != SAVE_JOB_NAME and call_id not in save_call_ids:
+            continue
+        payload = _parse_tool_result_payload(item.content)
+        if payload is None:
+            continue
+        summary = payload.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+        if "ok" not in payload:
+            continue
+        return payload
+    return None
+
+
+def _project_save_job_narration(payload: dict[str, Any]) -> str:
+    """Project final assistant text from validated save_job ToolResult only."""
+    summary = str(payload.get("summary") or "").strip()
+    data = payload.get("data")
+    data_dict = data if isinstance(data, dict) else {}
+    outcome = data_dict.get("outcome")
+    job_id = data_dict.get("job_id")
+    ok = payload.get("ok") is True
+
+    if not ok:
+        code = payload.get("code")
+        if summary:
+            return summary
+        if isinstance(code, str) and code.strip():
+            return f"save_job failed ({code.strip()})."
+        return "save_job failed."
+
+    if outcome == "returned":
+        # Compact outcome wins over any model-like "created" language.
+        base = summary or "Returned existing job for exact content match"
+        if "created" in base.lower() and "return" not in base.lower():
+            base = "Returned existing job for exact content match"
+        if isinstance(job_id, str) and job_id.strip():
+            return (
+                f"{base} Existing job_id={job_id.strip()} was reused; "
+                "no new Job was created."
+            )
+        return f"{base} No new Job was created."
+
+    if outcome == "created":
+        base = summary or "Saved job description"
+        if isinstance(job_id, str) and job_id.strip():
+            return f"{base} job_id={job_id.strip()}."
+        return base
+
+    if outcome == "retried":
+        base = summary or "Retried failed job in place after exact content match"
+        if isinstance(job_id, str) and job_id.strip():
+            return f"{base} job_id={job_id.strip()}."
+        return base
+
+    if summary:
+        return summary
+    return "save_job completed."
+
+
+def _normalize_ai_response(response_raw: Any) -> AIMessage:
+    if isinstance(response_raw, AIMessage):
+        return response_raw
+    content = getattr(response_raw, "content", response_raw)
+    text = content if isinstance(content, str) else str(content)
+    return AIMessage(content=text)
+
+
 def _as_base_chat_model(
     model: BaseChatModel | Runnable[Any, Any],
 ) -> BaseChatModel:
@@ -496,6 +664,7 @@ def build_agent_graph(
     )
 
     commit_available = COMMIT_PROFILE_DRAFT_NAME in set(tool_names)
+    save_job_available = SAVE_JOB_NAME in set(tool_names)
 
     def decision_node(state: AgentGraphState) -> dict[str, Any]:
         """LLM decision: append AIMessage; set controlled error if loop exhausted."""
@@ -517,14 +686,46 @@ def build_agent_graph(
                 updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
             return updates
 
+        raw_messages = state.get(MESSAGES_KEY)
+        turn_messages: list[Any] = (
+            list(raw_messages) if isinstance(raw_messages, list) else []
+        )
+        named_save = _request_names_save_job(
+            _initiating_user_text(state),
+            save_job_registered=save_job_available,
+        )
+        save_job_already = _turn_already_called_save_job(turn_messages)
+
+        # After a durable save_job ToolResult on a named turn, narrate only from
+        # validated summary/compact outcome (never model mutation prose).
+        if named_save and save_job_already:
+            payload = _latest_save_job_tool_result(turn_messages)
+            if payload is not None:
+                return {
+                    MESSAGES_KEY: [
+                        AIMessage(content=_project_save_job_narration(payload))
+                    ]
+                }
+
         prompt_messages = _build_model_messages(state, system_prompt)
         response_raw = chat.invoke(prompt_messages)
-        if isinstance(response_raw, AIMessage):
-            response: AIMessage = response_raw
-        else:
-            content = getattr(response_raw, "content", response_raw)
-            text = content if isinstance(content, str) else str(content)
-            response = AIMessage(content=text)
+        response = _normalize_ai_response(response_raw)
+
+        # Explicitly named save_job: plain-text first answer is discarded once;
+        # repair must be exactly one valid sole save_job call or fixed no-action.
+        if named_save and not save_job_already:
+            if not _has_tool_calls(response):
+                # Discard unsupported mutation prose; one bounded repair only.
+                repair_messages = list(prompt_messages) + [
+                    SystemMessage(content=_NAMED_SAVE_JOB_REPAIR_INSTRUCTION)
+                ]
+                response = _normalize_ai_response(chat.invoke(repair_messages))
+            if not _is_sole_save_job_call(response):
+                return {
+                    MESSAGES_KEY: [
+                        AIMessage(content=NAMED_SAVE_JOB_NO_ACTION_TEXT)
+                    ]
+                }
 
         updates = {MESSAGES_KEY: [response]}
         count = int(state.get("tool_iteration_count") or 0)

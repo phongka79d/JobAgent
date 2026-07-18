@@ -169,7 +169,9 @@ export function SavedJobDetailView({
             ) : null}
             <MetadataListItem label="Summary">
               <Text type="body" maxLines={4} hasTruncateTooltip as="span">
-                {extraction.summary}
+                {extraction.summary.trim() === ''
+                  ? 'No summary available'
+                  : extraction.summary}
               </Text>
             </MetadataListItem>
             <MetadataListItem label="Seniority">

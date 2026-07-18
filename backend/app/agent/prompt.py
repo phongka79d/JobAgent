@@ -65,6 +65,10 @@ def build_system_prompt(
         "- When a tool returns a failed result (ok=false, a non-null error "
         "code, or an explicit failure summary), never claim that the action "
         "succeeded. Explain the failure truthfully using the tool summary.",
+        "- Never claim that a registered write tool created, returned, "
+        "reused, updated, or deleted data until a ToolResult for that exact "
+        "tool call is present in this turn. Plain conversation alone is not "
+        "evidence of a mutation.",
         "",
     ]
 
@@ -87,6 +91,23 @@ def build_system_prompt(
             "Use a listed tool only when the user request requires that "
             "capability; otherwise answer directly."
         )
+        if "save_job" in names:
+            sections.extend(
+                [
+                    "",
+                    "save_job truthfulness:",
+                    "- When the user explicitly names save_job, call that "
+                    "registered tool once with exactly one of url or text. Do "
+                    "not answer with plain text that claims a Job was created "
+                    "or reused before a ToolResult exists.",
+                    "- After save_job returns, report only the ToolResult "
+                    "summary and compact outcome (created, returned, or "
+                    "retried). A returned exact-duplicate Job must not be "
+                    "described as newly created.",
+                    "- If you cannot call save_job, say that no action "
+                    "occurred; never invent a success claim.",
+                ]
+            )
         if "propose_profile_from_cv" in names or "commit_profile_draft" in names:
             sections.extend(
                 [

@@ -732,4 +732,246 @@ describe('Save Profile refreshes sidebar', () => {
       );
     });
   });
+
+  it('Save Profile fans out profile, activation, and saved-JD invalidation once', async () => {
+    const {cvHistoryPage, mockObservabilityApi} = await import(
+      './support/observability'
+    );
+    let profileCalls = 0;
+    const loadProfile = vi.fn(async (): Promise<ProfileReadResponse> => {
+      profileCalls += 1;
+      if (profileCalls === 1) {
+        return {
+          present: false,
+          profile: null,
+          preferences: null,
+          active_attachment: null,
+          draft_present: true,
+          pending_attachment: null,
+        };
+      }
+      return {
+        present: true,
+        profile: {
+          summary: 'Approved',
+          current_title: 'Senior Backend Engineer',
+        },
+        preferences: {
+          target_roles: ['Backend'],
+          preferred_locations: [],
+          acceptable_work_modes: [],
+          target_seniority: [],
+        },
+        active_attachment: {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          original_name: 'approved-cv.pdf',
+          mime_type: 'application/pdf',
+          size_bytes: 100,
+          page_count: 1,
+          state: 'active',
+          failure_code: null,
+        },
+        draft_present: false,
+        pending_attachment: null,
+      };
+    });
+
+    const firstCv = cvHistoryPage();
+    const secondCv = cvHistoryPage();
+    secondCv.items[0] = {
+      ...secondCv.items[0]!,
+      original_name: 'post-save.pdf',
+      state: 'active',
+    };
+    const fetchCvHistory = vi
+      .fn()
+      .mockResolvedValueOnce(firstCv)
+      .mockResolvedValueOnce(secondCv);
+    const observability = mockObservabilityApi({fetchCvHistory});
+
+    const jobId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const currentList = {
+      items: [
+        {
+          id: jobId,
+          title: 'Backend Engineer',
+          company: 'Acme',
+          processing_status: 'processed',
+          jd_quality: 'full',
+          source_type: 'text',
+          source_url: null,
+          created_at: TS,
+          updated_at: TS,
+          evaluation_state: 'current',
+          latest_score: 0.9,
+        },
+      ],
+      next_cursor: null,
+    };
+    const staleList = {
+      items: [
+        {
+          ...currentList.items[0]!,
+          evaluation_state: 'stale',
+        },
+      ],
+      next_cursor: null,
+    };
+    let jobsListCalls = 0;
+    const evaluateCalls: string[] = [];
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (url.includes('/api/jobs') && method === 'POST') {
+          evaluateCalls.push(url);
+          return new Response(JSON.stringify({error: 'unexpected'}), {
+            status: 500,
+            headers: {'Content-Type': 'application/json'},
+          });
+        }
+        if (url.includes(`/api/jobs/${jobId}`) && method === 'GET') {
+          const compact = jobsListCalls > 1 ? staleList.items[0]! : currentList.items[0]!;
+          return new Response(
+            JSON.stringify({
+              compact,
+              extraction: null,
+              raw_content: null,
+              latest_evaluation: null,
+            }),
+            {status: 200, headers: {'Content-Type': 'application/json'}},
+          );
+        }
+        if (url.includes('/api/jobs') && method === 'GET') {
+          jobsListCalls += 1;
+          const body = jobsListCalls === 1 ? currentList : staleList;
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: {'Content-Type': 'application/json'},
+          });
+        }
+        return new Response(JSON.stringify({}), {
+          status: 404,
+          headers: {'Content-Type': 'application/json'},
+        });
+      });
+
+    const prev = import.meta.env.VITE_API_BASE_URL;
+    // @ts-expect-error test mutation of Vite env
+    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
+
+    try {
+      const loadHistory = vi.fn().mockResolvedValue(interruptedHistory());
+      const resumeRun = vi.fn(
+        async (
+          _runId: string,
+          action: string,
+          cbs: StreamCallbacks,
+          _signal?: AbortSignal,
+        ) => {
+          expect(action).toBe(SAVE_PROFILE_ACTION);
+          cbs.onEvent(
+            sse(EVENT_F, 'run_started', {state: 'running', resumed: true}),
+          );
+          cbs.onEvent(
+            sse(EVENT_G, 'tool_status', {
+              tool_execution_id: TOOL_EXEC,
+              tool_call_id: 'tc-commit-1',
+              tool_name: 'commit_profile_draft',
+              status: 'completed',
+              duration_ms: 30,
+              summary: 'Profile committed',
+            }),
+          );
+          cbs.onEvent(sse(EVENT_H, 'run_completed', {state: 'completed'}));
+        },
+      );
+
+      render(
+        <Theme theme={neutralTheme}>
+          <App
+            deps={{
+              chat: {
+                loadHistory,
+                sendTurn: vi.fn(),
+                resumeRun,
+                uploadCv: vi.fn(),
+              },
+              sidebar: {
+                loadProfile,
+                uploadCv: vi.fn(),
+                getActiveCvUrl: () => 'http://localhost/api/profile/cv',
+                observability,
+              },
+            }}
+          />
+        </Theme>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('jobagent-approval-card')).toBeInTheDocument();
+      });
+
+      // Seed CV Manager cache, then open saved-JD (activation while JD tab open).
+      await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
+      expect(await screen.findByText('archived.pdf')).toBeInTheDocument();
+      expect(fetchCvHistory).toHaveBeenCalledTimes(1);
+
+      await userEvent.click(screen.getByRole('tab', {name: 'JD đã lưu'}));
+      await waitFor(() => {
+        expect(jobsListCalls).toBeGreaterThanOrEqual(1);
+      });
+      expect(
+        await screen.findByTestId(`jobagent-saved-job-select-${jobId}`),
+      ).toBeInTheDocument();
+      await userEvent.click(
+        screen.getByTestId(`jobagent-saved-job-select-${jobId}`),
+      );
+
+      const profileBefore = loadProfile.mock.calls.length;
+      const jobsBefore = jobsListCalls;
+      const cvBefore = fetchCvHistory.mock.calls.length;
+
+      await userEvent.click(
+        screen.getByRole('button', {name: SAVE_PROFILE_LABEL}),
+      );
+
+      await waitFor(() => {
+        expect(resumeRun).toHaveBeenCalledTimes(1);
+      });
+      // Profile refresh signal.
+      await waitFor(() => {
+        expect(loadProfile.mock.calls.length).toBe(profileBefore + 1);
+      });
+      // Saved-JD invalidation while open → list/detail GET; no evaluate POST.
+      await waitFor(() => {
+        expect(jobsListCalls).toBeGreaterThan(jobsBefore);
+      });
+      expect(evaluateCalls).toHaveLength(0);
+      await waitFor(() => {
+        expect(
+          screen.getByTestId(`jobagent-saved-job-stale-badge-${jobId}`),
+        ).toBeInTheDocument();
+      });
+      // Activation marked CV non-current without a fetch while the tab was closed.
+      expect(fetchCvHistory.mock.calls.length).toBe(cvBefore);
+
+      // Returning to CV Manager performs the deferred activation reload once.
+      await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
+      await waitFor(() => {
+        expect(fetchCvHistory.mock.calls.length).toBe(cvBefore + 1);
+      });
+      expect(await screen.findByText('post-save.pdf')).toBeInTheDocument();
+
+      // Single fan-out: each of the three signals advanced once.
+      expect(loadProfile.mock.calls.length - profileBefore).toBe(1);
+      expect(fetchCvHistory.mock.calls.length - cvBefore).toBe(1);
+      expect(jobsListCalls - jobsBefore).toBeGreaterThanOrEqual(1);
+    } finally {
+      fetchMock.mockRestore();
+      // @ts-expect-error restore Vite env
+      import.meta.env.VITE_API_BASE_URL = prev;
+    }
+  });
 });

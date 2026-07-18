@@ -742,10 +742,15 @@ export function parseJobPostExtraction(
   ) {
     throw new Error('extraction.work_mode is invalid');
   }
+  // Extraction summary is a required string that may be empty (backend parity);
+  // MatchResult.summary remains independently non-empty via parseMatchResult.
+  if (typeof raw.summary !== 'string') {
+    throw new Error('extraction.summary must be a string');
+  }
   return {
     title: asNullableDisplayString(raw.title, 'extraction.title'),
     company: asNullableDisplayString(raw.company, 'extraction.company'),
-    summary: asNonEmptyString(raw.summary, 'extraction.summary'),
+    summary: raw.summary,
     responsibilities: asStringList(
       raw.responsibilities,
       'extraction.responsibilities',

@@ -66,6 +66,11 @@ export type ObservabilityState = {
   graph: CachedResource<GraphSnapshot>;
   /** Sidebar-local CV Manager pending/error maps (Master §15.6). */
   cvManager: CvManagerActionSlice;
+  /**
+   * Advances on Save Profile activation invalidation. Open tabs reload when this
+   * changes; selection and last safe CV rows are preserved (Plan 11 F-03).
+   */
+  activationGeneration: number;
 };
 
 const emptyResource = <T,>(): CachedResource<T> => ({
@@ -86,6 +91,7 @@ export const initialObservabilityState: ObservabilityState = {
   runs: emptyResource(),
   graph: emptyResource(),
   cvManager: initialCvManagerActionSlice,
+  activationGeneration: 0,
 };
 
 export function chunkDetailKey(attachmentId: string, ordinal: number): string {
@@ -199,6 +205,16 @@ function applyLoading<T>(prev: CachedResource<T>): CachedResource<T> {
     data: prev.data,
     error: null,
     loaded: prev.loaded,
+  };
+}
+
+/** Mark resource non-current while retaining last safe data for loading UI. */
+function markNonCurrent<T>(prev: CachedResource<T>): CachedResource<T> {
+  return {
+    phase: 'loading',
+    data: prev.data,
+    error: null,
+    loaded: false,
   };
 }
 
@@ -440,15 +456,17 @@ export function observabilityReducer(
       };
     }
     case 'cv_invalidate_activation': {
-      // After approval activates a reprocessed CV — force list/chunks/runs/graph reload.
-      // Active selection stays until list refresh; profile summary is composition-owned.
+      // After approval activates a reprocessed CV — mark CV/chunk/run/graph
+      // non-current, retain last safe CV/run/graph rows for truthful loading,
+      // advance generation so an open tab issues one guarded reload (Plan 11).
       return {
         ...state,
-        cvHistory: emptyResource<CvHistoryPage>(),
+        activationGeneration: state.activationGeneration + 1,
+        cvHistory: markNonCurrent(state.cvHistory),
         chunkLists: {},
         chunkDetails: {},
-        runs: emptyResource<RunHistoryPage>(),
-        graph: emptyResource<GraphSnapshot>(),
+        runs: markNonCurrent(state.runs),
+        graph: markNonCurrent(state.graph),
       };
     }
     default:

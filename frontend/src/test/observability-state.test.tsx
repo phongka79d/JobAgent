@@ -305,10 +305,11 @@ describe('CV Manager action state and invalidation', () => {
     ).toBeUndefined();
   });
 
-  it('keeps selection and prior cache on reprocess failure; activation clears caches only', () => {
+  it('keeps selection and prior cache on reprocess failure; activation retains safe rows', () => {
     let state = seededState();
     const priorSelection = state.selectedAttachmentId;
     const priorCv = state.cvHistory.data;
+    const priorGeneration = state.activationGeneration;
     state = observabilityReducer(state, {
       type: 'cv_action_begin',
       attachmentId: ATTACHMENT_ID,
@@ -326,12 +327,66 @@ describe('CV Manager action state and invalidation', () => {
     );
 
     state = observabilityReducer(state, {type: 'cv_invalidate_activation'});
+    expect(state.activationGeneration).toBe(priorGeneration + 1);
     expect(state.cvHistory.loaded).toBe(false);
+    expect(state.cvHistory.phase).toBe('loading');
+    // Last safe CV rows retained for truthful open-tab loading (not blank idle).
+    expect(state.cvHistory.data).toEqual(priorCv);
     expect(state.runs.loaded).toBe(false);
     expect(state.graph.loaded).toBe(false);
     expect(Object.keys(state.chunkLists)).toHaveLength(0);
     // Selection unchanged until approved list refresh.
     expect(state.selectedAttachmentId).toBe(priorSelection);
+  });
+
+  it('invalidateAfterActivation advances generation and allows forced history reload', async () => {
+    const firstPage = cvHistoryPage();
+    const secondPage = cvHistoryPage();
+    secondPage.items[0] = {
+      ...secondPage.items[0]!,
+      original_name: 'post-activation.pdf',
+      state: 'active',
+    };
+    const fetchCvHistory = vi
+      .fn()
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    const {result} = renderHook(() =>
+      useObservabilityState({api: {fetchCvHistory}}),
+    );
+
+    await act(async () => {
+      await result.current.loadCvHistory();
+    });
+    expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
+      'archived.pdf',
+    );
+    act(() => {
+      result.current.selectAttachment(ATTACHMENT_ID);
+    });
+    const priorSelection = result.current.state.selectedAttachmentId;
+    const priorGen = result.current.state.activationGeneration;
+
+    act(() => {
+      result.current.invalidateAfterActivation();
+    });
+
+    expect(result.current.state.activationGeneration).toBe(priorGen + 1);
+    expect(result.current.state.selectedAttachmentId).toBe(priorSelection);
+    expect(result.current.state.cvHistory.loaded).toBe(false);
+    expect(result.current.state.cvHistory.phase).toBe('loading');
+    expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
+      'archived.pdf',
+    );
+
+    await act(async () => {
+      await result.current.loadCvHistory({force: true});
+    });
+    expect(fetchCvHistory).toHaveBeenCalledTimes(2);
+    expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
+      'post-activation.pdf',
+    );
+    expect(result.current.state.cvHistory.loaded).toBe(true);
   });
 
   it('confirmDelete success path clears deleted row and invalidates runs/graph', async () => {

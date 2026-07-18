@@ -11,9 +11,23 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch08 complete on product HEAD `e429c10`):** Plan 8
-Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy sidebar
-inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
+**Current status (Plan 11 Batch01 accepted, commit-ready on worktree over product
+base `d845480`):** Plan 11 Batch01 delivers the four root-cause functional
+repairs for desktop failures F-01 through F-05 with focused regressions only.
+CORS method allowlist is exactly `GET`/`POST`/`DELETE` so browser preflight
+permits existing CV and Job DELETE routes; Save Profile activation fans out once
+to profile refresh, observability generation-backed reload, and non-destructive
+saved-JD currentness invalidation (no automatic evaluate, no blank open CV
+Manager); explicitly named `save_job` turns get one bounded decision-node repair
+or fixed no-action text and ToolResult-derived narration; empty extraction
+summaries parse and render `No summary available` while MatchResult stays
+non-empty. Focused backend pytest and frontend Vitest suites for Batch01 pass on
+the combined worktree. Full static/full-suite gates and the five desktop
+reproductions remain Plan 11 Batch02 (`02A`). Plan 10 Batch08 remains the prior
+accepted product baseline on HEAD `e429c10`.
+
+Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
+sidebar inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
 Batch01–Batch07 remain as delivered: SQLite document foundation, document-first
 extraction and atomic drafts, approval-gated reprocess/activation, retryable
 non-active CV deletion (exact `CV.id` graph branch via `graph/delete_cv.py`),
