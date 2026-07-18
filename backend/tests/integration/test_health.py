@@ -226,11 +226,14 @@ def test_partial_startup_failure_cleans_up_resources(
 def test_only_public_functional_routes_are_health_chat_cv_and_profile(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Public surface after Plan 8/9: health, chat, CV, profile, observability."""
+    """Public surface after Plan 10: health, chat, CV, profile, observability, jobs."""
     expected = [
         ("DELETE", "/api/cvs/{attachment_id}"),
+        ("DELETE", "/api/jobs/{job_id}"),
         ("GET", "/api/chat/history"),
         ("GET", "/api/health"),
+        ("GET", "/api/jobs"),
+        ("GET", "/api/jobs/{job_id}"),
         ("GET", "/api/observability/cvs"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
@@ -243,12 +246,13 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
         ("POST", "/api/chat/runs/{run_id}/resume"),
         ("POST", "/api/chat/turns"),
         ("POST", "/api/cvs/{attachment_id}/reprocess"),
+        ("POST", "/api/jobs/save-and-evaluate"),
+        ("POST", "/api/jobs/{job_id}/evaluate"),
     ]
     with health_client() as client:
         assert sorted(public_api_routes(client.app)) == sorted(expected)
-        # Jobs remain non-public; profile GETs exist (wrong method is 405, not 404).
-        assert client.get("/api/jobs").status_code == 404
-        assert client.post("/api/jobs").status_code == 404
+        # Jobs list is GET-only; profile GETs exist (wrong method is 405, not 404).
+        assert client.post("/api/jobs").status_code == 405
         assert client.post("/api/profile").status_code == 405
         assert client.post("/api/profile/cv").status_code == 405
         # CV upload is POST-only (GET is method-not-allowed, not a read route).
@@ -280,6 +284,16 @@ def test_source_tree_has_no_other_route_decorators() -> None:
             "'/cvs/{attachment_id}/reprocess')",
             "health.py:get_health:router.get("
             "'/health', response_model=HealthResponse)",
+            "jobs.py:delete_saved_job_route:router.delete("
+            "'/jobs/{job_id}', status_code=204, response_class=Response)",
+            "jobs.py:get_saved_job:router.get("
+            "'/jobs/{job_id}', response_model=SavedJobDetail)",
+            "jobs.py:list_saved_jobs:router.get("
+            "'/jobs', response_model=SavedJobListPage)",
+            "jobs.py:post_evaluate_job:router.post("
+            "'/jobs/{job_id}/evaluate', response_model=EvaluateJobResponse)",
+            "jobs.py:post_save_and_evaluate:router.post("
+            "'/jobs/save-and-evaluate', response_model=SaveAndEvaluateResponse)",
             "observability.py:get_observability_chunk_detail:router.get("
             "'/observability/cvs/{attachment_id}/chunks/{ordinal}', "
             "response_model=ChunkDetail)",

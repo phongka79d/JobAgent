@@ -1261,5 +1261,5 @@ def test_profile_routes_have_no_write_crud_and_are_thin() -> None:
     for method, path in routes:
         if path in {"/api/profile", "/api/profile/cv"}:
             assert method == "GET"
-    # Plan 8/9 expanded public surface (observability + CV manager).
-    assert len(routes) == 15
+    # Plan 10 expanded public surface (observability + CV manager + saved-JD jobs).
+    assert len(routes) == 20
