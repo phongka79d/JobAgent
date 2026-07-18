@@ -26,6 +26,7 @@ from tests.support.db_migration import (
     assert_migrated_matches_accepted_models,
     expected_indexes,
     expected_named_constraints,
+    observe_schema,
     run_async,
     session_factory,
 )
@@ -88,9 +89,9 @@ def test_migrated_schema_exact_model_parity(db_path: Path) -> None:
                     )
 
                 await c.run_sync(_check)
-            # Programmatic completeness: none of the 63/8 expected missing.
-            assert len(expected_named_constraints()) == 63
-            assert len(expected_indexes()) == 8
+            # Programmatic completeness: none of the 67/9 expected missing.
+            assert len(expected_named_constraints()) == 67
+            assert len(expected_indexes()) == 9
         finally:
             await e.dispose()
 
@@ -311,6 +312,157 @@ def test_seeded_preferences_json_shape(db_path: Path) -> None:
             }
             assert all(prefs[k] == [] for k in prefs)
             assert int(n) == 0
+        finally:
+            await e.dispose()
+
+    run_async(_c())
+
+
+def _job_insert(job_id: str = "job-e1") -> str:
+    return (
+        "INSERT INTO job_posts ("
+        "id, source_type, source_url, raw_content, raw_content_hash, "
+        "extraction_json, processing_status, jd_quality, failure_code, "
+        "embedding_json, embedding_model, embedding_dimensions, "
+        "created_at, updated_at) VALUES ("
+        f"'{job_id}', 'text', NULL, 'JD body', 'hash-{job_id}', "
+        f"NULL, 'received', NULL, NULL, NULL, NULL, NULL, '{TS}', '{TS}')"
+    )
+
+
+def _eval_insert(
+    *,
+    eval_id: str,
+    job_id: str,
+    att_id: str,
+    ctx: str,
+) -> str:
+    result = json.dumps(
+        {
+            "job_id": job_id,
+            "title": "T",
+            "company": None,
+            "location": None,
+            "work_mode": "remote",
+            "source_url": None,
+            "final_score": 0.5,
+            "quality_multiplier": 1.0,
+            "components": {
+                "semantic_similarity": 0.5,
+                "skill_score": None,
+                "seniority_score": None,
+                "experience_score": None,
+                "location_score": None,
+                "work_mode_score": None,
+            },
+            "effective_weights": {"semantic_similarity": 1.0},
+            "matched_required_skills": [],
+            "matched_preferred_skills": [],
+            "related_skills": [],
+            "missing_required_skills": [],
+            "summary": "ok",
+        }
+    ).replace("'", "''")
+    return (
+        "INSERT INTO job_evaluations ("
+        "id, job_id, active_attachment_id, evaluation_context_hash, "
+        "job_revision, profile_revision, preferences_revision, "
+        "cv_source_hash, matching_contract_version, result_json, "
+        "created_at, updated_at) VALUES ("
+        f"'{eval_id}', '{job_id}', '{att_id}', '{ctx}', "
+        f"'{TS}', '{TS}', '{TS}', 'cvhash', 'match_v1', '{result}', "
+        f"'{TS}', '{TS}')"
+    )
+
+
+def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
+    """Named unique/index and CASCADE from job_posts and attachments."""
+
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with e.connect() as c:
+
+                def _check(sync_conn: object) -> None:
+                    observed = observe_schema(sync_conn)  # type: ignore[arg-type]
+                    assert "uq_job_evaluations__job_context" in (
+                        observed["named_constraints"]
+                    )
+                    assert "ix_job_evaluations__job_created_at" in (
+                        observed["indexes"]
+                    )
+                    ix = observed["indexes"][
+                        "ix_job_evaluations__job_created_at"
+                    ]
+                    assert ix["columns"] == ("job_id", "created_at")
+                    assert ix["unique"] is False
+                    fks = observed["foreign_keys"]
+                    assert (
+                        "job_evaluations",
+                        "job_id",
+                        "job_posts",
+                        "id",
+                        "CASCADE",
+                    ) in fks
+                    assert (
+                        "job_evaluations",
+                        "active_attachment_id",
+                        "attachments",
+                        "id",
+                        "CASCADE",
+                    ) in fks
+
+                await c.run_sync(_check)
+
+            async with f() as s:
+                await _x(s, _att("att-e1", "he1", "pe1"))
+                await _x(s, _job_insert("job-e1"))
+                await _x(
+                    s,
+                    _eval_insert(
+                        eval_id="eval-1",
+                        job_id="job-e1",
+                        att_id="att-e1",
+                        ctx="ctx-a",
+                    ),
+                )
+                await s.commit()
+
+            # Unique (job_id, evaluation_context_hash).
+            await _fail(
+                f,
+                _eval_insert(
+                    eval_id="eval-dup",
+                    job_id="job-e1",
+                    att_id="att-e1",
+                    ctx="ctx-a",
+                ),
+            )
+
+            async with f() as s:
+                await _x(s, "DELETE FROM job_posts WHERE id = 'job-e1'")
+                await s.commit()
+                assert await _cnt(s, "job_evaluations") == 0
+
+            async with f() as s:
+                await _x(s, _att("att-e2", "he2", "pe2"))
+                await _x(s, _job_insert("job-e2"))
+                await _x(
+                    s,
+                    _eval_insert(
+                        eval_id="eval-2",
+                        job_id="job-e2",
+                        att_id="att-e2",
+                        ctx="ctx-b",
+                    ),
+                )
+                await s.commit()
+            async with f() as s:
+                await _x(s, "DELETE FROM attachments WHERE id = 'att-e2'")
+                await s.commit()
+                assert await _cnt(s, "job_evaluations") == 0
+                assert await _cnt(s, "job_posts") == 1
         finally:
             await e.dispose()
 

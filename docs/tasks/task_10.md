@@ -97,7 +97,7 @@ Own one Alembic revision, evaluation ORM/schema/repository, pure context-key log
 
 ### Tasks
 
-- [ ] (01A): Persist one validated evaluation per canonical Job context
+- [x] (01A): Persist one validated evaluation per canonical Job context
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch01 - Evaluation Persistence and Canonical Currentness` > `(01A)`

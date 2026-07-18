@@ -11,29 +11,33 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 9 Batch07 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch01 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
-synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch06 remain
+synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
 drafts, approval-gated reprocess/activation, retryable non-active CV deletion
 (exact `CV.id` graph branch via `graph/delete_cv.py`), owned CV graph
 projection/rebuild (`graph/sync_cv.py` fixed labels `CV` / `CVSection` /
 `CVEntry`, exclusive active `PROJECTS_TO`, provider-free rebuild, bounded
-observability caps and document-revision staleness), and bounded active-CV Agent
+observability caps and document-revision staleness), bounded active-CV Agent
 retrieval (`active_cv_context` outline injection, pure `section`/`search`/`chunk`
 reader, seventh tool `read_active_cv` on the existing single ToolNode with
-durable ownership/replay/redaction). Plan 9 Batch07 converts the CV History
-inspector into an accessible **CV Manager**: typed reprocess/delete transport
-and sidebar-local pending/error state with focused cache invalidation; reprocess
-SSE reuses the sole `streamCvReprocess` → chat reducer path and focuses the
-existing approval card; panel/dialog action matrix (Active badge; active
-Open/Re-extract only; non-active Open/Make active/Delete with named confirmation);
-graph display mapping for fixed CV/section/entry nodes without changing D3
-simulation/viewport semantics; refreshed rail, `13/47/40` proportions, and
-responsive shell preserved. Six typed `GET /api/observability/*` routes remain.
-Synthetic observability smoke evidence remains in
-`docs/acceptance/observability_sidebar_checklist.md`. Batch08 still owns the
-synthetic direct FE smoke checklist and live console/screenshot evidence.
+durable ownership/replay/redaction), and the accessible **CV Manager** sidebar
+(typed reprocess/delete transport, sidebar-local pending/error state, focused
+cache invalidation, sole `streamCvReprocess` SSE path, panel/dialog action
+matrix, CV-branch graph display without changing D3 simulation/viewport
+semantics). Six typed `GET /api/observability/*` routes remain. Synthetic
+observability smoke evidence remains in
+`docs/acceptance/observability_sidebar_checklist.md`. Plan 9 Batch08 still owns
+the synthetic direct FE smoke checklist and live console/screenshot evidence.
+
+Plan 10 Batch01 adds structural-only evaluation persistence and pure
+server-side context/currentness: Alembic head `0004_add_job_evaluations`, ORM/
+schema/repository for one validated `MatchResult` per
+`(job_id, evaluation_context_hash)`, named FKs with `CASCADE` from `job_posts`
+and `attachments`, and `evaluation_context` deriving stable sorted JSON +
+SHA-256 plus `none|current|stale` without rewriting history. No matching,
+provider, graph, API, or frontend evaluation wiring yet (Batch02+).
 
 ## Purpose and scope
 
@@ -90,8 +94,8 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, JD, matching, tool execution, history, observability assembly) |
-| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives) and observability cross-table read projections |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
@@ -100,10 +104,10 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 SQLite is the sole durable source of truth for profiles, attachments (including
 immutable `archived` history and `deleting` lifecycle), attachment text chunks,
-per-CV approved/draft documents, jobs, messages, runs, and tool results (with
-optional CV ownership columns). Neo4j is a derived Candidate/Job/Skill and
-fixed CV-branch index plus vector retrieval surface. ShopAIKey is the only
-external model provider.
+per-CV approved/draft documents, jobs, validated per-context `job_evaluations`,
+messages, runs, and tool results (with optional CV ownership columns). Neo4j is
+a derived Candidate/Job/Skill and fixed CV-branch index plus vector retrieval
+surface. ShopAIKey is the only external model provider.
 
 Public functional endpoints (Master §14 core plus Plan 8 observability):
 
@@ -253,8 +257,24 @@ python -m pytest tests/e2e/test_demo_flow.py -q
 Set-Location ..
 ```
 
+Focused Plan 10 Batch01 evaluation persistence and canonical currentness gate
+(migration head `0004_add_job_evaluations`, named schema/cascades, no evaluation
+backfill, stable context hash, `none|current|stale`, MatchResult validation,
+unique-key race reload):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/integration/test_migrations.py tests/integration/test_database_contract.py tests/integration/test_job_evaluations.py -q
+py -3.13 -m pytest tests/unit/test_evaluation_context.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
 Focused Plan 9 Batch01 CV document and ownership persistence gate (migration
-head `0003`, schema/ownership cascades, no document synthesis, ORM parity):
+head through `0003` contract paths, schema/ownership cascades, no document
+synthesis, ORM parity; head is now `0004` with evaluations included):
 
 ```powershell
 Set-Location backend

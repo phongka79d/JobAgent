@@ -15,12 +15,12 @@ from alembic import command
 from alembic.config import Config
 from app.core import settings as settings_module
 from app.core.settings import clear_settings_cache
-from app.db.seed import APPLICATION_TABLE_NAMES
 from app.db.session import dispose_engine, sqlite_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 # Re-export parity API so integration tests keep one import surface.
 from tests.support.schema_parity import (  # noqa: F401
+    PARITY_APPLICATION_TABLE_NAMES,
     assert_migrated_matches_accepted_models,
     expected_indexes,
     expected_named_constraints,
@@ -30,8 +30,9 @@ from tests.support.schema_parity import (  # noqa: F401
 T = TypeVar("T")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_HEAD = "0003_add_cv_documents_and_ownership"
-EXPECTED_FRESH_TABLES: frozenset[str] = APPLICATION_TABLE_NAMES | {
+MIGRATION_HEAD = "0004_add_job_evaluations"
+# Seed owner still lists pre-evaluation tables; parity includes job_evaluations.
+EXPECTED_FRESH_TABLES: frozenset[str] = PARITY_APPLICATION_TABLE_NAMES | {
     "alembic_version"
 }
 SANITIZED_ENV: dict[str, str] = {

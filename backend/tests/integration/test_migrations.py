@@ -80,7 +80,7 @@ async def _counts(e: AsyncEngine) -> dict[str, int]:
     return out
 
 
-def test_fresh_upgrade_creates_twelve_tables_and_singleton_seeds(
+def test_fresh_upgrade_creates_application_tables_and_singleton_seeds(
     isolated_sqlite: Path,
 ) -> None:
     db = isolated_sqlite
@@ -96,6 +96,7 @@ def test_fresh_upgrade_creates_twelve_tables_and_singleton_seeds(
             assert "attachment_text_chunks" in names
             assert "cv_documents" in names
             assert "cv_document_drafts" in names
+            assert "job_evaluations" in names
             counts = await _counts(e)
             assert counts["conversation"] == 1
             assert counts["job_preferences"] == 1
@@ -112,6 +113,13 @@ def test_fresh_upgrade_creates_twelve_tables_and_singleton_seeds(
                         )
                     )
                 ).one()
+                n_evals = (
+                    await c.execute(
+                        text("SELECT COUNT(*) FROM job_evaluations")
+                    )
+                ).scalar_one()
+                assert int(n_evals) == 0
+
                 def _parity(sc: object) -> None:
                     assert_migrated_matches_accepted_models(
                         sc,  # type: ignore[arg-type]
@@ -558,14 +566,8 @@ def test_upgrade_from_0002_preserves_rows_without_document_synthesis(
     run_async(_c())
 
 
-def test_migration_0003_has_no_external_call_imports() -> None:
-    """0003 must not import provider, filesystem, or Neo4j modules."""
-    path = (
-        BACKEND_ROOT
-        / "migrations"
-        / "versions"
-        / "0003_add_cv_documents_and_ownership.py"
-    )
+def _assert_migration_has_no_external_call_imports(path: Path) -> None:
+    """Structural migrations must not import provider/filesystem/Neo4j owners."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     forbidden_roots = {
         "app.services",
@@ -592,7 +594,185 @@ def test_migration_0003_has_no_external_call_imports() -> None:
             assert not any(
                 mod == f or mod.startswith(f + ".") for f in forbidden_roots
             )
+
+
+def test_migration_0003_has_no_external_call_imports() -> None:
+    """0003 must not import provider, filesystem, or Neo4j modules."""
+    path = (
+        BACKEND_ROOT
+        / "migrations"
+        / "versions"
+        / "0003_add_cv_documents_and_ownership.py"
+    )
+    _assert_migration_has_no_external_call_imports(path)
     src = path.read_text(encoding="utf-8")
     assert "cv_documents" in src
     assert "INSERT INTO cv_documents" not in src
     assert "INSERT INTO cv_document_drafts" not in src
+
+
+def test_migration_0004_has_no_external_call_imports_or_backfill() -> None:
+    """0004 is structural only: no provider/graph work and no evaluation rows."""
+    path = (
+        BACKEND_ROOT
+        / "migrations"
+        / "versions"
+        / "0004_add_job_evaluations.py"
+    )
+    _assert_migration_has_no_external_call_imports(path)
+    src = path.read_text(encoding="utf-8")
+    assert "job_evaluations" in src
+    assert "INSERT INTO job_evaluations" not in src
+    assert "op.create_table" in src
+    assert path.read_text(encoding="utf-8").count("create_table") == 1
+
+
+def test_upgrade_from_0003_preserves_rows_without_evaluation_synthesis(
+    isolated_sqlite: Path,
+) -> None:
+    """Existing 0003 data survives 0004; no job_evaluations rows invented."""
+    db = isolated_sqlite
+    command.upgrade(alembic_config(db), "0003_add_cv_documents_and_ownership")
+
+    async def _plant() -> None:
+        e = build_async_engine(db)
+        try:
+            async with e.begin() as c:
+                await c.execute(
+                    text(
+                        "INSERT INTO attachments ("
+                        "id, file_hash, original_name, mime_type, size_bytes, "
+                        "page_count, storage_path, state, failure_code, "
+                        "created_at, updated_at"
+                        ") VALUES ("
+                        "'a-active', 'h-active', 'cv.pdf', 'application/pdf', "
+                        "20, 2, 'p/active.pdf', 'active', NULL, "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "INSERT INTO job_posts ("
+                        "id, source_type, source_url, raw_content, "
+                        "raw_content_hash, extraction_json, processing_status, "
+                        "jd_quality, failure_code, embedding_json, "
+                        "embedding_model, embedding_dimensions, "
+                        "created_at, updated_at"
+                        ") VALUES ("
+                        "'job-1', 'text', NULL, 'Engineer role', 'hash-job-1', "
+                        "NULL, 'received', NULL, NULL, NULL, NULL, NULL, "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "INSERT INTO cv_documents ("
+                        "attachment_id, document_json, profile_json, "
+                        "outline_json, extraction_version, source_hash, "
+                        "created_at, updated_at"
+                        ") VALUES ("
+                        "'a-active', '{}', '{}', '{}', 'v1', 'cv-hash-1', "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "INSERT INTO chat_messages ("
+                        "id, conversation_id, role, content, "
+                        "structured_payload, created_at, updated_at"
+                        ") VALUES ("
+                        "'msg-1', 'main', 'user', 'keep me', NULL, "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "CREATE TABLE checkpoints ("
+                        "id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL)"
+                    )
+                )
+                await c.execute(
+                    text(
+                        "INSERT INTO checkpoints (id, payload) "
+                        "VALUES ('cp-0003', 'checkpoint-keep-0003')"
+                    )
+                )
+        finally:
+            await e.dispose()
+
+    run_async(_plant())
+    upgrade_to_head(db)
+    assert _current(db) == MIGRATION_HEAD
+
+    async def _c() -> None:
+        e = build_async_engine(db)
+        try:
+            async with e.connect() as c:
+                job = (
+                    await c.execute(
+                        text(
+                            "SELECT raw_content FROM job_posts WHERE id='job-1'"
+                        )
+                    )
+                ).scalar_one()
+                assert job == "Engineer role"
+                docs = (
+                    await c.execute(
+                        text("SELECT source_hash FROM cv_documents")
+                    )
+                ).scalar_one()
+                assert docs == "cv-hash-1"
+                msg = (
+                    await c.execute(
+                        text(
+                            "SELECT content FROM chat_messages WHERE id='msg-1'"
+                        )
+                    )
+                ).scalar_one()
+                assert msg == "keep me"
+                assert (
+                    int(
+                        (
+                            await c.execute(
+                                text("SELECT COUNT(*) FROM job_evaluations")
+                            )
+                        ).scalar_one()
+                    )
+                    == 0
+                )
+                payload = (
+                    await c.execute(
+                        text(
+                            "SELECT payload FROM checkpoints "
+                            "WHERE id = 'cp-0003'"
+                        )
+                    )
+                ).scalar_one()
+                assert payload == "checkpoint-keep-0003"
+
+                def _parity(sc: object) -> None:
+                    assert_migrated_matches_accepted_models(sc)  # type: ignore[arg-type]
+
+                await c.run_sync(_parity)
+
+                fk_rows = (
+                    await c.execute(
+                        text("PRAGMA foreign_key_list('job_evaluations')")
+                    )
+                ).fetchall()
+                assert any(
+                    str(r[3]) == "job_id"
+                    and str(r[2]) == "job_posts"
+                    and str(r[6] or "").upper() == "CASCADE"
+                    for r in fk_rows
+                )
+                assert any(
+                    str(r[3]) == "active_attachment_id"
+                    and str(r[2]) == "attachments"
+                    and str(r[6] or "").upper() == "CASCADE"
+                    for r in fk_rows
+                )
+        finally:
+            await e.dispose()
+
+    run_async(_c())

@@ -25,11 +25,22 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection
 from sqlalchemy.types import JSON, DateTime, TypeEngine
 
+# Plan 10 job_evaluations is registered on Base; seed APPLICATION_TABLE_NAMES
+# remains the pre-evaluation set until its owner is updated out of this task.
+JOB_EVALUATIONS_TABLE = "job_evaluations"
+PARITY_APPLICATION_TABLE_NAMES: frozenset[str] = (
+    APPLICATION_TABLE_NAMES | {JOB_EVALUATIONS_TABLE}
+)
+
 _CONSTRAINT_NAME_RE = re.compile(
     r"\bCONSTRAINT\s+([A-Za-z_][A-Za-z0-9_]*)\b",
     re.IGNORECASE,
 )
 _WHERE_RE = re.compile(r"\bWHERE\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+# 0003: 63 named constraints / 8 indexes; 0004 adds pk + 2 fk + uq + 1 index.
+EXPECTED_NAMED_CONSTRAINT_COUNT = 67
+EXPECTED_INDEX_COUNT = 9
 
 
 def _sqlite_type_name(col_type: TypeEngine[Any]) -> str:
@@ -46,13 +57,13 @@ def _sqlite_type_name(col_type: TypeEngine[Any]) -> str:
 
 
 def accepted_metadata() -> MetaData:
-    """Return the registered application metadata (twelve tables)."""
-    assert set(Base.metadata.tables) == APPLICATION_TABLE_NAMES
+    """Return the registered application metadata (thirteen tables)."""
+    assert set(Base.metadata.tables) == PARITY_APPLICATION_TABLE_NAMES
     return Base.metadata
 
 
 def expected_named_constraints() -> frozenset[str]:
-    """All named PK/UQ/CK/FK constraints from accepted models (63)."""
+    """All named PK/UQ/CK/FK constraints from accepted models (67)."""
     names: set[str] = set()
     for table in accepted_metadata().tables.values():
         for constraint in table.constraints:
@@ -153,7 +164,7 @@ def observe_schema(connection: Connection) -> dict[str, Any]:
     fks: set[tuple[str, str, str, str, str]] = set()
     indexes: dict[str, dict[str, Any]] = {}
 
-    for tname in sorted(APPLICATION_TABLE_NAMES):
+    for tname in sorted(PARITY_APPLICATION_TABLE_NAMES):
         if tname not in tables:
             continue
         col_rows = connection.execute(
@@ -226,13 +237,13 @@ def assert_migrated_matches_accepted_models(
     and every FK target/delete action.
     """
     expected_constraints = expected_named_constraints()
-    # 0002 had 56; +2 pk + 2 cv FKs + 3 ownership FKs = 63 named constraints.
-    assert len(expected_constraints) == 63
+    # 0003: 63; 0004 adds pk_job_evaluations + 2 FKs + uq_job_context = 67.
+    assert len(expected_constraints) == EXPECTED_NAMED_CONSTRAINT_COUNT
     expected_cols = expected_columns()
     expected_fks = expected_foreign_keys()
     expected_ix = expected_indexes()
-    # Prior 5 + 3 source_attachment_id indexes.
-    assert len(expected_ix) == 8
+    # 0003: 8; 0004 adds ix_job_evaluations__job_created_at.
+    assert len(expected_ix) == EXPECTED_INDEX_COUNT
 
     observed = observe_schema(connection)
     if exact_tables is not None:
@@ -242,7 +253,7 @@ def assert_migrated_matches_accepted_models(
             f"missing={set(exact_tables) - observed['tables']}"
         )
     else:
-        missing_tables = APPLICATION_TABLE_NAMES - observed["tables"]
+        missing_tables = PARITY_APPLICATION_TABLE_NAMES - observed["tables"]
         assert not missing_tables, f"missing application tables: {missing_tables}"
 
     assert observed["columns"] == expected_cols, (
@@ -257,7 +268,10 @@ def assert_migrated_matches_accepted_models(
     }
     assert not missing_c, f"missing named constraints: {sorted(missing_c)}"
     assert not extra_app_c, f"unexpected named constraints: {sorted(extra_app_c)}"
-    assert len(expected_constraints & observed["named_constraints"]) == 63
+    assert (
+        len(expected_constraints & observed["named_constraints"])
+        == EXPECTED_NAMED_CONSTRAINT_COUNT
+    )
 
     missing_fk = expected_fks - observed["foreign_keys"]
     extra_fk = observed["foreign_keys"] - expected_fks
