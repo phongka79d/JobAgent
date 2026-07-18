@@ -348,15 +348,8 @@ be reduced or delegated to rather than expanded.
 
 ### Next Consumer
 
-The immediate next consumer is a fresh independent review of `Master_plan.md` and
-Plans 1-9. Do not create `docs/tasks/task_9.md`, implementation batches, or product
-code from this plan until that review accepts the amended portfolio.
-
-## Completion Contract
-
-Plan 9 planning is complete only when Master Version 1.7, Plan 8's successor
-handoff, and this plan form one structurally valid portfolio; every approved
-document-first extraction, CV activation/deletion, Neo4j ownership, bounded Agent
-retrieval, existing-UI preservation, failure/recovery, and verification requirement
-has one explicit owner; no product code or task file was created; and the complete
-portfolio is handed to a fresh independent review.
+`Plan_10.md` consumes the implemented CV Manager/document-first/active-read baseline,
+the existing sidebar module and cache patterns, exact cross-store ownership rules,
+and the verified matching/graph contracts. It must add only the authorized saved-JD
+and revision-keyed-evaluation increment, and must not reimplement Plan 9 CV lifecycle,
+approval, bounded retrieval, or graph projection ownership.

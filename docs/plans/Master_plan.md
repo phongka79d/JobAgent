@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 1.7
+**Version:** 1.8
 **Date:** 2026-07-17
-**Status:** Amended for Phase 8 CV Manager; full plan portfolio requires fresh review before task writing
+**Status:** Amended for Phase 9 saved JD library and revision-keyed evaluations; full plan portfolio requires fresh review before task writing
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -25,6 +25,8 @@ The system must let the user:
 10. Manage retained CVs, reprocess and approve an archived CV as the active source, and delete non-active CVs with their owned data.
 11. Preserve every detected CV section in a document-first extraction, including headings such as Certifications, Projects, Awards, or Publications that are not fields in the Candidate Profile schema.
 12. Let the Agent inspect only the active CV through bounded, explicit retrieval instead of injecting the whole document into every prompt.
+13. Keep a compact saved-JD library with detail, explicit evaluation, and complete deletion actions in the existing sidebar.
+14. Persist at most one evaluation for the same JD and active CV/profile/preferences/scoring revision, mark older results as **Cần đánh giá lại**, and recompute only after an explicit user action.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
@@ -60,6 +62,8 @@ Otherwise, it remains outside the MVP.
 - Structured long-term memory for profile corrections and job preferences.
 - Manual JD input through public URL or raw text.
 - JD persistence, quality classification, duplicate handling, and extraction.
+- A compact saved-JD sidebar tab with detail, explicit evaluate/re-evaluate, and complete delete actions.
+- Revision-keyed persisted JD evaluations that are reused for the same current context and become visibly stale after CV, profile, preference, or scoring-contract changes.
 - Vietnamese and English CV/JD content.
 - JD inputs from any job family, not only AI/NLP roles.
 - Deterministic skill normalization with a small seed alias/relationship taxonomy.
@@ -351,11 +355,35 @@ Constraints:
 - Embeddings are permitted and required only for processed `full` or `partial` jobs; every other status/quality combination requires all three embedding fields to be null.
 - The service validates that `embedding_json` contains exactly `EMBEDDING_DIMENSIONS` finite floats.
 - Add `uq_job_posts__raw_content_hash` and `ix_job_posts__processing_quality` on `(processing_status, jd_quality)`.
-- Do not persist a score cache; `match_jobs` computes scores from the current profile and preferences.
+- Do not persist transient top-N query pages or retrieval rankings. The dedicated `job_evaluations` table below is the only persisted score/explanation record and is keyed to an exact evaluation context.
 
 A scorable Job is exactly a row with `processing_status='processed'`, `jd_quality in ('full', 'partial')`, and embedding model/dimensions matching the locked runtime configuration; the database rules above guarantee that its embedding fields are present.
 
 Allowed transitions are `received → processing → processed | failed`, `received → failed` for fetch failure, and `failed → processing` only when the user resubmits the same content. `processed` is terminal in the MVP. A temporary URL placeholder may be deleted after its fetched hash selects an existing Job.
+
+#### `job_evaluations`
+
+| Column | SQLite type | Null | Rules |
+|---|---|---:|---|
+| `id` | `TEXT` | No | UUID v4 primary key |
+| `job_id` | `TEXT` | No | FK to `job_posts.id`; `ON DELETE CASCADE` |
+| `active_attachment_id` | `TEXT` | No | FK to `attachments.id`; `ON DELETE CASCADE` |
+| `evaluation_context_hash` | `TEXT` | No | SHA-256 of the canonical revision tuple below |
+| `job_revision` | `DATETIME` | No | `job_posts.updated_at` used for this evaluation |
+| `profile_revision` | `DATETIME` | No | `candidate_profile.updated_at` used for this evaluation |
+| `preferences_revision` | `DATETIME` | No | `job_preferences.updated_at` used for this evaluation |
+| `cv_source_hash` | `TEXT` | No | Approved `cv_documents.source_hash` used for this evaluation |
+| `matching_contract_version` | `TEXT` | No | Version of candidate/job representation, scoring, and explanation contract |
+| `result_json` | `JSON` | No | Validated compact `MatchResult` for exactly this Job and context |
+| `created_at`, `updated_at` | `DATETIME` | No | UTC |
+
+Add `uq_job_evaluations__job_context` on `(job_id, evaluation_context_hash)` and `ix_job_evaluations__job_created_at` on `(job_id, created_at)`.
+
+Build `evaluation_context_hash` from canonical sorted JSON containing `job_id`, `job_posts.updated_at`, active attachment ID, approved CV source hash, `candidate_profile.updated_at`, `job_preferences.updated_at`, and `matching_contract_version`, then SHA-256 that byte representation. The service computes this tuple from SQLite; clients never provide revision fields or hashes. A row is **current** only when its hash equals the hash derived from the current approved context. Older rows are **stale** and render as **Cần đánh giá lại**; changing the active CV, approved profile, preferences, Job revision, or matching contract does not rewrite historical rows or trigger evaluation automatically.
+
+Evaluation is explicit and idempotent. For the same `(job_id, evaluation_context_hash)`, return the existing validated row without calling ShopAIKey, Neo4j scoring, or the explanation pipeline again. For a new context, run the existing consistency, exact-Job semantic/skill scoring, and deterministic explanation owners outside a transaction, then insert once in a short transaction; a uniqueness race reloads the winner. Store no raw CV, raw JD, embedding, prompt, or provider response in `result_json`.
+
+Deleting a Job cascades every evaluation for that Job. Deleting a non-active CV cascades evaluations derived from that attachment, consistent with complete CV-owned-data deletion; shared Jobs remain and show no/current-stale evaluation as applicable.
 
 #### `conversation`
 
@@ -440,6 +468,8 @@ CV tools set `source_attachment_id` before persisting arguments/results. If a fi
 | `attachments` | `chat_messages.source_attachment_id` | `SET NULL` | Preserve only the fixed redacted chat marker after CV deletion |
 | `attachments` | `agent_runs.source_attachment_id` | `CASCADE` | CV-scoped runs and their tool records are deleted with the CV |
 | `attachments` | `tool_executions.source_attachment_id` | `CASCADE` | Delete bounded CV excerpts/results even when the parent run is otherwise unrelated |
+| `attachments` | `job_evaluations.active_attachment_id` | `CASCADE` | Delete persisted results derived from an explicitly deleted non-active CV |
+| `job_posts` | `job_evaluations.job_id` | `CASCADE` | Complete Job deletion removes all persisted evaluations |
 | `conversation` | `chat_messages.conversation_id` | `CASCADE` | Test cleanup may remove the complete conversation |
 | `chat_messages` | `agent_runs.user_message_id` | `CASCADE` | A run cannot exist without its initiating turn |
 | `agent_runs` | `tool_executions.run_id` | `CASCADE` | Tool logs belong to one run |
@@ -454,6 +484,8 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 - **CV deletion:** reject the active attachment. Mark an eligible attachment `deleting`, redact its linked chat messages, and clear any draft in a short transaction; delete matching checkpoints, its retained file, and only its CV-owned Neo4j subgraph with idempotent operations; then delete CV-scoped runs plus every directly CV-owned tool execution and delete the attachment in a final transaction so chunks/documents cascade. Retrying `DELETE` resumes a `deleting` row. Shared `Job`, `Skill`, seed relationships, unrelated runs/messages, and the active Candidate projection are never deleted. A partial failure keeps the row in `deleting` with a stable safe code and retry guidance; the UI must not report success until the row and file are gone and the CV subgraph delete succeeded.
 - **Approval decision:** both approval buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
 - **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
+- **JD evaluation:** resolve the current evaluation context from SQLite. Return a current persisted evaluation before any provider or graph scoring call. Otherwise compute one exact-Job result outside a transaction and insert it in a short transaction under the unique context key; a concurrent duplicate reloads the committed row. CV/profile/preference changes only alter the derived current hash and never launch background recomputation.
+- **JD deletion:** reject an unknown ID without mutation; idempotently delete only the exact Neo4j `Job.id` node and its incident Job relationships first, then delete the SQLite `job_posts` row in a short transaction so `job_evaluations` cascade. Preserve every shared `Skill` node, seed `RELATED_TO` relationship, Candidate/CV branch, and unrelated Job. Return success only after both stores confirm completion; a graph failure keeps SQLite data available for retry.
 - **Chat turn:** create the user message and `agent_runs` row together. Persist tool status transitions in short transactions. Persist the final assistant message and terminal run state together.
 - A failed external call updates only the relevant status and `error_code`; it does not roll back previously accepted raw input.
 
@@ -641,6 +673,45 @@ Every terminal `tool_executions.result_json` must validate as `ToolResult`. `JSO
 - `unscorable`: no meaningful job responsibilities/skills, contact-only content, or extraction contains insufficient evidence.
 
 Do not duplicate `jd_quality` inside `extraction_json`.
+
+### 7.7 Saved JD and evaluation views
+
+```text
+SavedJobListItem
+- id, title, company, processing_status, jd_quality
+- source_type, source_url, created_at, updated_at
+- evaluation_state: none | current | stale
+- latest_score: float | None
+
+SavedJobDetail
+- compact: SavedJobListItem
+- extraction: JobPostExtraction | None
+- raw_content: str | None
+- latest_evaluation: JobEvaluationView | None
+
+JobEvaluationView
+- id, job_id, evaluation_state: current | stale
+- evaluation_context_hash
+- result: MatchResult
+- created_at, updated_at
+
+SaveAndEvaluateRequest
+- source_message_id: UUID
+
+EvaluateJobResponse
+- outcome: created | reused
+- job: SavedJobListItem
+- evaluation: JobEvaluationView
+
+SaveAndEvaluateResponse
+- ingest_outcome: created | existing | retried
+- job: SavedJobListItem
+- evaluation_outcome: created | reused | unavailable
+- evaluation: JobEvaluationView | None
+- code: str | None
+```
+
+List responses never include raw JD text, extraction evidence bodies, embeddings, prompts, or provider payloads. Detail returns the validated extraction and may return the selected persisted raw JD within the existing accepted-input size bound. `evaluation_context_hash` is opaque comparison metadata; clients cannot submit or override it. `SaveAndEvaluateRequest` names only the initiating chat message; the server loads that exact durable content, treats a sole validated public HTTP(S) URL as URL input and otherwise treats the complete bounded message as raw JD text. It never accepts a client-supplied replacement body or infers from the latest message. A persisted but failed/unscorable JD returns `evaluation_outcome='unavailable'` plus a stable safe code rather than claiming that evaluation succeeded.
 
 ---
 
@@ -1042,7 +1113,7 @@ max_chars: int = 6000, range 500..12000
 
 ## 14. Public FastAPI Boundary
 
-Expose the existing chat/profile endpoints, two explicit CV Manager mutations, and local observability reads.
+Expose the existing chat/profile endpoints, two explicit CV Manager mutations, bounded saved-JD actions, and local observability reads.
 
 ```text
 GET  /api/health
@@ -1053,6 +1124,12 @@ GET  /api/profile/cv
 
 POST   /api/cvs/{attachment_id}/reprocess
 DELETE /api/cvs/{attachment_id}
+
+GET    /api/jobs?limit=<n>&before=<opaque_cursor>
+GET    /api/jobs/{job_id}
+POST   /api/jobs/save-and-evaluate
+POST   /api/jobs/{job_id}/evaluate
+DELETE /api/jobs/{job_id}
 
 GET  /api/chat/history?limit=50&before=<opaque_cursor>
 POST /api/chat/turns
@@ -1068,8 +1145,8 @@ GET  /api/observability/graph
 
 ### 14.1 API rules
 
-- No public profile/job CRUD endpoints. The only direct CV writes are the named reprocess and delete actions; approval still uses the Agent interrupt/resume contract.
-- Job/profile edits occur through Agent tool calls. CV Manager routes call the same application services used by the Agent and do not duplicate extraction, approval, deletion, or graph logic.
+- No public profile CRUD endpoints. The only direct CV writes are the named reprocess and delete actions; approval still uses the Agent interrupt/resume contract. Saved-JD routes are the only public Job write boundary and expose only save-and-evaluate, evaluate, and complete delete actions required by the sidebar/empty-state UX.
+- Agent Job tools and public saved-JD routes are thin adapters over the same JD ingestion, exact deduplication, matching/scoring, evaluation repository, graph synchronization/deletion, and safe-error services. Neither boundary duplicates business logic, and the deterministic public API does not depend on the LLM choosing or chaining `save_job → match_jobs`.
 - File upload and chat messages remain separate requests.
 - Sidebar upload immediately starts a chat turn containing the returned attachment ID.
 - `POST /api/chat/turns` returns an SSE stream.
@@ -1082,6 +1159,10 @@ GET  /api/observability/graph
 - `GET /api/observability/cvs/{attachment_id}/file` validates an `active` or `archived` attachment, checks retained local-file availability, and streams only `application/pdf` with a sanitized `Content-Disposition` filename. Unknown IDs return `CV_ATTACHMENT_NOT_FOUND`; a missing retained file returns `CV_FILE_UNAVAILABLE`. Both are safe JSON errors and never reveal a storage path.
 - Observability cursors have no expiry. A cursor is valid while its encoded tuple decodes and its row ordering remains queryable; malformed cursors return `422`, and a well-formed cursor past the final page returns an empty page with `next_cursor=null`.
 - `GET /api/observability/graph` exposes a bounded snapshot rooted at the active CV plus Candidate/Job/Skill data and a typed unavailable or stale state. It never mutates the graph or accepts a client query. A `ready` response contains at most one active CV, one Candidate, 20 CVSections, 60 CVEntries, 20 Jobs, and 40 Skills; only `PROJECTS_TO`, `HAS_SECTION`, `HAS_ENTRY`, `HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO` edges are returned. Node/edge caps, stable ordering, omission counts, and truncation flags remain mandatory. Full CV bodies and arbitrary attributes are never serialized. With no active Candidate/CV, return `status='ready'`, an empty projection, and `NO_ACTIVE_PROFILE`.
+- `GET /api/jobs` is cursor-paginated with `limit` in `1..50`, stable `(created_at, id)` ordering, and compact `none | current | stale` evaluation state derived against the current server-side context. It omits raw JD, extraction evidence bodies, embeddings, and historical evaluation arrays. `GET /api/jobs/{job_id}` returns one selected validated detail and its latest evaluation; unknown IDs return `JOB_NOT_FOUND`.
+- `POST /api/jobs/save-and-evaluate` requires the exact initiating `source_message_id` from a completed run whose durable `match_jobs` result succeeded with `count=0`. The server loads that user message, resolves a sole validated public HTTP(S) URL or otherwise uses the complete bounded message as raw text, then reuses JD ingestion/exact deduplication and evaluates the resulting scorable Job. It returns an existing current evaluation when present. It never accepts replacement JD text from the client, selects the latest chat message, or asks the Agent to make a second tool decision.
+- `POST /api/jobs/{job_id}/evaluate` requires an active approved profile and a scorable Job. It returns `outcome='reused'` for the current context without provider/graph scoring calls, otherwise computes and persists exactly one result after the normal graph consistency gate. Stale rows remain immutable. No evaluation runs merely because a CV/profile/preference revision changed.
+- `DELETE /api/jobs/{job_id}` invokes the one complete deletion coordinator. It removes only exact Neo4j `Job.id` plus incident Job relationships, then the SQLite Job/evaluation rows, and returns `204` only after both stores succeed. It preserves shared Skill nodes, seed relationships, Candidate/CV data, and every unrelated Job; retry after a graph failure is safe.
 
 ### 14.2 SSE contract
 
@@ -1109,17 +1190,18 @@ FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may b
 
 - Preserve the implemented resizable Astryx shell and vertical observability tab rail from `docs/superpowers/plans/2026-07-16-observability-sidebar-ui-refresh.md`.
 - Preserve the current desktop proportions (approximately `13% / 47% / 40%` for rail/sidebar/chat composition), drag constraints, mobile drawer, and full-height chat behavior.
-- Phase 8 may change panel content density and action layout only as needed for CV Manager; it must not redesign colors, graph controls, navigation primitives, or the established responsive shell.
+- Phases 8-9 may change panel content density and action layout only as needed for CV Manager and the saved-JD library; they must not redesign colors, graph controls, navigation primitives, or the established responsive shell.
 
 ### 15.2 Sidebar
 
-The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Neo4j graph`, and `Agent runs` tabs.
+The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Neo4j graph`, `Agent runs`, and `JD đã lưu` tabs in that order. `JD đã lưu` appears directly below `Agent runs` in the vertical rail.
 
 - `Overview` retains active-CV filename, profile state, upload/replace, and view/download actions.
 - `CV Manager` lists active and archived attachment metadata, retained-file availability, extraction state, and active badge. An archived CV offers Open/Download, **Make active**, and **Delete**; the active row offers Open/Download and **Re-extract**, but no delete action. Reprocessing streams the normal extraction/approval workflow and does not change the badge before approval. **Delete** requires explicit confirmation naming the file and refreshes CV/chunk/graph/run caches only after the API confirms completion.
 - `LLM chunks` lists fixed previews for a selected attachment; full chunk text is fetched only after that row is expanded.
 - `Neo4j graph` renders the active CV, its dynamic sections/entries, and bounded Candidate/Job/Skill snapshot. After approval it changes to the newly active CV; after archived deletion it contains no nodes owned by the deleted CV.
 - `Agent runs` lists durable run/tool status and safe summaries, not arguments or internal traces.
+- `JD đã lưu` uses one sidebar-local compact list plus a selected detail view. Each row keeps title and company concise, shows processing/quality state and `none | current | stale` evaluation state, and may show the latest score. Selecting a row opens validated JD details and the persisted score/evidence breakdown. Per-JD actions are **Xem chi tiết**, **Đánh giá với CV** when no current result exists, **Đánh giá lại** only when stale, and **Xoá JD** behind an explicit confirmation. Use short one-line headings, existing typography/tokens/components, truncation with accessible full labels, and no overlapping or redundant titles.
 - Collapsed state retains a keyboard-accessible expand control and compact active-profile/CV status. Responsive behavior must not hide the chat composer or trap focus.
 
 Do not add a full profile editor, arbitrary graph-query UI, a developer console, or direct activation that bypasses extraction and approval.
@@ -1163,13 +1245,15 @@ Each top result shows:
 - Expandable component score breakdown.
 - Original source URL when available.
 
+When a successful `match_jobs` result has `count=0`, render one visible empty-state card instead of mapping an empty result array to no UI. Its heading is exactly **Chưa có kết quả đánh giá**, its explanation states that the initiating JD has not yet produced a saved evaluation, and its one-click primary CTA is exactly **Lưu JD & đánh giá lại**. Bind the CTA to that row's initiating message/source; while pending it is disabled and visibly busy, success replaces or supplements the empty state with the saved evaluation and invalidates the saved-JD list/detail, and failure keeps the card with a safe retry message. Do not show the CTA for a malformed tool payload or failed `match_jobs` result.
+
 ### 15.6 Observability sidebar boundaries
 
 The observability tabs and CV Manager are sidebar-local read models plus two explicit CV action states. They load on tab selection,
 cache successful pages by query, and keep independent loading, empty, and error
 states. The graph panel renders the Master allowlisted bounded snapshot and its
 truncation metadata; it does not infer hidden properties or query for more nodes.
-Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, and run caches.
+Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Saved-JD reads/actions extend the same sidebar-local request/cache pattern with independent list/detail/action state. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, run, and evaluation-currentness caches; saved-JD evaluate/delete invalidates only affected job list/detail, graph, and visible chat-card state.
 
 ---
 
@@ -1245,6 +1329,17 @@ No E5 query/passage prefixes are used. Apply the same documented whitespace norm
 5. Compute seniority, experience, location, and work-mode features.
 6. Calculate the transparent hybrid score.
 7. Return up to the requested top 10 with explanations.
+
+### 17.5 Explicit saved-JD evaluation flow
+
+1. Resolve the exact saved Job and current evaluation context from SQLite.
+2. Return the current persisted `job_evaluations` row immediately when the unique context exists.
+3. Otherwise run the Section 21 Candidate/Job consistency gate; never repair Neo4j inside evaluation.
+4. Embed the current approved Candidate representation once for this new context and read the exact `Job.id` semantic score from Neo4j, without depending on top-50 retrieval membership.
+5. Reuse the existing skill, seniority, experience, location, work-mode, quality multiplier, and deterministic explanation owners to build one `MatchResult`.
+6. Persist the validated compact result under the unique context key and return `created`; on a uniqueness race, reload and return `reused`.
+
+The combined save-and-evaluate route first delegates to the existing JD ingestion/exact-dedup service, then runs this same flow for the resulting Job. It is an explicit user action and not an Agent loop, background refresh, or second scoring implementation.
 
 ---
 
@@ -1458,6 +1553,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Score components and weight renormalization.
 - Empty skill lists, excluded skills, seed-related best matches, quality multipliers, unavailable components, and exact-score ties.
 - Matching order and deterministic explanations.
+- Evaluation-context canonicalization, current/stale derivation, unique-row reuse, and scoring-contract invalidation.
+- Exact saved-Job evaluation reuses matching components/explanations and does not require top-50 retrieval membership.
 - General conversation produces a direct answer without JobAgent tool calls.
 - Tool preconditions for approval and required state.
 - Idempotent Neo4j `MERGE` payloads.
@@ -1479,6 +1576,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - URL and raw-text JD ingestion.
 - Active, staged, and failed CV hash reuse plus exact JD return/retry behavior.
 - `match_jobs` with deterministic fake embeddings.
+- Saved-JD list/detail pagination and redaction, one-click message/source binding, exact-hash save reuse, current evaluation reuse without provider calls, explicit stale re-evaluation, and no automatic recomputation after CV/profile/preference changes.
+- Complete Job deletion removes SQLite evaluations and only the exact Neo4j Job branch while preserving shared Skill/seed/Candidate/CV data; graph failure retains SQLite state for retry.
 - Candidate/Job revision mismatch returns `NEO4J_REBUILD_REQUIRED`; unavailable Neo4j returns `NEO4J_UNAVAILABLE`.
 - Greeting and general-question turns persist messages and complete without tool events.
 - Chat-history cursor pagination and malformed-cursor `422` behavior.
@@ -1502,10 +1601,12 @@ Normal automated tests must not call the real ShopAIKey API.
 - Chat history hydration.
 - Load-older chat history pagination.
 - Match-card score breakdown.
+- Zero-result card with **Chưa có kết quả đánh giá**, one-click **Lưu JD & đánh giá lại**, pending/error/retry behavior, and no blank successful state.
 - Error and disconnected stream states.
 - Observability tabs: lazy load, cache, collapsed/expanded accessibility, chunk
   preview-to-detail expansion, empty/loading/error states, and narrow layouts.
 - CV Manager active badge, reprocess/approval flow, active-delete guard, confirmed archived deletion, cache invalidation, and partial-cleanup errors within the existing refreshed layout.
+- `JD đã lưu` tab order, compact list/selected detail, current/stale labels, persisted evaluation rendering, explicit evaluate/re-evaluate/delete actions, concise headings, confirmation, and narrow-layout behavior.
 
 ### 24.4 End-to-end smoke test
 
@@ -1521,9 +1622,13 @@ Send greeting
 → verify Neo4j and Agent bounded reads use the first CV
 → delete the now-archived second CV and verify owned SQLite/file/graph/run data is gone
 → submit JD text
-→ save/sync JD
-→ request matching
-→ display score and skill gaps
+→ receive a visible zero-result card when no Job was saved
+→ click Lưu JD & đánh giá lại once
+→ save/sync the exact JD and display its persisted score and skill gaps
+→ repeat evaluation with the same active context and verify the stored result is reused without provider scoring
+→ activate an approved different CV and verify the saved JD shows Cần đánh giá lại without automatic recomputation
+→ click Đánh giá lại and verify one new revision-keyed result
+→ delete the JD and verify its SQLite evaluations and exact Neo4j Job branch are gone while shared Skills remain
 ```
 
 ### 24.5 Local verification commands
@@ -1746,6 +1851,28 @@ Exit gate:
 
 ---
 
+### Phase 9 - Saved JD library and revision-keyed evaluations
+
+Tasks:
+
+- [ ] Add `job_evaluations` with the exact context key, revision metadata, compact validated result, cascade rules, migration, and repository contracts.
+- [ ] Refactor the existing matching pipeline so top-N matching and exact saved-Job evaluation share consistency, semantic, component, ordering, and explanation owners.
+- [ ] Add thin saved-JD list/detail, combined save-and-evaluate, explicit evaluate, and complete delete API routes with safe typed errors and no duplicated ingestion/scoring/graph logic.
+- [ ] Render the successful zero-match empty card with **Chưa có kết quả đánh giá** and the one-click **Lưu JD & đánh giá lại** action bound to the initiating message/source.
+- [ ] Add `JD đã lưu` directly below `Agent runs`, using a compact list plus selected detail, persisted score evidence, current/stale state, and explicit evaluate/re-evaluate/delete actions.
+- [ ] Implement exact Job graph deletion and SQLite evaluation cascade while preserving shared Skills, seed relationships, Candidate/CV branches, and unrelated Jobs.
+- [ ] Verify duplicate JD/context reuse, stale-on-revision behavior without automatic recompute, concise responsive labels, recovery states, and the complete local flow.
+
+Exit gate:
+
+- A zero-result `match_jobs` success always gives the user a visible recovery card; one click deterministically saves/deduplicates the initiating JD and evaluates it without relying on another Agent tool decision.
+- The same Job and evaluation context returns one stored result and performs no repeated provider/graph scoring; changing CV/profile/preferences/scoring revision marks it **Cần đánh giá lại** until the user explicitly acts.
+- `JD đã lưu` presents bounded compact rows and selected details with clear actions and no raw JD in list payloads or layout/title overlap.
+- Complete Job deletion removes its SQLite row/evaluations and exact Neo4j Job branch while preserving all shared graph data; partial failure never reports false success.
+- Existing chat, Agent, CV Manager, matching, graph rebuild, observability, desktop/mobile shell, and release suites remain green.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -1761,6 +1888,7 @@ Recommended sequence for one intern developer:
 | Phase 6 | 2–4 days |
 | Phase 7 | 4–6 days |
 | Phase 8 | 5–8 days |
+| Phase 9 | 4–6 days |
 
 This is approximately 3–5 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
 
@@ -1781,6 +1909,10 @@ JobAgent MVP is done only when all conditions are true:
 - The Agent remembers approved corrections across restarts.
 - The user can submit public URL or raw JD text.
 - Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
+- A successful zero-result match renders **Chưa có kết quả đánh giá** with a deterministic one-click **Lưu JD & đánh giá lại** recovery path.
+- The saved-JD library exposes compact list/detail and explicit evaluate/re-evaluate/delete actions directly below Agent runs.
+- The same JD and current evaluation context reuses one persisted result without repeat scoring; context changes show **Cần đánh giá lại** and never recompute automatically.
+- Complete JD deletion removes every persisted evaluation and only that Job's Neo4j node/relationships while preserving shared Skills and seed relationships.
 - Scorable jobs synchronize to Neo4j.
 - Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
 - Tool activity is visible and concise.
@@ -1814,11 +1946,11 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Phases 0-7 and the completed observability sidebar UI refresh form the implemented baseline. This Version 1.7 amendment locks the Phase 8 CV Manager increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-9 receive a fresh portfolio review.
+Phases 0-8 and the completed CV Manager/observability implementation form the baseline. This Version 1.8 amendment locks the Phase 9 saved-JD and revision-keyed-evaluation increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-10 receive a fresh portfolio review.
 
 The project remains intentionally narrow:
 
-> One user, one natural conversation, one approved active CV selected through CV Manager, one Agent with bounded active-document access, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, and transparent matching behavior.
+> One user, one natural conversation, one approved active CV selected through CV Manager, one Agent with bounded active-document access, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, manual JD input, a compact saved-JD library, and explicit revision-keyed transparent evaluation.
 
 ---
 
