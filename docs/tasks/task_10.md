@@ -161,7 +161,7 @@ Own matching-root refactoring, exact-Job graph similarity reads, and evaluation 
 
 ### Tasks
 
-- [ ] (02A): Share exact-Job and top-N scoring without changing ranking behavior
+- [x] (02A): Share exact-Job and top-N scoring without changing ranking behavior
   - Task Type: refactor
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch02 - Shared Exact-Job Scoring and Idempotent Evaluation` > `(02A)`
@@ -207,7 +207,7 @@ Own matching-root refactoring, exact-Job graph similarity reads, and evaluation 
   - Blocked Condition: A formula/consistency source conflict is `BLOCKED_SOURCE_CONFLICT`; a root fix outside Allowed Files is `BLOCKED_SCOPE_CONFLICT`; unavailable test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/services/matching.py`, `backend/app/services/match_scoring.py`, `backend/app/services/match_components.py`, `backend/app/services/match_explanations.py`, `backend/app/graph/retrieval.py`, `backend/tests/unit/test_match_components.py`, `backend/tests/unit/test_match_explanations.py`, `backend/tests/unit/test_match_ordering.py`, `backend/tests/unit/test_job_evaluation.py`, `backend/tests/integration/test_match_jobs.py`
 
-- [ ] (02B): Evaluate one saved Job with current-context reuse and change detection
+- [x] (02B): Evaluate one saved Job with current-context reuse and change detection
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch02 - Shared Exact-Job Scoring and Idempotent Evaluation` > `(02B)`

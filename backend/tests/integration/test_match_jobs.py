@@ -26,7 +26,11 @@ from app.graph.consistency import NEO4J_REBUILD_REQUIRED, NEO4J_UNAVAILABLE
 from app.graph.constraints import JOB_EMBEDDING_VECTOR_INDEX_NAME
 from app.graph.rebuild_snapshot import load_source_revision_snapshot
 from app.graph.rebuild_target import CANONICAL_COMPOSE_REBUILD_COMMAND
-from app.graph.retrieval import JobRetrievalError, retrieve_job_candidates
+from app.graph.retrieval import (
+    JobRetrievalError,
+    retrieve_exact_job_candidate,
+    retrieve_job_candidates,
+)
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
 from app.repositories import jobs as jobs_repo
@@ -291,7 +295,86 @@ def test_retrieval_owner_reuses_index_and_snapshot_owners() -> None:
     assert "rollback(" not in source
     assert "flush(" not in source
     assert "db.index.vector.queryNodes" in source
+    assert "vector.similarity.cosine" in source
+    assert "retrieve_exact_job_candidate" in source
     assert "clamp" in source
+
+
+def test_exact_job_retrieval_targets_requested_id_outside_vector_top_k(
+    sqlite_factory: Any,
+) -> None:
+    """Exact Job.id cosine read works without vector top-50 membership."""
+    target_id = run_async(
+        seed_scorable_job(sqlite_factory, raw_hash="exact-outside-top50")
+    )
+    # Many other scorable IDs prove exact path does not require vector ranking.
+    other_ids = {
+        run_async(
+            seed_scorable_job(
+                sqlite_factory,
+                raw_hash=f"exact-other-{index}",
+            )
+        )
+        for index in range(51)
+    }
+    scorable = frozenset(other_ids | {target_id})
+    vector = embedding_vector(0.77)
+    driver = ScriptedReadDriver(
+        (
+            ScriptedRead(
+                "vector.similarity.cosine",
+                [{"id": target_id, "score": 0.42}],
+            ),
+        ),
+    )
+
+    async def _body() -> Any:
+        async with sqlite_factory() as session:
+            return await retrieve_exact_job_candidate(
+                session,
+                driver,
+                job_id=target_id,
+                candidate_vector=vector,
+                scorable_job_ids=scorable,
+            )
+
+    result = run_async(_body())
+
+    assert result.job_id == target_id
+    assert result.semantic_similarity == 0.42
+    assert result.extraction.title == "Backend Engineer"
+    assert result.jd_quality == "full"
+    assert len(driver.queries) == 1
+    assert "vector.similarity.cosine" in driver.queries[0]
+    assert "db.index.vector.queryNodes" not in driver.queries[0]
+    assert driver.parameters[0]["job_id"] == target_id
+    assert driver.parameters[0]["candidate_vector"] == vector
+    assert driver.write_queries == []
+
+
+def test_exact_job_retrieval_rejects_id_outside_scorable_set(
+    sqlite_factory: Any,
+) -> None:
+    job_id = run_async(
+        seed_scorable_job(sqlite_factory, raw_hash="exact-not-scorable")
+    )
+    driver = ScriptedReadDriver(
+        (ScriptedRead("vector.similarity.cosine", [{"id": job_id, "score": 0.9}]),)
+    )
+
+    async def _body() -> None:
+        async with sqlite_factory() as session:
+            await retrieve_exact_job_candidate(
+                session,
+                driver,
+                job_id=job_id,
+                candidate_vector=embedding_vector(0.1),
+                scorable_job_ids=frozenset({"other-job"}),
+            )
+
+    with pytest.raises(JobRetrievalError, match="not in the current scorable set"):
+        run_async(_body())
+    assert driver.session_enter == 0
 
 
 # ---------------------------------------------------------------------------
@@ -928,15 +1011,18 @@ def test_match_jobs_orchestrator_delegates_and_is_read_only() -> None:
     assert "check_graph_revision_consistency" in source
     assert "build_candidate_embedding_text_v1" in source
     assert "retrieve_job_candidates" in source
-    assert "compute_skill_coverage" in source
-    assert "rank_match_candidates" in source
-    assert "project_match_jobs_result" in source
+    assert "score_retrieved_candidates" in source
+    assert "match_scoring" in source
     assert "ERROR_ACTIVE_PROFILE_MISSING" in source
     assert "profile_drafts" in source or "ERROR_ACTIVE_PROFILE_MISSING" in source
     assert "MERGE" not in source
     assert "upsert_" not in source
     assert "sync_job" not in source
     assert "sync_candidate" not in source
+    # Pure formula/explanation work stays in the shared scoring owner.
+    assert "compute_skill_coverage" not in source
+    assert "rank_match_candidates" not in source
+    assert "project_match_jobs_result" not in source
 
 
 # ---------------------------------------------------------------------------

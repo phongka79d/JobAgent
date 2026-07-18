@@ -21,6 +21,14 @@ _VECTOR_RETRIEVAL_CYPHER = (
     "RETURN node.id AS id, score AS score"
 )
 
+# Exact Job.id cosine read — independent of vector top-k membership.
+_EXACT_JOB_SIMILARITY_CYPHER = (
+    "MATCH (j:Job {id: $job_id}) "
+    "WHERE j.embedding IS NOT NULL "
+    "RETURN j.id AS id, "
+    "vector.similarity.cosine(j.embedding, $candidate_vector) AS score"
+)
+
 
 class JobRetrievalError(Exception):
     """Raised when vector retrieval cannot safely return ranked candidates."""
@@ -135,9 +143,82 @@ async def retrieve_job_candidates(
     ]
 
 
+async def _query_exact_job_similarity(
+    driver: AsyncGraphReadDriver,
+    *,
+    job_id: str,
+    candidate_vector: list[float],
+) -> list[dict[str, Any]]:
+    async with driver.session() as session:
+        result = await session.run(
+            _EXACT_JOB_SIMILARITY_CYPHER,
+            {
+                "job_id": job_id,
+                "candidate_vector": candidate_vector,
+            },
+        )
+        return await result.data()
+
+
+async def retrieve_exact_job_candidate(
+    session: Any,
+    driver: AsyncGraphReadDriver,
+    *,
+    job_id: str,
+    candidate_vector: Any,
+    scorable_job_ids: Iterable[str],
+) -> RetrievedJobCandidate:
+    """Return one scorable Job by exact id with Neo4j semantic similarity.
+
+    Requires ``job_id`` in the revision-consistent scorable set from the
+    pre-match consistency gate. Uses a direct Job-node cosine read and never
+    depends on vector top-50 membership.
+    """
+    if not isinstance(job_id, str) or job_id.strip() == "":
+        raise JobRetrievalError("exact Job id must be a non-empty string")
+
+    vector = validate_finite_vector(candidate_vector)
+    current_scorable_ids = frozenset(scorable_job_ids)
+    if job_id not in current_scorable_ids:
+        raise JobRetrievalError(
+            "exact Job id is not in the current scorable set"
+        )
+
+    rows = await _query_exact_job_similarity(
+        driver,
+        job_id=job_id,
+        candidate_vector=vector,
+    )
+    if not rows:
+        raise JobRetrievalError(
+            "Neo4j exact Job read returned no embedding for requested id"
+        )
+    ids_and_scores = _retrieved_ids_and_scores(rows)
+    if len(ids_and_scores) != 1 or ids_and_scores[0][0] != job_id:
+        raise JobRetrievalError(
+            "Neo4j exact Job read did not return the requested Job id"
+        )
+    _, score = ids_and_scores[0]
+
+    facts = await load_scorable_job_facts(session, (job_id,))
+    if job_id not in facts:
+        raise JobRetrievalError(
+            "SQLite hydration missing current scorable Job facts"
+        )
+
+    return RetrievedJobCandidate(
+        job_id=job_id,
+        semantic_similarity=score,
+        extraction=facts[job_id].extraction,
+        jd_quality=facts[job_id].jd_quality,
+        source_url=facts[job_id].source_url,
+    )
+
+
 __all__ = [
     "MAX_VECTOR_RETRIEVAL_K",
     "JobRetrievalError",
     "RetrievedJobCandidate",
+    "retrieve_exact_job_candidate",
     "retrieve_job_candidates",
 ]

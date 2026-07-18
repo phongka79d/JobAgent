@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch01 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch02 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -31,13 +31,22 @@ observability smoke evidence remains in
 `docs/acceptance/observability_sidebar_checklist.md`. Plan 9 Batch08 still owns
 the synthetic direct FE smoke checklist and live console/screenshot evidence.
 
-Plan 10 Batch01 adds structural-only evaluation persistence and pure
+Plan 10 Batch01 added structural-only evaluation persistence and pure
 server-side context/currentness: Alembic head `0004_add_job_evaluations`, ORM/
 schema/repository for one validated `MatchResult` per
 `(job_id, evaluation_context_hash)`, named FKs with `CASCADE` from `job_posts`
 and `attachments`, and `evaluation_context` deriving stable sorted JSON +
-SHA-256 plus `none|current|stale` without rewriting history. No matching,
-provider, graph, API, or frontend evaluation wiring yet (Batch02+).
+SHA-256 plus `none|current|stale` without rewriting history.
+
+Plan 10 Batch02 completes shared exact-Job scoring and idempotent evaluation
+orchestration: pure `match_scoring` projects top-N and single-Job results
+through the same component/explanation owners (no formula fork); exact
+`retrieve_exact_job_candidate` cosine read scores a Job outside vector top-50;
+`evaluate_job` reuses a current context row with zero repeat provider/graph/
+explanation work, otherwise runs consistency → embed once → exact score
+outside SQLite transactions → context revalidation → short insert (or race
+reload), returning safe codes including `EVALUATION_CONTEXT_CHANGED`. Public
+saved-JD routes, deletion, and frontend evaluation wiring remain later batches.
 
 ## Purpose and scope
 
@@ -94,9 +103,9 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, JD, matching, tool execution, history, observability assembly) |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, JD, top-N `match_jobs`, tool execution, history, observability assembly) |
 | `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup) and observability cross-table read projections |
-| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), provider-free rebuild, allowlisted observability projection |
+| `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, revision consistency (Candidate/Job + active-CV observability), top-50 vector retrieval + exact `Job.id` cosine semantic read, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
 | `backend/app/core/settings.py` | Sole runtime settings model; loads only root `.env` |
 | `backend/migrations/versions/` | Sole Alembic migration chain (`script_location = migrations` in `backend/alembic.ini`) |
@@ -266,6 +275,20 @@ unique-key race reload):
 Set-Location backend
 py -3.13 -m pytest tests/integration/test_migrations.py tests/integration/test_database_contract.py tests/integration/test_job_evaluations.py -q
 py -3.13 -m pytest tests/unit/test_evaluation_context.py -q
+py -3.13 -m ruff check app tests --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch02 shared exact-Job scoring and idempotent evaluation gate
+(top-N parity, exact-outside-top-50 cosine read, pure shared scorer, current-
+context reuse with zero repeat external calls, context drift
+`EVALUATION_CONTEXT_CHANGED`, uniqueness race reload, safe failures):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_match_components.py tests/unit/test_match_explanations.py tests/unit/test_match_ordering.py tests/unit/test_evaluation_context.py tests/unit/test_job_evaluation.py tests/integration/test_job_evaluations.py tests/integration/test_match_jobs.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
 Set-Location ..

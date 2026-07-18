@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -45,20 +44,8 @@ from app.schemas.profile import (
 )
 from app.services.embedding_text import build_candidate_embedding_text_v1
 from app.services.jd_ingestion import EmbeddingClient
-from app.services.match_components import (
-    MatchScoreComponents,
-    compute_experience_score,
-    compute_location_score,
-    compute_seniority_score,
-    compute_work_mode_score,
-    rank_match_candidates,
-)
-from app.services.match_explanations import (
-    MatchExplanationInput,
-    project_match_jobs_result,
-)
+from app.services.match_scoring import score_retrieved_candidates
 from app.services.profile_drafts import ERROR_ACTIVE_PROFILE_MISSING
-from app.services.skill_matching import compute_skill_coverage
 from app.services.skill_normalization import SkillNormalizer
 
 logger = logging.getLogger(__name__)
@@ -160,71 +147,6 @@ def _consistency_failure(
     )
 
 
-def _score_retrieved_candidates(
-    *,
-    profile: CandidateProfile,
-    preferences: JobPreferences,
-    candidates: list[Any],
-    normalizer: SkillNormalizer,
-    limit: int,
-) -> MatchJobsResultData:
-    """Pure scoring/explanation projection over already-hydrated candidates."""
-    components_by_id: dict[str, MatchScoreComponents] = {}
-    coverage_by_id: dict[str, Any] = {}
-    meta_by_id: dict[str, Any] = {}
-
-    for candidate in candidates:
-        coverage = compute_skill_coverage(
-            profile.skills,
-            required_skills=candidate.extraction.required_skills,
-            preferred_skills=candidate.extraction.preferred_skills,
-            normalizer=normalizer,
-        )
-        components = MatchScoreComponents(
-            job_id=candidate.job_id,
-            semantic_similarity=candidate.semantic_similarity,
-            skill_score=coverage.skill_score,
-            seniority_score=compute_seniority_score(
-                candidate.extraction.seniority,
-                preferences.target_seniority,
-            ),
-            experience_score=compute_experience_score(
-                profile.total_experience_years,
-                candidate.extraction.min_experience_years,
-            ),
-            location_score=compute_location_score(
-                candidate.extraction.location,
-                preferences.preferred_locations,
-            ),
-            work_mode_score=compute_work_mode_score(
-                candidate.extraction.work_mode,
-                preferences.acceptable_work_modes,
-            ),
-            jd_quality=candidate.jd_quality,
-        )
-        components_by_id[candidate.job_id] = components
-        coverage_by_id[candidate.job_id] = coverage
-        meta_by_id[candidate.job_id] = candidate
-
-    ranked = rank_match_candidates(
-        list(components_by_id.values()),
-        limit=limit,
-    )
-    explanation_inputs = [
-        MatchExplanationInput(
-            scored=scored,
-            skill_coverage=coverage_by_id[scored.components.job_id],
-            title=meta_by_id[scored.components.job_id].extraction.title,
-            company=meta_by_id[scored.components.job_id].extraction.company,
-            location=meta_by_id[scored.components.job_id].extraction.location,
-            work_mode=meta_by_id[scored.components.job_id].extraction.work_mode,
-            source_url=meta_by_id[scored.components.job_id].source_url,
-        )
-        for scored in ranked
-    ]
-    return project_match_jobs_result(explanation_inputs, limit=limit)
-
-
 async def match_jobs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
@@ -319,7 +241,7 @@ async def match_jobs(
         )
 
     # 5) Pure scoring / explanation / top-limit projection (no I/O).
-    data = _score_retrieved_candidates(
+    data = score_retrieved_candidates(
         profile=profile,
         preferences=preferences,
         candidates=retrieved,
