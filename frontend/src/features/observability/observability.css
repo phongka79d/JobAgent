@@ -261,6 +261,22 @@
   min-width: 0;
 }
 
+/* Saved-JD compact rows: keep title/actions from colliding in the rail. */
+.jobagent-obs-saved-jobs .astryx-list-item,
+[data-testid='jobagent-obs-saved-jobs'] [data-testid^='jobagent-saved-job-select-'] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[data-testid='jobagent-saved-job-detail'] {
+  min-width: 0;
+}
+
+[data-testid='jobagent-saved-job-detail'] .jobagent-obs-row-actions {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .jobagent-graph-skeleton-canvas {
   width: 100%;
   height: clamp(20rem, 48vh, 30rem);

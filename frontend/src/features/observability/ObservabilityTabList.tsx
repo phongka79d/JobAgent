@@ -1,7 +1,8 @@
-import {Icon, type IconName} from '@astryxdesign/core/Icon';
+import {Icon} from '@astryxdesign/core/Icon';
 import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Tooltip} from '@astryxdesign/core/Tooltip';
 
+import {OBSERVABILITY_TABS} from './observabilityTabs';
 import type {ObservabilityTabId} from './types';
 
 const TAB_FIT_STYLE = {
@@ -17,18 +18,6 @@ const VERTICAL_TAB_LIST_STYLE = {
 
 // Astryx 0.1.4 defaults undefined to "Tabs"; remove when the component supports presentational composition.
 const OMITTED_ARIA_LABEL = null as unknown as string;
-
-const TABS: ReadonlyArray<{
-  id: ObservabilityTabId;
-  label: string;
-  icon: IconName;
-}> = [
-  {id: 'overview', label: 'Overview', icon: 'info'},
-  {id: 'cv-history', label: 'CV Manager', icon: 'clock'},
-  {id: 'chunks', label: 'LLM chunks', icon: 'viewColumns'},
-  {id: 'graph', label: 'Neo4j graph', icon: 'arrowsUpDown'},
-  {id: 'runs', label: 'Agent runs', icon: 'wrench'},
-];
 
 export function ObservabilityTabList({
   value,
@@ -51,14 +40,14 @@ export function ObservabilityTabList({
         aria-label={OMITTED_ARIA_LABEL}
         value={value}
         onChange={(next) => {
-          const tab = TABS.find((item) => item.id === next);
+          const tab = OBSERVABILITY_TABS.find((item) => item.id === next);
           if (tab) onChange(tab.id);
         }}
         orientation="vertical"
         size="sm"
         style={VERTICAL_TAB_LIST_STYLE}
       >
-        {TABS.map((tab) => (
+        {OBSERVABILITY_TABS.map((tab) => (
           <Tab
             key={tab.id}
             value={tab.id}

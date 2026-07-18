@@ -500,7 +500,7 @@ Own tab integration, compact saved-JD panels/dialog, existing component reuse, a
 
 ### Tasks
 
-- [ ] (06A): Render compact saved-JD list, detail, evaluation, and deletion actions
+- [x] (06A): Render compact saved-JD list, detail, evaluation, and deletion actions
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch06 - Accessible Saved-JD Sidebar Interface` > `(06A)`

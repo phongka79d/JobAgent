@@ -11,6 +11,9 @@ import {
   type ToolStatus,
 } from '../chat/types';
 
+/** Tab identity lives in observabilityTabs.ts (focused extraction; Master §15.2). */
+export type {ObservabilityTabId} from './observabilityTabs';
+
 export type ObservabilityAttachmentState =
   | 'staged'
   | 'active'
@@ -27,13 +30,6 @@ export type GraphEdgeType =
   | 'PROJECTS_TO'
   | 'HAS_SECTION'
   | 'HAS_ENTRY';
-
-export type ObservabilityTabId =
-  | 'overview'
-  | 'cv-history'
-  | 'chunks'
-  | 'graph'
-  | 'runs';
 
 export type CvHistoryItem = {
   id: string;

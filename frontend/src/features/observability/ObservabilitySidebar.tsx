@@ -1,13 +1,16 @@
 /**
  * Observability inspector composition: tabs, lazy fetch/cache, and panel routing.
  * Profile/upload state stays in CvSidebar; this owns inspector state only.
+ * Saved-JD list/detail/actions compose focused jobs modules (Plan 10 / Master §15.6).
  */
 
-import {useEffect, type ReactNode} from 'react';
+import {useCallback, useEffect, type ReactNode} from 'react';
 import {useSideNavCollapse} from '@astryxdesign/core/SideNav';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 
+import {SavedJobsPanel} from '../jobs/SavedJobsPanel';
+import {useSavedJobsState} from '../jobs/savedJobsState';
 import {ChunkPanel} from './ChunkPanel';
 import {CvManagerPanel} from './CvManagerPanel';
 import {GraphPanel} from './GraphPanel';
@@ -46,6 +49,15 @@ export function ObservabilitySidebar({
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
+  const savedJobs = useSavedJobsState();
+
+  const loadSavedJobsList = useCallback(() => {
+    void savedJobs.loadList();
+  }, [savedJobs.loadList]);
+
+  const refreshSavedJobsList = useCallback(() => {
+    void savedJobs.loadList({}, {force: true});
+  }, [savedJobs.loadList]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,8 +77,36 @@ export function ObservabilitySidebar({
     return () => {
       controller.abort();
     };
-    // load* functions are stable and skip cached resources.
+    // load* skip cached resources; tab/selection are the intentional load triggers (Plan 8 pattern).
   }, [state.selectedTab, state.selectedAttachmentId]);
+
+  useEffect(() => {
+    if (state.selectedTab !== 'saved-jobs') {
+      return;
+    }
+    const jobId = savedJobs.state.selectedJobId;
+    if (!jobId) {
+      return;
+    }
+    const controller = new AbortController();
+    void savedJobs.loadDetail(jobId, {signal: controller.signal});
+    return () => {
+      controller.abort();
+    };
+    // Selection-driven detail load; loadDetail is cache-aware.
+  }, [state.selectedTab, savedJobs.state.selectedJobId]);
+
+  // Evaluate/delete success bumps graph generation; force-refresh when graph was loaded.
+  useEffect(() => {
+    const gen = savedJobs.state.externalInvalidation.graphGeneration;
+    if (gen <= 0) {
+      return;
+    }
+    if (obs.state.graph.loaded || state.selectedTab === 'graph') {
+      void obs.loadGraph({force: true});
+    }
+    // Generation is the sole invalidation trigger for graph projection.
+  }, [savedJobs.state.externalInvalidation.graphGeneration]);
 
   const handleSelectTab = (tab: ObservabilityTabId) => {
     obs.selectTab(tab);
@@ -226,6 +266,24 @@ export function ObservabilitySidebar({
             }}
             onRefresh={() => {
               void obs.loadRuns({force: true});
+            }}
+          />
+        ) : null}
+
+        {state.selectedTab === 'saved-jobs' ? (
+          <SavedJobsPanel
+            list={savedJobs.state.list}
+            details={savedJobs.state.details}
+            selectedJobId={savedJobs.state.selectedJobId}
+            actions={savedJobs.state.actions}
+            onSelect={savedJobs.selectJob}
+            onLoad={loadSavedJobsList}
+            onRefresh={refreshSavedJobsList}
+            onEvaluate={savedJobs.evaluateJob}
+            onConfirmDelete={savedJobs.confirmDelete}
+            onClearError={savedJobs.clearActionError}
+            onRefreshDetail={(jobId) => {
+              void savedJobs.loadDetail(jobId, {force: true});
             }}
           />
         ) : null}

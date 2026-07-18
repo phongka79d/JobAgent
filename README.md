@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch05 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch06 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -74,8 +74,17 @@ request-order guards and keep-data-on-error; per-Job pending action dedupe;
 focused list/detail invalidation plus graph/chat generation bumps; and
 deterministic post-delete selection. Evaluation `result` reuses
 `parseMatchResult` (no second MatchResult parser); observability `state.ts` is
-not grown. Panel UI, tab composition, and zero-result chat recovery remain
-later batches.
+not grown.
+
+Plan 10 Batch06 completes the accessible saved-JD sidebar interface
+(P9-JD-02/P9-JD-06 tab/layout/a11y/action/evidence): `JD đã lưu` tab immediately
+after `Agent runs` (focused `observabilityTabs.ts` extraction so oversized
+`types.ts` shrinks); compact list/detail over accepted `useSavedJobsState`;
+currentness action matrix (`Đánh giá với CV` / `Đánh giá lại` / no evaluate when
+current, `Xoá JD` with Job-named confirmation); stale `Cần đánh giá lại` badge
+and banner; persisted evaluation via existing `MatchCard`/`formatDisplayScore`
+(no score-map fork); shell/rail/drawer/`13/47/40` proportions preserved.
+Zero-result chat recovery remains Batch07.
 
 ## Purpose and scope
 
@@ -110,8 +119,9 @@ JobAgent provides:
   complete delete through thin FastAPI adapters over accepted service owners.
 - Typed saved-JD frontend client and sidebar-local state (strict parsers,
   request-order cache, pending/error maps, focused invalidation, safe
-  post-delete selection) ready for Batch06 panel composition; no second
-  observability state architecture.
+  post-delete selection) composed into the accessible **JD đã lưu** sidebar
+  tab (compact list/detail, currentness actions, Job-named delete
+  confirmation, MatchCard reuse); no second observability state architecture.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
 - Compact active-CV outline in Agent prompt context plus durable
@@ -138,7 +148,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + CV Manager observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed observability API clients, typed saved-JD client/state (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`) without panel UI yet |
+| `frontend/` | Astryx chat shell, CV sidebar + observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`, focused `observabilityTabs.ts`, `SavedJobsPanel` composition), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed observability API clients, typed saved-JD client/state/panel (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`, `SavedJobsPanel`/`SavedJobDetail`/`JobDeleteDialog` reusing `MatchCard`) |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -380,6 +390,21 @@ Set-Location frontend
 npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-state.test.tsx
 npm run lint
 npm run typecheck
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch06 accessible saved-JD sidebar interface gate (`JD đã lưu`
+after Agent runs, compact list/detail/currentness actions, MatchCard reuse,
+Job-named delete confirmation, navigation/shell preservation, full FE matrix):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-navigation.test.tsx src/test/match-card.test.tsx
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
 Set-Location ..
 git diff --check
 ```

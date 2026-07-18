@@ -85,12 +85,22 @@ describe('observability navigation', () => {
       name: 'Observability inspector',
     });
     expect(tablist).toHaveAttribute('aria-orientation', 'vertical');
-    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    expect(screen.getAllByRole('tab')).toHaveLength(6);
     expect(tablist.firstElementChild).toHaveAttribute('role', 'presentation');
     expect(tablist.firstElementChild).not.toHaveAttribute('aria-label');
     expect(
       screen.queryByRole('navigation', {name: 'Tabs'}),
     ).not.toBeInTheDocument();
+  });
+
+  it('places JD đã lưu directly after Agent runs in the vertical rail', async () => {
+    renderObservabilitySidebar();
+    const tabs = await screen.findAllByRole('tab');
+    const labels = tabs.map((tab) => tab.textContent ?? '');
+    const runsAt = labels.findIndex((label) => label.includes('Agent runs'));
+    const savedAt = labels.findIndex((label) => label.includes('JD đã lưu'));
+    expect(runsAt).toBeGreaterThanOrEqual(0);
+    expect(savedAt).toBe(runsAt + 1);
   });
 
   it('keeps tabs in the collapsed rail and expands the selected view', async () => {
