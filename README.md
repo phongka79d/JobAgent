@@ -11,20 +11,25 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 11 Batch01 accepted, commit-ready on worktree over product
-base `d845480`):** Plan 11 Batch01 delivers the four root-cause functional
-repairs for desktop failures F-01 through F-05 with focused regressions only.
-CORS method allowlist is exactly `GET`/`POST`/`DELETE` so browser preflight
-permits existing CV and Job DELETE routes; Save Profile activation fans out once
-to profile refresh, observability generation-backed reload, and non-destructive
-saved-JD currentness invalidation (no automatic evaluate, no blank open CV
-Manager); explicitly named `save_job` turns get one bounded decision-node repair
-or fixed no-action text and ToolResult-derived narration; empty extraction
-summaries parse and render `No summary available` while MatchResult stays
-non-empty. Focused backend pytest and frontend Vitest suites for Batch01 pass on
-the combined worktree. Full static/full-suite gates and the five desktop
-reproductions remain Plan 11 Batch02 (`02A`). Plan 10 Batch08 remains the prior
-accepted product baseline on HEAD `e429c10`.
+**Current status (Plan 11 complete — Batch01+Batch02 accepted, commit-ready on
+product HEAD `04fa5f8` / P11B1):** Plan 11 resolves desktop failures F-01 through
+F-05 without architecture or product-scope expansion. Batch01 delivered the four
+root-cause repairs with focused regressions: CORS allowlist exactly
+`GET`/`POST`/`DELETE`; Save Profile activation fans out once to profile refresh,
+observability generation-backed CV Manager reload, and non-destructive saved-JD
+currentness invalidation (no automatic evaluate); explicitly named `save_job`
+turns get one bounded decision-node repair or fixed no-action text and
+ToolResult-derived narration; empty extraction summaries parse and render
+`No summary available` while MatchResult stays non-empty. Batch02 (`02A`) final
+desktop reverification on that accepted code passed every focused/full static,
+unit, build, plan-structure, and scope-hygiene gate; disposable Compose project
+`jobagent-plan11-smoke` reached three-service health `overall=available`; original
+F-01–F-05 reproductions passed with sanitized Origin-bearing API/network/backend
+evidence (DELETE preflight+actual deletes, activation stale without evaluate POST,
+nonblank CV history rows, one durable named duplicate `save_job` returned path,
+empty-summary detail + `JOB_NOT_SCORABLE`); named smoke volumes were removed and
+the normal `infrastructure` stack restored healthy. No product edits in Batch02.
+Plan 10 Batch08 remains the prior accepted product baseline on HEAD `e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
 sidebar inspector, and synthetic local smoke) remain the reuse baseline. Plan 9

@@ -379,7 +379,7 @@ data, and user-volume deletion.
 
 ### Tasks
 
-- [ ] (02A): Prove all five desktop failures are resolved on final accepted code
+- [x] (02A): Prove all five desktop failures are resolved on final accepted code
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_11.md` > `## Mandatory Batch02 - Final Desktop Reverification` > `(02A)`
