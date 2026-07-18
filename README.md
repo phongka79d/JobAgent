@@ -11,7 +11,7 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 10 Batch04 on worktree):** Plan 8 Batch01–Batch04
+**Current status (Plan 10 Batch05 on worktree):** Plan 8 Batch01–Batch04
 (retention/chunks, observability APIs, accessible lazy sidebar inspector, and
 synthetic local smoke) remain the reuse baseline. Plan 9 Batch01–Batch07 remain
 as delivered: SQLite document foundation, document-first extraction and atomic
@@ -64,7 +64,18 @@ plus source-bound `POST /api/jobs/save-and-evaluate` (durable zero-result
 context create/reuse), and `DELETE /api/jobs/{job_id}` (accepted graph-first
 deletion coordinator). Thin routes delegate to accepted ingestion/evaluation/
 deletion owners; public outcomes map internal ingest `returned` → `existing`.
-Frontend typed client, sidebar, and zero-result chat recovery remain later batches.
+
+Plan 10 Batch05 completes the typed saved-JD client and sidebar-local action
+state (P9-JD-02/P9-JD-06 client schema/cache/pending/error/invalidation/
+selection): strict allowlist parsers for list/detail/evaluation/outcome payloads
+with forbidden-field rejection; focused transport for GET list/detail, POST
+evaluate/save-and-evaluate, and DELETE; race-safe list/detail cache with
+request-order guards and keep-data-on-error; per-Job pending action dedupe;
+focused list/detail invalidation plus graph/chat generation bumps; and
+deterministic post-delete selection. Evaluation `result` reuses
+`parseMatchResult` (no second MatchResult parser); observability `state.ts` is
+not grown. Panel UI, tab composition, and zero-result chat recovery remain
+later batches.
 
 ## Purpose and scope
 
@@ -97,6 +108,10 @@ JobAgent provides:
 - Deterministic saved-JD public API: cursor-paginated redacted list/detail,
   source-bound save-and-evaluate, explicit current-context evaluate, and
   complete delete through thin FastAPI adapters over accepted service owners.
+- Typed saved-JD frontend client and sidebar-local state (strict parsers,
+  request-order cache, pending/error maps, focused invalidation, safe
+  post-delete selection) ready for Batch06 panel composition; no second
+  observability state architecture.
 - Hybrid top-N matching with skill coverage, preference components, quality
   multipliers, and collapsible score explanations in chat.
 - Compact active-CV outline in Agent prompt context plus durable
@@ -123,7 +138,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 
 | Layer | Owns |
 |---|---|
-| `frontend/` | Astryx chat shell, CV sidebar + CV Manager observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed API clients |
+| `frontend/` | Astryx chat shell, CV sidebar + CV Manager observability inspector (`features/observability/**` including `CvManagerPanel`/`cvManagerState`), approval/saved-job/match cards, single SSE reducer (`streamCvReprocess` reuses chat path), typed observability API clients, typed saved-JD client/state (`features/jobs/api.ts`, `types.ts` saved-JD parsers, `savedJobsState.ts`) without panel UI yet |
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
@@ -351,6 +366,20 @@ py -3.13 -m pytest tests/integration/test_saved_jobs_api.py tests/integration/te
 py -3.13 -m pytest tests/unit/test_agent_graph.py tests/integration/test_chat_api.py tests/integration/test_job_tools.py tests/e2e/test_demo_flow.py -q
 py -3.13 -m ruff check app tests --no-cache
 py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
+```
+
+Focused Plan 10 Batch05 typed saved-JD client and sidebar-local action state gate
+(strict list/detail/evaluation/outcome parsers, transport, request-order, keep-
+data-on-error, pending dedupe, focused invalidation, safe post-delete selection,
+MatchResult reuse; no panel UI):
+
+```powershell
+Set-Location frontend
+npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-state.test.tsx
+npm run lint
+npm run typecheck
 Set-Location ..
 git diff --check
 ```

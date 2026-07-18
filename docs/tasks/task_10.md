@@ -438,7 +438,7 @@ Own focused saved-JD frontend types, client, request-order-safe state, cache inv
 
 ### Tasks
 
-- [ ] (05A): Implement strict saved-JD transport, cache, selection, and action state
+- [x] (05A): Implement strict saved-JD transport, cache, selection, and action state
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_10.md` > `## Mandatory Batch05 - Typed Saved-JD Client and Action State` > `(05A)`
