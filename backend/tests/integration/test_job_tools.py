@@ -185,12 +185,18 @@ async def _ainvoke_save(
     tool_call_id: str,
     url: str | None = None,
     text: str | None = None,
+    source: str | None = None,
+    preview: dict[str, Any] | None = None,
 ) -> ToolResult:
     args: dict[str, Any] = {}
     if url is not None:
         args["url"] = url
     if text is not None:
         args["text"] = text
+    if source is not None:
+        args["source"] = source
+    if preview is not None:
+        args["preview"] = preview
     return await _ainvoke_tool(
         tool_fn, run_id=run_id, tool_call_id=tool_call_id, args=args
     )
@@ -1211,6 +1217,842 @@ def test_save_job_history_and_current_sse_exclude_raw_and_embeddings(
             # Arguments summary stored durably stays compact (no body).
             assert args_summary is not None
             assert unique_raw not in json.dumps(args_summary)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+# ---------------------------------------------------------------------------
+# Plan 12 (01B): current-message interrupt, save, cancel, replay, opt-out
+# ---------------------------------------------------------------------------
+
+
+_OBVIOUS_JD_MESSAGE = (
+    "Job Description\n"
+    "Backend Engineer at Acme\n"
+    "Responsibilities\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Requirements\n"
+    "- 3+ years Python experience required for this role\n"
+    "- Strong communication skills\n"
+    "About the role: build APIs for local demo customers with care."
+)
+
+_FORBIDDEN_PENDING_KEYS = frozenset(
+    {
+        "raw",
+        "raw_jd",
+        "raw_content",
+        "message_id",
+        "user_message_id",
+        "url",
+        "source_url",
+        "hash",
+        "content_hash",
+        "raw_content_hash",
+        "arguments",
+        "prompt",
+        "provider",
+        "credential",
+        "api_key",
+        "password",
+        "storage",
+        "storage_path",
+        "stack",
+        "traceback",
+        "content",
+        "text",
+    }
+)
+
+
+def _assert_pending_redacted(projection: dict[str, Any], *, body: str) -> None:
+    blob = json.dumps(projection, default=str)
+    assert body not in blob
+    lower_keys = {k.casefold() for k in _walk_keys(projection)}
+    for forbidden in _FORBIDDEN_PENDING_KEYS:
+        assert forbidden not in lower_keys, f"forbidden key {forbidden!r} in pending"
+    assert "xyzzy" not in blob
+
+
+def _walk_keys(value: Any) -> list[str]:
+    keys: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            keys.append(str(key))
+            keys.extend(_walk_keys(child))
+    elif isinstance(value, list):
+        for child in value:
+            keys.extend(_walk_keys(child))
+    return keys
+
+
+async def _count_jobs(session: Any) -> int:
+    result = await session.execute(select(func.count()).select_from(JobPost))
+    return int(result.scalar_one())
+
+
+async def _count_evaluations(session: Any) -> int:
+    from app.db.models.job_evaluations import JobEvaluation
+
+    result = await session.execute(select(func.count()).select_from(JobEvaluation))
+    return int(result.scalar_one())
+
+
+def test_save_job_current_message_interrupts_before_dependencies(
+    db_path: Path,
+) -> None:
+    """One running execution, exact pending keys, zero pre-action side effects."""
+    from app.agent.graph import build_agent_graph
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_INTERRUPTED,
+        TOOL_EXECUTION_STATUS_RUNNING,
+    )
+    from app.services.chat_turns import stream_chat_turn
+    from app.services.job_save_confirmation import (
+        JOB_SAVE_CONFIRMATION_ACTIONS,
+        JOB_SAVE_CONFIRMATION_KIND,
+    )
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            invoker = FakeJdInvoker([_full_extracted()])
+            embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {
+                                    "source": "current_message",
+                                    "preview": {
+                                        "title": "Backend Engineer",
+                                        "company": "Acme",
+                                        "skills": ["Python"],
+                                    },
+                                },
+                                "id": "call-cm-interrupt",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting for your decision."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([tool_fn]),
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message=_OBVIOUS_JD_MESSAGE,
+                    graph_bundle=bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            names = [e.event for e in events]
+            assert names[0] == "run_started"
+            assert names[-1] == "approval_required"
+            assert "run_completed" not in names
+
+            interrupt_statuses = [e for e in events if e.event == "tool_status"]
+            assert [s.payload.status for s in interrupt_statuses] == [
+                "pending",
+                "running",
+            ]
+            durable_exec_id = interrupt_statuses[0].payload.tool_execution_id
+            assert all(
+                s.payload.tool_execution_id == durable_exec_id
+                for s in interrupt_statuses
+            )
+            assert all(s.payload.tool_name == SAVE_JOB_NAME for s in interrupt_statuses)
+
+            approval = events[-1]
+            payload = approval.payload
+            assert payload.kind == JOB_SAVE_CONFIRMATION_KIND
+            assert list(payload.allowed_actions) == list(
+                JOB_SAVE_CONFIRMATION_ACTIONS
+            )
+            assert payload.card["tool_name"] == SAVE_JOB_NAME
+            assert payload.card["tool_call_id"] == "call-cm-interrupt"
+            assert payload.card["source"] == "current_message"
+            assert payload.card["text_length"] == len(_OBVIOUS_JD_MESSAGE)
+            run_id = approval.run_id
+            approval_blob = json.dumps(payload.model_dump(mode="json"), default=str)
+            assert _OBVIOUS_JD_MESSAGE not in approval_blob
+            for forbidden in (
+                "message_id",
+                "user_message_id",
+                "raw_content",
+                "prompt",
+                "provider",
+            ):
+                assert forbidden not in approval_blob
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_INTERRUPTED
+                proj = run.pending_approval_json
+                assert proj is not None
+                assert proj["kind"] == JOB_SAVE_CONFIRMATION_KIND
+                assert proj["allowed_actions"] == list(JOB_SAVE_CONFIRMATION_ACTIONS)
+                card = proj["card"]
+                assert card["tool_name"] == SAVE_JOB_NAME
+                assert card["tool_call_id"] == "call-cm-interrupt"
+                assert card["source"] == "current_message"
+                assert card["text_length"] == len(_OBVIOUS_JD_MESSAGE)
+                assert card["preview"]["title"] == "Backend Engineer"
+                assert card["preview"]["company"] == "Acme"
+                assert card["preview"]["skills"] == ["Python"]
+                _assert_pending_redacted(proj, body=_OBVIOUS_JD_MESSAGE)
+
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
+                assert tools[0].result_json is None
+                assert tools[0].id == durable_exec_id
+                args = tools[0].arguments_summary_json or {}
+                assert args == {"source": "current_message"}
+                assert await _count_jobs(session) == 0
+                assert await _count_evaluations(session) == 0
+
+            # Zero pre-action provider/ingestion/graph calls.
+            assert len(invoker.calls) == 0
+            assert len(embedder.calls) == 0
+            assert sync.calls == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_save_job_current_message_save_reloads_exact_source_once(
+    db_path: Path,
+) -> None:
+    """Save resumes same identity, ingests durable message once, no evaluation."""
+    from app.agent.graph import build_agent_graph
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_COMPLETED,
+        TOOL_EXECUTION_STATUS_COMPLETED,
+    )
+    from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.tool_execution import get_replay_result
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            invoker = FakeJdInvoker([_full_extracted(), _full_extracted()])
+            embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {"source": "current_message"},
+                                "id": "call-cm-save",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting."),
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([tool_fn]),
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message=_OBVIOUS_JD_MESSAGE,
+                    graph_bundle=bundle,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert events[-1].event == "approval_required"
+            run_id = events[-1].run_id
+            assert len(invoker.calls) == 0
+
+            tool2 = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            model2 = FakeChatModel(
+                responses=[AIMessage(content="Saved the JD.")]
+            )
+            bundle2 = build_agent_graph(
+                model=model2,
+                registry=ToolRegistry([tool2]),
+            )
+            resume_events = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="save_job",
+                    graph_bundle=bundle2,
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert "run_completed" in [e.event for e in resume_events]
+            assert len(invoker.calls) == 1
+            assert len(embedder.calls) == 1
+            assert sync.calls == 1
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                assert run.pending_approval_json is None
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                assert tools[0].tool_call_id == "call-cm-save"
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is True
+                assert stored.data is not None
+                assert stored.data["outcome"] == "created"
+                assert stored.data["sqlite_committed"] is True
+                job_id = stored.data["job_id"]
+                row = await jobs_repo.get_by_id(session, job_id)
+                assert row is not None
+                assert row.raw_content == _OBVIOUS_JD_MESSAGE
+                assert await _count_jobs(session) == 1
+                assert await _count_evaluations(session) == 0
+
+            # Terminal replay: exact stored result, no second side effect.
+            replay = await get_replay_result(
+                run_id=run_id,
+                tool_call_id="call-cm-save",
+                session_factory=factory,
+            )
+            assert replay is not None
+            assert replay.model_dump(mode="json") == stored.model_dump(mode="json")
+            assert len(invoker.calls) == 1
+            assert sync.calls == 1
+
+            # Terminal no-op resume.
+            boom = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {"source": "current_message"},
+                                "id": "should-not-run",
+                                "type": "tool_call",
+                            }
+                        ],
+                    )
+                ]
+            )
+            noop = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="save_job",
+                    graph_bundle=build_agent_graph(
+                        model=boom,
+                        registry=ToolRegistry([tool2]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert [e.event for e in noop] == ["run_started", "run_completed"]
+            assert boom.invoke_count == 0
+            assert len(invoker.calls) == 1
+            assert sync.calls == 1
+
+            # Exact-hash return on a second current-message paste of same body.
+            invoker2 = FakeJdInvoker([_full_extracted()])
+            embedder2 = FakeEmbeddingClient()
+            sync2 = RecordingSync()
+            tool_dup = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker2,
+                normalizer=_normalizer(),
+                embedding_client=embedder2,
+                job_sync_fn=sync2,
+            )
+            model_dup = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {"source": "current_message"},
+                                "id": "call-cm-dup",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting again."),
+                ]
+            )
+            events_dup = [
+                e
+                async for e in stream_chat_turn(
+                    message=_OBVIOUS_JD_MESSAGE,
+                    graph_bundle=build_agent_graph(
+                        model=model_dup,
+                        registry=ToolRegistry([tool_dup]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert events_dup[-1].event == "approval_required"
+            run_dup = events_dup[-1].run_id
+            tool_dup2 = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker2,
+                normalizer=_normalizer(),
+                embedding_client=embedder2,
+                job_sync_fn=sync2,
+            )
+            resume_dup = [
+                e
+                async for e in stream_resume(
+                    run_id=run_dup,
+                    action="save_job",
+                    graph_bundle=build_agent_graph(
+                        model=FakeChatModel(
+                            responses=[AIMessage(content="Returned existing.")]
+                        ),
+                        registry=ToolRegistry([tool_dup2]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert "run_completed" in [e.event for e in resume_dup]
+            # Exact duplicate: no second extract/embed/sync.
+            assert len(invoker2.calls) == 0
+            assert len(embedder2.calls) == 0
+            assert sync2.calls == 0
+            async with factory() as session:
+                tools_dup = await tool_repo.list_for_run_ids(session, [run_dup])
+                assert len(tools_dup) == 1
+                stored_dup = tool_repo.load_stored_result(tools_dup[0])
+                assert stored_dup.data is not None
+                assert stored_dup.data["outcome"] == "returned"
+                assert stored_dup.data["job_id"] == job_id
+                assert await _count_jobs(session) == 1
+                assert await _count_evaluations(session) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_save_job_current_message_cancel_zero_dependencies(
+    db_path: Path,
+) -> None:
+    """Cancel returns exact no-save ToolResult with zero mutation/deps."""
+    from app.agent.graph import build_agent_graph
+    from app.db.models.chat import (
+        AGENT_RUN_STATE_COMPLETED,
+        TOOL_EXECUTION_STATUS_COMPLETED,
+    )
+    from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.job_save_confirmation import CANCEL_SUMMARY
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            invoker = FakeJdInvoker([_full_extracted()])
+            embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {"source": "current_message"},
+                                "id": "call-cm-cancel",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting."),
+                ]
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message=_OBVIOUS_JD_MESSAGE,
+                    graph_bundle=build_agent_graph(
+                        model=model,
+                        registry=ToolRegistry([tool_fn]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert events[-1].event == "approval_required"
+            run_id = events[-1].run_id
+
+            tool2 = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            resume_events = [
+                e
+                async for e in stream_resume(
+                    run_id=run_id,
+                    action="cancel_save_job",
+                    graph_bundle=build_agent_graph(
+                        model=FakeChatModel(
+                            responses=[AIMessage(content="Understood, not saved.")]
+                        ),
+                        registry=ToolRegistry([tool2]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            assert "run_completed" in [e.event for e in resume_events]
+            assert len(invoker.calls) == 0
+            assert len(embedder.calls) == 0
+            assert sync.calls == 0
+
+            async with factory() as session:
+                run = await runs_repo.get_run(session, run_id)
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_COMPLETED
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                stored = tool_repo.load_stored_result(tools[0])
+                assert stored.ok is True
+                assert stored.code is None
+                assert stored.summary == CANCEL_SUMMARY
+                assert stored.data == {
+                    "committed": False,
+                    "outcome": "cancelled",
+                }
+                assert await _count_jobs(session) == 0
+                assert await _count_evaluations(session) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+@pytest.mark.parametrize(
+    ("mode", "tool_args", "message"),
+    [
+        (
+            "current_message",
+            {"source": "current_message"},
+            f"{_OBVIOUS_JD_MESSAGE}\nPlease không lưu this.",
+        ),
+        (
+            "text",
+            {
+                "text": (
+                    "Backend Engineer at Acme. Design REST services. "
+                    "Required: 3+ years Python."
+                )
+            },
+            "Please save this JD but do not save after all.",
+        ),
+        (
+            "url",
+            {"url": "https://example.com/jobs/opt-out"},
+            "Here is a link but don't save it.",
+        ),
+    ],
+)
+def test_save_job_opt_out_precondition_all_source_modes(
+    db_path: Path,
+    mode: str,
+    tool_args: dict[str, Any],
+    message: str,
+) -> None:
+    """Clear opt-out cancels without interrupt, card, dependency, or mutation."""
+    from app.services.job_save_confirmation import CANCEL_SUMMARY
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            async with factory() as session:
+                run_id = await _seed_run(session, content=message)
+                await session.commit()
+
+            invoker = FakeJdInvoker([_full_extracted()])
+            embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
+
+            async def ok_fetcher(url: str) -> UrlFetchResult:
+                return UrlFetchResult(
+                    text="Fetched body. Required: Python.",
+                    failure_code=None,
+                )
+
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+                url_fetcher=ok_fetcher,
+            )
+            result = await _ainvoke_save(
+                tool_fn,
+                run_id=run_id,
+                tool_call_id=f"call-opt-out-{mode}",
+                **tool_args,
+            )
+            assert result.ok is True
+            assert result.code is None
+            assert result.summary == CANCEL_SUMMARY
+            assert result.data == {"committed": False, "outcome": "cancelled"}
+            assert len(invoker.calls) == 0
+            assert len(embedder.calls) == 0
+            assert sync.calls == 0
+            async with factory() as session:
+                assert await _count_jobs(session) == 0
+                assert await _count_evaluations(session) == 0
+                row = await tool_repo.get_by_identity(
+                    session,
+                    run_id=run_id,
+                    tool_call_id=f"call-opt-out-{mode}",
+                )
+                assert row is not None
+                assert row.status == TOOL_EXECUTION_STATUS_COMPLETED
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_save_job_current_message_only_allows_running_reentry(
+    db_path: Path,
+) -> None:
+    """Direct URL/text reject concurrent running re-entry; CM enables it."""
+    from app.services.tool_execution import ToolExecutionInProgressError
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            async with factory() as session:
+                run_id = await _seed_run(session, content="direct text turn")
+                # Force a durable running identity for direct text path.
+                pending, _created = await tool_repo.get_or_create_pending(
+                    session,
+                    run_id=run_id,
+                    tool_call_id="call-text-running",
+                    tool_name=SAVE_JOB_NAME,
+                    arguments_summary_json={
+                        "source": "text",
+                        "text_length": 10,
+                    },
+                )
+                await tool_repo.mark_running(session, pending.id)
+                await session.commit()
+
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+            )
+            with pytest.raises(ToolExecutionInProgressError):
+                await _ainvoke_save(
+                    tool_fn,
+                    run_id=run_id,
+                    tool_call_id="call-text-running",
+                    text="Backend Engineer. Required: Python.",
+                )
+
+            # Source inspection: only current-message enables re-entry flag.
+            jobs_src = (
+                Path(__file__).resolve().parents[2] / "app" / "tools" / "jobs.py"
+            ).read_text(encoding="utf-8")
+            assert "allow_running_reentry=allow_reentry" in jobs_src
+            assert "_is_current_message_only" in jobs_src
+            assert "interrupt(" in jobs_src
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_save_job_current_message_source_lookup_failure_no_side_effects(
+    db_path: Path,
+) -> None:
+    """Invalid initiating message fails safely without Job/ingestion work."""
+    from app.services.job_save_confirmation import ERROR_INVALID_CURRENT_MESSAGE
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            async with factory() as session:
+                # Empty content allowed only with structured_payload on insert.
+                user = await messages_repo.insert_message(
+                    session,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="",
+                    structured_payload={"kind": "empty_fixture"},
+                )
+                run = await runs_repo.create_run(
+                    session, user_message_id=user.id
+                )
+                await session.commit()
+                run_id = run.id
+
+            invoker = FakeJdInvoker([_full_extracted()])
+            embedder = FakeEmbeddingClient()
+            sync = RecordingSync()
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=embedder,
+                job_sync_fn=sync,
+            )
+            result = await _ainvoke_save(
+                tool_fn,
+                run_id=run_id,
+                tool_call_id="call-cm-invalid",
+                source="current_message",
+            )
+            assert result.ok is False
+            assert result.code == ERROR_INVALID_CURRENT_MESSAGE
+            assert len(invoker.calls) == 0
+            assert len(embedder.calls) == 0
+            assert sync.calls == 0
+            async with factory() as session:
+                assert await _count_jobs(session) == 0
+                assert await _count_evaluations(session) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_save_job_arguments_summary_current_message_redacted(
+    db_path: Path,
+) -> None:
+    """Current-message args summary is exactly {source: current_message}."""
+    from app.agent.graph import build_agent_graph
+    from app.services.chat_turns import stream_chat_turn
+    from app.tools.registry import ToolRegistry
+    from langchain_core.messages import AIMessage
+
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": SAVE_JOB_NAME,
+                                "args": {
+                                    "source": "current_message",
+                                    "preview": {
+                                        "title": "Secret Title Guess",
+                                        "company": "Secret Co",
+                                        "skills": ["Go"],
+                                    },
+                                },
+                                "id": "call-cm-args",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Waiting."),
+                ]
+            )
+            events = [
+                e
+                async for e in stream_chat_turn(
+                    message=_OBVIOUS_JD_MESSAGE,
+                    graph_bundle=build_agent_graph(
+                        model=model,
+                        registry=ToolRegistry([tool_fn]),
+                    ),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+            run_id = events[-1].run_id
+            async with factory() as session:
+                tools = await tool_repo.list_for_run_ids(session, [run_id])
+                assert len(tools) == 1
+                args = tools[0].arguments_summary_json or {}
+                assert args == {"source": "current_message"}
+                assert "preview" not in args
+                assert "title" not in args
+                assert "Secret Title Guess" not in json.dumps(args)
         finally:
             await engine.dispose()
 

@@ -2,7 +2,8 @@
 
 Registers via :func:`build_production_job_tools` / ``production_registry``:
 
-* ``save_job`` — persistence-first ingest + direct sync; no approval
+* ``save_job`` — persistence-first ingest + direct sync; current-message mode
+  interrupts for confirmation before ingestion side effects
 * ``query_jobs`` — read-only compact listing; default limit 10
 
 Tool results are compact :class:`~app.schemas.tools.ToolResult` objects. Raw
@@ -17,6 +18,7 @@ from typing import Annotated, Any, cast
 
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
+from langgraph.types import interrupt
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,12 +32,14 @@ from app.schemas.jobs import (
     JOB_INGEST_OUTCOME_RETRIED,
     JOB_INGEST_OUTCOME_RETURNED,
     QUERY_JOBS_DEFAULT_LIMIT,
+    SAVE_JOB_SOURCE_CURRENT_MESSAGE,
     CompactJobToolRow,
     JobJdQuality,
     JobProcessingStatus,
     QueryJobsInput,
     QueryJobsResultData,
     SaveJobInput,
+    SaveJobPreview,
     SaveJobResultData,
 )
 from app.schemas.tools import ToolResult
@@ -49,6 +53,14 @@ from app.services.jd_ingestion import (
     ingest_raw_text,
     ingest_url,
 )
+from app.services.job_save_confirmation import (
+    InitiatingMessage,
+    SourceLookupFailure,
+    build_cancellation_tool_result,
+    build_job_save_confirmation_projection,
+    message_has_clear_opt_out,
+    resolve_initiating_user_message,
+)
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 
@@ -59,19 +71,27 @@ ERROR_INVALID_JOB_INPUT: str = "INVALID_JOB_INPUT"
 ERROR_MISSING_RUN_ID: str = "MISSING_RUN_ID"
 ERROR_INVALID_QUERY: str = "INVALID_QUERY"
 ERROR_JOB_INGESTION: str = "JOB_INGESTION_FAILED"
+ERROR_INVALID_APPROVAL_ACTION: str = "INVALID_APPROVAL_ACTION"
+
+ACTION_SAVE_JOB: str = "save_job"
+ACTION_CANCEL_SAVE_JOB: str = "cancel_save_job"
 
 
 def _arguments_summary_save(
     *,
     url: str | None,
     text: str | None,
+    source: str | None = None,
 ) -> dict[str, Any]:
-    """Compact args summary: never include raw JD body."""
+    """Compact args summary: never include raw JD body or preview guesses."""
     has_url = isinstance(url, str) and url.strip() != ""
     has_text = isinstance(text, str) and text.strip() != ""
-    if has_url and not has_text:
+    has_source = source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+    if has_source and not has_url and not has_text:
+        return {"source": SAVE_JOB_SOURCE_CURRENT_MESSAGE}
+    if has_url and not has_text and not has_source:
         return {"source": "url", "url": url.strip() if url else None}
-    if has_text and not has_url:
+    if has_text and not has_url and not has_source:
         return {
             "source": "text",
             "text_length": len(text) if isinstance(text, str) else 0,
@@ -80,6 +100,7 @@ def _arguments_summary_save(
         "source": "invalid",
         "has_url": has_url,
         "has_text": has_text,
+        "has_source": has_source,
     }
 
 
@@ -195,6 +216,138 @@ def _tool_result_from_ingest(
     return ToolResult(ok=True, code=None, summary=summary, data=data)
 
 
+def _is_current_message_only(
+    *,
+    url: str | None,
+    text: str | None,
+    source: str | None,
+) -> bool:
+    has_url = isinstance(url, str) and url.strip() != ""
+    has_text = isinstance(text, str) and text.strip() != ""
+    return (
+        source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+        and not has_url
+        and not has_text
+    )
+
+
+async def _resolve_opt_out(
+    factory: async_sessionmaker[AsyncSession],
+    run_id: str,
+) -> ToolResult | None:
+    """Return cancellation when the initiating message has a clear opt-out.
+
+    Lookup failure is not an opt-out (URL/text may still proceed; current-message
+    mode handles lookup failures on its own path).
+    """
+    async with factory() as session:
+        resolved = await resolve_initiating_user_message(session, run_id)
+    if isinstance(resolved, SourceLookupFailure):
+        return None
+    if message_has_clear_opt_out(resolved.content):
+        return build_cancellation_tool_result()
+    return None
+
+
+async def _ingest_with_deps(
+    *,
+    factory: async_sessionmaker[AsyncSession],
+    url: str | None,
+    text: str | None,
+    invoker: StructuredJdInvoker | None,
+    normalizer: SkillNormalizer | None,
+    embedding_client: EmbeddingClient | None,
+    url_fetcher: UrlFetcher | None,
+    driver: AsyncGraphDriver | None,
+    job_sync_fn: JobSyncFn | None,
+) -> ToolResult:
+    """Construct provider/ingestion deps and run direct URL or text ingest."""
+    from app.services.jd_extraction import ShopAIKeyStructuredJdInvoker
+
+    inv: StructuredJdInvoker = (
+        invoker if invoker is not None else ShopAIKeyStructuredJdInvoker()
+    )
+    norm = (
+        normalizer if normalizer is not None else SkillNormalizer.production()
+    )
+
+    try:
+        if isinstance(url, str) and url.strip() != "":
+            ingest = await ingest_url(
+                url.strip(),
+                invoker=inv,
+                normalizer=norm,
+                embedding_client=embedding_client,
+                session_factory=factory,
+                url_fetcher=url_fetcher,
+                graph_driver=driver,
+                job_sync_fn=job_sync_fn,
+            )
+        else:
+            assert isinstance(text, str)
+            ingest = await ingest_raw_text(
+                text,
+                invoker=inv,
+                normalizer=norm,
+                embedding_client=embedding_client,
+                session_factory=factory,
+                graph_driver=driver,
+                job_sync_fn=job_sync_fn,
+            )
+    except JdIngestionError as exc:
+        return ToolResult(
+            ok=False,
+            code=exc.code,
+            summary=exc.message,
+            data={"sqlite_committed": False},
+        )
+
+    compact = await _load_compact_for_job(factory, ingest.job_id)
+    return _tool_result_from_ingest(ingest, compact)
+
+
+async def _ingest_current_message_content(
+    *,
+    factory: async_sessionmaker[AsyncSession],
+    content: str,
+    invoker: StructuredJdInvoker | None,
+    normalizer: SkillNormalizer | None,
+    embedding_client: EmbeddingClient | None,
+    driver: AsyncGraphDriver | None,
+    job_sync_fn: JobSyncFn | None,
+) -> ToolResult:
+    """Construct deps only after confirmation and ingest exact durable text."""
+    from app.services.jd_extraction import ShopAIKeyStructuredJdInvoker
+
+    inv: StructuredJdInvoker = (
+        invoker if invoker is not None else ShopAIKeyStructuredJdInvoker()
+    )
+    norm = (
+        normalizer if normalizer is not None else SkillNormalizer.production()
+    )
+
+    try:
+        ingest = await ingest_raw_text(
+            content,
+            invoker=inv,
+            normalizer=norm,
+            embedding_client=embedding_client,
+            session_factory=factory,
+            graph_driver=driver,
+            job_sync_fn=job_sync_fn,
+        )
+    except JdIngestionError as exc:
+        return ToolResult(
+            ok=False,
+            code=exc.code,
+            summary=exc.message,
+            data={"sqlite_committed": False},
+        )
+
+    compact = await _load_compact_for_job(factory, ingest.job_id)
+    return _tool_result_from_ingest(ingest, compact)
+
+
 def build_save_job_tool(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
@@ -205,9 +358,10 @@ def build_save_job_tool(
     driver: AsyncGraphDriver | None = None,
     job_sync_fn: JobSyncFn | None = None,
 ) -> Any:
-    """Build compact ``save_job`` LangChain tool (no approval; any auth state).
+    """Build compact ``save_job`` LangChain tool (URL/text direct; CM interrupt).
 
     Dependencies are closed over and absent from the LLM-visible schema.
+    Current-message mode enables running re-entry for the same identity.
     """
 
     @tool(SAVE_JOB_NAME)
@@ -216,11 +370,15 @@ def build_save_job_tool(
         state: Annotated[dict[str, Any], InjectedState],
         url: str | None = None,
         text: str | None = None,
+        source: str | None = None,
+        preview: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Save a public job URL or pasted JD text.
+        """Save a public job URL, pasted JD text, or the current user message.
 
-        Provide exactly one of ``url`` or ``text``. No profile or approval is
-        required. Returns compact job identity/status/outcome only (never raw JD).
+        Provide exactly one of ``url``, ``text``, or ``source='current_message'``.
+        Current-message mode pauses for confirmation before ingestion. Optional
+        ``preview`` is presentation-only and only valid with current_message.
+        Returns compact job identity/status/outcome only (never raw JD).
         """
         factory = (
             session_factory
@@ -244,67 +402,116 @@ def build_save_job_tool(
                 data=None,
             ).model_dump(mode="json")
 
-        args_summary = _arguments_summary_save(url=url, text=text)
+        args_summary = _arguments_summary_save(
+            url=url, text=text, source=source
+        )
+        allow_reentry = _is_current_message_only(
+            url=url, text=text, source=source
+        )
 
         async def _invoke() -> ToolResult:
             try:
-                SaveJobInput.model_validate({"url": url, "text": text})
+                validated = SaveJobInput.model_validate(
+                    {
+                        "url": url,
+                        "text": text,
+                        "source": source,
+                        "preview": preview,
+                    }
+                )
             except ValidationError:
                 return ToolResult(
                     ok=False,
                     code=ERROR_INVALID_JOB_INPUT,
                     summary=(
-                        "save_job requires exactly one of non-empty url or text"
+                        "save_job requires exactly one of non-empty url, text, "
+                        "or source='current_message'"
                     ),
-                    data={"has_url": url is not None, "has_text": text is not None},
+                    data={
+                        "has_url": url is not None,
+                        "has_text": text is not None,
+                        "has_source": source is not None,
+                    },
                 )
 
-            from app.services.jd_extraction import ShopAIKeyStructuredJdInvoker
+            # Shared opt-out write precondition for every source mode.
+            opt_out = await _resolve_opt_out(factory, run_id)
+            if opt_out is not None:
+                return opt_out
 
-            inv: StructuredJdInvoker = (
-                invoker
-                if invoker is not None
-                else ShopAIKeyStructuredJdInvoker()
-            )
-            norm = (
-                normalizer
-                if normalizer is not None
-                else SkillNormalizer.production()
-            )
+            if validated.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE:
+                # Resolve durable source; interrupt before provider/ingestion deps.
+                async with factory() as session:
+                    resolved = await resolve_initiating_user_message(
+                        session, run_id
+                    )
+                if isinstance(resolved, SourceLookupFailure):
+                    return ToolResult(
+                        ok=False,
+                        code=resolved.code,
+                        summary=resolved.summary,
+                        data=None,
+                    )
+                assert isinstance(resolved, InitiatingMessage)
 
-            try:
-                if isinstance(url, str) and url.strip() != "":
-                    ingest = await ingest_url(
-                        url.strip(),
-                        invoker=inv,
-                        normalizer=norm,
-                        embedding_client=embedding_client,
-                        session_factory=factory,
-                        url_fetcher=url_fetcher,
-                        graph_driver=driver,
-                        job_sync_fn=job_sync_fn,
+                preview_model: SaveJobPreview | None = validated.preview
+                decision = interrupt(
+                    build_job_save_confirmation_projection(
+                        tool_call_id=tool_call_id,
+                        content=resolved.content,
+                        preview=preview_model,
                     )
-                else:
-                    assert isinstance(text, str)
-                    ingest = await ingest_raw_text(
-                        text,
-                        invoker=inv,
-                        normalizer=norm,
-                        embedding_client=embedding_client,
-                        session_factory=factory,
-                        graph_driver=driver,
-                        job_sync_fn=job_sync_fn,
+                )
+                action = decision if isinstance(decision, str) else str(decision)
+
+                if action == ACTION_CANCEL_SAVE_JOB:
+                    # No provider/normalizer/embedding/graph dependency on cancel.
+                    return build_cancellation_tool_result()
+
+                if action != ACTION_SAVE_JOB:
+                    return ToolResult(
+                        ok=False,
+                        code=ERROR_INVALID_APPROVAL_ACTION,
+                        summary=f"unsupported approval action {action!r}",
+                        data={"action": action},
                     )
-            except JdIngestionError as exc:
-                return ToolResult(
-                    ok=False,
-                    code=exc.code,
-                    summary=exc.message,
-                    data={"sqlite_committed": False},
+
+                # Reload exact durable source immediately before ingest.
+                async with factory() as session:
+                    reloaded = await resolve_initiating_user_message(
+                        session, run_id
+                    )
+                if isinstance(reloaded, SourceLookupFailure):
+                    return ToolResult(
+                        ok=False,
+                        code=reloaded.code,
+                        summary=reloaded.summary,
+                        data=None,
+                    )
+                assert isinstance(reloaded, InitiatingMessage)
+
+                return await _ingest_current_message_content(
+                    factory=factory,
+                    content=reloaded.content,
+                    invoker=invoker,
+                    normalizer=normalizer,
+                    embedding_client=embedding_client,
+                    driver=driver,
+                    job_sync_fn=job_sync_fn,
                 )
 
-            compact = await _load_compact_for_job(factory, ingest.job_id)
-            return _tool_result_from_ingest(ingest, compact)
+            # Direct URL / text: construct deps only after opt-out gate.
+            return await _ingest_with_deps(
+                factory=factory,
+                url=validated.url,
+                text=validated.text,
+                invoker=invoker,
+                normalizer=normalizer,
+                embedding_client=embedding_client,
+                url_fetcher=url_fetcher,
+                driver=driver,
+                job_sync_fn=job_sync_fn,
+            )
 
         result = await execute_tool(
             run_id=run_id,
@@ -313,6 +520,7 @@ def build_save_job_tool(
             invoke=_invoke,
             arguments_summary_json=args_summary,
             session_factory=factory,
+            allow_running_reentry=allow_reentry,
         )
         return result.model_dump(mode="json")
 
@@ -455,6 +663,9 @@ def build_production_job_tools(
 
 
 __all__ = [
+    "ACTION_CANCEL_SAVE_JOB",
+    "ACTION_SAVE_JOB",
+    "ERROR_INVALID_APPROVAL_ACTION",
     "ERROR_INVALID_JOB_INPUT",
     "ERROR_INVALID_QUERY",
     "ERROR_JOB_INGESTION",

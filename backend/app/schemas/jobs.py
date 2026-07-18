@@ -22,7 +22,7 @@ No ORM, provider, filesystem, graph, route, or Agent behavior lives here.
 
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Annotated, Any, Literal, get_args
 
 from app.db.models.jobs import (
     JOB_COMPACT_QUERY_LIMIT_MAX,
@@ -32,7 +32,7 @@ from app.db.models.jobs import (
 )
 from app.schemas.common import StrictModelConfig
 from app.schemas.skills import SkillRef
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Exact enum vocabularies from Master §7.4 (job extraction only).
 JobSeniority = Literal["intern", "junior", "mid", "senior", "lead", "unknown"]
@@ -74,6 +74,18 @@ assert QUERY_JOBS_LIMIT_MIN == JOB_COMPACT_QUERY_LIMIT_MIN
 assert QUERY_JOBS_LIMIT_MAX == JOB_COMPACT_QUERY_LIMIT_MAX
 assert QUERY_JOBS_LIMIT_MIN <= QUERY_JOBS_DEFAULT_LIMIT <= QUERY_JOBS_LIMIT_MAX
 
+# Passive current-message source and presentation-only preview bounds (Plan 12).
+SaveJobCurrentMessageSource = Literal["current_message"]
+SAVE_JOB_SOURCE_CURRENT_MESSAGE: SaveJobCurrentMessageSource = "current_message"
+SAVE_JOB_PREVIEW_TITLE_MAX: int = 160
+SAVE_JOB_PREVIEW_COMPANY_MAX: int = 160
+SAVE_JOB_PREVIEW_SKILLS_MAX: int = 5
+SAVE_JOB_PREVIEW_SKILL_MAX: int = 80
+
+# Cancellation is separate from JobIngestOutcome (created|returned|retried).
+SaveJobCancelOutcome = Literal["cancelled"]
+SAVE_JOB_CANCEL_OUTCOME: SaveJobCancelOutcome = "cancelled"
+
 
 class JobSkill(BaseModel):
     """One skill assertion on a job extraction (Master §7.4)."""
@@ -108,23 +120,91 @@ class JobPostExtraction(BaseModel):
     extraction_confidence: float = Field(ge=0.0, le=1.0)
 
 
+class SaveJobPreview(BaseModel):
+    """Bounded presentation-only estimates for current-message confirmation.
+
+    Never enters ingestion or canonical ``job_posts`` facts.
+    """
+
+    model_config = StrictModelConfig
+
+    title: str | None = None
+    company: str | None = None
+    skills: list[
+        Annotated[str, Field(min_length=1, max_length=SAVE_JOB_PREVIEW_SKILL_MAX)]
+    ] = Field(default_factory=list, max_length=SAVE_JOB_PREVIEW_SKILLS_MAX)
+
+    @field_validator("title", "company", mode="before")
+    @classmethod
+    def _trim_optional_blank_to_none(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("must be a string or null")
+        text = value.strip()
+        return text if text else None
+
+    @field_validator("title", "company")
+    @classmethod
+    def _bounded_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        max_len = SAVE_JOB_PREVIEW_TITLE_MAX
+        if len(value) > max_len:
+            raise ValueError(f"must be at most {max_len} characters")
+        return value
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _trim_skills_omit_blanks(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("skills must be a list of strings")
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("each skill must be a string")
+            text = item.strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+
 class SaveJobInput(BaseModel):
-    """``save_job`` arguments: exactly one of non-empty ``url`` or ``text``."""
+    """``save_job`` arguments: exactly one of url, text, or current_message."""
 
     model_config = StrictModelConfig
 
     url: str | None = None
     text: str | None = None
+    source: SaveJobCurrentMessageSource | None = None
+    preview: SaveJobPreview | None = None
 
     @model_validator(mode="after")
-    def exactly_one_of_url_or_text(self) -> SaveJobInput:
+    def exactly_one_source_mode(self) -> SaveJobInput:
         has_url = isinstance(self.url, str) and self.url.strip() != ""
         has_text = isinstance(self.text, str) and self.text.strip() != ""
-        if has_url == has_text:
+        has_source = self.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+        if sum((has_url, has_text, has_source)) != 1:
             raise ValueError(
-                "save_job requires exactly one of non-empty url or text"
+                "save_job requires exactly one of non-empty url, text, "
+                "or source='current_message'"
+            )
+        if self.preview is not None and not has_source:
+            raise ValueError(
+                "preview is only allowed with source='current_message'"
             )
         return self
+
+
+class SaveJobCancellationData(BaseModel):
+    """Successful no-mutation cancel payload; not a JobIngestOutcome."""
+
+    model_config = StrictModelConfig
+
+    committed: Literal[False]
+    outcome: SaveJobCancelOutcome
 
 
 class QueryJobsInput(BaseModel):

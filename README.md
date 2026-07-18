@@ -11,25 +11,35 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 11 complete — Batch01+Batch02 accepted, commit-ready on
-product HEAD `04fa5f8` / P11B1):** Plan 11 resolves desktop failures F-01 through
-F-05 without architecture or product-scope expansion. Batch01 delivered the four
-root-cause repairs with focused regressions: CORS allowlist exactly
-`GET`/`POST`/`DELETE`; Save Profile activation fans out once to profile refresh,
-observability generation-backed CV Manager reload, and non-destructive saved-JD
-currentness invalidation (no automatic evaluate); explicitly named `save_job`
-turns get one bounded decision-node repair or fixed no-action text and
-ToolResult-derived narration; empty extraction summaries parse and render
-`No summary available` while MatchResult stays non-empty. Batch02 (`02A`) final
-desktop reverification on that accepted code passed every focused/full static,
-unit, build, plan-structure, and scope-hygiene gate; disposable Compose project
-`jobagent-plan11-smoke` reached three-service health `overall=available`; original
-F-01–F-05 reproductions passed with sanitized Origin-bearing API/network/backend
-evidence (DELETE preflight+actual deletes, activation stale without evaluate POST,
-nonblank CV history rows, one durable named duplicate `save_job` returned path,
-empty-summary detail + `JOB_NOT_SCORABLE`); named smoke volumes were removed and
-the normal `infrastructure` stack restored healthy. No product edits in Batch02.
-Plan 10 Batch08 remains the prior accepted product baseline on HEAD `e429c10`.
+**Current status (Plan 12 Batch01 accepted — backend Agent policy and pasted-JD
+confirmation; worktree commit-ready pending orchestrator commit):** Plan 12
+Batch01 delivers the backend half of passive pasted-JD confirmation and Agent
+policy without changing topology, public endpoints, registry count, schema
+migrations, or evaluation behavior. Task **01A** adds strict `SaveJobInput`
+three-way source union (`url` | `text` | `source='current_message'`), bounded
+presentation-only preview, separate cancellation model, and focused
+`backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/
+obvious-JD predicates with required `ponytail:`, durable
+`run_id → user_message_id → chat_messages` resolve, redacted
+`job_save_confirmation` projection, no-mutation cancel ToolResult; service
+below 300 lines; no `app.tools` import). Task **01B** integrates current-message
+`save_job` interrupt before provider/ingestion deps, save that reloads the exact
+durable message once into existing `ingest_raw_text`, cancel with zero
+mutation/deps, opt-out write precondition for every source mode, and
+`allow_running_reentry` only for exclusive current-message mode; direct URL/text
+and dedupe paths remain compatible with zero automatic evaluation. Task **01C**
+extends the existing system prompt (conclusion-first answers, narrow
+`read_active_cv` evidence, passive `source='current_message'`, no auto
+`match_jobs`/evaluate) and the single decision node (opt-out → Plan 11
+exact-name → sole-URL exclude → one obvious-JD repair or fixed refusal;
+ToolResult-only save/cancel narration) while keeping one Agent/decision/ToolNode,
+seven tools, and `TOOL_LOOP_LIMIT=6`. Combined A3 revalidation on the accepted
+worktree: 135 focused unit/integration tests, ruff, and mypy all exit 0; only
+authorized Batch01 product/test paths plus orchestrator task checkboxes differ
+from base `ea7025eb`. Frontend Markdown/citation and JD confirmation card remain
+later Plan 12 batches. Plan 11 complete (Batch01+Batch02) remains the prior
+accepted desktop baseline on product HEAD `04fa5f8` / P11B1. Plan 10 Batch08
+remains the earlier product baseline on HEAD `e429c10`.
 
 Plan 8 Batch01–Batch04 (retention/chunks, observability APIs, accessible lazy
 sidebar inspector, and synthetic local smoke) remain the reuse baseline. Plan 9
@@ -146,7 +156,10 @@ JobAgent provides:
   confirmation dialog, CV-branch graph display + semantic list fallback; D3
   simulation/pan/zoom/fit/reset semantics unchanged).
 - Job description save from public URL or raw text, with durable extract/embed/
-  sync outcomes and exact-hash duplicate/retry semantics.
+  sync outcomes and exact-hash duplicate/retry semantics. Passive pasted
+  recognizable JDs use `save_job(source='current_message')` with a pre-mutation
+  confirmation interrupt; confirmed save reloads the exact durable user message
+  once and never auto-evaluates; cancel returns a successful no-mutation result.
 - Retry-safe complete Job deletion service (exact Neo4j `Job.id` first, SQLite
   Job + evaluation cascade second; graph-fault preservation and shared-graph
   integrity) exposed via public `DELETE /api/jobs/{job_id}`.
@@ -190,7 +203,7 @@ React/Astryx UI  →  FastAPI public API  →  one LangGraph Agent
 | `backend/app/api/` | Thin public routes: health, CV upload, CV reprocess SSE, CV delete, profile reads, chat history/turn/resume, saved-JD list/detail/save-evaluate/evaluate/delete (`api/jobs.py`), read-only observability |
 | `backend/app/agent/` | Agent state/context (including outline-only `active_cv_context`), graph factory, request-scoped checkpoint/runner (including multi-run checkpoint delete) |
 | `backend/app/tools/` | Production registry of exactly seven tools (three profile + `save_job` / `query_jobs` / `match_jobs` + `read_active_cv`) |
-| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, graph-first/SQLite-second `job_deletion` coordinator, saved-JD read assembly + source-bound mutation orchestration (`saved_jobs.py`), JD, top-N `match_jobs`, tool execution, history, observability assembly) |
+| `backend/app/services/` | Domain orchestration (CV document extraction/projection, reprocess turns, profile approval/activation/drafts, non-active CV deletion coordinator + structured ownership resolver, active-CV bounded reader, pure `evaluation_context` hash/currentness, pure `match_scoring` single/multi-Job projection, exact `evaluate_job` orchestration with current-context reuse, graph-first/SQLite-second `job_deletion` coordinator, saved-JD read assembly + source-bound mutation orchestration (`saved_jobs.py`), pure passive-JD recognition/source/projection (`job_save_confirmation.py`), JD, top-N `match_jobs`, tool execution, history, observability assembly) |
 | `backend/app/repositories/` | Flush-only SQLite persistence (including `attachment_text_chunks`, `cv_documents` / `cv_document_drafts`, ownership kwargs, delete redaction/list primitives, `job_evaluations` insert/race-reload/lookup, narrow Job `delete_by_id` + focused `job_deletion` cascade primitive, focused `saved_jobs` cursor-page queries, chat_messages `get_by_id`) and observability cross-table read projections |
 | `backend/app/graph/` | Neo4j lifecycle, Candidate/Job/CV sync, exact CV-branch delete, exact Job-node delete (`delete_job.py` allowlisted `Job.id`), revision consistency (Candidate/Job + active-CV observability), top-50 vector retrieval + exact `Job.id` cosine semantic read, provider-free rebuild, allowlisted observability projection |
 | `backend/app/adapters/` | ShopAIKey chat and locked embedding transports |
@@ -357,6 +370,19 @@ python -m pytest tests/unit -q
 python -m pytest tests/integration -q
 python -m pytest tests/e2e/test_demo_flow.py -q
 Set-Location ..
+```
+
+Focused Plan 12 Batch01 backend confirmation and Agent policy gate (strict
+schema/service predicates, current-message interrupt/save/cancel/replay,
+prompt/decision recognition order, seven-tool six-pass topology; fakes only):
+
+```powershell
+Set-Location backend
+py -3.13 -m pytest tests/unit/test_job_save_confirmation.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py tests/integration/test_job_tools.py tests/integration/test_chat_api.py -q
+py -3.13 -m ruff check app/schemas/jobs.py app/services/job_save_confirmation.py app/tools/jobs.py app/agent/prompt.py app/agent/graph.py tests/unit/test_job_save_confirmation.py tests/unit/test_shopaikey_chat.py tests/unit/test_agent_graph.py tests/integration/test_job_tools.py tests/integration/test_chat_api.py --no-cache
+py -3.13 -m mypy app --no-incremental
+Set-Location ..
+git diff --check
 ```
 
 Focused Plan 10 Batch01 evaluation persistence and canonical currentness gate

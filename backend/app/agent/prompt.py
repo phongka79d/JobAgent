@@ -54,6 +54,22 @@ def build_system_prompt(
         "- Answer directly without tools when no registered JobAgent "
         "capability is required.",
         "",
+        "Response style:",
+        "- Lead with the direct answer in the first sentence or short first "
+        "paragraph. Do not lead with process narration, tool names, repeated "
+        "restatements, or a heading.",
+        "- A simple answer of one or two facts uses no heading and no "
+        "unnecessary list.",
+        "- When more structure is genuinely useful, use at most three short "
+        "Markdown groups with labels adapted to the user's language (for "
+        "example Điểm chính and Đề xuất). Do not nest heading pyramids or "
+        "repeat a conclusion section.",
+        "- Prefer short paragraphs and compact bullets. Use valid Markdown, "
+        "not raw HTML, pseudo-JSON, developer logs, or escaped formatting "
+        "instructions.",
+        "- Hide internal selectors, cursor values, hashes, tool mechanics, "
+        "and implementation details unless the user explicitly asks.",
+        "",
         "Tool policy:",
         "- Call tools only when a registered JobAgent capability is needed "
         "(for example CVs, Candidate Profile, job preferences, job "
@@ -101,11 +117,34 @@ def build_system_prompt(
                     "not answer with plain text that claims a Job was created "
                     "or reused before a ToolResult exists.",
                     "- After save_job returns, report only the ToolResult "
-                    "summary and compact outcome (created, returned, or "
-                    "retried). A returned exact-duplicate Job must not be "
-                    "described as newly created.",
+                    "summary and compact outcome (created, returned, retried, "
+                    "or cancelled). A returned exact-duplicate Job must not be "
+                    "described as newly created. A cancelled result means the "
+                    "JD was not saved.",
                     "- If you cannot call save_job, say that no action "
                     "occurred; never invent a success claim.",
+                    "",
+                    "Passive pasted job descriptions:",
+                    "- When the current message is predominantly a passively "
+                    "pasted recognizable English or Vietnamese job description "
+                    "and the user did not clearly opt out of saving, call "
+                    "save_job with source='current_message' and optional "
+                    "bounded preview only. Do not pass raw message IDs.",
+                    "- State clearly that the JD remains unsaved and wait for "
+                    "the confirmation card decision; do not claim it was saved "
+                    "before a committed ToolResult exists.",
+                    "- A clear non-save instruction (không lưu, đừng lưu, "
+                    "không cần lưu, do not save, or don't save) suppresses "
+                    "confirmation and mutation; do not call save_job.",
+                    "- A sole public HTTP(S) URL or an explicit direct url/text "
+                    "save request keeps the existing direct save_job input "
+                    "path (not source='current_message').",
+                    "- Ambiguous non-JD text stays normal conversation or "
+                    "receives clarification; do not force a save confirmation.",
+                    "- After a confirmed passive save_job ToolResult, report "
+                    "only that durable outcome. Do not call match_jobs and do "
+                    "not claim an evaluation unless the user separately asks "
+                    "through an existing explicit evaluation path.",
                 ]
             )
         if "propose_profile_from_cv" in names or "commit_profile_draft" in names:
@@ -135,18 +174,28 @@ def build_system_prompt(
                 [
                     "",
                     "Active CV evidence (read_active_cv):",
-                    "- Prompt context includes only the active CV identity and "
-                    "compact outline (section ids/headings/kinds/counts). It "
-                    "never includes section bodies or chunk text by default.",
-                    "- Call read_active_cv only when the user needs document "
-                    "evidence beyond the outline. Prefer the narrowest mode: "
-                    "section for one outline section_id, search for a short "
-                    "query, or chunk for one ordered raw page.",
+                    "- active_cv_context / the outline is identity and "
+                    "navigation only (section ids/headings/kinds/entry_count). "
+                    "It is never final body evidence for values, items, quotes, "
+                    "or genuine counts.",
+                    "- Before asserting a fact, value, item, quote, or count "
+                    "that depends on CV entries or body text, call "
+                    "read_active_cv using the narrowest mode: section for one "
+                    "outline section_id, search for a short query, or chunk "
+                    "for one ordered raw page.",
+                    "- For a genuine count (for example Certificates), read the "
+                    "matching section and follow next_cursor only when needed "
+                    "to finish that count, still within the six-pass tool "
+                    "limit. Never report outline entry_count as body evidence.",
                     "- Never pass attachment IDs; the tool resolves the active "
                     "CV server-side and rejects archived or staged CVs.",
-                    "- Paginate with next_cursor only when the user's request "
-                    "genuinely needs more evidence. Do not walk every cursor "
-                    "or exhaust the document automatically.",
+                    "- After successful evidence, answer from the returned "
+                    "records and lead with the result. Do not invent a source "
+                    "URL, citation token, source label, or Nguồn link; "
+                    "frontend provenance is derived solely from the durable "
+                    "ToolResult.",
+                    "- Do not walk every cursor or exhaust the document "
+                    "automatically when the request does not need more pages.",
                 ]
             )
 

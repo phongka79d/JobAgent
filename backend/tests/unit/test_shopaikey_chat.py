@@ -250,3 +250,91 @@ def test_adapter_module_is_sole_chatopenai_construction_owner() -> None:
             rel = path.relative_to(app_root).as_posix()
             hits.append(rel)
     assert hits == ["adapters/shopaikey_chat.py"]
+
+
+# ---------------------------------------------------------------------------
+# Plan 12: readable responses, active-CV evidence, passive-JD policy
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_response_style_is_conclusion_first_and_bounded() -> None:
+    """Direct answer first; simple vs long structure; hide internals."""
+    prompt = build_system_prompt(None)
+    lower = prompt.lower()
+    assert "response style" in lower
+    assert "lead with the direct answer" in lower
+    assert "first sentence" in lower or "first paragraph" in lower
+    assert "simple answer" in lower
+    assert "no heading" in lower
+    assert "at most three" in lower
+    assert "user's language" in lower or "user language" in lower
+    assert "điểm chính" in lower or "diem chinh" in lower
+    assert "hide internal" in lower or "hide internal selectors" in lower
+    assert "cursor" in lower
+    assert "hash" in lower
+    # Existing general-conversation rules remain.
+    assert "greeting" in lower or "greetings" in lower
+    assert "general knowledge" in lower
+
+
+def test_prompt_active_cv_requires_narrow_reads_and_no_invented_source() -> None:
+    prompt = build_system_prompt(["read_active_cv"])
+    lower = prompt.lower()
+    assert "read_active_cv" in prompt
+    assert "narrowest" in lower
+    assert "never final body evidence" in lower or "never final body" in lower
+    assert "entry_count" in lower or "outline" in lower
+    assert "fact" in lower or "value" in lower or "quote" in lower
+    assert "count" in lower
+    assert "next_cursor" in lower
+    assert "six-pass" in lower or "six pass" in lower
+    assert "do not invent" in lower or "not invent" in lower
+    assert "source url" in lower or "citation" in lower or "nguồn" in lower
+    # Section absent when tool not registered.
+    empty = build_system_prompt([])
+    assert "Active CV evidence" not in empty
+
+
+def test_prompt_passive_jd_current_message_opt_outs_and_no_auto_eval() -> None:
+    prompt = build_system_prompt(["save_job", "match_jobs"])
+    lower = prompt.lower()
+    assert "save_job truthfulness" in lower
+    assert "source='current_message'" in prompt or 'source="current_message"' in prompt
+    assert "unsaved" in lower
+    assert "confirmation card" in lower or "card decision" in lower
+    assert "không lưu" in lower
+    assert "đừng lưu" in lower or "dung luu" in lower
+    assert "do not save" in lower
+    assert "don't save" in lower or "don\u2019t save" in lower
+    assert "sole public" in lower or "sole" in lower
+    assert "match_jobs" in prompt
+    assert "do not call match_jobs" in lower
+    assert "evaluation" in lower
+    # Named save truthfulness preserved (Plan 11).
+    assert "before a toolresult exists" in lower
+    assert "returned" in lower
+    # Passive section absent without save_job.
+    no_save = build_system_prompt(["match_jobs"])
+    assert "Passive pasted" not in no_save
+    assert "current_message" not in no_save
+
+
+def test_prompt_profile_and_failure_rules_remain_with_plan12_policy() -> None:
+    """Plan 12 additions must not drop profile or false-success rules."""
+    prompt = build_system_prompt(
+        [
+            "propose_profile_from_cv",
+            "commit_profile_draft",
+            "save_job",
+            "read_active_cv",
+        ]
+    )
+    lower = prompt.lower()
+    assert "ok=false" in lower
+    assert "never claim" in lower and "succeeded" in lower
+    assert "propose_profile_from_cv" in prompt
+    assert "commit_profile_draft" in prompt
+    assert "draft_id" in lower or "draft_id='current'" in lower
+    assert "response style" in lower
+    assert "active cv evidence" in lower
+    assert "passive pasted" in lower

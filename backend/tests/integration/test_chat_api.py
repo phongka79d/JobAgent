@@ -540,6 +540,279 @@ def test_resume_unknown_run_404(
 
 
 # ---------------------------------------------------------------------------
+# Plan 12 (01B): public save_job current-message interrupt / cancel / save
+# ---------------------------------------------------------------------------
+
+
+_PUBLIC_JD_MESSAGE = (
+    "Job Description\n"
+    "Backend Engineer at Acme\n"
+    "Responsibilities\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Requirements\n"
+    "- 3+ years Python experience required for this role\n"
+    "- Strong communication skills\n"
+    "About the role: build APIs for local demo customers with care."
+)
+
+
+def test_public_save_job_current_message_interrupt_cancel_and_save(
+    chat_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    """Public SSE: exact job_save_confirmation keys, cancel then save paths."""
+    from app.db.models.job_evaluations import JobEvaluation
+    from app.db.models.jobs import JobPost
+    from app.services.jd_extraction import ExtractedJobPost
+    from app.services.skill_normalization import SkillNormalizer
+    from app.tools.jobs import SAVE_JOB_NAME, build_save_job_tool
+    from sqlalchemy import func, select
+
+    from tests.fakes.embeddings import FakeEmbeddingClient
+    from tests.fakes.structured_output import FakeJdInvoker
+
+    db_path, _files, _fake = chat_env
+    factory = get_session_factory()
+    skills = (
+        Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
+    )
+    normalizer = SkillNormalizer.from_path(skills)
+
+    extracted = ExtractedJobPost.model_validate(
+        {
+            "title": "Backend Engineer",
+            "company": "Acme",
+            "summary": "Build and maintain APIs.",
+            "responsibilities": ["Design REST services", "Own deployments"],
+            "required_skills": [
+                {
+                    "name": "Python",
+                    "confidence": 0.9,
+                    "evidence": ["Required: 3+ years Python"],
+                }
+            ],
+            "preferred_skills": [],
+            "seniority": "mid",
+            "min_experience_years": 3.0,
+            "max_experience_years": 5.0,
+            "location": "Berlin",
+            "work_mode": "hybrid",
+            "extraction_confidence": 0.85,
+        }
+    )
+
+    # --- Cancel path ---
+    invoker_cancel = FakeJdInvoker([extracted])
+    embedder_cancel = FakeEmbeddingClient()
+    tool_cancel = build_save_job_tool(
+        session_factory=factory,
+        invoker=invoker_cancel,
+        normalizer=normalizer,
+        embedding_client=embedder_cancel,
+    )
+    model_cancel = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                call_id="call-public-cm-cancel",
+                args={
+                    "source": "current_message",
+                    "preview": {
+                        "title": "Backend Engineer",
+                        "company": "Acme",
+                        "skills": ["Python"],
+                    },
+                },
+            ),
+            _ai_text("Waiting for confirmation."),
+        ]
+    )
+    with _client_with_fake(
+        db_path, model_cancel, ToolRegistry([tool_cancel])
+    ) as client:
+        turn = client.post(
+            "/api/chat/turns",
+            json={"message": _PUBLIC_JD_MESSAGE, "attachment_ids": []},
+        )
+        assert turn.status_code == 200
+        events = _parse_sse(turn.text)
+        names = [e["event"] for e in events]
+        assert names[0] == "run_started"
+        assert names[-1] == "approval_required"
+        assert "run_completed" not in names
+        approval = events[-1]
+        payload = approval["payload"]
+        assert payload["kind"] == "job_save_confirmation"
+        assert payload["allowed_actions"] == ["save_job", "cancel_save_job"]
+        card = payload["card"]
+        assert card["tool_name"] == SAVE_JOB_NAME
+        assert card["tool_call_id"] == "call-public-cm-cancel"
+        assert card["source"] == "current_message"
+        assert card["text_length"] == len(_PUBLIC_JD_MESSAGE)
+        assert card["preview"]["title"] == "Backend Engineer"
+        assert _PUBLIC_JD_MESSAGE not in turn.text
+        assert "user_message_id" not in turn.text
+        assert "raw_content" not in turn.text
+        assert len(invoker_cancel.calls) == 0
+        run_cancel = approval["run_id"]
+
+        # Invalid action leaves interrupt in place
+        bad = client.post(
+            f"/api/chat/runs/{run_cancel}/resume",
+            json={"action": "approve"},
+        )
+        assert bad.status_code == 400
+        assert bad.json()["detail"]["code"] == "INVALID_APPROVAL_ACTION"
+
+        model_resume = FakeChatModel(
+            responses=[_ai_text("Understood; JD was not saved.")]
+        )
+        tool_cancel2 = build_save_job_tool(
+            session_factory=factory,
+            invoker=invoker_cancel,
+            normalizer=normalizer,
+            embedding_client=embedder_cancel,
+        )
+        _override_deps(
+            client,
+            model=model_resume,
+            registry=ToolRegistry([tool_cancel2]),
+            db_path=db_path,
+        )
+        resume = client.post(
+            f"/api/chat/runs/{run_cancel}/resume",
+            json={"action": "cancel_save_job"},
+        )
+        assert resume.status_code == 200
+        rev = _parse_sse(resume.text)
+        assert "run_completed" in [e["event"] for e in rev]
+        assert len(invoker_cancel.calls) == 0
+
+    async def _assert_cancel() -> None:
+        async with factory() as session:
+            run = await runs_repo.get_run(session, run_cancel)
+            assert run is not None
+            assert run.state == AGENT_RUN_STATE_COMPLETED
+            tools = await tool_repo.list_for_run_ids(session, [run_cancel])
+            assert len(tools) == 1
+            assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+            data = tools[0].result_json
+            assert data is not None
+            assert data.get("data") == {
+                "committed": False,
+                "outcome": "cancelled",
+            }
+            job_count = await session.execute(
+                select(func.count()).select_from(JobPost)
+            )
+            assert int(job_count.scalar_one()) == 0
+            eval_count = await session.execute(
+                select(func.count()).select_from(JobEvaluation)
+            )
+            assert int(eval_count.scalar_one()) == 0
+
+    run_async(_assert_cancel())
+
+    # --- Save path (separate turn) ---
+    invoker_save = FakeJdInvoker([extracted])
+    embedder_save = FakeEmbeddingClient()
+    tool_save = build_save_job_tool(
+        session_factory=factory,
+        invoker=invoker_save,
+        normalizer=normalizer,
+        embedding_client=embedder_save,
+    )
+    model_save = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                call_id="call-public-cm-save",
+                args={"source": "current_message"},
+            ),
+            _ai_text("Waiting for confirmation."),
+        ]
+    )
+    with _client_with_fake(
+        db_path, model_save, ToolRegistry([tool_save])
+    ) as client:
+        turn = client.post(
+            "/api/chat/turns",
+            json={"message": _PUBLIC_JD_MESSAGE, "attachment_ids": []},
+        )
+        assert turn.status_code == 200
+        events = _parse_sse(turn.text)
+        assert events[-1]["event"] == "approval_required"
+        run_save = events[-1]["run_id"]
+        assert len(invoker_save.calls) == 0
+
+        tool_save2 = build_save_job_tool(
+            session_factory=factory,
+            invoker=invoker_save,
+            normalizer=normalizer,
+            embedding_client=embedder_save,
+        )
+        _override_deps(
+            client,
+            model=FakeChatModel(responses=[_ai_text("Saved the JD.")]),
+            registry=ToolRegistry([tool_save2]),
+            db_path=db_path,
+        )
+        resume = client.post(
+            f"/api/chat/runs/{run_save}/resume",
+            json={"action": "save_job"},
+        )
+        assert resume.status_code == 200
+        rev = _parse_sse(resume.text)
+        assert "run_completed" in [e["event"] for e in rev]
+        assert len(invoker_save.calls) == 1
+
+        # Terminal no-op resume
+        _override_deps(
+            client,
+            model=FakeChatModel(responses=[_ai_text("should not run")]),
+            registry=ToolRegistry([]),
+            db_path=db_path,
+        )
+        noop = client.post(
+            f"/api/chat/runs/{run_save}/resume",
+            json={"action": "save_job"},
+        )
+        assert noop.status_code == 200
+        nevents = _parse_sse(noop.text)
+        assert [e["event"] for e in nevents] == ["run_started", "run_completed"]
+        assert len(invoker_save.calls) == 1
+
+    async def _assert_save() -> None:
+        async with factory() as session:
+            tools = await tool_repo.list_for_run_ids(session, [run_save])
+            assert len(tools) == 1
+            assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+            result = tools[0].result_json
+            assert result is not None
+            assert result.get("ok") is True
+            data = result.get("data") or {}
+            assert data.get("outcome") == "created"
+            assert data.get("sqlite_committed") is True
+            job_id = data.get("job_id")
+            assert job_id
+            from app.repositories import jobs as jobs_repo
+
+            row = await jobs_repo.get_by_id(session, job_id)
+            assert row is not None
+            assert row.raw_content == _PUBLIC_JD_MESSAGE
+            job_count = await session.execute(
+                select(func.count()).select_from(JobPost)
+            )
+            assert int(job_count.scalar_one()) == 1
+            eval_count = await session.execute(
+                select(func.count()).select_from(JobEvaluation)
+            )
+            assert int(eval_count.scalar_one()) == 0
+
+    run_async(_assert_save())
+
+
+# ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
 

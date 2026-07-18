@@ -205,7 +205,7 @@ provider/model, tool registry/count, Agent state/topology, and loop-limit change
 
 ### Tasks
 
-- [ ] (01A): Establish strict JD confirmation schemas and service boundaries
+- [x] (01A): Establish strict JD confirmation schemas and service boundaries
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch01 - Backend Agent Policy and Pasted-JD Confirmation` > `(01A)`
@@ -255,7 +255,7 @@ provider/model, tool registry/count, Agent state/topology, and loop-limit change
   - Blocked Condition: Missing accepted Plan 11 schema/repository refs is `BLOCKED_MISSING_REF`; conflicting source/recognition authority is `BLOCKED_SOURCE_CONFLICT`; a root foundation requiring tool/Agent/repository/API or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/schemas/jobs.py`, `backend/app/services/job_save_confirmation.py`, `backend/tests/unit/test_job_save_confirmation.py`
 
-- [ ] (01B): Integrate current-message interrupt, save, cancel, and replay into save_job
+- [x] (01B): Integrate current-message interrupt, save, cancel, and replay into save_job
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch01 - Backend Agent Policy and Pasted-JD Confirmation` > `(01B)`
@@ -304,7 +304,7 @@ provider/model, tool registry/count, Agent state/topology, and loop-limit change
   - Blocked Condition: Missing accepted (01A) foundation is `BLOCKED_MISSING_REF`; conflicting interrupt/replay authority is `BLOCKED_SOURCE_CONFLICT`; a root implementation requiring a generic execution/runner/repository/API/ingestion or other out-of-bound edit is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/tools/jobs.py`, `backend/tests/integration/test_job_tools.py`, `backend/tests/integration/test_chat_api.py`
 
-- [ ] (01C): Enforce readable, evidence-backed, and bounded passive-JD Agent decisions
+- [x] (01C): Enforce readable, evidence-backed, and bounded passive-JD Agent decisions
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_12.md` > `## Mandatory Batch01 - Backend Agent Policy and Pasted-JD Confirmation` > `(01C)`

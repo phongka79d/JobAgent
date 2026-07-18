@@ -43,6 +43,12 @@ from app.agent.prompt import build_system_prompt
 from app.agent.state import AGENT_CONVERSATION_ID, AGENT_STATE_FIELDS
 from app.core.settings import Settings, get_settings
 from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.services.job_save_confirmation import (
+    CANCEL_SUMMARY,
+    message_has_clear_opt_out,
+    message_is_obvious_jd,
+    message_is_sole_http_url,
+)
 from app.tools.jobs import SAVE_JOB_NAME
 from app.tools.profile import (
     COMMIT_PROFILE_DRAFT_NAME,
@@ -62,6 +68,14 @@ NAMED_SAVE_JOB_NO_ACTION_TEXT: str = (
     "or reused."
 )
 
+# Fixed truthful fallback when passive obvious-JD repair never issues confirmation.
+PASSIVE_JD_NO_CONFIRMATION_TEXT: str = (
+    "No confirmation was created and the JD was not saved."
+)
+
+SAVE_JOB_SOURCE_CURRENT_MESSAGE: str = "current_message"
+SAVE_JOB_CANCEL_OUTCOME: str = "cancelled"
+
 # Exact registered token only (word boundary). Not NL paraphrase detection.
 _SAVE_JOB_NAME_IN_REQUEST = re.compile(rf"\b{re.escape(SAVE_JOB_NAME)}\b")
 
@@ -70,6 +84,13 @@ _NAMED_SAVE_JOB_REPAIR_INSTRUCTION: str = (
     "Call exactly one valid save_job with the user's url or text argument. "
     "Do not call any other tool. Do not answer with plain text. Do not claim "
     "that a Job was created, returned, or reused until a ToolResult exists."
+)
+
+_PASSIVE_JD_REPAIR_INSTRUCTION: str = (
+    "Required repair: the current message is an obvious pasted job description. "
+    "Call exactly one valid save_job with source='current_message' (optional "
+    "bounded preview only). Do not call any other tool. Do not answer with "
+    "plain text. Do not claim the JD was saved until a ToolResult exists."
 )
 
 # Graph node names — exactly one decision node and one ToolNode.
@@ -341,6 +362,18 @@ def _tool_call_name(call: Any) -> str:
     return name if isinstance(name, str) else ""
 
 
+def _tool_call_args(call: Any) -> dict[str, Any]:
+    if isinstance(call, dict):
+        args = call.get("args")
+    else:
+        args = getattr(call, "args", None)
+    return args if isinstance(args, dict) else {}
+
+
+def _is_current_message_source_args(args: dict[str, Any]) -> bool:
+    return args.get("source") == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+
+
 def _parse_tool_result_payload(content: Any) -> dict[str, Any] | None:
     if isinstance(content, dict):
         return content
@@ -510,6 +543,51 @@ def _is_sole_save_job_call(message: AIMessage | None) -> bool:
     return _tool_call_name(calls[0]) == SAVE_JOB_NAME
 
 
+def _is_sole_current_message_save_job_call(message: AIMessage | None) -> bool:
+    """True when the AIMessage is exactly one save_job(source=current_message)."""
+    if not _is_sole_save_job_call(message):
+        return False
+    assert message is not None
+    calls = list(message.tool_calls or [])
+    return _is_current_message_source_args(_tool_call_args(calls[0]))
+
+
+def _turn_called_current_message_save_job(messages: Sequence[Any]) -> bool:
+    for item in messages:
+        if not isinstance(item, AIMessage):
+            continue
+        for call in item.tool_calls or []:
+            if _tool_call_name(call) != SAVE_JOB_NAME:
+                continue
+            if _is_current_message_source_args(_tool_call_args(call)):
+                return True
+    return False
+
+
+def _is_cancellation_payload(payload: dict[str, Any]) -> bool:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return False
+    return (
+        data.get("outcome") == SAVE_JOB_CANCEL_OUTCOME
+        and data.get("committed") is False
+    )
+
+
+def _should_project_save_job_narration(
+    *,
+    named_save: bool,
+    messages: Sequence[Any],
+    payload: dict[str, Any],
+) -> bool:
+    """Project only for named, current-message, or cancellation ToolResults."""
+    if named_save:
+        return True
+    if _turn_called_current_message_save_job(messages):
+        return True
+    return _is_cancellation_payload(payload)
+
+
 def _latest_save_job_tool_result(
     messages: Sequence[Any],
 ) -> dict[str, Any] | None:
@@ -564,6 +642,10 @@ def _project_save_job_narration(payload: dict[str, Any]) -> str:
         if isinstance(code, str) and code.strip():
             return f"save_job failed ({code.strip()})."
         return "save_job failed."
+
+    # Cancellation is never narrated as saved/created/reused.
+    if outcome == SAVE_JOB_CANCEL_OUTCOME or _is_cancellation_payload(payload):
+        return summary or CANCEL_SUMMARY
 
     if outcome == "returned":
         # Compact outcome wins over any model-like "created" language.
@@ -690,17 +772,25 @@ def build_agent_graph(
         turn_messages: list[Any] = (
             list(raw_messages) if isinstance(raw_messages, list) else []
         )
-        named_save = _request_names_save_job(
-            _initiating_user_text(state),
+        user_text = _initiating_user_text(state)
+        # Deterministic order: clear opt-out → positive exact-name → sole URL /
+        # obvious passive JD. Opt-out suppresses both save repairs.
+        clear_opt_out = message_has_clear_opt_out(user_text)
+        named_save = (not clear_opt_out) and _request_names_save_job(
+            user_text,
             save_job_registered=save_job_available,
         )
         save_job_already = _turn_already_called_save_job(turn_messages)
 
-        # After a durable save_job ToolResult on a named turn, narrate only from
-        # validated summary/compact outcome (never model mutation prose).
-        if named_save and save_job_already:
+        # After a durable save_job ToolResult on named / current-message /
+        # cancellation paths, narrate only from validated summary/outcome.
+        if save_job_already:
             payload = _latest_save_job_tool_result(turn_messages)
-            if payload is not None:
+            if payload is not None and _should_project_save_job_narration(
+                named_save=named_save,
+                messages=turn_messages,
+                payload=payload,
+            ):
                 return {
                     MESSAGES_KEY: [
                         AIMessage(content=_project_save_job_narration(payload))
@@ -726,6 +816,27 @@ def build_agent_graph(
                         AIMessage(content=NAMED_SAVE_JOB_NO_ACTION_TEXT)
                     ]
                 }
+        # Passive obvious-JD: only after opt-out and positive exact-name lose;
+        # sole URL is excluded; one repair after plain-text miss only.
+        elif (
+            save_job_available
+            and not clear_opt_out
+            and not save_job_already
+            and not message_is_sole_http_url(user_text)
+            and message_is_obvious_jd(user_text)
+        ):
+            if not _has_tool_calls(response):
+                repair_messages = list(prompt_messages) + [
+                    SystemMessage(content=_PASSIVE_JD_REPAIR_INSTRUCTION)
+                ]
+                response = _normalize_ai_response(chat.invoke(repair_messages))
+                if not _is_sole_current_message_save_job_call(response):
+                    return {
+                        MESSAGES_KEY: [
+                            AIMessage(content=PASSIVE_JD_NO_CONFIRMATION_TEXT)
+                        ]
+                    }
+            # First decision already has tool calls: leave normal validation.
 
         updates = {MESSAGES_KEY: [response]}
         count = int(state.get("tool_iteration_count") or 0)

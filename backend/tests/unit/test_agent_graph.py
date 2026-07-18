@@ -11,6 +11,7 @@ from app.agent.graph import (
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
     MESSAGES_KEY,
     NAMED_SAVE_JOB_NO_ACTION_TEXT,
+    PASSIVE_JD_NO_CONFIRMATION_TEXT,
     TOOLS_NODE_NAME,
     AgentGraphBundle,
     _build_model_messages,
@@ -19,6 +20,7 @@ from app.agent.graph import (
     initial_graph_state,
 )
 from app.agent.state import AGENT_STATE_FIELDS
+from app.services import job_save_confirmation as conf
 from app.tools.jobs import SAVE_JOB_NAME
 from app.tools.registry import ToolRegistry, production_registry
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -124,6 +126,73 @@ def save_job_created_tool(
             "sync_ok": True,
         },
     }
+
+
+_SAVE_JOB_CANCEL_PAYLOAD: dict[str, Any] = {
+    "ok": True,
+    "code": None,
+    "summary": conf.CANCEL_SUMMARY,
+    "data": {
+        "committed": False,
+        "outcome": "cancelled",
+    },
+}
+
+
+@tool(SAVE_JOB_NAME)
+def save_job_current_message_tool(
+    url: str | None = None,
+    text: str | None = None,
+    source: str | None = None,
+    preview: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Test-only save_job accepting current_message source."""
+    del url, text, preview
+    if source == "current_message":
+        return {
+            "ok": True,
+            "code": None,
+            "summary": "Saved job description (processed/full)",
+            "data": {
+                "job_id": "job-cm-1",
+                "title": "Backend Engineer",
+                "company": "Acme",
+                "source_url": None,
+                "processing_status": "processed",
+                "jd_quality": "full",
+                "outcome": "created",
+                "sqlite_committed": True,
+                "sync_ok": True,
+            },
+        }
+    return dict(_SAVE_JOB_RETURNED_PAYLOAD)
+
+
+@tool(SAVE_JOB_NAME)
+def save_job_cancel_tool(
+    url: str | None = None,
+    text: str | None = None,
+    source: str | None = None,
+    preview: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Test-only save_job that always returns successful cancellation."""
+    del url, text, source, preview
+    return dict(_SAVE_JOB_CANCEL_PAYLOAD)
+
+
+def _obvious_passive_jd(
+    *,
+    markers: tuple[str, str] = ("responsibilities", "requirements"),
+) -> str:
+    """Obvious structured JD meeting 01A thresholds (reuse pure predicates)."""
+    lines = [markers[0], markers[1], "line three", "line four", "line five"]
+    body = "\n".join(lines)
+    while conf._non_whitespace_char_count(body) < conf.OBVIOUS_JD_MIN_NON_WS_CHARS:  # noqa: SLF001
+        body += "x"
+    assert conf.message_is_obvious_jd(body)
+    assert not conf.message_has_clear_opt_out(body)
+    assert not conf.message_is_sole_http_url(body)
+    return body
 
 
 def _ai_text(content: str) -> AIMessage:
@@ -827,3 +896,325 @@ def test_named_save_job_gate_has_ponytail_and_topology_intact() -> None:
     }
     assert app_nodes == {DECISION_NODE_NAME, TOOLS_NODE_NAME}
     assert bundle.tool_loop_limit == 6
+
+
+# ---------------------------------------------------------------------------
+# Plan 12: passive-JD recognition precedence, one repair, narration
+# ---------------------------------------------------------------------------
+
+
+def test_opt_out_suppresses_exact_name_and_passive_repair() -> None:
+    """Clear opt-out wins over exact-name repair and passive-JD repair."""
+    # Exact-name token plus clear opt-out: no forced save_job repair.
+    named_opt = (
+        "Use save_job with url https://example.com but please don't save it."
+    )
+    assert conf.message_has_clear_opt_out(named_opt)
+    model = FakeChatModel(
+        responses=[
+            _ai_text("I created the job successfully."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com"},
+                call_id="should-not-run",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=named_opt)
+    )
+    assert out["tool_iteration_count"] == 0
+    assert model.invoke_count == 1  # no repair invoke
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == "I created the job successfully."
+
+    # Obvious JD plus Vietnamese opt-out: no passive repair / mutation.
+    jd_opt = _obvious_passive_jd() + "\nkhông lưu"
+    assert conf.message_has_clear_opt_out(jd_opt)
+    assert conf.message_is_obvious_jd(jd_opt)
+    jd_model = FakeChatModel(
+        responses=[
+            _ai_text("Looks like a JD; I will not save it."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="passive-should-not",
+            ),
+        ]
+    )
+    jd_bundle = _bundle(jd_model, [save_job_current_message_tool])
+    jd_out = jd_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd_opt)
+    )
+    assert jd_out["tool_iteration_count"] == 0
+    assert jd_model.invoke_count == 1
+    assert not any(isinstance(m, ToolMessage) for m in jd_out[MESSAGES_KEY])
+
+
+def test_positive_exact_name_precedes_passive_jd_repair() -> None:
+    """Positive exact-name Plan 11 path wins over passive current-message repair."""
+    # Named token with obvious-JD-shaped text still uses exact-name repair
+    # (url/text sole call), not source=current_message.
+    body = (
+        "Please call save_job for this posting:\n"
+        + _obvious_passive_jd()
+        + "\nurl https://example.com/role"
+    )
+    assert conf.message_is_obvious_jd(body)
+    assert not conf.message_has_clear_opt_out(body)
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Saved already."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com/role"},
+                call_id="exact-1",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=body)
+    )
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 2  # first + exact-name repair
+    tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    ai_with_calls = [
+        m
+        for m in out[MESSAGES_KEY]
+        if isinstance(m, AIMessage) and (m.tool_calls or [])
+    ]
+    assert len(ai_with_calls) == 1
+    args = ai_with_calls[0].tool_calls[0]["args"]
+    assert args.get("url") == "https://example.com/role"
+    assert args.get("source") != "current_message"
+    final = str(out[MESSAGES_KEY][-1].content).lower()
+    assert "returned" in final or "reused" in final
+
+
+def test_sole_url_and_ambiguous_prose_skip_passive_repair() -> None:
+    sole_url = "https://example.com/jobs/backend-engineer"
+    assert conf.message_is_sole_http_url(sole_url)
+    url_model = FakeChatModel(responses=[_ai_text("I can open that link.")])
+    url_bundle = _bundle(url_model, [save_job_current_message_tool])
+    url_out = url_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=sole_url)
+    )
+    assert url_model.invoke_count == 1
+    assert url_out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in url_out[MESSAGES_KEY])
+    assert url_out[MESSAGES_KEY][-1].content == "I can open that link."
+
+    # Long ambiguous prose without distinct JD markers is not forced.
+    ambiguous = ("This is a long story about my career journey. " * 20).strip()
+    assert conf._non_whitespace_char_count(ambiguous) >= 300  # noqa: SLF001
+    assert not conf.message_is_obvious_jd(ambiguous)
+    amb_model = FakeChatModel(responses=[_ai_text("Thanks for sharing.")])
+    amb_bundle = _bundle(amb_model, [save_job_current_message_tool])
+    amb_out = amb_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=ambiguous)
+    )
+    assert amb_model.invoke_count == 1
+    assert amb_out["tool_iteration_count"] == 0
+    assert amb_out[MESSAGES_KEY][-1].content == "Thanks for sharing."
+
+
+def test_passive_first_tool_success_projects_without_repair() -> None:
+    """First decision already sole current-message: no repair, ToolResult narrates."""
+    jd = _obvious_passive_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="cm-first",
+            ),
+            _ai_text("I created a brand new job for you."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert out["error"] is None
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 1  # projection skips second model call
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" in final
+    assert "brand new" not in final.lower()
+    assert not any(
+        isinstance(m, AIMessage)
+        and "brand new" in str(m.content).lower()
+        for m in out[MESSAGES_KEY]
+    )
+
+
+def test_passive_one_repair_success_discards_plain_text() -> None:
+    """Plain-text miss → one current-message repair; discard never stored."""
+    jd = _obvious_passive_jd(markers=("mô tả công việc", "yêu cầu"))
+    model = FakeChatModel(
+        responses=[
+            _ai_text("I already saved this JD for you."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {
+                    "source": "current_message",
+                    "preview": {"title": "Engineer", "company": None, "skills": []},
+                },
+                call_id="cm-repair",
+            ),
+            _ai_text("Created successfully."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 2  # first + one repair only
+    joined = " ".join(
+        str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
+    )
+    assert "I already saved this JD" not in joined
+    assert "Created successfully." not in joined
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" in final
+    ai_calls = [
+        m
+        for m in out[MESSAGES_KEY]
+        if isinstance(m, AIMessage) and (m.tool_calls or [])
+    ]
+    assert len(ai_calls) == 1
+    assert ai_calls[0].tool_calls[0]["args"].get("source") == "current_message"
+
+
+def test_passive_repair_refusal_is_fixed_truthful_no_save() -> None:
+    jd = _obvious_passive_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Looks like a job post."),
+            _ai_text("Still not calling tools."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="too-late",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert out["tool_iteration_count"] == 0
+    assert model.invoke_count == 2  # first + one repair, no loop
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    joined = " ".join(
+        str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
+    )
+    assert "Looks like a job post" not in joined
+    assert "Still not calling tools" not in joined
+
+
+def test_passive_repair_rejects_non_current_message_tool() -> None:
+    """Repair that calls another tool or non-CM save_job is refused."""
+    jd = _obvious_passive_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Saving now."),
+            _ai_tool_call("echo_tool", {"text": "nope"}, call_id="wrong"),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool, echo_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert out["tool_iteration_count"] == 0
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+
+    url_model = FakeChatModel(
+        responses=[
+            _ai_text("Saving now."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"url": "https://example.com"},
+                call_id="url-not-cm",
+            ),
+        ]
+    )
+    url_bundle = _bundle(url_model, [save_job_current_message_tool])
+    url_out = url_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert url_out["tool_iteration_count"] == 0
+    assert url_out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+
+
+def test_cancellation_narration_from_tool_result_only() -> None:
+    """Cancel ToolResult projects not-saved wording; never saved/created."""
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="cancel-1",
+            ),
+            _ai_text("Job was created successfully."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_cancel_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=_obvious_passive_jd())
+    )
+    assert model.invoke_count == 1
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert final == conf.CANCEL_SUMMARY
+    assert "created" not in final.lower()
+    assert "saved" not in final.lower() or "chưa được lưu" in final
+    assert "Job was created successfully" not in " ".join(
+        str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
+    )
+
+
+def test_unrelated_greeting_and_topology_six_pass_unchanged() -> None:
+    """Unrelated turns, one Agent/decision/ToolNode, seven tools, six passes."""
+    greet_model = FakeChatModel(responses=[_ai_text("Chào bạn!")])
+    greet_bundle = _bundle(greet_model, [save_job_current_message_tool])
+    greet_out = greet_bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text="Xin chào")
+    )
+    assert greet_model.invoke_count == 1
+    assert greet_out["tool_iteration_count"] == 0
+    assert greet_out[MESSAGES_KEY][-1].content == "Chào bạn!"
+
+    # Service predicates remain the single owner (ponytail on message_is_obvious_jd).
+    service_text = (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "services"
+        / "job_save_confirmation.py"
+    ).read_text(encoding="utf-8")
+    assert "ponytail:" in service_text
+    assert "typed composer intent" in service_text
+
+    graph_text = (APP_AGENT / "graph.py").read_text(encoding="utf-8")
+    assert "message_is_obvious_jd" in graph_text
+    assert "message_has_clear_opt_out" in graph_text
+    assert "PASSIVE_JD_NO_CONFIRMATION_TEXT" in graph_text
+    assert "StateGraph" in graph_text
+
+    reg = production_registry()
+    assert len(reg.tool_names()) == 7
+    model = FakeChatModel(responses=[_ai_text("ok")])
+    bundle = _bundle(model, [save_job_tool])
+    app_nodes = {
+        n
+        for n in bundle.compiled.get_graph().nodes
+        if n not in {"__start__", "__end__", "START", "END"}
+    }
+    assert app_nodes == {DECISION_NODE_NAME, TOOLS_NODE_NAME}
+    assert bundle.tool_loop_limit == 6
+    assert bundle.decision_node_name == DECISION_NODE_NAME
+    assert bundle.tools_node_name == TOOLS_NODE_NAME
