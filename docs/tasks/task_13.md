@@ -442,7 +442,7 @@ tests and only source-proven mapping/redaction/aggregate repairs.
 
 ### Tasks
 
-- [ ] (03A): Add deterministic redacted ShopAIKey and PDF diagnostic failure coverage
+- [x] (03A): Add deterministic redacted ShopAIKey and PDF diagnostic failure coverage
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch03 - Deterministic Diagnostic Failure Coverage` > `(03A)`

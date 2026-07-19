@@ -11,9 +11,10 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 13 Batch01 + Batch02 A3 PASS — commit-ready on worktree;
-Batch02 base `5e53c49`; Plan 12 Batch01–Batch05 remain accepted baseline on
-product HEAD `887d4f6` / P12B4; final commits remain orchestrator-owned):**
+**Current status (Plan 13 Batch01 + Batch02 + Batch03 A3 PASS — commit-ready on
+worktree; Batch03 base `1d1bf17`; Plan 12 Batch01–Batch05 remain accepted
+baseline on product HEAD `887d4f6` / P12B4; final commits remain
+orchestrator-owned):**
 Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
 boundary for reliable passive pasted-JD confirmation without changing topology,
 public endpoints, registry count, schema migrations, or evaluation behavior.
@@ -45,6 +46,21 @@ return are preserved. No parser/history/reducer/API/package/CSS/backend change.
 Focused frontend gate (active-cv-source + assistant-response + chat-page) is
 **3 files / 60 tests** exit `0` plus `npm run typecheck` exit `0` on the
 accepted Batch02 worktree.
+
+Plan 13 **Batch03** (task **03A**) closes P13-DIAG-01: fake-backed
+`backend/tests/unit/test_phase0_diagnostics.py` proves all seven ShopAIKey
+failure tuples (TIMEOUT / RATE_LIMIT / MALFORMED_RESPONSE on `basic_chat`;
+MODEL_ABSENCE on `model_discovery` and CLI `config`; DIMENSION_MISMATCH /
+ORDERING_MISMATCH on `scalar_batch_embeddings`) plus PDF aggregate negatives
+(3/5 digital and accepted image-only) with non-zero exits, terminal FAIL
+markers, secret/header redaction, and no OCR. Production diagnostic owners
+already matched the RED cases, so no mapping/redaction/aggregate repair was
+required. Candidate identity at positive diagnostics:
+`BASE_HEAD=1d1bf17a9ad8a05a4e0e9b25ae33d3e3fe102ece`,
+manifest `f02131fe5ded28d31dead3ec9332c937fbd4daeebdf1f8ea93c6eccd22bab9b7`,
+path list only the new test file. Focused pytest trio (phase0 + embedding +
+pdf) exits `0`; project-interpreter `verify_pdf_extraction.py` and
+`diagnose_shopaikey.py` both end PASS with sanitized output.
 
 Plan 12 Batch01 delivered the prior backend half of passive pasted-JD
 confirmation and Agent policy. Task **01A** added strict `SaveJobInput`
@@ -854,18 +870,39 @@ python -m pytest tests/integration/test_neo4j_setup.py tests/integration/test_co
 Set-Location ..
 ```
 
-### ShopAIKey provider diagnostic
+### Plan 13 diagnostic failure coverage (Batch03)
 
-Requires a valid `SHOPAIKEY_API_KEY` in the ignored root `.env`. From the
-repository root:
+Fake-backed negative ShopAIKey and PDF aggregate gates (no live provider,
+no OCR). From the repository root:
 
 ```powershell
-python infrastructure/scripts/diagnose_shopaikey.py
+Set-Location backend
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_phase0_diagnostics.py tests/unit/test_embedding_adapter.py tests/unit/test_pdf_extraction.py -q
+Set-Location ..
+```
+
+Expected: exit `0` with exact failure-code/capability/FAIL-marker and redaction
+assertions plus PDF 3/5 and image-only rejected aggregates.
+
+### ShopAIKey provider diagnostic
+
+Requires a valid `SHOPAIKEY_API_KEY` in the ignored root `.env`. Prefer the
+project interpreter. From the repository root:
+
+```powershell
+& '.\.venv\Scripts\python.exe' infrastructure/scripts/diagnose_shopaikey.py
 ```
 
 Expected: sanitized output ending with `SHOPAIKEY_COMPATIBILITY=PASS`. The
 script calls the real provider; it must not print API keys or authorization
-headers.
+headers. Pair with the pypdf feasibility diagnostic when refreshing Plan 13
+positive evidence:
+
+```powershell
+& '.\.venv\Scripts\python.exe' infrastructure/scripts/verify_pdf_extraction.py
+```
+
+Expected: exit `0` and terminal `PYPDF_COMPATIBILITY=PASS`.
 
 ### Graph rebuild (choice C only)
 
