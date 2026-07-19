@@ -11,29 +11,49 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 12 complete — Batch01–Batch05 accepted on product HEAD
-`887d4f6` / P12B4; worktree commit-ready pending orchestrator final commit):**
-Plan 12 Batch01 delivers the backend half of passive pasted-JD confirmation and
-Agent policy without changing topology, public endpoints, registry count, schema
-migrations, or evaluation behavior. Task **01A** adds strict `SaveJobInput`
+**Current status (Plan 13 Batch01 A3 PASS — commit-ready on worktree over base
+`fda68c5`; Plan 12 Batch01–Batch05 remain accepted baseline on product HEAD
+`887d4f6` / P12B4; final commits remain orchestrator-owned):**
+Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
+boundary for reliable passive pasted-JD confirmation without changing topology,
+public endpoints, registry count, schema migrations, or evaluation behavior.
+**01A** binds a ShopAIKey-compatible ordinary provider-visible `save_job` object
+(exactly `url`/`text`/`source`/bounded `preview`, no required provider
+combinators) with a required `ponytail:` limitation/upgrade comment, while
+`SaveJobInput` and the original ToolNode `BaseTool` remain runtime authority and
+the early side-effect-free provider schema probe prints only
+`SAVE_JOB_PROVIDER_SCHEMA_PROBE=PASS`. **01B** adds one binding-aware passive
+repair: normal seven-tool bind omits `tool_choice`; repair bind exposes only the
+compatible `save_job` definition with exact
+`{"type":"function","function":{"name":"save_job"}}`; invalid repair yields the
+fixed refusal, zero ToolNode passes, and shape-only `passive_jd_call_rejected`
+logs. **01C** keeps confirmation pre-mutation with one pre-interrupt durable
+lookup plus one re-entry lookup (two reads total, no third reload); save ingests
+the fresh content once with zero automatic evaluation; cancel persists a durable
+cancelled ToolResult with zero domain side effects. Architecture remains one
+Agent, one decision node, one ToolNode, seven tools, and `TOOL_LOOP_LIMIT=6`.
+Focused combined Batch01 pytest (unit provider/runtime/graph + integration
+job-tools/chat-api) exits `0` on the accepted worktree.
+
+Plan 12 Batch01 delivered the prior backend half of passive pasted-JD
+confirmation and Agent policy. Task **01A** added strict `SaveJobInput`
 three-way source union (`url` | `text` | `source='current_message'`), bounded
 presentation-only preview, separate cancellation model, and focused
 `backend/app/services/job_save_confirmation.py` (pure opt-out/sole-URL/obvious-JD
 predicates with required `ponytail:`, durable
 `run_id → user_message_id → chat_messages` resolve, redacted
 `job_save_confirmation` projection, no-mutation cancel ToolResult; service
-below 300 lines; no `app.tools` import). Task **01B** integrates current-message
+below 300 lines; no `app.tools` import). Task **01B** integrated current-message
 `save_job` interrupt before provider/ingestion deps, save that reloads the exact
 durable message once into existing `ingest_raw_text`, cancel with zero
 mutation/deps, opt-out write precondition for every source mode, and
 `allow_running_reentry` only for exclusive current-message mode; direct URL/text
 and dedupe paths remain compatible with zero automatic evaluation. Task **01C**
-extends the existing system prompt (conclusion-first answers, narrow
-`read_active_cv` evidence, passive `source='current_message'`, no auto
-`match_jobs`/evaluate) and the single decision node (opt-out → Plan 11
-exact-name → sole-URL exclude → one obvious-JD repair or fixed refusal;
-ToolResult-only save/cancel narration) while keeping one Agent/decision/ToolNode,
-seven tools, and `TOOL_LOOP_LIMIT=6`.
+extended the system prompt (conclusion-first answers, narrow `read_active_cv`
+evidence, passive `source='current_message'`, no auto `match_jobs`/evaluate)
+and the single decision node (opt-out → Plan 11 exact-name → sole-URL exclude →
+one obvious-JD repair or fixed refusal; ToolResult-only save/cancel narration)
+while keeping one Agent/decision/ToolNode, seven tools, and `TOOL_LOOP_LIMIT=6`.
 
 Plan 12 **Batch02** (task **02A**) adds the sole frontend active-CV evidence
 vocabulary owner `frontend/src/features/chat/activeCvEvidence.ts` and chains

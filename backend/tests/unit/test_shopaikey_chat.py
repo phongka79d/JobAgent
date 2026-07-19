@@ -177,6 +177,41 @@ def test_bind_chat_tools_injects_tools_without_network(
     assert out is bound_result
     assert recorded["tools"] == fake_tools
     assert recorded["self"] is model
+    # Normal binding must omit tool_choice entirely.
+    assert recorded["kwargs"] == {}
+
+
+def test_bind_chat_tools_accepts_one_forced_tool_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repair binding passes the exact canonical forced-choice object only."""
+    from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
+
+    model = build_shopaikey_chat(_settings())
+    bound_result = object()
+    recorded: dict[str, Any] = {}
+
+    def _fake_bind(self: Any, tools: list[Any], **kwargs: Any) -> object:
+        recorded["self"] = self
+        recorded["tools"] = tools
+        recorded["kwargs"] = kwargs
+        return bound_result
+
+    monkeypatch.setattr(ChatOpenAI, "bind_tools", _fake_bind)
+    tool = save_job_openai_tool_schema()
+    canonical_choice = {
+        "type": "function",
+        "function": {"name": SAVE_JOB_NAME},
+    }
+
+    bound = bind_chat_tools(model, [tool], tool_choice=canonical_choice)
+
+    assert bound is bound_result
+    assert recorded == {
+        "self": model,
+        "tools": [tool],
+        "kwargs": {"tool_choice": canonical_choice},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -338,3 +373,142 @@ def test_prompt_profile_and_failure_rules_remain_with_plan12_policy() -> None:
     assert "response style" in lower
     assert "active cv evidence" in lower
     assert "passive pasted" in lower
+
+
+# ---------------------------------------------------------------------------
+# Plan 13 (01A): ShopAIKey-compatible provider-visible save_job object
+# ---------------------------------------------------------------------------
+
+
+def test_save_job_provider_schema_is_ordinary_object_without_combinators() -> None:
+    """Actual OpenAI-format payload: ordinary properties, no required combinators."""
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    from app.schemas.jobs import (
+        SAVE_JOB_PREVIEW_COMPANY_MAX,
+        SAVE_JOB_PREVIEW_SKILL_MAX,
+        SAVE_JOB_PREVIEW_SKILLS_MAX,
+        SAVE_JOB_PREVIEW_TITLE_MAX,
+    )
+    from app.tools.jobs import (
+        SAVE_JOB_DESCRIPTION,
+        SAVE_JOB_NAME,
+        save_job_openai_tool_schema,
+    )
+
+    raw = save_job_openai_tool_schema()
+    spec = convert_to_openai_tool(raw)
+    assert spec["type"] == "function"
+    assert spec["function"]["name"] == SAVE_JOB_NAME
+    assert spec["function"]["description"] == SAVE_JOB_DESCRIPTION
+    params = spec["function"]["parameters"]
+    assert params["type"] == "object"
+    assert set(params["properties"]) == {"url", "text", "source", "preview"}
+    assert "required" not in params
+    assert "oneOf" not in params
+    assert "anyOf" not in params
+    assert "allOf" not in params
+    assert "additionalProperties" not in params
+
+    for key in ("url", "text", "source"):
+        prop = params["properties"][key]
+        assert prop["type"] == "string"
+        assert "const" not in prop
+        assert "enum" not in prop
+        assert "anyOf" not in prop
+        assert "oneOf" not in prop
+        assert "description" in prop
+    # Exact runtime token length only; not a provider combinator.
+    source_prop = params["properties"]["source"]
+    assert source_prop.get("minLength") == 15
+    assert source_prop.get("maxLength") == 15
+
+    preview = params["properties"]["preview"]
+    assert preview["type"] == "object"
+    assert "oneOf" not in preview
+    assert "anyOf" not in preview
+    assert "additionalProperties" not in preview
+    assert set(preview["properties"]) == {"title", "company", "skills"}
+    assert preview["properties"]["title"]["maxLength"] == SAVE_JOB_PREVIEW_TITLE_MAX
+    assert (
+        preview["properties"]["company"]["maxLength"] == SAVE_JOB_PREVIEW_COMPANY_MAX
+    )
+    skills = preview["properties"]["skills"]
+    assert skills["maxItems"] == SAVE_JOB_PREVIEW_SKILLS_MAX
+    assert skills["items"]["minLength"] == 1
+    assert skills["items"]["maxLength"] == SAVE_JOB_PREVIEW_SKILL_MAX
+
+    rendered = str(params)
+    assert "tool_call_id" not in rendered
+    assert "state" not in rendered
+    assert "Injected" not in rendered
+    assert "oneOf" not in rendered
+    assert "const" not in rendered
+    assert "anyOf" not in rendered
+
+
+def test_save_job_provider_schema_owner_has_ponytail_upgrade_path() -> None:
+    """Provider-schema owner documents limitation and verified-upgrade path."""
+    schemas_path = (
+        Path(__file__).resolve().parents[2] / "app" / "schemas" / "jobs.py"
+    )
+    source = schemas_path.read_text(encoding="utf-8")
+    assert "ponytail:" in source
+    assert "ShopAIKey" in source
+    assert "oneOf" in source
+    assert "const" in source
+    assert "anyOf" in source
+    assert "documents" in source or "documented" in source
+    assert "probe" in source
+
+
+def test_normal_model_binding_uses_provider_dict_without_forced_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graph normal bind: provider dict, no tool_choice; repair bind separate."""
+    from app.agent.graph import PASSIVE_JD_REPAIR_TOOL_CHOICE, build_agent_graph
+    from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
+    from app.tools.registry import production_registry
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    model = FakeChatModel(responses=[])
+    binds: list[dict[str, Any]] = []
+    original_bind = FakeChatModel.bind_tools
+
+    def _capture_bind(
+        self: FakeChatModel, tools: list[Any], **kwargs: Any
+    ) -> FakeChatModel:
+        binds.append({"tools": list(tools), "kwargs": dict(kwargs)})
+        return original_bind(self, tools, **kwargs)
+
+    monkeypatch.setattr(FakeChatModel, "bind_tools", _capture_bind)
+    registry = production_registry()
+    registry_save = next(t for t in registry.list_tools() if t.name == SAVE_JOB_NAME)
+    bundle = build_agent_graph(model=model, registry=registry)
+
+    assert len(binds) == 2
+    normal = binds[0]
+    repair = binds[1]
+    assert "tool_choice" not in normal["kwargs"]
+    bound = normal["tools"]
+    assert len(bound) == 7
+    save_defs = [
+        item
+        for item in bound
+        if isinstance(item, dict)
+        and item.get("type") == "function"
+        and item.get("function", {}).get("name") == SAVE_JOB_NAME
+    ]
+    assert len(save_defs) == 1
+    assert save_defs[0] == save_job_openai_tool_schema()
+    # Repair binding: only compatible save_job + exact canonical choice.
+    assert repair["tools"] == [save_job_openai_tool_schema()]
+    assert repair["kwargs"] == {"tool_choice": PASSIVE_JD_REPAIR_TOOL_CHOICE}
+    assert PASSIVE_JD_REPAIR_TOOL_CHOICE == {
+        "type": "function",
+        "function": {"name": SAVE_JOB_NAME},
+    }
+    # Runtime ToolNode still owns the original registry BaseTool instance.
+    runtime = bundle.tool_node.tools_by_name[SAVE_JOB_NAME]
+    assert runtime is registry_save
+    assert not isinstance(runtime, dict)

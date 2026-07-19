@@ -181,6 +181,17 @@ class SaveJobInput(BaseModel):
     source: SaveJobCurrentMessageSource | None = None
     preview: SaveJobPreview | None = None
 
+    @field_validator("url", "text", mode="before")
+    @classmethod
+    def _blank_optional_source_to_none(cls, value: Any) -> str | None:
+        """Treat blank placeholders as omitted so provider empty strings match absent."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("must be a string or null")
+        text = value.strip()
+        return text if text else None
+
     @model_validator(mode="after")
     def exactly_one_source_mode(self) -> SaveJobInput:
         has_url = isinstance(self.url, str) and self.url.strip() != ""
@@ -196,6 +207,83 @@ class SaveJobInput(BaseModel):
                 "preview is only allowed with source='current_message'"
             )
         return self
+
+
+def save_job_provider_parameters() -> dict[str, Any]:
+    """ShopAIKey-compatible provider-visible ``save_job`` parameters schema.
+
+    Ordinary single ``type='object'`` with exactly ``url``, ``text``, ``source``,
+    and bounded ``preview`` properties. Runtime ``SaveJobInput`` remains the
+    authority for exactly-one-source, unknown fields, source value, and preview
+    mode/bounds.
+    """
+    # ponytail: ShopAIKey has not verified provider support for omitted combinators
+    # (oneOf, const, nested anyOf, branch-local required, additionalProperties=false).
+    # This ordinary object is the deliberate compatibility shape. Restore provider
+    # combinators only after ShopAIKey documents them or a sanitized compatibility
+    # probe verifies them.
+    return {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": (
+                    "Public job posting URL when saving from a link. "
+                    "Omit this property entirely unless it is the sole source. "
+                    "Never send empty strings or null placeholders."
+                ),
+            },
+            "text": {
+                "type": "string",
+                "description": (
+                    "Explicit pasted job-description text when the user supplies "
+                    "it directly. Omit this property entirely unless it is the "
+                    "sole source. Never send empty strings or null placeholders."
+                ),
+            },
+            "source": {
+                "type": "string",
+                "minLength": 15,
+                "maxLength": 15,
+                "description": (
+                    "Exactly current_message (15 characters, no trailing "
+                    "punctuation) when saving the current user message after "
+                    "confirmation. When used, omit url and text entirely "
+                    "(do not send empty strings)."
+                ),
+            },
+            "preview": {
+                "type": "object",
+                "description": (
+                    "Optional presentation-only estimates for current_message "
+                    "confirmation. Never a canonical Job fact; only valid with "
+                    "source='current_message'. Omit when unused."
+                ),
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "maxLength": SAVE_JOB_PREVIEW_TITLE_MAX,
+                        "description": "Optional estimated job title.",
+                    },
+                    "company": {
+                        "type": "string",
+                        "maxLength": SAVE_JOB_PREVIEW_COMPANY_MAX,
+                        "description": "Optional estimated company name.",
+                    },
+                    "skills": {
+                        "type": "array",
+                        "maxItems": SAVE_JOB_PREVIEW_SKILLS_MAX,
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": SAVE_JOB_PREVIEW_SKILL_MAX,
+                        },
+                        "description": "Optional estimated skill labels.",
+                    },
+                },
+            },
+        },
+    }
 
 
 class SaveJobCancellationData(BaseModel):

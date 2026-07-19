@@ -60,13 +60,22 @@ def build_shopaikey_chat(
 def bind_chat_tools(
     model: BaseChatModel,
     tools: Sequence[Any] | None = None,
+    *,
+    tool_choice: Any | None = None,
 ) -> BaseChatModel | Runnable[Any, Any]:
     """Bind injected registry tools using Phase 0 OpenAI function-calling mode.
 
     Empty or missing ``tools`` returns the model unchanged so direct
     conversation remains tool-free. Callers inject fakes or production
     BaseTool/dict schemas; this adapter never registers domain tools itself.
+
+    ``tool_choice`` is keyword-only and omitted for every normal binding.
+    The passive-JD repair binding alone passes the canonical OpenAI function
+    choice object ``{"type":"function","function":{"name":"save_job"}}``.
     """
     if not tools:
         return model
-    return model.bind_tools(list(tools))
+    kwargs: dict[str, Any] = {}
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
+    return model.bind_tools(list(tools), **kwargs)

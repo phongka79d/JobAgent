@@ -229,6 +229,68 @@ def test_preview_preserves_skill_order() -> None:
     assert preview.skills == ["Zeta", "Alpha", "Mid"]
 
 
+def test_save_job_input_runtime_stricter_than_provider_hints() -> None:
+    """SaveJobInput remains authority for mixed/unknown/source/preview cases.
+
+    Provider ordinary object permits loose property bags; runtime still rejects.
+    """
+    from app.schemas.jobs import save_job_provider_parameters
+
+    params = save_job_provider_parameters()
+    assert params["type"] == "object"
+    assert set(params["properties"]) == {"url", "text", "source", "preview"}
+    # Provider does not encode exclusivity; runtime does.
+    with pytest.raises(ValidationError):
+        SaveJobInput.model_validate(
+            {"url": "https://a.example", "text": "body"}
+        )
+    with pytest.raises(ValidationError):
+        SaveJobInput.model_validate(
+            {
+                "url": "https://a.example",
+                "source": SAVE_JOB_SOURCE_CURRENT_MESSAGE,
+            }
+        )
+    with pytest.raises(ValidationError):
+        SaveJobInput.model_validate({"source": "not_current_message"})
+    with pytest.raises(ValidationError):
+        SaveJobInput.model_validate(
+            {
+                "source": SAVE_JOB_SOURCE_CURRENT_MESSAGE,
+                "unknown_field": True,
+            }
+        )
+    with pytest.raises(ValidationError):
+        SaveJobInput.model_validate(
+            {"url": "https://a.example", "preview": {"title": "X"}}
+        )
+    with pytest.raises(ValidationError):
+        SaveJobPreview.model_validate({"title": "T", "extra_key": 1})
+    with pytest.raises(ValidationError):
+        SaveJobPreview.model_validate(
+            {"title": "t" * (SAVE_JOB_PREVIEW_TITLE_MAX + 1)}
+        )
+    # Provider empty-string placeholders normalize to omitted sources.
+    blank_cm = SaveJobInput.model_validate(
+        {
+            "source": SAVE_JOB_SOURCE_CURRENT_MESSAGE,
+            "url": "",
+            "text": "   ",
+        }
+    )
+    assert blank_cm.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+    assert blank_cm.url is None
+    assert blank_cm.text is None
+    ok_url = SaveJobInput.model_validate({"url": "https://ok.example/job"})
+    ok_text = SaveJobInput.model_validate({"text": "direct JD body"})
+    ok_cm = SaveJobInput.model_validate(
+        {"source": SAVE_JOB_SOURCE_CURRENT_MESSAGE}
+    )
+    assert ok_url.url is not None and ok_url.text is None and ok_url.source is None
+    assert ok_text.text is not None and ok_text.url is None
+    assert ok_cm.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
+
+
 # ---------------------------------------------------------------------------
 # Cancellation model separation
 # ---------------------------------------------------------------------------

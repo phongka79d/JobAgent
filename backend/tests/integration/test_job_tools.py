@@ -15,6 +15,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args
+from unittest.mock import AsyncMock
 
 import pytest
 from app.core.ids import new_uuid
@@ -1301,10 +1302,48 @@ async def _count_evaluations(session: Any) -> int:
     return int(result.scalar_one())
 
 
+def _install_cm_side_effect_spies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[str, str | None]], AsyncMock, AsyncMock]:
+    """Record durable source reads and wrap ingest/evaluation seams."""
+    import app.tools.jobs as jobs_tools
+    from app.services import job_evaluation, saved_jobs
+    from app.services.job_save_confirmation import InitiatingMessage
+
+    real_ingest_raw_text = jobs_tools.ingest_raw_text
+    ingest_spy = AsyncMock(wraps=real_ingest_raw_text)
+    monkeypatch.setattr(jobs_tools, "ingest_raw_text", ingest_spy)
+
+    evaluation_spy = AsyncMock(
+        side_effect=AssertionError("passive save must not evaluate")
+    )
+    monkeypatch.setattr(saved_jobs, "evaluate_job", evaluation_spy)
+    monkeypatch.setattr(job_evaluation, "evaluate_job", evaluation_spy)
+
+    real_resolve = jobs_tools.resolve_initiating_user_message
+    source_reads: list[tuple[str, str | None]] = []
+
+    async def recording_resolve(session: Any, run_id: str) -> Any:
+        resolved = await real_resolve(session, run_id)
+        content = (
+            resolved.content if isinstance(resolved, InitiatingMessage) else None
+        )
+        source_reads.append((run_id, content))
+        return resolved
+
+    monkeypatch.setattr(
+        jobs_tools,
+        "resolve_initiating_user_message",
+        recording_resolve,
+    )
+    return source_reads, ingest_spy, evaluation_spy
+
+
 def test_save_job_current_message_interrupts_before_dependencies(
     db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One running execution, exact pending keys, zero pre-action side effects."""
+    """One running execution, one pre-interrupt lookup, zero pre-action side effects."""
     from app.agent.graph import build_agent_graph
     from app.db.models.chat import (
         AGENT_RUN_STATE_INTERRUPTED,
@@ -1319,6 +1358,10 @@ def test_save_job_current_message_interrupts_before_dependencies(
     from langchain_core.messages import AIMessage
 
     from tests.fakes.fake_chat_model import FakeChatModel
+
+    source_reads, ingest_spy, evaluation_spy = _install_cm_side_effect_spies(
+        monkeypatch
+    )
 
     async def _body() -> None:
         engine, factory = _factory(db_path)
@@ -1408,6 +1451,11 @@ def test_save_job_current_message_interrupts_before_dependencies(
             ):
                 assert forbidden not in approval_blob
 
+            # Exactly one pre-interrupt durable lookup; zero domain side effects.
+            assert source_reads == [(run_id, _OBVIOUS_JD_MESSAGE)]
+            assert ingest_spy.await_count == 0
+            assert evaluation_spy.await_count == 0
+
             async with factory() as session:
                 run = await runs_repo.get_run(session, run_id)
                 assert run is not None
@@ -1448,8 +1496,9 @@ def test_save_job_current_message_interrupts_before_dependencies(
 
 def test_save_job_current_message_save_reloads_exact_source_once(
     db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Save resumes same identity, ingests durable message once, no evaluation."""
+    """Save: two reads total, one ingest of fresh content, zero evaluation."""
     from app.agent.graph import build_agent_graph
     from app.db.models.chat import (
         AGENT_RUN_STATE_COMPLETED,
@@ -1461,6 +1510,10 @@ def test_save_job_current_message_save_reloads_exact_source_once(
     from langchain_core.messages import AIMessage
 
     from tests.fakes.fake_chat_model import FakeChatModel
+
+    source_reads, ingest_spy, evaluation_spy = _install_cm_side_effect_spies(
+        monkeypatch
+    )
 
     async def _body() -> None:
         engine, factory = _factory(db_path)
@@ -1507,6 +1560,9 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             assert events[-1].event == "approval_required"
             run_id = events[-1].run_id
             assert len(invoker.calls) == 0
+            assert source_reads == [(run_id, _OBVIOUS_JD_MESSAGE)]
+            assert ingest_spy.await_count == 0
+            assert evaluation_spy.await_count == 0
 
             tool2 = build_save_job_tool(
                 session_factory=factory,
@@ -1533,6 +1589,14 @@ def test_save_job_current_message_save_reloads_exact_source_once(
                 )
             ]
             assert "run_completed" in [e.event for e in resume_events]
+            # One pre-interrupt + one re-entry read; never a third reload.
+            assert source_reads == [
+                (run_id, _OBVIOUS_JD_MESSAGE),
+                (run_id, _OBVIOUS_JD_MESSAGE),
+            ]
+            assert ingest_spy.await_count == 1
+            assert ingest_spy.await_args.args[0] == _OBVIOUS_JD_MESSAGE
+            assert evaluation_spy.await_count == 0
             assert len(invoker.calls) == 1
             assert len(embedder.calls) == 1
             assert sync.calls == 1
@@ -1558,7 +1622,7 @@ def test_save_job_current_message_save_reloads_exact_source_once(
                 assert await _count_jobs(session) == 1
                 assert await _count_evaluations(session) == 0
 
-            # Terminal replay: exact stored result, no second side effect.
+            # Terminal replay: exact stored result, no extra lookup or side effect.
             replay = await get_replay_result(
                 run_id=run_id,
                 tool_call_id="call-cm-save",
@@ -1566,6 +1630,9 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             )
             assert replay is not None
             assert replay.model_dump(mode="json") == stored.model_dump(mode="json")
+            assert len(source_reads) == 2
+            assert ingest_spy.await_count == 1
+            assert evaluation_spy.await_count == 0
             assert len(invoker.calls) == 1
             assert sync.calls == 1
 
@@ -1600,10 +1667,13 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             ]
             assert [e.event for e in noop] == ["run_started", "run_completed"]
             assert boom.invoke_count == 0
+            assert len(source_reads) == 2
+            assert ingest_spy.await_count == 1
             assert len(invoker.calls) == 1
             assert sync.calls == 1
 
             # Exact-hash return on a second current-message paste of same body.
+            dup_reads_start = len(source_reads)
             invoker2 = FakeJdInvoker([_full_extracted()])
             embedder2 = FakeEmbeddingClient()
             sync2 = RecordingSync()
@@ -1644,6 +1714,9 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             ]
             assert events_dup[-1].event == "approval_required"
             run_dup = events_dup[-1].run_id
+            assert source_reads[dup_reads_start:] == [
+                (run_dup, _OBVIOUS_JD_MESSAGE)
+            ]
             tool_dup2 = build_save_job_tool(
                 session_factory=factory,
                 invoker=invoker2,
@@ -1667,10 +1740,16 @@ def test_save_job_current_message_save_reloads_exact_source_once(
                 )
             ]
             assert "run_completed" in [e.event for e in resume_dup]
-            # Exact duplicate: no second extract/embed/sync.
+            # Dedupe run: own one pre-interrupt + one re-entry read; no extract.
+            assert source_reads[dup_reads_start:] == [
+                (run_dup, _OBVIOUS_JD_MESSAGE),
+                (run_dup, _OBVIOUS_JD_MESSAGE),
+            ]
+            assert ingest_spy.await_count == 2  # create + returned hash path
             assert len(invoker2.calls) == 0
             assert len(embedder2.calls) == 0
             assert sync2.calls == 0
+            assert evaluation_spy.await_count == 0
             async with factory() as session:
                 tools_dup = await tool_repo.list_for_run_ids(session, [run_dup])
                 assert len(tools_dup) == 1
@@ -1688,8 +1767,9 @@ def test_save_job_current_message_save_reloads_exact_source_once(
 
 def test_save_job_current_message_cancel_zero_dependencies(
     db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancel returns exact no-save ToolResult with zero mutation/deps."""
+    """Cancel: two reads total, zero domain side effects, durable cancelled result."""
     from app.agent.graph import build_agent_graph
     from app.db.models.chat import (
         AGENT_RUN_STATE_COMPLETED,
@@ -1701,6 +1781,10 @@ def test_save_job_current_message_cancel_zero_dependencies(
     from langchain_core.messages import AIMessage
 
     from tests.fakes.fake_chat_model import FakeChatModel
+
+    source_reads, ingest_spy, evaluation_spy = _install_cm_side_effect_spies(
+        monkeypatch
+    )
 
     async def _body() -> None:
         engine, factory = _factory(db_path)
@@ -1745,6 +1829,7 @@ def test_save_job_current_message_cancel_zero_dependencies(
             ]
             assert events[-1].event == "approval_required"
             run_id = events[-1].run_id
+            assert source_reads == [(run_id, _OBVIOUS_JD_MESSAGE)]
 
             tool2 = build_save_job_tool(
                 session_factory=factory,
@@ -1769,6 +1854,13 @@ def test_save_job_current_message_cancel_zero_dependencies(
                 )
             ]
             assert "run_completed" in [e.event for e in resume_events]
+            # Cancel re-entry records one fresh lookup (two reads total).
+            assert source_reads == [
+                (run_id, _OBVIOUS_JD_MESSAGE),
+                (run_id, _OBVIOUS_JD_MESSAGE),
+            ]
+            assert ingest_spy.await_count == 0
+            assert evaluation_spy.await_count == 0
             assert len(invoker.calls) == 0
             assert len(embedder.calls) == 0
             assert sync.calls == 0
@@ -2053,6 +2145,72 @@ def test_save_job_arguments_summary_current_message_redacted(
                 assert "preview" not in args
                 assert "title" not in args
                 assert "Secret Title Guess" not in json.dumps(args)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_provider_save_job_dict_bound_toolnode_keeps_basetool() -> None:
+    """Model sees ordinary provider dict; ToolNode keeps identical BaseTool."""
+    from app.agent.graph import build_agent_graph
+    from app.tools.jobs import save_job_openai_tool_schema
+    from app.tools.registry import ToolRegistry
+    from tests.fakes.fake_chat_model import FakeChatModel
+
+    tool_fn = build_save_job_tool(
+        invoker=FakeJdInvoker([_full_extracted()]),
+        normalizer=_normalizer(),
+        embedding_client=FakeEmbeddingClient(),
+    )
+    model = FakeChatModel(responses=[])
+    registry = ToolRegistry([tool_fn])
+    bundle = build_agent_graph(model=model, registry=registry)
+
+    assert bundle.tool_node.tools_by_name[SAVE_JOB_NAME] is tool_fn
+    assert model.bound_tools
+    save_bound = next(
+        item
+        for item in model.bound_tools
+        if isinstance(item, dict)
+        and item.get("function", {}).get("name") == SAVE_JOB_NAME
+    )
+    assert save_bound == save_job_openai_tool_schema()
+    params = save_bound["function"]["parameters"]
+    assert params["type"] == "object"
+    assert set(params["properties"]) == {"url", "text", "source", "preview"}
+    assert "oneOf" not in params
+    assert "tool_call_id" not in str(params)
+    assert "state" not in str(params)
+
+
+def test_save_job_runtime_mixed_source_invalid_via_tool(
+    db_path: Path,
+) -> None:
+    """Runtime SaveJobInput still rejects mixed non-empty sources at the tool."""
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            async with factory() as session:
+                run_id = await _seed_run(session)
+                await session.commit()
+
+            tool_fn = build_save_job_tool(
+                session_factory=factory,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+            )
+            mixed = await _ainvoke_save(
+                tool_fn,
+                run_id=run_id,
+                tool_call_id="call_mixed_source",
+                text="pasted body",
+                source="current_message",
+            )
+            assert mixed.ok is False
+            assert mixed.code == ERROR_INVALID_JOB_INPUT
         finally:
             await engine.dispose()
 

@@ -209,7 +209,7 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
 
 ### Tasks
 
-- [ ] (01A): Bind a ShopAIKey-compatible provider save_job object while preserving strict runtime authority
+- [x] (01A): Bind a ShopAIKey-compatible provider save_job object while preserving strict runtime authority
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch01 - Reliable Passive-JD Provider and Confirmation Boundary` > `(01A)`
@@ -261,7 +261,7 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
   - Blocked Condition: Missing/unreadable accepted schema/tool refs or ShopAIKey Function Calling reference is `BLOCKED_MISSING_REF`; disagreement between the corrected compatible provider object and strict runtime authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring repair, service/repository/API/registry/state/config/dependency or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python tooling is `BLOCKED_ENVIRONMENT`; missing provider credential/access for the required early probe is `BLOCKED_USER_ACTION`; provider rejection or malformed probe output is `BLOCKED_ENVIRONMENT` and must not enable a fallback, retry/model switch, argument stripping, or unapproved schema change.
   - Files: `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/agent/graph.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_job_save_confirmation.py`, `backend/tests/integration/test_job_tools.py`
 
-- [ ] (01B): Force one runtime-validated source-only passive repair with sanitized refusal evidence
+- [x] (01B): Force one runtime-validated source-only passive repair with sanitized refusal evidence
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch01 - Reliable Passive-JD Provider and Confirmation Boundary` > `(01B)`
@@ -308,7 +308,7 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
   - Blocked Condition: Missing accepted (01A) compatible provider/runtime-validator artifact, `ponytail:` comment, or probe evidence is `BLOCKED_MISSING_REF`; conflicting corrected choice/repair/precedence authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring tool runtime/integration, prompt/state/runner/registry/service/API/provider settings or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/adapters/shopaikey_chat.py`, `backend/app/agent/graph.py`, `backend/tests/fakes/fake_chat_model.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_agent_graph.py`
 
-- [ ] (01C): Correct current-message read boundaries and prove every confirmation side effect
+- [x] (01C): Correct current-message read boundaries and prove every confirmation side effect
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch01 - Reliable Passive-JD Provider and Confirmation Boundary` > `(01C)`

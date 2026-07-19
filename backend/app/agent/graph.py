@@ -17,6 +17,7 @@ defaults to the seven production tools via :func:`production_registry`.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, cast
@@ -51,7 +52,7 @@ from app.services.job_save_confirmation import (
     message_is_obvious_jd,
     message_is_sole_http_url,
 )
-from app.tools.jobs import SAVE_JOB_NAME
+from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
 from app.tools.profile import (
     COMMIT_PROFILE_DRAFT_NAME,
     ERROR_INVALID_PROFILE_UPDATE,
@@ -59,6 +60,8 @@ from app.tools.profile import (
     PROPOSE_PROFILE_UPDATE_NAME,
 )
 from app.tools.registry import ToolRegistry, production_registry
+
+logger = logging.getLogger(__name__)
 
 # Stable controlled-failure code when the tool loop would exceed the limit.
 ERROR_TOOL_LOOP_LIMIT_EXCEEDED: str = "TOOL_LOOP_LIMIT_EXCEEDED"
@@ -76,6 +79,12 @@ PASSIVE_JD_NO_CONFIRMATION_TEXT: str = (
 )
 
 SAVE_JOB_CANCEL_OUTCOME: str = "cancelled"
+
+# Canonical OpenAI function forced-choice object for passive-JD repair only.
+PASSIVE_JD_REPAIR_TOOL_CHOICE: dict[str, Any] = {
+    "type": "function",
+    "function": {"name": SAVE_JOB_NAME},
+}
 
 # Exact registered token only (word boundary). Not NL paraphrase detection.
 _SAVE_JOB_NAME_IN_REQUEST = re.compile(rf"\b{re.escape(SAVE_JOB_NAME)}\b")
@@ -557,6 +566,40 @@ def _is_sole_current_message_save_job_call(message: AIMessage | None) -> bool:
     return args.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
 
 
+def _passive_call_shape(
+    message: AIMessage | None,
+) -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+    """Shape-only fields for passive-JD rejection diagnostics (no values)."""
+    calls = list(message.tool_calls or []) if message is not None else []
+    names = tuple(_tool_call_name(call) for call in calls)
+    argument_keys = tuple(
+        sorted(
+            {
+                str(key)
+                for call in calls
+                for key in _tool_call_args(call)
+            }
+        )
+    )
+    return len(calls), names, argument_keys
+
+
+def _log_passive_call_rejection(
+    reason: Literal["invalid_first_call", "invalid_repair_call"],
+    message: AIMessage | None,
+) -> None:
+    """Emit fixed-shape sanitized rejection log; never values or payloads."""
+    call_count, tool_names, argument_keys = _passive_call_shape(message)
+    logger.warning(
+        "passive_jd_call_rejected reason=%s call_count=%d "
+        "tool_names=%s argument_keys=%s",
+        reason,
+        call_count,
+        tool_names,
+        argument_keys,
+    )
+
+
 def _turn_called_current_message_save_job(messages: Sequence[Any]) -> bool:
     for item in messages:
         if not isinstance(item, AIMessage):
@@ -701,6 +744,22 @@ def _as_base_chat_model(
     )
 
 
+def _provider_bind_tools(tools: Sequence[Any]) -> list[Any]:
+    """Model-visible tools: substitute compatible ``save_job`` definition only.
+
+    ToolNode continues to receive the original registry ``BaseTool`` instances so
+    injected ``tool_call_id``/``state`` and runtime ``SaveJobInput`` validation
+    stay unchanged. Normal binding omits forced ``tool_choice``.
+    """
+    provider_tools: list[Any] = []
+    for candidate in tools:
+        if getattr(candidate, "name", None) == SAVE_JOB_NAME:
+            provider_tools.append(save_job_openai_tool_schema())
+        else:
+            provider_tools.append(candidate)
+    return provider_tools
+
+
 def build_agent_graph(
     *,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
@@ -734,13 +793,37 @@ def build_agent_graph(
     tools = reg.list_tools()
     tool_names = reg.tool_names()
     system_prompt = build_system_prompt(tool_names)
+    # Provider-visible definitions for model binding only (not ToolNode).
+    provider_tools = _provider_bind_tools(tools)
+    commit_available = COMMIT_PROFILE_DRAFT_NAME in set(tool_names)
+    save_job_available = SAVE_JOB_NAME in set(tool_names)
+    save_job_provider_tool: dict[str, Any] | None = (
+        save_job_openai_tool_schema() if save_job_available else None
+    )
 
+    # Normal binding: all seven capabilities, no forced choice.
+    # Repair binding: only compatible save_job + exact canonical tool_choice.
     chat: BaseChatModel | Runnable[Any, Any]
+    passive_repair_chat: BaseChatModel | Runnable[Any, Any] | None = None
     if model is None:
         cfg = settings if settings is not None else get_settings()
-        chat = bind_chat_tools(build_shopaikey_chat(cfg), tools)
+        base_chat: BaseChatModel = build_shopaikey_chat(cfg)
+        chat = bind_chat_tools(base_chat, provider_tools)
+        if save_job_provider_tool is not None:
+            passive_repair_chat = bind_chat_tools(
+                base_chat,
+                [save_job_provider_tool],
+                tool_choice=PASSIVE_JD_REPAIR_TOOL_CHOICE,
+            )
     elif tools:
-        chat = bind_chat_tools(_as_base_chat_model(model), tools)
+        base_chat = _as_base_chat_model(model)
+        chat = bind_chat_tools(base_chat, provider_tools)
+        if save_job_provider_tool is not None:
+            passive_repair_chat = bind_chat_tools(
+                base_chat,
+                [save_job_provider_tool],
+                tool_choice=PASSIVE_JD_REPAIR_TOOL_CHOICE,
+            )
     else:
         chat = model
 
@@ -749,9 +832,6 @@ def build_agent_graph(
         tool_loop_limit=limit,
         messages_key=MESSAGES_KEY,
     )
-
-    commit_available = COMMIT_PROFILE_DRAFT_NAME in set(tool_names)
-    save_job_available = SAVE_JOB_NAME in set(tool_names)
 
     def decision_node(state: AgentGraphState) -> dict[str, Any]:
         """LLM decision: append AIMessage; set controlled error if loop exhausted."""
@@ -823,6 +903,7 @@ def build_agent_graph(
                 }
         # Passive obvious-JD: only after opt-out and positive exact-name lose;
         # sole URL is excluded; one repair after any invalid first decision.
+        # Runtime validation remains the dispatch gate; never synthesize/strip.
         elif (
             save_job_available
             and not clear_opt_out
@@ -831,11 +912,20 @@ def build_agent_graph(
             and message_is_obvious_jd(user_text)
         ):
             if not _is_sole_current_message_save_job_call(response):
+                _log_passive_call_rejection("invalid_first_call", response)
                 repair_messages = list(prompt_messages) + [
                     SystemMessage(content=_PASSIVE_JD_REPAIR_INSTRUCTION)
                 ]
-                response = _normalize_ai_response(chat.invoke(repair_messages))
+                repair_runnable = (
+                    passive_repair_chat
+                    if passive_repair_chat is not None
+                    else chat
+                )
+                response = _normalize_ai_response(
+                    repair_runnable.invoke(repair_messages)
+                )
                 if not _is_sole_current_message_save_job_call(response):
+                    _log_passive_call_rejection("invalid_repair_call", response)
                     return {
                         MESSAGES_KEY: [
                             AIMessage(content=PASSIVE_JD_NO_CONFIRMATION_TEXT)

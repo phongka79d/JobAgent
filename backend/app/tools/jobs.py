@@ -39,8 +39,8 @@ from app.schemas.jobs import (
     QueryJobsInput,
     QueryJobsResultData,
     SaveJobInput,
-    SaveJobPreview,
     SaveJobResultData,
+    save_job_provider_parameters,
 )
 from app.schemas.tools import ToolResult
 from app.services.jd_extraction import StructuredJdInvoker
@@ -66,6 +66,16 @@ from app.services.tool_execution import execute_tool
 
 SAVE_JOB_NAME: str = "save_job"
 QUERY_JOBS_NAME: str = "query_jobs"
+
+# Shared description for runtime BaseTool and provider-visible OpenAI definition.
+SAVE_JOB_DESCRIPTION: str = (
+    "Save a public job URL, pasted JD text, or the current user message. "
+    "Provide exactly one of url, text, or source='current_message'. "
+    "Omit unused properties entirely; never send empty strings for unused "
+    "fields. Current-message mode pauses for confirmation before ingestion; "
+    "optional preview is presentation-only. Returns compact status only, "
+    "never raw JD."
+)
 
 ERROR_INVALID_JOB_INPUT: str = "INVALID_JOB_INPUT"
 ERROR_MISSING_RUN_ID: str = "MISSING_RUN_ID"
@@ -348,6 +358,22 @@ async def _ingest_current_message_content(
     return _tool_result_from_ingest(ingest, compact)
 
 
+def save_job_openai_tool_schema() -> dict[str, Any]:
+    """OpenAI-format provider-visible ``save_job`` definition (model binding only).
+
+    Not the runtime ToolNode ``BaseTool``. Injected ``tool_call_id``/``state`` are
+    omitted; ``SaveJobInput`` remains the dispatch-time authority.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": SAVE_JOB_NAME,
+            "description": SAVE_JOB_DESCRIPTION,
+            "parameters": save_job_provider_parameters(),
+        },
+    }
+
+
 def build_save_job_tool(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
@@ -364,7 +390,7 @@ def build_save_job_tool(
     Current-message mode enables running re-entry for the same identity.
     """
 
-    @tool(SAVE_JOB_NAME)
+    @tool(SAVE_JOB_NAME, description=SAVE_JOB_DESCRIPTION)
     async def save_job_tool(
         tool_call_id: Annotated[str, InjectedToolCallId],
         state: Annotated[dict[str, Any], InjectedState],
@@ -434,13 +460,10 @@ def build_save_job_tool(
                     },
                 )
 
-            # Shared opt-out write precondition for every source mode.
-            opt_out = await _resolve_opt_out(factory, run_id)
-            if opt_out is not None:
-                return opt_out
-
             if validated.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE:
-                # Resolve durable source; interrupt before provider/ingestion deps.
+                # One durable lookup feeds opt-out, card, and re-entry ingest.
+                # Initial path: one pre-interrupt read. LangGraph re-entry:
+                # one fresh read (no third post-decision reload).
                 async with factory() as session:
                     resolved = await resolve_initiating_user_message(
                         session, run_id
@@ -453,13 +476,14 @@ def build_save_job_tool(
                         data=None,
                     )
                 assert isinstance(resolved, InitiatingMessage)
+                if message_has_clear_opt_out(resolved.content):
+                    return build_cancellation_tool_result()
 
-                preview_model: SaveJobPreview | None = validated.preview
                 decision = interrupt(
                     build_job_save_confirmation_projection(
                         tool_call_id=tool_call_id,
                         content=resolved.content,
-                        preview=preview_model,
+                        preview=validated.preview,
                     )
                 )
                 action = decision if isinstance(decision, str) else str(decision)
@@ -476,23 +500,10 @@ def build_save_job_tool(
                         data={"action": action},
                     )
 
-                # Reload exact durable source immediately before ingest.
-                async with factory() as session:
-                    reloaded = await resolve_initiating_user_message(
-                        session, run_id
-                    )
-                if isinstance(reloaded, SourceLookupFailure):
-                    return ToolResult(
-                        ok=False,
-                        code=reloaded.code,
-                        summary=reloaded.summary,
-                        data=None,
-                    )
-                assert isinstance(reloaded, InitiatingMessage)
-
+                # Re-entry's single fresh lookup supplies ingest content.
                 return await _ingest_current_message_content(
                     factory=factory,
-                    content=reloaded.content,
+                    content=resolved.content,
                     invoker=invoker,
                     normalizer=normalizer,
                     embedding_client=embedding_client,
@@ -500,7 +511,10 @@ def build_save_job_tool(
                     job_sync_fn=job_sync_fn,
                 )
 
-            # Direct URL / text: construct deps only after opt-out gate.
+            # Direct URL / text: shared opt-out then construct deps.
+            opt_out = await _resolve_opt_out(factory, run_id)
+            if opt_out is not None:
+                return opt_out
             return await _ingest_with_deps(
                 factory=factory,
                 url=validated.url,
@@ -671,8 +685,10 @@ __all__ = [
     "ERROR_JOB_INGESTION",
     "ERROR_MISSING_RUN_ID",
     "QUERY_JOBS_NAME",
+    "SAVE_JOB_DESCRIPTION",
     "SAVE_JOB_NAME",
     "build_production_job_tools",
     "build_query_jobs_tool",
     "build_save_job_tool",
+    "save_job_openai_tool_schema",
 ]

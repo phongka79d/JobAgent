@@ -11,7 +11,10 @@ Public SSE/client helpers live in ``tests.support.public_api`` (shared with E2E)
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock
 
+import pytest
 from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
 from app.core.ids import new_uuid
 from app.db.models.chat import (
@@ -30,7 +33,7 @@ from app.schemas.chat import HistoryPage
 from app.tools.registry import ToolRegistry
 from sqlalchemy import func, select
 
-from tests.fakes.fake_chat_model import FakeChatModel
+from tests.fakes.fake_chat_model import FakeChatModel, PassiveJdBindingAwareFake
 from tests.fakes.synthetic_tool import (
     SYNTHETIC_ALLOWED_ACTIONS,
     SYNTHETIC_APPROVAL_KIND,
@@ -540,7 +543,7 @@ def test_resume_unknown_run_404(
 
 
 # ---------------------------------------------------------------------------
-# Plan 12 (01B): public save_job current-message interrupt / cancel / save
+# Plan 12 (01B) / Plan 13 (01C): public save_job confirmation + side effects
 # ---------------------------------------------------------------------------
 
 
@@ -556,11 +559,182 @@ _PUBLIC_JD_MESSAGE = (
     "About the role: build APIs for local demo customers with care."
 )
 
+# Five-line 300+ non-whitespace passive JD for binding-aware public path.
+_BINDING_AWARE_PUBLIC_JD = (
+    "Job Description: Plan13 Labs is hiring a Synthetic Platform Engineer.\n"
+    "Responsibilities: Build FastAPI services, design deterministic integration "
+    "tests, review SQLite transactions, and keep Neo4j synchronization retry-safe.\n"
+    "Requirements: At least two years of Python backend experience, strong SQL, "
+    "and practical Docker skills for local portfolio work in Hanoi.\n"
+    "Qualifications: Experience with REST APIs, pytest, Git, typed data models, "
+    "and clear technical documentation for synthetic acceptance fixtures.\n"
+    "Skills: Python, FastAPI, SQL, Docker, pytest, Neo4j, and TypeScript "
+    "collaboration; this is entirely synthetic acceptance data for Plan 13."
+)
+
+
+def _install_public_cm_spies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[str, str | None]], AsyncMock, AsyncMock]:
+    """Record durable source reads; fail if passive confirmation evaluates."""
+    import app.tools.jobs as jobs_tools
+    from app.services import job_evaluation, saved_jobs
+    from app.services.job_save_confirmation import InitiatingMessage
+
+    real_ingest_raw_text = jobs_tools.ingest_raw_text
+    ingest_spy = AsyncMock(wraps=real_ingest_raw_text)
+    monkeypatch.setattr(jobs_tools, "ingest_raw_text", ingest_spy)
+
+    evaluation_spy = AsyncMock(
+        side_effect=AssertionError("passive save must not evaluate")
+    )
+    monkeypatch.setattr(saved_jobs, "evaluate_job", evaluation_spy)
+    monkeypatch.setattr(job_evaluation, "evaluate_job", evaluation_spy)
+
+    real_resolve = jobs_tools.resolve_initiating_user_message
+    source_reads: list[tuple[str, str | None]] = []
+
+    async def recording_resolve(session: Any, run_id: str) -> Any:
+        resolved = await real_resolve(session, run_id)
+        content = (
+            resolved.content if isinstance(resolved, InitiatingMessage) else None
+        )
+        source_reads.append((run_id, content))
+        return resolved
+
+    monkeypatch.setattr(
+        jobs_tools,
+        "resolve_initiating_user_message",
+        recording_resolve,
+    )
+    return source_reads, ingest_spy, evaluation_spy
+
+
+def test_public_passive_binding_aware_confirmation_card(
+    chat_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Binding-aware repair reaches public approval_required with strict card."""
+    from app.db.models.job_evaluations import JobEvaluation
+    from app.db.models.jobs import JobPost
+    from app.services.jd_extraction import ExtractedJobPost
+    from app.services.skill_normalization import SkillNormalizer
+    from app.tools.jobs import SAVE_JOB_NAME, build_save_job_tool
+    from app.tools.registry import production_registry
+    from sqlalchemy import func, select
+
+    from tests.fakes.embeddings import FakeEmbeddingClient
+    from tests.fakes.structured_output import FakeJdInvoker
+
+    db_path, _files, _fake = chat_env
+    factory = get_session_factory()
+    source_reads, ingest_spy, evaluation_spy = _install_public_cm_spies(monkeypatch)
+
+    skills = (
+        Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
+    )
+    normalizer = SkillNormalizer.from_path(skills)
+    extracted = ExtractedJobPost.model_validate(
+        {
+            "title": "Synthetic Platform Engineer",
+            "company": "Plan13 Labs",
+            "summary": "Build local APIs.",
+            "responsibilities": ["Build FastAPI services"],
+            "required_skills": [
+                {
+                    "name": "Python",
+                    "confidence": 0.9,
+                    "evidence": ["Python backend experience"],
+                }
+            ],
+            "preferred_skills": [],
+            "seniority": "mid",
+            "min_experience_years": 2.0,
+            "max_experience_years": 5.0,
+            "location": "Hanoi",
+            "work_mode": "hybrid",
+            "extraction_confidence": 0.85,
+        }
+    )
+    invoker = FakeJdInvoker([extracted])
+    embedder = FakeEmbeddingClient()
+    tool_fn = build_save_job_tool(
+        session_factory=factory,
+        invoker=invoker,
+        normalizer=normalizer,
+        embedding_client=embedder,
+    )
+    # Full production registry so normal bind exposes seven tools; repair
+    # substitutes the compatible save_job definition with forced choice.
+    registry = production_registry()
+    # Replace production save_job with the fake-backed instance for this path.
+    tools = [
+        tool_fn if getattr(t, "name", None) == SAVE_JOB_NAME else t
+        for t in registry.list_tools()
+    ]
+    model = PassiveJdBindingAwareFake(
+        mixed_text=_BINDING_AWARE_PUBLIC_JD,
+        preview_value="Synthetic Platform Engineer",
+        argument_value="Plan13 Labs",
+        provider_payload_value="PROVIDER-PAYLOAD-SENTINEL-DO-NOT-LOG",
+        permit_valid_repair=True,
+    )
+    with _client_with_fake(db_path, model, ToolRegistry(tools)) as client:
+        turn = client.post(
+            "/api/chat/turns",
+            json={"message": _BINDING_AWARE_PUBLIC_JD, "attachment_ids": []},
+        )
+        assert turn.status_code == 200
+        events = _parse_sse(turn.text)
+        event_names = [e["event"] for e in events]
+        assert event_names[-1] == "approval_required"
+        approval = events[-1]["payload"]
+        assert approval["kind"] == "job_save_confirmation"
+        assert approval["allowed_actions"] == ["save_job", "cancel_save_job"]
+        assert approval["card"]["source"] == "current_message"
+        assert approval["card"]["tool_name"] == SAVE_JOB_NAME
+        assert approval["card"]["text_length"] == len(_BINDING_AWARE_PUBLIC_JD)
+        # Strict projection: no raw body key, message id, or JD content.
+        assert "text" not in approval["card"]
+        assert "content" not in approval["card"]
+        assert "message_id" not in str(approval)
+        assert "user_message_id" not in str(approval)
+        assert _BINDING_AWARE_PUBLIC_JD not in turn.text
+        assert _BINDING_AWARE_PUBLIC_JD not in str(approval)
+        run_id = events[-1]["run_id"]
+        assert source_reads == [(run_id, _BINDING_AWARE_PUBLIC_JD)]
+        assert ingest_spy.await_count == 0
+        assert evaluation_spy.await_count == 0
+        assert len(invoker.calls) == 0
+        assert len(embedder.calls) == 0
+        # Repair path: mixed first decision + one forced repair.
+        assert model.invoke_count == 2
+        assert len(model.binding_log) == 2
+        _normal_tools, normal_kwargs = model.binding_log[0]
+        assert "tool_choice" not in normal_kwargs
+
+    async def _assert_pending() -> None:
+        async with factory() as session:
+            tools_rows = await tool_repo.list_for_run_ids(session, [run_id])
+            assert len(tools_rows) == 1
+            assert tools_rows[0].status == "running"
+            job_count = await session.execute(
+                select(func.count()).select_from(JobPost)
+            )
+            assert int(job_count.scalar_one()) == 0
+            eval_count = await session.execute(
+                select(func.count()).select_from(JobEvaluation)
+            )
+            assert int(eval_count.scalar_one()) == 0
+
+    run_async(_assert_pending())
+
 
 def test_public_save_job_current_message_interrupt_cancel_and_save(
     chat_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Public SSE: exact job_save_confirmation keys, cancel then save paths."""
+    """Public SSE: exact card, two-read cancel/save, zero evaluation."""
     from app.db.models.job_evaluations import JobEvaluation
     from app.db.models.jobs import JobPost
     from app.services.jd_extraction import ExtractedJobPost
@@ -573,6 +747,7 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
 
     db_path, _files, _fake = chat_env
     factory = get_session_factory()
+    source_reads, ingest_spy, evaluation_spy = _install_public_cm_spies(monkeypatch)
     skills = (
         Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
     )
@@ -655,6 +830,9 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
         assert "raw_content" not in turn.text
         assert len(invoker_cancel.calls) == 0
         run_cancel = approval["run_id"]
+        assert source_reads == [(run_cancel, _PUBLIC_JD_MESSAGE)]
+        assert ingest_spy.await_count == 0
+        assert evaluation_spy.await_count == 0
 
         # Invalid action leaves interrupt in place
         bad = client.post(
@@ -687,6 +865,13 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
         rev = _parse_sse(resume.text)
         assert "run_completed" in [e["event"] for e in rev]
         assert len(invoker_cancel.calls) == 0
+        # Cancel re-entry: one fresh read (two total); zero domain side effects.
+        assert source_reads == [
+            (run_cancel, _PUBLIC_JD_MESSAGE),
+            (run_cancel, _PUBLIC_JD_MESSAGE),
+        ]
+        assert ingest_spy.await_count == 0
+        assert evaluation_spy.await_count == 0
 
     async def _assert_cancel() -> None:
         async with factory() as session:
@@ -714,6 +899,7 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
     run_async(_assert_cancel())
 
     # --- Save path (separate turn) ---
+    save_reads_start = len(source_reads)
     invoker_save = FakeJdInvoker([extracted])
     embedder_save = FakeEmbeddingClient()
     tool_save = build_save_job_tool(
@@ -744,6 +930,10 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
         assert events[-1]["event"] == "approval_required"
         run_save = events[-1]["run_id"]
         assert len(invoker_save.calls) == 0
+        assert source_reads[save_reads_start:] == [
+            (run_save, _PUBLIC_JD_MESSAGE)
+        ]
+        assert ingest_spy.await_count == 0
 
         tool_save2 = build_save_job_tool(
             session_factory=factory,
@@ -765,6 +955,13 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
         rev = _parse_sse(resume.text)
         assert "run_completed" in [e["event"] for e in rev]
         assert len(invoker_save.calls) == 1
+        assert source_reads[save_reads_start:] == [
+            (run_save, _PUBLIC_JD_MESSAGE),
+            (run_save, _PUBLIC_JD_MESSAGE),
+        ]
+        assert ingest_spy.await_count == 1
+        assert ingest_spy.await_args.args[0] == _PUBLIC_JD_MESSAGE
+        assert evaluation_spy.await_count == 0
 
         # Terminal no-op resume
         _override_deps(
@@ -781,6 +978,9 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
         nevents = _parse_sse(noop.text)
         assert [e["event"] for e in nevents] == ["run_started", "run_completed"]
         assert len(invoker_save.calls) == 1
+        assert len(source_reads[save_reads_start:]) == 2
+        assert ingest_spy.await_count == 1
+        assert evaluation_spy.await_count == 0
 
     async def _assert_save() -> None:
         async with factory() as session:

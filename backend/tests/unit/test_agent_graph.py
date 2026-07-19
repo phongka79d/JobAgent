@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from app.agent.graph import (
     MESSAGES_KEY,
     NAMED_SAVE_JOB_NO_ACTION_TEXT,
     PASSIVE_JD_NO_CONFIRMATION_TEXT,
+    PASSIVE_JD_REPAIR_TOOL_CHOICE,
     TOOLS_NODE_NAME,
     AgentGraphBundle,
     _build_model_messages,
@@ -21,13 +23,17 @@ from app.agent.graph import (
 )
 from app.agent.state import AGENT_STATE_FIELDS
 from app.services import job_save_confirmation as conf
-from app.tools.jobs import SAVE_JOB_NAME
+from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
 from app.tools.registry import ToolRegistry, production_registry
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 
-from tests.fakes.fake_chat_model import FakeChatModel
+from tests.fakes.fake_chat_model import (
+    CANONICAL_SAVE_JOB_TOOL_CHOICE,
+    FakeChatModel,
+    PassiveJdBindingAwareFake,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1290,3 +1296,135 @@ def test_unrelated_greeting_and_topology_six_pass_unchanged() -> None:
     assert bundle.tool_loop_limit == 6
     assert bundle.decision_node_name == DECISION_NODE_NAME
     assert bundle.tools_node_name == TOOLS_NODE_NAME
+
+
+# ---------------------------------------------------------------------------
+# Plan 13 (01B): binding-aware passive repair + sanitized rejection logs
+# ---------------------------------------------------------------------------
+
+
+def test_passive_binding_aware_repair_dispatches_source_only_once() -> None:
+    """Valid repair only when ordinary schema + canonical tool_choice bind."""
+    jd = _obvious_passive_jd()
+    model = PassiveJdBindingAwareFake(
+        mixed_text=jd,
+        preview_value="Synthetic Engineer",
+        argument_value="Plan13 Labs",
+        provider_payload_value="PROVIDER-PAYLOAD-SENTINEL-DO-NOT-LOG",
+        permit_valid_repair=True,
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+
+    assert out["error"] is None
+    assert model.invoke_count == 2  # first + one repair
+    assert out["tool_iteration_count"] == 1
+    tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    assert getattr(tool_msgs[0], "name", None) == SAVE_JOB_NAME
+    ai_calls = [
+        m
+        for m in out[MESSAGES_KEY]
+        if isinstance(m, AIMessage) and (m.tool_calls or [])
+    ]
+    assert len(ai_calls) == 1
+    assert ai_calls[0].tool_calls[0]["args"] == {"source": "current_message"}
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" in final
+
+    # Two binds: normal multi-tool (no choice) + repair-only canonical choice.
+    assert len(model.binding_log) == 2
+    normal_tools, normal_kwargs = model.binding_log[0]
+    repair_tools, repair_kwargs = model.binding_log[1]
+    assert "tool_choice" not in normal_kwargs
+    assert len(normal_tools) >= 1
+    assert repair_tools == [save_job_openai_tool_schema()]
+    assert repair_kwargs == {"tool_choice": CANONICAL_SAVE_JOB_TOOL_CHOICE}
+    assert PASSIVE_JD_REPAIR_TOOL_CHOICE == CANONICAL_SAVE_JOB_TOOL_CHOICE
+
+
+def test_passive_binding_aware_red_without_compatible_forced_choice() -> None:
+    """Without permit (or missing forced bind), repeated mixed refuses."""
+    jd = _obvious_passive_jd()
+    model = PassiveJdBindingAwareFake(
+        mixed_text=jd,
+        preview_value="Synthetic Engineer",
+        argument_value="Plan13 Labs",
+        provider_payload_value="PROVIDER-PAYLOAD-SENTINEL-DO-NOT-LOG",
+        permit_valid_repair=False,
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+
+    assert out["error"] is None
+    assert model.invoke_count == 2
+    assert out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert not any(
+        isinstance(m, AIMessage) and (m.tool_calls or [])
+        for m in out[MESSAGES_KEY]
+    )
+
+
+def test_passive_repair_diagnostics_never_log_content_or_arguments(
+    caplog: Any,
+) -> None:
+    """Rejection logs are shape-only: reason/call_count/tool_names/argument_keys."""
+    raw_sentinel = "RAW-JD-SENTINEL-DO-NOT-LOG"
+    preview_sentinel = "PREVIEW-SENTINEL-DO-NOT-LOG"
+    argument_sentinel = "ARGUMENT-VALUE-SENTINEL-DO-NOT-LOG"
+    provider_sentinel = "PROVIDER-PAYLOAD-SENTINEL-DO-NOT-LOG"
+    prompt_sentinel = "PROMPT-SENTINEL-DO-NOT-LOG"
+    jd = _obvious_passive_jd() + f"\n{raw_sentinel}\n{prompt_sentinel}"
+    model = PassiveJdBindingAwareFake(
+        mixed_text=jd,
+        preview_value=preview_sentinel,
+        argument_value=argument_sentinel,
+        provider_payload_value=provider_sentinel,
+        permit_valid_repair=False,
+    )
+    # Alembic migrations in other unit tests can disable existing loggers.
+    graph_logger = logging.getLogger("app.agent.graph")
+    was_disabled = graph_logger.disabled
+    graph_logger.disabled = False
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.agent.graph"):
+            out = _bundle(model, [save_job_current_message_tool]).compiled.invoke(
+                initial_graph_state(run_id=RUN_ID, user_text=jd)
+            )
+    finally:
+        graph_logger.disabled = was_disabled
+
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    repair_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.agent.graph"
+        and record.getMessage().startswith("passive_jd_call_rejected")
+    ]
+    shape = (
+        "call_count=1 tool_names=('save_job',) "
+        "argument_keys=('preview', 'source', 'text')"
+    )
+    assert repair_logs == [
+        f"passive_jd_call_rejected reason=invalid_first_call {shape}",
+        f"passive_jd_call_rejected reason=invalid_repair_call {shape}",
+    ]
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    for forbidden in (
+        jd,
+        raw_sentinel,
+        preview_sentinel,
+        argument_sentinel,
+        provider_sentinel,
+        prompt_sentinel,
+        "current_message",
+        "provider_payload",
+        "Required repair:",
+    ):
+        assert forbidden not in joined
