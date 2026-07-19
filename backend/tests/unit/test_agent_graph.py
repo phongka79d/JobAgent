@@ -1090,6 +1090,78 @@ def test_passive_one_repair_success_discards_plain_text() -> None:
     assert ai_calls[0].tool_calls[0]["args"].get("source") == "current_message"
 
 
+def test_passive_malformed_first_save_job_call_is_discarded_and_repaired_once() -> None:
+    """Malformed first passive call is discarded; only a source-only repair runs."""
+    jd = _obvious_passive_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"text": jd, "source": "current_message"},
+                call_id="malformed-first",
+            ),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="cm-repair",
+            ),
+            _ai_text("I created a brand new job for you."),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+
+    assert out["error"] is None
+    assert model.invoke_count == 2  # first decision + exactly one repair
+    assert out["tool_iteration_count"] == 1
+    tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    assert getattr(tool_msgs[0], "name", None) == SAVE_JOB_NAME
+    ai_calls = [
+        m
+        for m in out[MESSAGES_KEY]
+        if isinstance(m, AIMessage) and (m.tool_calls or [])
+    ]
+    assert len(ai_calls) == 1
+    call = ai_calls[0].tool_calls[0]
+    assert call["id"] == "cm-repair"
+    assert call["args"] == {"source": "current_message"}
+    final = str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" in final
+    assert "brand new" not in final.lower()
+
+
+def test_passive_malformed_repair_call_yields_no_confirmation_without_tools() -> None:
+    """A text-plus-source repair is rejected without executing save_job."""
+    jd = _obvious_passive_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_text("I already saved this JD for you."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"text": jd, "source": "current_message"},
+                call_id="malformed-repair",
+            ),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+
+    assert out["error"] is None
+    assert model.invoke_count == 2  # first response + one repair
+    assert out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert not any(
+        isinstance(m, AIMessage) and (m.tool_calls or [])
+        for m in out[MESSAGES_KEY]
+    )
+
+
 def test_passive_repair_refusal_is_fixed_truthful_no_save() -> None:
     jd = _obvious_passive_jd()
     model = FakeChatModel(
