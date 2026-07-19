@@ -1,7 +1,7 @@
 # Plan 13 Repair And Revalidation Design
 
 **Date:** 2026-07-19  
-**Status:** Draft for user review after the approved Plan 13 direction  
+**Status:** Approved by the user on 2026-07-19
 **Change type:** `bugfix`  
 **Master impact:** `none`
 
@@ -124,8 +124,9 @@ bounded repair and deterministic validation.
 ### 1. Provider-visible `save_job` source union
 
 Create one focused LLM-facing argument schema/adapter in the existing Job tool
-owner. The provider schema is an object with `additionalProperties=false` and
-three mutually-exclusive branches:
+owner. The provider schema contains exactly three full mutually-exclusive
+`oneOf` object branches. Every branch owns its complete `properties`,
+`required`, and `additionalProperties=false` contract:
 
 ```text
 URL branch:             required url; no text/source/preview
@@ -164,30 +165,44 @@ decision node:
 6. If it is still invalid, emit the existing fixed no-confirmation text and no
    tool execution.
 
-Record only sanitized repair diagnostics (reason category and call shape, never
-raw JD text or provider payloads). This keeps one model repair, one decision
-node, and the existing six-pass counter. A fake-provider regression must include
-both repeated mixed-source calls (refusal/no side effect) and a valid strict
-repair (confirmation appears), so the test cannot pass by weakening validation.
+Record only sanitized repair diagnostics: fixed rejection category, call count,
+tool-name list, and argument-key-name list. Never log raw JD/user text, preview,
+argument values, call objects, provider payload/response, repair messages, or
+prompts. A `caplog` sentinel test must prove all forbidden values are absent.
+This keeps one model repair, one decision node, and the existing six-pass
+counter. A binding-aware fake-provider regression must emit a valid repair only
+when it sees all three full strict branches plus forced
+`tool_choice='save_job'`; otherwise it repeats the mixed-source call. This makes
+the regression RED against the permissive/unforced graph rather than passing
+from a scripted response sequence.
 
 ### 3. Confirmation and side-effect proof
 
-Reuse the current `save_job` interrupt/resume implementation unchanged except
-for the provider schema/dispatch seam. Acceptance must prove:
+Reuse the current `save_job` interrupt/resume owner and make only one additional
+read-boundary correction: current-message opt-out and confirmation reuse one
+durable lookup before interrupt, while an accepted save performs exactly one
+new durable reload immediately before ingestion. Acceptance must prove:
 
 - Before **Lưu JD**, the same tool execution is `running`, the pending card is
   bounded/redacted, and Job rows, extraction calls, embedding calls, evaluation
   calls, and Neo4j writes are all zero.
-- **Lưu JD** reloads the exact durable initiating message once and preserves
-  `created|returned|retried` plus the existing SavedJobCard.
+- **Lưu JD** follows exactly one pre-interrupt durable lookup with exactly one
+  accepted-resume reload of the same initiating message (two repository reads
+  total), then preserves `created|returned|retried` plus the existing
+  SavedJobCard.
 - **Không lưu** returns `committed=false`, `outcome=cancelled`, no Job/card/
-  invalidation, and zero ingestion/provider/graph side effects.
+  invalidation, and zero ingestion/provider/graph side effects. LangGraph may
+  perform the same one fresh source read while re-entering the interrupted tool;
+  that read never reaches ingestion.
 - Repeated resume and terminal replay perform no second side effect; direct
   URL/text and explicit **Lưu JD & đánh giá lại** remain unchanged.
 
-Counters are gathered with fake seams in automated tests and sanitized
-provider/SQLite/Neo4j observations in the disposable browser run; no product
-observability endpoint is added.
+Automated fake/wrapper spies own exact `ingest_raw_text`, extraction, embedding,
+evaluation-dispatch, and Neo4j-sync call counters. The disposable browser run
+separately owns SQLite Job/evaluation and Neo4j node deltas, durable run/tool
+state, network requests, console output, and sanitized backend logs. Browser
+evidence must not claim fake/provider call counters. No product observability
+endpoint is added.
 
 ### 4. Dialog accessible name
 
@@ -214,7 +229,13 @@ Add a short Plan 12 supplement section to
 `full_functional_test_matrix.md` linking P12-RSP/CV/JD/REG IDs to this ledger;
 do not rewrite historical rows or turn the failure-only report into a pass
 diary. The ledger records the three passive-JD run IDs, dialog role/name result,
-pre-action counters, browser network requests, and all warning classifications.
+pre-action evidence, browser network requests, and all warning classifications.
+It is seeded with the preserved failed run IDs
+`4971481e-0e7b-42ca-8d7b-184d314be2e9`,
+`d1fab78d-a4ff-4a9d-ad06-75d5cd229c8a`, and
+`5a12595d-7af4-4b64-a03b-433c08d87293`. Reruns append attempt rows rather than
+overwriting first-failure evidence. Non-blocking warnings live in a separate
+out-of-scope table, never in functional failure rows.
 
 ### 6. Deterministic diagnostic and archived-CV evidence
 
@@ -225,8 +246,18 @@ pre-action counters, browser network requests, and all warning classifications.
 - Provide a disposable two-CV fixture/procedure for the browser run: upload and
   approve CV A, upload/approve CV B, reprocess/activate archived A, then delete
   archived B. Record request/event order, active badge, retained PDF, graph/run
-  state, and deletion result in the ledger. Tear down only the named disposable
-  Compose project.
+  state, and deletion result in the ledger.
+- In the passive-JD browser matrix, refresh while the Vietnamese confirmation
+  card is pending, prove history rehydrates the same run/execution/card, then
+  save. Cancel the short English case, save and exact-hash repeat the Vietnamese
+  case, and terminally cancel the long MISA-like third case. Exercise explicit
+  direct text with the exact named `save_job` request recorded in the
+  implementation plan.
+- Because the Compose file publishes fixed ports, preflight the normal
+  `infrastructure` workspace project. If it is fully running, stop only its
+  containers without deleting volumes; partial state blocks the run. Start the
+  named `jobagent-plan13-smoke` project, remove only that project's volumes at
+  teardown, then restore the normal stack to its prior running/stopped state.
 
 ## Error handling and recovery
 
@@ -238,9 +269,9 @@ pre-action counters, browser network requests, and all warning classifications.
   existing stable codes and durable truth. No new error envelope is introduced.
 - Dialog naming failure is a frontend test failure; evidence content/network
   behavior remains a separate regression gate.
-- If a disposable browser run is interrupted, retain its sanitized partial row
-  as `INCOMPLETE` in the ledger and rerun with a new project; never mutate normal
-  user volumes or mark the check PASS from stale output.
+- If a disposable browser run is interrupted, retain its sanitized attempt as
+  `FAIL` or `BLOCKED` in the ledger and append a new attempt for any rerun; never
+  mutate normal user volumes or mark the check PASS from stale output.
 
 ## Acceptance gates
 
@@ -248,13 +279,15 @@ The design is accepted for implementation only when all of the following are
 proved on current HEAD after the repair:
 
 1. Three new fresh obvious JDs each show one confirmation card and zero
-   pre-action mutation; save/cancel/replay behavior is exact.
+   pre-action mutation; the pending-refresh/history check passes and every run
+   receives a terminal save/cancel action, including cancellation of the long
+   MISA-like case.
 2. The provider-visible schema has strict source branches and the malformed-call
    tests prove no invalid dispatch.
 3. `getByRole('dialog', {name: 'Nguồn từ CV'})` succeeds while all existing
    evidence/dialog behavior remains green.
-4. Plan 1 negative diagnostics, archived-CV browser paths, and P12 counters have
-   dated ledger evidence.
+4. Plan 1 negative diagnostics, archived-CV browser paths, automated P12 call
+   counters, and separate live browser state deltas have dated ledger evidence.
 5. Backend/frontend focused and full gates, Compose health, plan validator, and
    scope hygiene pass. Non-blocking warnings are listed separately.
 
@@ -283,6 +316,9 @@ docs/acceptance/full_functional_test_matrix.md
 docs/acceptance/cv_manager_checklist.md
 ```
 
-No task contract or product implementation is created by this design. The
-incremental plan will convert these boundaries into bite-sized test-first tasks
-after the written spec is reviewed.
+This planning/design turn creates no task contract or product implementation.
+After the complete Plans 1-13 portfolio receives independent approval,
+`task-writing-agent` must create canonical `docs/tasks/task_13.md`; only then may
+A1/A2/A3 implementation/review/audit execute the bite-sized plan. The canonical
+orchestrator/A3 workflow owns commit readiness and final commits, so worker
+commit commands in the implementation plan are explicitly conditional.

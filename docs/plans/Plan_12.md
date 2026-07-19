@@ -759,7 +759,7 @@ choose the same single card host and preserve exact-one action rendering.
 | Desktop JD save/dedupe | Paste an obvious synthetic Vietnamese JD, choose **Lưu JD**, then repeat the same passive paste and confirm again. | Each paste requires its own card; each accepted run ingests its own exact durable message once; first outcome creates and second returns the same Job; Job count is one; no evaluate request/row occurs; normal SavedJobCard/outcome wording appears. |
 | Desktop direct/opt-out | Send a sole public test URL, one explicit direct `save_job` text request, one JD plus `không lưu`, and ambiguous long prose. | URL/direct paths remain compatible without the passive card; opt-out creates no card/mutation; ambiguous prose is not forced into confirmation. |
 | Scope hygiene | `git diff --check`; inspect `git status --short`, changed paths, package manifests, migrations, public route lists, registry size, and source file lengths. | Only the authorized Version 1.9/Plan 11/Plan 12/spec planning edits and Plan 12 implementation owners are present; no task file, dependency, migration, endpoint, duplicate store/parser, second Agent/node/tool, auto-evaluation, raw-data leak, security/mobile work, real data, secret, or oversized owner exists. |
-| Plan structure | `python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json` | Plans are contiguous through `Plan_12.md`; Plan 11 hands off normally and only Plan 12 is terminal. |
+| Historical Plan 12 structure gate | `python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json` | At Plan 12 completion, Plans were contiguous through `Plan_12.md`, Plan 11 handed off normally, and only Plan 12 was terminal. The current successor topology is verified by Plan 13. |
 
 ## Handoff Contract
 
@@ -782,7 +782,16 @@ choose the same single card host and preserve exact-one action rendering.
 | Future A1 implementation | Prompt/decision/source/interrupt/card plus Markdown/CV projection/citation/dialog and test sequence | Implementation reuses exact owners and the verification matrix without adding endpoints, stores, tools, migrations, evaluations, or dependencies. |
 | Future A2/A3 review | Independent functional/scope boundary | Evidence proves readable output, truthful CV provenance, exact source display, recognition boundaries, zero pre-confirmation mutation, correct save/cancel/replay, no auto-evaluation, and regression safety. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_13.md` consumes the completed readable-response, active-CV evidence,
+passive-JD confirmation, exact durable source, interrupt/resume, frontend card,
+and desktop baseline. It owns only the approved provider-boundary reliability,
+source-dialog accessible-name, deterministic diagnostic coverage, and fresh
+browser/evidence repairs; it must not reimplement Plan 12 ingestion, evidence,
+card, Markdown, or evaluation ownership.
+
+### Historical Completion Contract
 
 Plan 12 is complete only when assistant messages render readable semantic Markdown
 while user/system text remains literal; Agent responses lead with the answer and
