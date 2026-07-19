@@ -36,6 +36,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from pydantic import ValidationError
 from typing_extensions import TypedDict
 
 from app.adapters.shopaikey_chat import bind_chat_tools, build_shopaikey_chat
@@ -43,6 +44,7 @@ from app.agent.prompt import build_system_prompt
 from app.agent.state import AGENT_CONVERSATION_ID, AGENT_STATE_FIELDS
 from app.core.settings import Settings, get_settings
 from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.schemas.jobs import SAVE_JOB_SOURCE_CURRENT_MESSAGE, SaveJobInput
 from app.services.job_save_confirmation import (
     CANCEL_SUMMARY,
     message_has_clear_opt_out,
@@ -73,7 +75,6 @@ PASSIVE_JD_NO_CONFIRMATION_TEXT: str = (
     "No confirmation was created and the JD was not saved."
 )
 
-SAVE_JOB_SOURCE_CURRENT_MESSAGE: str = "current_message"
 SAVE_JOB_CANCEL_OUTCOME: str = "cancelled"
 
 # Exact registered token only (word boundary). Not NL paraphrase detection.
@@ -544,12 +545,16 @@ def _is_sole_save_job_call(message: AIMessage | None) -> bool:
 
 
 def _is_sole_current_message_save_job_call(message: AIMessage | None) -> bool:
-    """True when the AIMessage is exactly one save_job(source=current_message)."""
+    """True for exactly one valid source-only current-message save_job call."""
     if not _is_sole_save_job_call(message):
         return False
     assert message is not None
     calls = list(message.tool_calls or [])
-    return _is_current_message_source_args(_tool_call_args(calls[0]))
+    try:
+        args = SaveJobInput.model_validate(_tool_call_args(calls[0]))
+    except ValidationError:
+        return False
+    return args.source == SAVE_JOB_SOURCE_CURRENT_MESSAGE
 
 
 def _turn_called_current_message_save_job(messages: Sequence[Any]) -> bool:
@@ -817,7 +822,7 @@ def build_agent_graph(
                     ]
                 }
         # Passive obvious-JD: only after opt-out and positive exact-name lose;
-        # sole URL is excluded; one repair after plain-text miss only.
+        # sole URL is excluded; one repair after any invalid first decision.
         elif (
             save_job_available
             and not clear_opt_out
@@ -825,7 +830,7 @@ def build_agent_graph(
             and not message_is_sole_http_url(user_text)
             and message_is_obvious_jd(user_text)
         ):
-            if not _has_tool_calls(response):
+            if not _is_sole_current_message_save_job_call(response):
                 repair_messages = list(prompt_messages) + [
                     SystemMessage(content=_PASSIVE_JD_REPAIR_INSTRUCTION)
                 ]
@@ -836,7 +841,6 @@ def build_agent_graph(
                             AIMessage(content=PASSIVE_JD_NO_CONFIRMATION_TEXT)
                         ]
                     }
-            # First decision already has tool calls: leave normal validation.
 
         updates = {MESSAGES_KEY: [response]}
         count = int(state.get("tool_iteration_count") or 0)
