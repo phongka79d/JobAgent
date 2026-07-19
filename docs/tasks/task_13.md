@@ -18,16 +18,18 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
   `887d4f6`, with final orchestrator commit still pending. That baseline is context;
   future execution must verify the matching immutable A1/A2/A3 evidence and
   Orchestrator decisions rather than infer acceptance from README prose. The
-  repository HEAD observed during derivation was `76c709c`; this task contract
+  repository HEAD observed during this correction was `b938310`; this task contract
   does not claim that it is the same candidate as the README product baseline.
 - The current user explicitly invoked `task-writing-agent` for `Plan_13.md`. This
   authorizes creation of this task contract and supersedes only the plan's
   planning-stage instruction to wait for another portfolio review. It does not
   authorize implementation, expand scope, or mark any task accepted.
-- `docs/plans/Plan_13.md` is the primary authority. Its approved design and
-  implementation plan are aligned supporting sources; their worker-owned commit
-  snippets are conditional guidance and do not override the orchestrated handoff
-  contract below.
+- `docs/plans/Plan_13.md` is the primary authority. Its approved ShopAIKey
+  compatibility correction supersedes conflicting provider `oneOf`/`const`/
+  nested-`anyOf`, provider unknown-field, branch-local-required, and string
+  forced-choice passages in the supporting design/implementation documents. Their
+  otherwise aligned behavior, test, ownership, and conditional commit guidance
+  remains supporting input and does not override the handoff contract below.
 - The shared plan validator passed during task derivation on 2026-07-19 with
   contiguous `Plan_1.md` through `Plan_13.md`, `valid: true`, and no errors.
 - Existing backend owners were confirmed at `backend/app/schemas/jobs.py`,
@@ -43,11 +45,11 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
   `docs/acceptance/full_functional_test_matrix.md` and
   `docs/acceptance/cv_manager_checklist.md`.
   `docs/acceptance/plan13_acceptance_ledger.md` does not yet exist.
-- The worktree already contains user changes to Plan 12 and the approved Plan 13
-  design/implementation sources, an untracked `Plan_13.md`, and the unrelated
-  pre-existing deletion named in Plan 13. Preserve those changes and never restore,
-  edit, stage, or absorb that unrelated deletion. This authoring pass creates only
-  `docs/tasks/task_13.md`.
+- This correction pass changes only `docs/plans/Plan_13.md` and
+  `docs/tasks/task_13.md`. A fresh orchestration run will consume them; abandoned
+  `.agent` evidence is not revised or reused as authority. Product code, supporting
+  design/implementation documents, Plan 12, README, and unrelated paths remain
+  untouched by this pass.
 - Automated tests use fakes and synthetic fixtures. Only the explicitly named
   provider probes and disposable browser release task may use configured local
   services. Never record `.env` values, raw CV/JD bodies, prompts, provider
@@ -63,6 +65,10 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
   `docs/superpowers/plans/2026-07-19-plan13-repair-revalidation-plan.md`,
   `docs/plans/Plan_1.md`, `docs/plans/Plan_12.md`, and
   `docs/plans/Master_plan.md` Version 1.9.
+- Provider format reference:
+  [ShopAIKey OpenAI Format - Function Calling](https://shopaikey.com/docs/openai-format).
+  Its documented ordinary object shape supports the approved compatibility
+  correction; it does not make unsupported combinators mandatory.
 - Context only: `README.md`, `frontend/AGENTS.md`, `docs/tasks/task_12.md`,
   existing implementation/tests, acceptance documents, and
   `infrastructure/docker-compose.yml`.
@@ -73,12 +79,13 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
   `## Prerequisites`, `## Scope`, and `## Out of Scope` -> mandatory P13-JD,
   P13-A11Y, P13-DIAG, P13-CV, P13-EVID, and P13-REG outcomes, dependencies, and
   exclusions.
-- `Plan_13.md` > `### Provider-visible source contract` -> exact three-branch
-  provider schema, model-only binding, unchanged runtime `BaseTool`, runtime
-  validation, and early no-fallback provider probe.
+- `Plan_13.md` > `### Provider-visible source contract` -> compatible ordinary
+  provider object, required `ponytail:` limitation/upgrade comment, model-only
+  binding, unchanged runtime `BaseTool`, strict runtime validation, and early
+  no-fallback provider probe.
 - `Plan_13.md` > `### One bounded strict repair` -> repair-only tool choice,
-  binding-aware regression, one invocation, fixed refusal, precedence, sanitized
-  logging, and topology invariants.
+  exact canonical forced-choice object, binding-aware regression, one invocation,
+  fixed refusal, precedence, sanitized logging, and topology invariants.
 - `Plan_13.md` > `### Confirmation, side effects, and durable truth` -> exact
   pre-interrupt/re-entry read boundaries, fake-spy ownership, zero pre-action and
   cancel domain side effects, fresh-content save, dedupe, replay, and direct-path
@@ -105,7 +112,8 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
   repair boundaries.
 - `2026-07-19-plan13-repair-revalidation-plan.md` > `## Task 1` through
   `## Task 8` and `## Completion conditions` -> detailed test-first examples and
-  command sequencing subordinate to the primary Plan 13 contract.
+  command sequencing subordinate to the primary Plan 13 contract; conflicting
+  provider-schema and string forced-choice examples are superseded.
 
 ### Approved Architecture and Constraints
 
@@ -115,12 +123,17 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
 - Keep one LangGraph Agent, one decision node, one ToolNode, exactly seven runtime
   tools, unchanged graph state and routing, and `TOOL_LOOP_LIMIT=6`.
 - Keep `SaveJobInput` and the original runtime `save_job` `BaseTool` authoritative
-  for validation, injected state, interrupt, execution, and replay. The strict
-  branch schema is provider-visible only and must never become a second runtime
-  tool or ingestion path.
-- A clear passive JD receives at most one repair bound only to strict `save_job`
-  with forced tool choice. Invalid first/repaired calls never dispatch and logging
-  is limited to the approved shape-only fields.
+  for exactly-one-source/unknown-field/source/preview validation, injected state,
+  interrupt, execution, and replay. The provider-visible schema is one compatible
+  ordinary object and must never become a second runtime tool or ingestion path.
+- Normal binding has no forced choice. A clear passive JD receives at most one
+  repair bound only to the compatible `save_job` definition with exact canonical
+  choice `{"type":"function","function":{"name":"save_job"}}`. Invalid first/
+  repaired calls never dispatch, and logging is limited to the approved shape-only
+  fields.
+- The provider-schema owner must include a `ponytail:` comment documenting the
+  deliberate absence of unverified combinators and the upgrade path after
+  ShopAIKey verifies support.
 - Current-message confirmation remains pre-mutation. The initial interrupt and
   save/cancel re-entry each perform one durable lookup; save consumes the fresh
   re-entry content without a third reload, while cancellation performs no
@@ -144,7 +157,7 @@ existing one-Agent, one-ToolNode, seven-tool architecture.
 
 | Batch | Outcome | Task IDs | Depends on |
 |---|---|---|---|
-| Batch01 | Strict provider contract, one bounded repair, and exact durable confirmation behavior | (01A), (01B), (01C) | Accepted Plan 12 baseline and current Plan 13 authorization |
+| Batch01 | Compatible provider contract, strict runtime authority, one bounded repair, and exact durable confirmation behavior | (01A), (01B), (01C) | Accepted Plan 12 baseline and current Plan 13 authorization |
 | Batch02 | Accessible active-CV source dialog name with preserved behavior | (02A) | Batch01 |
 | Batch03 | Deterministic redacted ShopAIKey and PDF diagnostic failure coverage | (03A) | Batch02 |
 | Batch04 | Complete P12/P13 traceability and append-only evidence scaffold | (04A) | Batch03 |
@@ -186,32 +199,35 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
 
 ### Scope Boundary
 
-- This batch owns only the provider-visible schema, model binding substitution,
-  repair-only binding/decision behavior, sanitized rejection diagnostics, and the
-  bounded current-message lookup-flow correction with directly required tests.
+- This batch owns only the compatible provider-visible object, strict runtime
+  validation authority, model binding substitution, repair-only binding/decision
+  behavior, sanitized rejection diagnostics, and the bounded current-message
+  lookup-flow correction with directly required tests.
 - It does not own endpoints, SSE shapes, persistence schemas, ingestion/extraction/
   embedding/evaluation implementations, registry topology, Agent state, prompt
   policy, frontend behavior, or release documentation.
 
 ### Tasks
 
-- [ ] (01A): Bind an exact provider-only save_job source union while preserving runtime authority
+- [ ] (01A): Bind a ShopAIKey-compatible provider save_job object while preserving strict runtime authority
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch01 - Reliable Passive-JD Provider and Confirmation Boundary` > `(01A)`
-  - Source of Truth: `docs/plans/Plan_13.md` > `### Provider-visible source contract`, `## Implementation` steps 1-2, and `## Verification` rows `Provider schema/runtime` and `Early live schema compatibility`; `docs/superpowers/specs/2026-07-19-plan13-repair-revalidation-design.md` > `### 1. Provider-visible \`save_job\` source union`; `docs/superpowers/plans/2026-07-19-plan13-repair-revalidation-plan.md` > `## Task 1: Lock the provider-visible \`save_job\` schema`.
+  - Source of Truth: `docs/plans/Plan_13.md` > `## Source of Truth` > `Approved ShopAIKey compatibility correction (2026-07-19)`, `### Provider-visible source contract`, `## Implementation` steps 1-2, and `## Verification` rows `Provider schema/runtime` and `Early live schema compatibility`; [ShopAIKey OpenAI Format - Function Calling](https://shopaikey.com/docs/openai-format). The supporting Plan 13 design/implementation passages remain subordinate where they conflict with this corrected provider shape.
   - Suggested Refs:
     - task-contract: repository `docs/tasks/task_13.md` > `(01A)` -> task authority
     - source-provider-contract: repository `docs/plans/Plan_13.md` > `### Provider-visible source contract` -> required provider/runtime separation
     - source-provider-implementation: repository `docs/plans/Plan_13.md` > `## Implementation` step 2 -> exact early probe authority
     - existing-runtime-contract: repository `docs/tasks/task_12.md` > `(01A)` and `(01B)` -> accepted runtime schema/tool/interrupt ownership
+    - existing-provider-pattern: repository `infrastructure/scripts/shopaikey_diag/tools_schema.py` > `check_tools_schema` -> working ShopAIKey ordinary-object binding pattern
     - owner-save-input: repository `backend/app/schemas/jobs.py` > `SaveJobInput` and preview bounds -> reuse/runtime authority
     - validation-provider: repository `docs/plans/Plan_13.md` > `## Verification` > `Provider schema/runtime` and `Early live schema compatibility` -> validation authority
   - Source Requirements:
-    - Add one reusable parameters builder with exactly three complete `oneOf` object branches: non-empty URL only, non-empty text only, and literal `source='current_message'` with optional bounded preview only; each branch and preview forbid unknown properties.
+    - Add one reusable parameters builder with one provider-visible `type='object'` and exactly `url`, `text`, `source`, and bounded `preview` properties. Do not require provider-side `oneOf`, `const`, nested `anyOf`, branch-local `required`, or unknown-field enforcement.
     - Wrap that parameters object in one OpenAI-format `save_job` definition and reuse one description constant with the existing runtime decorator.
-    - Bind the strict dictionary only to the model; keep the original registry `BaseTool`, injected state/tool-call ID, `SaveJobInput`, ToolNode execution, interrupt, and replay unchanged.
-    - Inspect the actual provider-bound payload and independently test runtime mixed/unknown/preview rejection; do not use OpenAI `strict=True` or a permissive fallback.
+    - Bind the compatible dictionary only to the model with no normal forced choice; keep the original registry `BaseTool`, injected state/tool-call ID, `SaveJobInput`, ToolNode execution, interrupt, and replay unchanged.
+    - Keep `SaveJobInput` authoritative for exactly one source, `source='current_message'`, unknown fields, preview-only-current-message rules, unknown preview fields, and bounds. Inspect the actual provider-bound payload and independently test those runtime rejections; do not use OpenAI `strict=True` or a fallback schema.
+    - Add a `ponytail:` comment at the provider-schema owner documenting that ShopAIKey has not verified the omitted combinators and that they may be restored only after documented or sanitized-probe verification.
     - Immediately after implementation and before (01B), run the exact side-effect-free inline `.venv` probe embedded in Plan 13 Implementation step 2. It must emit only its PASS marker, dispatch no ToolNode, contain no real JD/provider payload, and block on rejection or malformed output.
   - Dependencies: Accepted Plan 12 baseline; no earlier Plan 13 task.
   - User Action: Before the early live probe, make a usable ignored root `.env` and provider access available without sharing values. Missing or invalid provider setup blocks the probe and all later Batch01 work.
@@ -223,28 +239,29 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
   - Likely Files: `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/agent/graph.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_job_save_confirmation.py`, `backend/tests/integration/test_job_tools.py`
   - Allowed Files: the six listed schema/tool/graph/test files only; edits in `backend/app/agent/graph.py` are limited to provider-definition substitution. Exclude repair binding/logging (owned by (01B)), current-message lookup refactor (owned by (01C)), registry/state/runner/prompt, services/repositories/API, settings, migrations, dependencies, frontend, acceptance docs, runtime data, and `.env`.
   - Agent Work:
-    1. Inspect `SaveJobInput`, preview constants, the existing decorated `save_job`, graph model binding, ToolNode construction, and every direct schema/runtime caller; reuse the accepted owners.
-    2. Add failing actual-provider-payload and runtime-union tests, including original ToolNode `BaseTool` identity and injected-field absence.
-    3. Implement the minimum provider parameters/function definition and substitute it only in model binding; do not attach it as the runtime tool schema.
+    1. Inspect `SaveJobInput`, preview constants, the existing decorated `save_job`, `shopaikey_diag/tools_schema.py`, graph model binding, ToolNode construction, and every direct schema/runtime caller; reuse the accepted owners and working provider pattern.
+    2. Add failing actual-provider-payload and strict runtime-validation tests, including ordinary property shape, combinator absence, no normal forced choice, original ToolNode `BaseTool` identity, and injected-field absence.
+    3. Implement the minimum compatible provider parameters/function definition plus required `ponytail:` comment and substitute it only in model binding; do not attach it as the runtime tool schema.
     4. Run the focused fake-backed provider/runtime tests and resolve only root causes within this task's boundary.
     5. Run the exact early inline provider probe once, record only its terminal marker/exit evidence, and stop with the mapped blocker if it fails.
-  - Output: One strict provider-visible `save_job` definition is model-bound while the original runtime tool and validator remain authoritative.
-  - A1 Outcome: The model receives exactly three exclusive save-job source branches, ToolNode retains the original injected runtime tool, malformed runtime inputs remain rejected, and the early synthetic provider probe passes without fallback or side effects.
-  - A2 Review Focus: Exact branch-local properties/requirements/bounds, actual bound payload, description reuse, provider-only placement, all runtime callers, original `BaseTool` identity, injected-field absence, mixed/unknown rejection, probe freshness/sanitization, no fallback, no out-of-scope graph/tool changes, and bugfix hard gates.
+  - Output: One ShopAIKey-compatible provider-visible `save_job` object is model-bound while the original runtime tool and strict validator remain authoritative.
+  - A1 Outcome: The model receives the compatible ordinary save-job property schema with no normal forced choice, ToolNode retains the original injected runtime tool, `SaveJobInput` rejects every invalid source/unknown/preview case, and the early synthetic provider probe passes without fallback or side effects.
+  - A2 Review Focus: Exact ordinary properties/bounds and combinator absence, actual bound payload, `ponytail:` limitation/upgrade path, description reuse, provider-only placement, no normal forced choice, all runtime callers, original `BaseTool` identity, injected-field absence, strict runtime exactly-one/mixed/unknown/source/preview rejection, probe freshness/sanitization, no fallback, no out-of-scope graph/tool changes, and bugfix hard gates.
   - A3 Batch Evidence: Provider-contract and owner rows for P13-JD-01 plus the provider/runtime portions of P13-REG-01.
   - Acceptance:
-    - The actual model-bound definition contains exactly the three complete exclusive branches and no injected or disallowed branch fields.
-    - The original runtime `BaseTool` is the identical ToolNode owner and `SaveJobInput` rejects mixed, unknown, direct-preview, and over-limit values.
+    - The actual model-bound definition is one ordinary object with exactly `url`, `text`, `source`, and bounded `preview` properties, omits injected fields and required provider combinators, and the normal binding has no forced choice.
+    - The required `ponytail:` comment names the provider limitation and the verified-upgrade path.
+    - The original runtime `BaseTool` is the identical ToolNode owner and `SaveJobInput` rejects zero/multiple sources, invalid source, unknown fields, direct-preview, unknown preview fields, and over-limit values.
     - Direct URL/text and current-message runtime paths retain their accepted public behavior and no second tool/ingestion path exists.
     - The exact early inline probe exits zero with only its PASS marker; any rejection/malformed output blocks with no fallback, retry, model switch, or argument stripping.
   - Validation:
-    - Required: `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_shopaikey_chat.py tests/unit/test_job_save_confirmation.py tests/integration/test_job_tools.py -q` -> PASS evidence: exit `0` and strict bound-payload/runtime/ToolNode assertions; freshness: final attempt only
+    - Required: `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_shopaikey_chat.py tests/unit/test_job_save_confirmation.py tests/integration/test_job_tools.py -q` -> PASS evidence: exit `0` and compatible bound-payload/no-normal-choice plus strict runtime/ToolNode assertions; freshness: final attempt only
     - Required: execute the exact standalone PowerShell `.venv` probe in `docs/plans/Plan_13.md` > `## Implementation` step 2 from the repository root -> PASS evidence: exit `0` and only `SAVE_JOB_PROVIDER_SCHEMA_PROBE=PASS`; freshness: immediately after final (01A) implementation and before (01B)
     - Required: `git diff --check` -> PASS evidence: exit `0`; freshness: after the last task edit
-  - Blocked Condition: Missing/unreadable accepted schema/tool refs is `BLOCKED_MISSING_REF`; disagreement between the strict provider definition and runtime authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring repair, service/repository/API/registry/state/config/dependency or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python tooling is `BLOCKED_ENVIRONMENT`; missing provider credential/access for the required early probe is `BLOCKED_USER_ACTION`; provider rejection or malformed probe output is `BLOCKED_ENVIRONMENT` and must not enable a fallback.
+  - Blocked Condition: Missing/unreadable accepted schema/tool refs or ShopAIKey Function Calling reference is `BLOCKED_MISSING_REF`; disagreement between the corrected compatible provider object and strict runtime authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring repair, service/repository/API/registry/state/config/dependency or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python tooling is `BLOCKED_ENVIRONMENT`; missing provider credential/access for the required early probe is `BLOCKED_USER_ACTION`; provider rejection or malformed probe output is `BLOCKED_ENVIRONMENT` and must not enable a fallback, retry/model switch, argument stripping, or unapproved schema change.
   - Files: `backend/app/schemas/jobs.py`, `backend/app/tools/jobs.py`, `backend/app/agent/graph.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_job_save_confirmation.py`, `backend/tests/integration/test_job_tools.py`
 
-- [ ] (01B): Force one strict source-only passive repair with sanitized refusal evidence
+- [ ] (01B): Force one runtime-validated source-only passive repair with sanitized refusal evidence
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch01 - Reliable Passive-JD Provider and Confirmation Boundary` > `(01B)`
@@ -252,17 +269,17 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
   - Suggested Refs:
     - task-contract: repository `docs/tasks/task_13.md` > `(01B)` -> task authority
     - source-repair: repository `docs/plans/Plan_13.md` > `### One bounded strict repair` -> repair, precedence, logging, and topology authority
-    - accepted-provider-owner: repository `docs/tasks/task_13.md` > `(01A)` -> strict provider artifact dependency
+    - accepted-provider-owner: repository `docs/tasks/task_13.md` > `(01A)` -> compatible provider artifact and strict runtime-validator dependency
     - existing-decision-owner: repository `backend/app/agent/graph.py` > `_is_sole_current_message_save_job_call` and passive-JD decision branch -> reuse/root-cause owner
     - validation-repair: repository `docs/plans/Plan_13.md` > `## Verification` > `Passive repair/topology` -> validation authority
   - Source Requirements:
-    - Extend the existing binding helper with an optional keyword-only tool choice that is omitted for normal binding and set to `save_job` only for the repair binding.
-    - Build normal seven-capability and repair-only runnables from the same base model and accepted strict provider definition.
+    - Extend the existing binding helper with an optional keyword-only tool choice that is omitted for normal binding and set to exactly `{"type":"function","function":{"name":"save_job"}}` only for the repair binding.
+    - Build normal seven-capability and repair-only runnables from the same base model and accepted compatible provider definition; runtime validation remains the dispatch gate.
     - Preserve opt-out, exact-name, sole-URL, and obvious-JD precedence; validate both first and repaired responses before dispatch and make exactly one repair invocation.
     - A still-invalid repair returns the fixed truthful refusal with zero ToolNode passes; never synthesize, strip, or normalize mixed arguments.
-    - Add a binding-aware RED fake that succeeds only for the full strict union plus forced tool choice. Rejection logs use prefix `passive_jd_call_rejected`, reason allowlist `invalid_first_call|invalid_repair_call`, and exactly four observable fields: reason, integer `call_count`, `tool_names` list, and `argument_keys` list.
+    - Add a binding-aware RED fake that succeeds only for the expected compatible ordinary provider schema plus the exact canonical forced-choice object. Rejection logs use prefix `passive_jd_call_rejected`, reason allowlist `invalid_first_call|invalid_repair_call`, and exactly four observable fields: reason, integer `call_count`, `tool_names` list, and `argument_keys` list.
     - Keep Agent state, node/edge topology, tool iteration semantics, seven tools, and the six-pass guard unchanged.
-  - Dependencies: Task (01A) accepted, including fresh PASS evidence from the early provider probe.
+  - Dependencies: Task (01A) accepted, including the compatible provider object, strict runtime-validation evidence, required `ponytail:` comment, and fresh PASS evidence from the early provider probe.
   - User Action: None; all repair/topology validation is fake-backed and must not call the provider.
   - Runtime Policy:
     - check_after_seconds: 600
@@ -270,25 +287,25 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
     - quiet_until_due: true
     - max_repair_attempts: 2
   - Likely Files: `backend/app/adapters/shopaikey_chat.py`, `backend/app/agent/graph.py`, `backend/tests/fakes/fake_chat_model.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_agent_graph.py`
-  - Allowed Files: the five listed adapter/graph/fake/unit-test files only; consume (01A)'s schema/tool artifacts read-only. Exclude Job tool runtime flow/integration tests (owned by (01C)), prompt/state/runner/registry, services/repositories/API, settings, migrations, dependencies, frontend, acceptance docs, and runtime data.
+  - Allowed Files: the five listed adapter/graph/fake/unit-test files only; consume (01A)'s provider schema/runtime-validator/tool artifacts read-only. Exclude Job tool runtime flow/integration tests (owned by (01C)), prompt/state/runner/registry, services/repositories/API, settings, migrations, dependencies, frontend, acceptance docs, and runtime data.
   - Agent Work:
     1. Inspect every binding-helper and graph-decision caller plus accepted precedence/topology tests; reuse the existing sole-current-message predicate and fixed refusal.
     2. Add failing adapter and binding-aware graph tests for valid first/repair, repeated mixed calls, precedence, invocation counts, topology, six passes, and sentinel-safe `caplog` output.
-    3. Implement the optional binding choice, one strict repair-only runnable, one invocation, and the fixed-shape rejection helper without moving or duplicating decision logic.
+    3. Implement the optional binding choice, exact canonical forced-choice object, one repair-only runnable, one invocation, and the fixed-shape rejection helper without moving or duplicating decision logic.
     4. Run the focused fake-backed gate and prove normal binding receives no forced tool-choice argument.
-  - Output: The existing decision node makes at most one strict `save_job`-only repair and emits only safe shape diagnostics before truthful refusal.
+  - Output: The existing decision node makes at most one runtime-validated `save_job`-only repair and emits only safe shape diagnostics before truthful refusal.
   - A1 Outcome: An obvious passive JD dispatches one validated source-only save call after at most one binding-aware repair, while repeated malformed calls refuse with zero tools and unchanged precedence/topology.
-  - A2 Review Focus: All binding callers, strict-artifact reuse, repair-only tool exposure/choice, exact invocation counts, pre-dispatch validation, precedence, fixed refusal, shape-only logging and sentinel absence, unchanged state/nodes/routes/tool count/loop limit, focused evidence freshness, and bugfix hard gates.
+  - A2 Review Focus: All binding callers, compatible provider-artifact reuse, exact normal omission and repair-only canonical choice, runtime pre-dispatch validation, exact invocation counts, precedence, fixed refusal, shape-only logging and sentinel absence, unchanged state/nodes/routes/tool count/loop limit, focused evidence freshness, and bugfix hard gates.
   - A3 Batch Evidence: Repair/refusal rows for P13-JD-02 and Agent/topology portions of P13-REG-01.
   - Acceptance:
-    - Normal binding exposes all seven capabilities with no forced choice; repair binding exposes only strict `save_job` with forced choice.
+    - Normal binding exposes all seven capabilities and omits `tool_choice`; repair binding exposes only the compatible `save_job` definition with exact `{"type":"function","function":{"name":"save_job"}}`.
     - Valid first or repaired source-only calls reach ToolNode once; a repeated invalid repair yields the fixed refusal and zero ToolNode passes.
     - Opt-out, exact-name save, sole URL, greeting, direct paths, and six-pass behavior remain unchanged.
     - Every rejection log starts `passive_jd_call_rejected`, uses only reason `invalid_first_call` or `invalid_repair_call`, contains exactly reason/integer `call_count`/`tool_names`/`argument_keys`, and contains no JD/preview/argument values, call objects, prompts, provider payloads/responses, secrets, or headers.
   - Validation:
     - Required: `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_shopaikey_chat.py tests/unit/test_job_save_confirmation.py tests/unit/test_agent_graph.py -q` -> PASS evidence: exit `0`, binding-aware repair/refusal, sanitized `caplog`, precedence, topology, and six-pass assertions; freshness: final attempt only
     - Required: `git diff --check` -> PASS evidence: exit `0`; freshness: after the last task edit
-  - Blocked Condition: Missing accepted (01A) strict provider artifact/probe evidence is `BLOCKED_MISSING_REF`; conflicting repair/precedence authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring tool runtime/integration, prompt/state/runner/registry/service/API/provider settings or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
+  - Blocked Condition: Missing accepted (01A) compatible provider/runtime-validator artifact, `ponytail:` comment, or probe evidence is `BLOCKED_MISSING_REF`; conflicting corrected choice/repair/precedence authority is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring tool runtime/integration, prompt/state/runner/registry/service/API/provider settings or other out-of-bound edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/adapters/shopaikey_chat.py`, `backend/app/agent/graph.py`, `backend/tests/fakes/fake_chat_model.py`, `backend/tests/unit/test_shopaikey_chat.py`, `backend/tests/unit/test_agent_graph.py`
 
 - [ ] (01C): Correct current-message read boundaries and prove every confirmation side effect
@@ -309,7 +326,7 @@ runtime validation, adding mutation, or changing direct URL/text behavior.
     - Add binding-aware public SSE/tool integration coverage for the strict pending card, one running execution, exact lookup counts, fresh-content save, cancel, dedupe, terminal replay, and direct URL/text compatibility.
     - Automated fakes/spies exclusively own exact ingestion, JD extraction, embedding, evaluation, Neo4j sync, Job-row, and evaluation-row counts; browser evidence must not claim these counters.
     - Preserve `created|returned|retried`, strict projection redaction, same durable identity, and zero automatic evaluation.
-  - Dependencies: Tasks (01A) and (01B) accepted with strict provider and repair artifacts.
+  - Dependencies: Tasks (01A) and (01B) accepted with the compatible provider object, strict runtime-validation authority, canonical repair choice, and repair artifacts.
   - User Action: None; integration tests use fakes and temporary SQLite/files only.
   - Runtime Policy:
     - check_after_seconds: 600
@@ -347,7 +364,7 @@ while preserving every accepted evidence, PDF, keyboard, focus, and no-fetch pat
 
 ### Dependencies
 
-- Batch01 accepted with strict provider, repair, and confirmation evidence.
+- Batch01 accepted with compatible provider, strict runtime-validation, canonical repair-choice, and confirmation evidence.
 - Accepted Plan 12 dialog/evidence behavior remains an immutable input.
 
 ### Scope Boundary
