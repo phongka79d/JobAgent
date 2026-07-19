@@ -11,9 +11,9 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 13 Batch01 A3 PASS — commit-ready on worktree over base
-`fda68c5`; Plan 12 Batch01–Batch05 remain accepted baseline on product HEAD
-`887d4f6` / P12B4; final commits remain orchestrator-owned):**
+**Current status (Plan 13 Batch01 + Batch02 A3 PASS — commit-ready on worktree;
+Batch02 base `5e53c49`; Plan 12 Batch01–Batch05 remain accepted baseline on
+product HEAD `887d4f6` / P12B4; final commits remain orchestrator-owned):**
 Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
 boundary for reliable passive pasted-JD confirmation without changing topology,
 public endpoints, registry count, schema migrations, or evaluation behavior.
@@ -34,6 +34,17 @@ cancelled ToolResult with zero domain side effects. Architecture remains one
 Agent, one decision node, one ToolNode, seven tools, and `TOOL_LOOP_LIMIT=6`.
 Focused combined Batch01 pytest (unit provider/runtime/graph + integration
 job-tools/chat-api) exits `0` on the accepted worktree.
+
+Plan 13 **Batch02** (task **02A**) closes P13-A11Y-01: the existing outer Astryx
+`Dialog` in `ActiveCvSourceDialog` carries
+`aria-label={ACTIVE_CV_SOURCE_DIALOG_TITLE}` so Testing Library finds one
+`dialog` named exactly **Nguồn từ CV**. Evidence order/duplicates, partial
+notice, zero evidence/chunk fetch, retained PDF open (`noopener,noreferrer`),
+close/Escape, scroll containment, title focus, and citation trigger-focus
+return are preserved. No parser/history/reducer/API/package/CSS/backend change.
+Focused frontend gate (active-cv-source + assistant-response + chat-page) is
+**3 files / 60 tests** exit `0` plus `npm run typecheck` exit `0` on the
+accepted Batch02 worktree.
 
 Plan 12 Batch01 delivered the prior backend half of passive pasted-JD
 confirmation and Agent policy. Task **01A** added strict `SaveJobInput`

@@ -20,6 +20,7 @@ import {
   AssistantResponse,
   placeActiveCvCitationMarker,
 } from '../features/chat/components/AssistantResponse';
+import {ACTIVE_CV_SOURCE_DIALOG_TITLE} from '../features/chat/components/ActiveCvSourceDialog';
 import {ChatMessageRow} from '../features/chat/components/ChatMessageRow';
 import {
   activeCvEvidenceForTools,
@@ -302,16 +303,58 @@ describe('AssistantResponse Markdown semantics', () => {
       <AssistantResponse content="Direct answer." evidence={bundle} />,
     );
 
-    await user.click(screen.getByTestId('jobagent-active-cv-citation'));
+    const citation = screen.getByTestId('jobagent-active-cv-citation');
+    await user.click(citation);
+    const dialog = screen.getByRole('dialog', {
+      name: ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    });
+    expect(dialog).toHaveAttribute(
+      'aria-label',
+      ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    );
     expect(
       screen.getByTestId('jobagent-active-cv-source-dialog'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Nguồn từ CV')).toBeInTheDocument();
     expect(
       screen.getByTestId('jobagent-active-cv-partial-notice'),
     ).toBeInTheDocument();
     expect(screen.getByText('Cloud practitioner certificate.')).toBeInTheDocument();
     expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to the citation after close button and Escape', async () => {
+    const user = userEvent.setup();
+    const bundle = bundleFromPage();
+    renderWithTheme(
+      <AssistantResponse content="Direct answer." evidence={bundle} />,
+    );
+
+    const citation = screen.getByTestId('jobagent-active-cv-citation');
+    await user.click(citation);
+    let dialog = screen.getByRole('dialog', {
+      name: ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    });
+    expect(dialog).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('jobagent-active-cv-close'));
+    expect(
+      screen.queryByRole('dialog', {name: ACTIVE_CV_SOURCE_DIALOG_TITLE}),
+    ).not.toBeInTheDocument();
+    expect(citation).toHaveFocus();
+
+    await user.click(citation);
+    dialog = screen.getByRole('dialog', {
+      name: ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    });
+    // Escape is handled on the dialog; focus a descendant so the key event reaches it.
+    const title = dialog.querySelector('h2');
+    expect(title).not.toBeNull();
+    title?.focus();
+    await user.keyboard('{Escape}');
+    expect(
+      screen.queryByRole('dialog', {name: ACTIVE_CV_SOURCE_DIALOG_TITLE}),
+    ).not.toBeInTheDocument();
+    expect(citation).toHaveFocus();
   });
 });
 

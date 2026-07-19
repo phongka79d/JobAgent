@@ -18,6 +18,7 @@ import {
 import {
   ActiveCvSourceDialog,
   ACTIVE_CV_PARTIAL_NOTICE,
+  ACTIVE_CV_SOURCE_DIALOG_TITLE,
 } from '../features/chat/components/ActiveCvSourceDialog';
 import {
   projectToolResultData,
@@ -974,7 +975,21 @@ describe('ActiveCvSourceDialog exact evidence and original CV', () => {
       </Theme>,
     );
 
-    expect(screen.getByText('Nguồn từ CV')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', {
+      name: ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    });
+    expect(dialog).toHaveAttribute(
+      'aria-label',
+      ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    );
+    expect(dialog).toHaveAttribute('aria-label', 'Nguồn từ CV');
+    expect(screen.getByText(ACTIVE_CV_SOURCE_DIALOG_TITLE)).toBeInTheDocument();
+    // Title receives focus on open (DialogHeader contract).
+    expect(document.activeElement?.textContent).toContain(
+      ACTIVE_CV_SOURCE_DIALOG_TITLE,
+    );
+    // Scroll containment: body locked while modal is open.
+    expect(document.body.style.overflow).toBe('hidden');
     const pages = screen.getAllByTestId('jobagent-active-cv-evidence-page');
     expect(pages).toHaveLength(3);
     const records = screen.getAllByTestId('jobagent-active-cv-evidence-record');

@@ -376,7 +376,7 @@ while preserving every accepted evidence, PDF, keyboard, focus, and no-fetch pat
 
 ### Tasks
 
-- [ ] (02A): Name the existing active-CV source dialog without behavior drift
+- [x] (02A): Name the existing active-CV source dialog without behavior drift
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch02 - Accessible Active-CV Source Dialog` > `(02A)`

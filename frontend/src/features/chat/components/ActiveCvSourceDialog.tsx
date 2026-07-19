@@ -210,6 +210,7 @@ export function ActiveCvSourceDialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       purpose="info"
+      aria-label={ACTIVE_CV_SOURCE_DIALOG_TITLE}
       width={520}
       maxHeight="75vh"
       data-testid="jobagent-active-cv-source-dialog"
