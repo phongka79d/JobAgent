@@ -155,3 +155,76 @@ prohibition.
 approval → Save Profile → graph CV branch PASS; staged Certifications extract →
 approval PASS; request_changes preserves active PASS; backend inventory green at
 `b1d4659` plus post-fix suite re-verification; Compose health available.
+
+## Plan 13 two-CV rerun contract (`P13-CV-01`)
+
+Additive Plan 13 browser procedure only. Historical Plan 9 rows above remain
+immutable. Execution status for this contract is owned by
+[`plan13_acceptance_ledger.md`](plan13_acceptance_ledger.md) requirement
+`P13-CV-01` and its append-only attempt rows. This section does not claim PASS.
+
+### Authority and isolation
+
+- Primary: `docs/plans/Plan_13.md` > Traceability and browser evidence; Compose
+  preflight, isolation, and restoration.
+- Ledger: [`plan13_acceptance_ledger.md`](plan13_acceptance_ledger.md)
+  (`P13-CV-01`, browser evidence owner).
+- Matrix link: [`full_functional_test_matrix.md`](full_functional_test_matrix.md)
+  row `P13-CV-01`.
+- Named Compose project only: `jobagent-plan13-smoke` on fixed loopback ports.
+  Preflight the normal `infrastructure` project; stop only its three containers
+  when fully running and healthy; never run normal-project `down` or delete
+  normal volumes. Tear down only the named smoke project with volumes.
+- Candidate identity for the attempt: base HEAD plus SHA-256 content-manifest
+  fingerprint of product/test/dependency/config paths (deleted paths =
+  `DELETED`); acceptance-only edits do not redefine the product candidate.
+- Synthetic inputs only. Never record raw PDF bytes, full chunk bodies, prompts,
+  provider transcripts, credentials, or secrets.
+
+### Synthetic CV fixtures
+
+| Role | Fixture | Active-evidence identity after A reactivation |
+|---|---|---|
+| CV A | `backend/tests/fixtures/cv/digital_cv_01.pdf` | Most recent role/company: `Senior Software Engineer at Northwind Labs` |
+| CV B | `backend/tests/fixtures/cv/digital_cv_02.pdf` | Must not answer as active after A reactivation (`Data Engineer at Fabrikam Analytics`) |
+
+### Exact lifecycle sequence
+
+Execute through the in-app browser at desktop width on the named smoke stack:
+
+1. Upload and approve synthetic CV A (`digital_cv_01.pdf`) until A is the sole
+   active CV/profile.
+2. Upload and approve synthetic CV B (`digital_cv_02.pdf`); B becomes active and
+   A becomes archived.
+3. Reprocess archived A (Make active / re-extract path) and approve A active
+   again so A is the sole active CV and B is archived.
+4. Prove active evidence and graph branch use A:
+   - Ask: `What is the most recent role and company in my CV?`
+   - Evidence-backed answer must be `Senior Software Engineer at Northwind Labs`
+     from A, not B’s `Data Engineer at Fabrikam Analytics`.
+   - Click **Nguồn**; one `dialog` named **Nguồn từ CV** shows the exact returned
+     record; **Mở CV gốc** works without an evidence/chunk network fetch; close
+     and Escape each return focus to the trigger.
+   - Active graph projection/owned CV branch must reference A.
+5. Delete archived B through the browser confirmation dialog.
+6. Verify B’s row, retained file (when previously available), owned graph branch,
+   and owned run/checkpoint data are gone, while active A and shared Jobs/Skills
+   remain.
+
+### Evidence recording rules
+
+- Record only browser-owned durable state, SQLite Job/evaluation deltas, Neo4j
+  Job/active-CV deltas, network order, console, run/execution identity, and
+  sanitized backend logs in the ledger attempt row for `P13-CV-01`.
+- Do not claim automated fake-spy or provider counters from this browser flow.
+- Preserve every failed attempt as append-only `FAIL`/`BLOCKED`; never overwrite
+  first-failure evidence or rewrite historical Plan 9 rows.
+
+### Plan 13 two-CV evidence (execution)
+
+| Requirement | Evidence | Status | Date (UTC) |
+|---|---|---|---|
+| `P13-CV-01` two-CV lifecycle contract documented and linked | This section; ledger `P13-CV-01`; matrix `P13-CV-01` | NOT RUN | — |
+| A approve → B approve (A archived) → A reprocess/activate → B delete | Browser attempt evidence to be appended in ledger | NOT RUN | — |
+| Active-A answer + **Nguồn từ CV** dialog + no evidence fetch | Browser attempt evidence to be appended in ledger | NOT RUN | — |
+| Shared Job/Skill preservation after archived-B cleanup | Browser attempt evidence to be appended in ledger | NOT RUN | — |

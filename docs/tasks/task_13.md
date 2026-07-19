@@ -515,7 +515,7 @@ browser rerun contract before final release execution.
 
 ### Tasks
 
-- [ ] (04A): Establish complete P12/P13 matrix, ledger, and two-CV rerun authority
+- [x] (04A): Establish complete P12/P13 matrix, ledger, and two-CV rerun authority
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch04 - Plan 13 Traceability and Append-Only Evidence Contract` > `(04A)`

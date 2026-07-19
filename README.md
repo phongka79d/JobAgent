@@ -11,10 +11,10 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 13 Batch01 + Batch02 + Batch03 A3 PASS — commit-ready on
-worktree; Batch03 base `1d1bf17`; Plan 12 Batch01–Batch05 remain accepted
-baseline on product HEAD `887d4f6` / P12B4; final commits remain
-orchestrator-owned):**
+**Current status (Plan 13 Batch01 + Batch02 + Batch03 + Batch04 A3 PASS —
+commit-ready on worktree; Batch04 base `175c404`; Plan 12 Batch01–Batch05
+remain accepted baseline on product HEAD `887d4f6` / P12B4; final commits
+remain orchestrator-owned):**
 Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
 boundary for reliable passive pasted-JD confirmation without changing topology,
 public endpoints, registry count, schema migrations, or evaluation behavior.
@@ -61,6 +61,22 @@ manifest `f02131fe5ded28d31dead3ec9332c937fbd4daeebdf1f8ea93c6eccd22bab9b7`,
 path list only the new test file. Focused pytest trio (phase0 + embedding +
 pdf) exits `0`; project-interpreter `verify_pdf_extraction.py` and
 `diagnose_shopaikey.py` both end PASS with sanitized output.
+
+Plan 13 **Batch04** (task **04A**, docs-config) establishes P13-EVID-01 /
+P13-CV-01 procedure ownership: new
+`docs/acceptance/plan13_acceptance_ledger.md` with all 21 exact P12/P13
+requirement rows seeded `NOT RUN`, immutable `BASE-PJD-01..03` baseline
+failures, empty append-only execution-attempt table, separate five-column
+non-blocking warnings, and candidate identity as base HEAD plus SHA-256
+product/test/dependency/config content-manifest (no self-referential same-
+commit SHA). Additive Plan 12/13 rows in
+`docs/acceptance/full_functional_test_matrix.md` carry method, expected
+behavior, and ledger links only (no execution status). Additive Plan 13
+two-CV rerun contract in `docs/acceptance/cv_manager_checklist.md` documents
+synthetic A/B lifecycle, active-A **Nguồn từ CV** proof, archived-B cleanup,
+and shared Job/Skill preservation on named project `jobagent-plan13-smoke`.
+No product/test/config execution in this batch; Batch05 freezes a candidate
+and records append-only release evidence.
 
 Plan 12 Batch01 delivered the prior backend half of passive pasted-JD
 confirmation and Agent policy. Task **01A** added strict `SaveJobInput`
@@ -883,6 +899,27 @@ Set-Location ..
 
 Expected: exit `0` with exact failure-code/capability/FAIL-marker and redaction
 assertions plus PDF 3/5 and image-only rejected aggregates.
+
+### Plan 13 acceptance ledger and traceability (Batch04)
+
+Scaffold only (no release execution). Authority paths:
+
+- `docs/acceptance/plan13_acceptance_ledger.md` — dated requirement status,
+  immutable baseline failures, append-only attempts, non-blocking warnings
+- `docs/acceptance/full_functional_test_matrix.md` — Plan 12/13 method/
+  expectation supplement (status owned by the ledger)
+- `docs/acceptance/cv_manager_checklist.md` — Plan 13 two-CV browser procedure
+  for `P13-CV-01`
+
+From the repository root, confirm IDs and vocabulary:
+
+```powershell
+rg -n "P12-|P13-|current_message|job_save_confirmation|Nguồn|BASE-PJD-01|BASE-PJD-02|BASE-PJD-03" docs/acceptance/full_functional_test_matrix.md docs/acceptance/plan13_acceptance_ledger.md docs/acceptance/cv_manager_checklist.md
+```
+
+Expected: every exact P12/P13 requirement ID, ledger link, vocabulary term, and
+immutable baseline label is present; requirement rows remain `NOT RUN` until
+Batch05 records fresh candidate evidence.
 
 ### ShopAIKey provider diagnostic
 
