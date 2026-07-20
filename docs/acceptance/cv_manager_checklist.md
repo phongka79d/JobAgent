@@ -224,7 +224,20 @@ Execute through the in-app browser at desktop width on the named smoke stack:
 
 | Requirement | Evidence | Status | Date (UTC) |
 |---|---|---|---|
-| `P13-CV-01` two-CV lifecycle contract documented and linked | This section; ledger `P13-CV-01`; matrix `P13-CV-01` | NOT RUN | — |
-| A approve → B approve (A archived) → A reprocess/activate → B delete | Browser attempt evidence to be appended in ledger | NOT RUN | — |
-| Active-A answer + **Nguồn từ CV** dialog + no evidence fetch | Browser attempt evidence to be appended in ledger | NOT RUN | — |
-| Shared Job/Skill preservation after archived-B cleanup | Browser attempt evidence to be appended in ledger | NOT RUN | — |
+| `P13-CV-01` two-CV lifecycle contract documented and linked | This section; ledger `P13-CV-01`; matrix `P13-CV-01` | PASS (contract only) | 2026-07-19 |
+| A approve → B approve (A archived) → A reprocess/activate → B delete | Ledger attempt `P13-CV-01-B1`: browser control unavailable; smoke not started; no synthetic lifecycle observed | BLOCKED | 2026-07-19 |
+| Active-A answer + **Nguồn từ CV** dialog + no evidence fetch | Ledger attempt `P13-CV-01-B1` / `P13-A11Y-01-B1`: no browser observation | BLOCKED | 2026-07-19 |
+| Shared Job/Skill preservation after archived-B cleanup | Ledger attempt `P13-CV-01-B1`: no browser cleanup proof | BLOCKED | 2026-07-19 |
+
+### 05B browser rerun (append-only)
+
+The historical `B1` blocked observations remain immutable. The 2026-07-20
+rerun used the rebuilt local `infrastructure` Compose project and preserved all
+three existing application/Neo4j volumes.
+
+| Requirement | Evidence | Status | Date (UTC) |
+|---|---|---|---|
+| A approve → B approve (A archived) → A reprocess/activate → B delete | Browser runs `81a16774…`, `4e922bee…`, `e4db9189…`; staged B had no reprocess action; A became active after Make active + Save Profile; B was deleted through the named confirmation dialog. | PASS | 2026-07-20 |
+| Active-A answer + **Nguồn từ CV** dialog + no evidence fetch | Run `65af027c…`: one successful `read_active_cv`; answer **Senior Software Engineer at Northwind Labs**; dialog role/name exact; retained PDF HTTP 200; no evidence/chunk fetch; Close/Escape restored citation focus. | PASS | 2026-07-20 |
+| Shared Job/Skill preservation after archived-B cleanup | B row and retained file are gone (file HTTP 404); A remains active; graph still contains A and shared synthetic Job/Skill nodes; B-owned chunks/documents/drafts/tool/checkpoint rows are zero. | PASS | 2026-07-20 |
+| Rebuilt Compose stack remains usable | `up --build -d --wait --wait-timeout 180` exit 0; backend/frontend/neo4j healthy; API health overall, SQLite, filesystem, Neo4j all `available`; frontend HTTP 200; volumes `infrastructure_app_data`, `infrastructure_neo4j_data`, `infrastructure_neo4j_logs` preserved; post-rebuild browser reload shows active A, no B, and Re-extract only for selected A. | PASS | 2026-07-20 |

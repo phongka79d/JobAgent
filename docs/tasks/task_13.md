@@ -596,7 +596,7 @@ cleanup/restoration and append-only release evidence.
 
 ### Tasks
 
-- [ ] (05A): Freeze the candidate and record fresh automated, static, and structure evidence
+- [x] (05A): Freeze the candidate and record fresh automated, static, and structure evidence
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_13.md` > `## Mandatory Batch05 - Frozen-Candidate Release Revalidation` > `(05A)`
