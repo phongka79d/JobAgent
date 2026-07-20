@@ -49,6 +49,7 @@ from app.schemas.jobs import SAVE_JOB_SOURCE_CURRENT_MESSAGE, SaveJobInput
 from app.services.job_save_confirmation import (
     CANCEL_SUMMARY,
     message_has_clear_opt_out,
+    message_is_large_text,
     message_is_obvious_jd,
     message_is_sole_http_url,
 )
@@ -109,6 +110,14 @@ _PASSIVE_JD_REPAIR_INSTRUCTION: str = (
     "Call exactly one valid save_job with source='current_message' (optional "
     "bounded preview only). Do not call any other tool. Do not answer with "
     "plain text. Do not claim the JD was saved until a ToolResult exists."
+)
+
+_PASSIVE_JD_RECONSIDER_INSTRUCTION: str = (
+    "Required reconsideration: based on the user's semantic intent, either "
+    "answer normally in plain text, or call exactly one valid save_job with "
+    "source='current_message' (optional bounded preview only) to open save "
+    "confirmation. Do not call any other tool. Do not claim the JD was saved "
+    "until a ToolResult exists."
 )
 
 # Graph node names — exactly one decision node and one ToolNode.
@@ -675,6 +684,24 @@ def _is_sole_save_job_call(message: AIMessage | None) -> bool:
     return _tool_call_name(calls[0]) == SAVE_JOB_NAME
 
 
+def _response_includes_save_job(message: AIMessage | None) -> bool:
+    if message is None:
+        return False
+    return any(
+        _tool_call_name(call) == SAVE_JOB_NAME
+        for call in (message.tool_calls or [])
+    )
+
+
+def _canonical_current_message_save_job() -> AIMessage:
+    """One source-only save_job for passive positive intent (no raw provider args)."""
+    return _canonical_tool_call(
+        SAVE_JOB_NAME,
+        {"source": SAVE_JOB_SOURCE_CURRENT_MESSAGE},
+        "canonical-save-current-message",
+    )
+
+
 def _is_sole_current_message_save_job_call(message: AIMessage | None) -> bool:
     """True for exactly one valid source-only current-message save_job call."""
     if not _is_sole_save_job_call(message):
@@ -1049,17 +1076,48 @@ def build_agent_graph(
                         AIMessage(content=NAMED_SAVE_JOB_NO_ACTION_TEXT)
                     ]
                 }
-        # Passive obvious-JD: only after opt-out and positive exact-name lose;
-        # sole URL is excluded; one repair after any invalid first decision.
-        # Runtime validation remains the dispatch gate; never synthesize/strip.
+        # Passive turns (after opt-out / sole URL / legacy direct precedence):
+        # sole save_job → always canonicalize source-only; large no-tool → one
+        # normal-model reconsideration; multi-tool save_job → at most one repair.
         elif (
             save_job_available
             and not clear_opt_out
             and not save_job_already
             and not message_is_sole_http_url(user_text)
-            and message_is_obvious_jd(user_text)
         ):
-            if not _is_sole_current_message_save_job_call(response):
+            if _is_sole_current_message_save_job_call(response):
+                # Already valid source-only (optional preview): keep identity.
+                pass
+            elif _is_sole_save_job_call(response):
+                # Positive passive save intent; discard mixed/blank provider args.
+                # New canonical id is intentional: mixed provider ids are not
+                # durable replay identities until a valid call is established.
+                response = _canonical_current_message_save_job()
+            elif not _has_tool_calls(response) and message_is_large_text(
+                user_text
+            ):
+                reconsider_messages = list(prompt_messages) + [
+                    SystemMessage(content=_PASSIVE_JD_RECONSIDER_INSTRUCTION)
+                ]
+                response = _normalize_ai_response(
+                    chat.invoke(reconsider_messages)
+                )
+                if _is_sole_current_message_save_job_call(response):
+                    pass
+                elif _is_sole_save_job_call(response):
+                    response = _canonical_current_message_save_job()
+                elif _has_tool_calls(response):
+                    _log_passive_call_rejection(
+                        "invalid_repair_call", response
+                    )
+                    return {
+                        MESSAGES_KEY: [
+                            AIMessage(content=PASSIVE_JD_NO_CONFIRMATION_TEXT)
+                        ]
+                    }
+                # else: ordinary plain-text reconsideration is the final answer
+            elif _response_includes_save_job(response):
+                # Multi-tool or non-sole save_job: at most one semantic repair.
                 _log_passive_call_rejection("invalid_first_call", response)
                 repair_messages = list(prompt_messages) + [
                     SystemMessage(content=_PASSIVE_JD_REPAIR_INSTRUCTION)
@@ -1072,8 +1130,14 @@ def build_agent_graph(
                 response = _normalize_ai_response(
                     repair_runnable.invoke(repair_messages)
                 )
-                if not _is_sole_current_message_save_job_call(response):
-                    _log_passive_call_rejection("invalid_repair_call", response)
+                if _is_sole_current_message_save_job_call(response):
+                    pass
+                elif _is_sole_save_job_call(response):
+                    response = _canonical_current_message_save_job()
+                else:
+                    _log_passive_call_rejection(
+                        "invalid_repair_call", response
+                    )
                     return {
                         MESSAGES_KEY: [
                             AIMessage(content=PASSIVE_JD_NO_CONFIRMATION_TEXT)

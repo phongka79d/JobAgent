@@ -354,6 +354,55 @@ def test_prompt_passive_jd_current_message_opt_outs_and_no_auto_eval() -> None:
     assert "current_message" not in no_save
 
 
+def test_prompt_intent_matrix_pure_paste_nl_save_analysis_and_opt_out() -> None:
+    """Plan 14 (01A): semantic save-versus-analysis without phrase/layout gates."""
+    prompt = build_system_prompt(["save_job", "match_jobs"])
+    lower = prompt.lower()
+
+    # Pure paste and natural-language save → passive current_message confirmation.
+    assert "pure pasted" in lower or "pure paste" in lower
+    assert "natural-language" in lower or "natural language" in lower
+    assert "source='current_message'" in prompt or 'source="current_message"' in prompt
+    assert "semantic" in lower
+    # No exact-phrase / newline / line-count gate for semantic JD/save decisions.
+    assert "exact command phrase" in lower or "exact" in lower
+    assert "newline layout" in lower or "line count" in lower
+    assert "do not require" in lower or "not require" in lower
+
+    # Analysis-only: no save_job / no confirmation.
+    assert "analyse" in lower or "analyze" in lower
+    assert "summarise" in lower or "summarize" in lower
+    assert "compare" in lower
+    assert "without asking to save" in lower or "without" in lower and "save" in lower
+    # Analysis-only must not call save_job (wording present near analysis policy).
+    assert "do not call save_job" in lower
+
+    # Analyse-and-save: answer plus confirmation-gated save.
+    assert "analyse-and-save" in lower or "analyze-and-save" in lower
+    assert "confirmation-gated" in lower or "confirmation gated" in lower
+
+    # Clear opt-out guidance retained.
+    assert "không lưu" in lower
+    assert "do not save" in lower
+    assert "suppresses" in lower or "do not call save_job" in lower
+
+    # Direct URL/path and no auto-eval retained.
+    assert "sole public" in lower
+    assert "direct" in lower and ("url" in lower or "text" in lower)
+    assert "do not call match_jobs" in lower
+    assert "evaluation" in lower
+
+    # ToolResult-only success claims retained (truthfulness section).
+    assert "toolresult" in lower
+    assert "before a toolresult exists" in lower
+
+    # Still gated on save_job registration.
+    no_save = build_system_prompt(["match_jobs"])
+    assert "pure pasted" not in no_save.lower()
+    assert "analyse-and-save" not in no_save.lower()
+    assert "current_message" not in no_save
+
+
 def test_prompt_profile_and_failure_rules_remain_with_plan12_policy() -> None:
     """Plan 12 additions must not drop profile or false-success rules."""
     prompt = build_system_prompt(

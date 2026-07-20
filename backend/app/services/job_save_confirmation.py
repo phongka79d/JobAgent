@@ -122,6 +122,15 @@ def _distinct_marker_count(text: str) -> int:
     return sum(1 for marker in _JD_MARKERS if marker.casefold() in folded)
 
 
+def message_is_large_text(text: str) -> bool:
+    """True when *text* meets the coarse large-message reconsideration gate.
+
+    Counts non-whitespace characters only. Not a JD classifier: does not use
+    line count, exact phrases, or marker diversity as a semantic decision.
+    """
+    return _non_whitespace_char_count(text) >= OBVIOUS_JD_MIN_NON_WS_CHARS
+
+
 def message_is_obvious_jd(text: str) -> bool:
     """True when *text* meets the fixed obvious structured-JD thresholds.
 
@@ -132,7 +141,7 @@ def message_is_obvious_jd(text: str) -> bool:
     with a typed composer intent in a future approved increment instead of
     expanding the marker keyword list.
     """
-    if _non_whitespace_char_count(text) < OBVIOUS_JD_MIN_NON_WS_CHARS:
+    if not message_is_large_text(text):
         return False
     if _non_empty_line_count(text) < OBVIOUS_JD_MIN_NON_EMPTY_LINES:
         return False
@@ -262,6 +271,7 @@ __all__ = [
     "build_cancellation_tool_result",
     "build_job_save_confirmation_projection",
     "message_has_clear_opt_out",
+    "message_is_large_text",
     "message_is_obvious_jd",
     "message_is_sole_http_url",
     "normalize_for_match",

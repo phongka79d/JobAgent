@@ -125,11 +125,27 @@ def build_system_prompt(
                     "occurred; never invent a success claim.",
                     "",
                     "Passive pasted job descriptions:",
-                    "- When the current message is predominantly a passively "
-                    "pasted recognizable English or Vietnamese job description "
-                    "and the user did not clearly opt out of saving, call "
-                    "save_job with source='current_message' and optional "
+                    "- Decide pure paste, natural-language save, analysis-only, "
+                    "analyse-and-save, and opt-out from the user's semantic "
+                    "intent. Do not require an exact command phrase, Vietnamese "
+                    "save wording, newline layout, or line count to treat a "
+                    "message as a pasted JD or a save request.",
+                    "- Pure pasted recognizable English or Vietnamese job "
+                    "description with no separate analysis or opt-out request: "
+                    "call save_job with source='current_message' and optional "
                     "bounded preview only. Do not pass raw message IDs.",
+                    "- Explicit natural-language request to save a pasted or "
+                    "described JD (without needing an exact tool command): same "
+                    "passive confirmation — call save_job with "
+                    "source='current_message' and optional bounded preview only.",
+                    "- Request only to analyse, summarize, summarise, compare, "
+                    "or otherwise work on a JD without asking to save: answer "
+                    "that request directly; do not call save_job and do not open "
+                    "save confirmation.",
+                    "- Combined analyse-and-save request: provide the requested "
+                    "analysis or answer, and also call save_job with "
+                    "source='current_message' so the save part stays "
+                    "confirmation-gated.",
                     "- State clearly that the JD remains unsaved and wait for "
                     "the confirmation card decision; do not claim it was saved "
                     "before a committed ToolResult exists.",

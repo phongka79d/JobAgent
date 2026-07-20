@@ -11,10 +11,27 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 13 Batch01 + Batch02 + Batch03 + Batch04 A3 PASS —
-commit-ready on worktree; Batch04 base `175c404`; Plan 12 Batch01–Batch05
-remain accepted baseline on product HEAD `887d4f6` / P12B4; final commits
-remain orchestrator-owned):**
+**Current status (Plan 14 Batch01 A3 PASS — commit-ready on worktree; base
+`91f0a43`; Plan 13 Batch01–Batch04 remain accepted prior baseline on product
+worktree / Batch04 base `175c404`; Plan 12 Batch01–Batch05 remain accepted
+baseline on product HEAD `887d4f6` / P12B4; final commits remain
+orchestrator-owned):**
+Plan 14 **Batch01** (tasks **01A**/**01B**) makes passive JD confirmation depend
+on LLM semantic intent rather than exact phrases, newline layout, or five-line
+formatting for one-line pastes. **01A** strengthens the existing Agent prompt so
+pure paste, natural-language save, analysis-only, analyse-and-save, and clear
+opt-out are distinguished without a classifier or keyword-list owner.
+**01B** owns decision-node post-model dispatch: sole `save_job` becomes one
+canonical `source='current_message'` call (mixed/blank provider args discarded);
+large no-tool messages get at most one 300 non-whitespace reconsideration; multi-
+tool/invalid outcomes refuse with fixed no-confirmation text and zero ToolNode
+work; opt-out, sole URL, and legacy direct paths stay truthful; zero pre-
+confirmation domain side effects. Architecture remains one Agent, one decision
+node, one ToolNode, seven tools, and `TOOL_LOOP_LIMIT=6`. Focused combined
+Batch01 pytest (graph / confirmation / shopaikey / chat-api / job-tools) exits
+`0` with **163** passed on the accepted worktree. Batch02 full gates, Docker,
+and browser smoke remain next.
+
 Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
 boundary for reliable passive pasted-JD confirmation without changing topology,
 public endpoints, registry count, schema migrations, or evaluation behavior.

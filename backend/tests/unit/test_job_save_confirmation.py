@@ -375,9 +375,27 @@ def test_sole_http_url_boundaries() -> None:
     assert conf.message_is_sole_http_url("not a url") is False
 
 
+def test_message_is_large_text_is_non_ws_gate_only() -> None:
+    """Coarse reconsideration gate: non-whitespace count, not lines/markers."""
+    short = "x" * (conf.OBVIOUS_JD_MIN_NON_WS_CHARS - 1)
+    assert conf.message_is_large_text(short) is False
+    exact = "x" * conf.OBVIOUS_JD_MIN_NON_WS_CHARS
+    assert conf.message_is_large_text(exact) is True
+    # Whitespace-only padding does not count toward the gate.
+    padded = exact[:10] + (" " * 50) + exact[10:]
+    assert conf.message_is_large_text(padded) is True
+    # One-line large text is large even without JD structure.
+    one_line = "word " * 80
+    one_line = " ".join(one_line.split())
+    assert "\n" not in one_line
+    assert conf.message_is_large_text(one_line) is True
+    assert conf.message_is_obvious_jd(one_line) is False
+
+
 def test_obvious_jd_meets_thresholds() -> None:
     body = _obvious_jd_body()
     assert conf.message_is_obvious_jd(body) is True
+    assert conf.message_is_large_text(body) is True
 
 
 def test_obvious_jd_rejects_short_char_boundary() -> None:

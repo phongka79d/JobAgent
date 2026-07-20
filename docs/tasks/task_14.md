@@ -172,7 +172,7 @@ analysis-only, opt-out, sole-URL, and legacy direct paths remain truthful.
 
 ### Tasks
 
-- [ ] (01A): Strengthen Agent prompt semantic save-versus-analysis policy
+- [x] (01A): Strengthen Agent prompt semantic save-versus-analysis policy
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_14.md` > `## Mandatory Batch01 - Intent-Aware Prompt and Passive Graph Dispatch` > `(01A)`
@@ -219,7 +219,7 @@ analysis-only, opt-out, sole-URL, and legacy direct paths remain truthful.
   - Blocked Condition: Missing accepted Plan 13 prompt/owner refs is `BLOCKED_MISSING_REF`; design/plan conflict on intent matrix is `BLOCKED_SOURCE_CONFLICT`; root fix requiring graph/tool/schema/frontend edits is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/agent/prompt.py`, `backend/tests/unit/test_shopaikey_chat.py`
 
-- [ ] (01B): Canonicalize passive save_job intent and add bounded large-message reconsideration
+- [x] (01B): Canonicalize passive save_job intent and add bounded large-message reconsideration
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_14.md` > `## Mandatory Batch01 - Intent-Aware Prompt and Passive Graph Dispatch` > `(01B)`

@@ -12,6 +12,7 @@ from app.agent.graph import (
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
     MESSAGES_KEY,
     NAMED_SAVE_JOB_NO_ACTION_TEXT,
+    PASSIVE_JD_NO_CONFIRMATION_TEXT,
     PASSIVE_JD_REPAIR_TOOL_CHOICE,
     TOOLS_NODE_NAME,
     AgentGraphBundle,
@@ -1118,18 +1119,23 @@ def test_sole_url_dispatches_direct_save_and_ambiguous_prose_stays_normal() -> N
     assert url_calls[0]["args"] == {"url": sole_url}
     assert url_out[MESSAGES_KEY][-1].content == "I can open that link."
 
-    # Long ambiguous prose without distinct JD markers is not forced.
+    # Long ambiguous prose: one large-message reconsideration, still no force-save.
     ambiguous = ("This is a long story about my career journey. " * 20).strip()
-    assert conf._non_whitespace_char_count(ambiguous) >= 300  # noqa: SLF001
+    assert conf.message_is_large_text(ambiguous)
     assert not conf.message_is_obvious_jd(ambiguous)
-    amb_model = FakeChatModel(responses=[_ai_text("Thanks for sharing.")])
+    amb_model = FakeChatModel(
+        responses=[
+            _ai_text("Thanks for sharing."),
+            _ai_text("Still just a story; no job save."),
+        ]
+    )
     amb_bundle = _bundle(amb_model, [save_job_current_message_tool])
     amb_out = amb_bundle.compiled.invoke(
         initial_graph_state(run_id=RUN_ID, user_text=ambiguous)
     )
-    assert amb_model.invoke_count == 1
+    assert amb_model.invoke_count == 2  # first + one reconsideration
     assert amb_out["tool_iteration_count"] == 0
-    assert amb_out[MESSAGES_KEY][-1].content == "Thanks for sharing."
+    assert amb_out[MESSAGES_KEY][-1].content == "Still just a story; no job save."
 
 
 def test_passive_canonical_tool_success_projects_without_provider() -> None:
@@ -1606,3 +1612,312 @@ def test_near_miss_explicit_text_remains_model_driven() -> None:
     assert model.invoke_count == 2
     assert out["tool_iteration_count"] == 0
     assert out[MESSAGES_KEY][-1].content == NAMED_SAVE_JOB_NO_ACTION_TEXT
+
+
+# ---------------------------------------------------------------------------
+# Plan 14 (01B): one-line intent, canonical sole save_job, reconsideration
+# ---------------------------------------------------------------------------
+
+
+def _one_line_vietnamese_jd() -> str:
+    """300+ non-ws single-line Vietnamese-style JD (fails five-line heuristic)."""
+    body = (
+        "Mô tả công việc: Kỹ sư phần mềm Backend tại MISA. "
+        "Trách nhiệm: phát triển API, tối ưu hiệu năng, làm việc với PostgreSQL. "
+        "Yêu cầu: Python, FastAPI, Docker, kinh nghiệm 2 năm. "
+        "Quyền lợi: lương thưởng, bảo hiểm, remote hybrid. "
+        "Kỹ năng: thiết kế hệ thống, code review, CI/CD. "
+    )
+    while conf._non_whitespace_char_count(body) < conf.OBVIOUS_JD_MIN_NON_WS_CHARS:  # noqa: SLF001
+        body += "Chi tiết thêm về dự án nội bộ và quy trình agile. "
+    body = " ".join(body.split())
+    assert "\n" not in body
+    assert conf._non_whitespace_char_count(body) >= conf.OBVIOUS_JD_MIN_NON_WS_CHARS  # noqa: SLF001
+    assert conf._non_empty_line_count(body) == 1  # noqa: SLF001
+    assert not conf.message_is_obvious_jd(body)
+    assert not conf.message_has_clear_opt_out(body)
+    assert not conf.message_is_sole_http_url(body)
+    assert conf.message_is_large_text(body)
+    return body
+
+
+def _tool_calls_from_state(out: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+
+
+def test_one_line_intent_mixed_source_canonicalizes_to_current_message() -> None:
+    """300+ one-line mixed text/source sole save_job → canonical current_message."""
+    jd = _one_line_vietnamese_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {
+                    "text": jd,
+                    "source": "current_message",
+                    "url": "",
+                },
+                call_id="mixed-one-line",
+            ),
+            _ai_text("provider narration must not leak"),
+        ]
+    )
+    bundle = _bundle(model, [save_job_current_message_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+
+    assert out["error"] is None
+    assert out["tool_iteration_count"] == 1
+    calls = _tool_calls_from_state(out)
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["name"] == SAVE_JOB_NAME
+    assert call["args"] == {"source": "current_message"}
+    assert str(call["id"]).startswith("canonical-save-current-message-")
+    assert call["id"] != "mixed-one-line"
+    assert "text" not in call["args"]
+    assert "url" not in call["args"]
+    tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    assert getattr(tool_msgs[0], "name", None) == SAVE_JOB_NAME
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "provider narration" not in str(out[MESSAGES_KEY][-1].content).lower()
+
+
+def test_one_line_intent_pure_paste_and_nl_save_reach_confirmation() -> None:
+    """Pure paste and natural-language save intents reach confirmation."""
+    jd = _one_line_vietnamese_jd()
+    pure_model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="pure-paste",
+            ),
+        ]
+    )
+    pure_out = _bundle(pure_model, [save_job_current_message_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    pure_calls = _tool_calls_from_state(pure_out)
+    assert len(pure_calls) == 1
+    # Already-valid source-only keeps provider call identity (replay).
+    assert pure_calls[0]["args"] == {"source": "current_message"}
+    assert pure_calls[0]["id"] == "pure-paste"
+    assert pure_out["tool_iteration_count"] == 1
+
+    nl_text = f"Please save this job description for me. {jd}"
+    assert conf.message_is_large_text(nl_text)
+    nl_model = FakeChatModel(
+        responses=[
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"text": jd[:80], "source": "current_message"},
+                call_id="nl-mixed",
+            ),
+        ]
+    )
+    nl_out = _bundle(nl_model, [save_job_current_message_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=nl_text)
+    )
+    nl_calls = _tool_calls_from_state(nl_out)
+    assert len(nl_calls) == 1
+    assert nl_calls[0]["args"] == {"source": "current_message"}
+    assert str(nl_calls[0]["id"]).startswith("canonical-save-current-message-")
+    assert nl_out["tool_iteration_count"] == 1
+
+
+def test_one_line_intent_analysis_and_opt_out_no_confirmation() -> None:
+    """Analysis-only and clear opt-out produce no confirmation and no tools."""
+    jd = _one_line_vietnamese_jd()
+    analysis = f"Please summarise and analyse this posting without saving: {jd}"
+    analysis_model = FakeChatModel(
+        responses=[
+            _ai_text("Here is a short analysis of the role."),
+            _ai_text("Still analysing only; no save."),
+        ]
+    )
+    analysis_out = _bundle(
+        analysis_model, [save_job_current_message_tool]
+    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=analysis))
+    assert analysis_out["tool_iteration_count"] == 0
+    assert analysis_model.invoke_count == 2  # first + one reconsideration
+    assert not any(
+        isinstance(m, ToolMessage) for m in analysis_out[MESSAGES_KEY]
+    )
+    assert "Still analysing only" in str(analysis_out[MESSAGES_KEY][-1].content)
+
+    opt = f"{jd} do not save"
+    assert conf.message_has_clear_opt_out(opt)
+    opt_model = FakeChatModel(
+        responses=[
+            _ai_text("Understood; I will not save this."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="opt-should-not",
+            ),
+        ]
+    )
+    opt_out = _bundle(opt_model, [save_job_current_message_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=opt)
+    )
+    assert opt_out["tool_iteration_count"] == 0
+    assert opt_model.invoke_count == 1  # no reconsideration on opt-out
+    assert not any(isinstance(m, ToolMessage) for m in opt_out[MESSAGES_KEY])
+
+
+def test_one_line_intent_no_tool_reconsideration_source_only() -> None:
+    """No-tool large message gets one reconsideration; source-only confirms."""
+    jd = _one_line_vietnamese_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_text("I see a long message."),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"text": "should-be-discarded", "source": "current_message"},
+                call_id="reconsider-mixed",
+            ),
+        ]
+    )
+    out = _bundle(model, [save_job_current_message_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    assert model.invoke_count == 2
+    assert out["tool_iteration_count"] == 1
+    calls = _tool_calls_from_state(out)
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"source": "current_message"}
+    assert str(calls[0]["id"]).startswith("canonical-save-current-message-")
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+
+
+def test_one_line_intent_reconsideration_invalid_tools_refused() -> None:
+    """Invalid reconsideration tool response → fixed no-confirmation, zero tools."""
+    jd = _one_line_vietnamese_jd()
+    model = FakeChatModel(
+        responses=[
+            _ai_text("Thinking..."),
+            _ai_tool_call(
+                "echo_tool",
+                {"text": "nope"},
+                call_id="bad-reconsider",
+            ),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"source": "current_message"},
+                call_id="too-late",
+            ),
+        ]
+    )
+    out = _bundle(
+        model, [save_job_current_message_tool, echo_tool]
+    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
+    assert model.invoke_count == 2  # first + one reconsideration only
+    assert out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+
+
+def test_one_line_intent_multi_tool_save_repair_then_refuse() -> None:
+    """Multi-tool including save_job: one repair; still invalid → no ToolNode."""
+    jd = _one_line_vietnamese_jd()
+    model = FakeChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": SAVE_JOB_NAME,
+                        "args": {"text": jd, "source": "current_message"},
+                        "id": "multi-a",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "echo_tool",
+                        "args": {"text": "x"},
+                        "id": "multi-b",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            _ai_tool_call(
+                SAVE_JOB_NAME,
+                {"text": jd, "url": "https://example.com"},
+                call_id="repair-still-mixed",
+            ),
+        ]
+    )
+    # Repair path uses forced tool_choice binding when available; FakeChatModel
+    # shares the same scripted queue sequence for normal and repair binds.
+    out = _bundle(
+        model, [save_job_current_message_tool, echo_tool]
+    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
+    # First multi-tool + one repair. Repair sole save_job is canonicalized.
+    assert model.invoke_count == 2
+    calls = _tool_calls_from_state(out)
+    # Sole mixed repair becomes canonical source-only (positive intent).
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"source": "current_message"}
+    assert out["tool_iteration_count"] == 1
+
+    refuse_model = FakeChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": SAVE_JOB_NAME,
+                        "args": {"source": "current_message"},
+                        "id": "m1",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "echo_tool",
+                        "args": {"text": "x"},
+                        "id": "m2",
+                        "type": "tool_call",
+                    },
+                ],
+            ),
+            _ai_tool_call("echo_tool", {"text": "still-wrong"}, call_id="r2"),
+        ]
+    )
+    refuse_out = _bundle(
+        refuse_model, [save_job_current_message_tool, echo_tool]
+    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
+    assert refuse_model.invoke_count == 2
+    assert refuse_out["tool_iteration_count"] == 0
+    assert not any(
+        isinstance(m, ToolMessage) for m in refuse_out[MESSAGES_KEY]
+    )
+    assert refuse_out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+
+
+def test_one_line_intent_skips_reconsideration_for_url_and_legacy() -> None:
+    """Sole URL and legacy exact command keep direct paths (no large-text recon)."""
+    sole_url = "https://example.com/jobs/plan14-one-line"
+    url_model = FakeChatModel(responses=[_ai_text("url narration")])
+    url_out = _bundle(url_model, [save_job_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=sole_url)
+    )
+    url_calls = _tool_calls_from_state(url_out)
+    assert len(url_calls) == 1
+    assert url_calls[0]["args"] == {"url": sole_url}
+
+    legacy_model = FakeChatModel(responses=[_ai_text("legacy narration")])
+    legacy_out = _bundle(legacy_model, [save_job_created_tool]).compiled.invoke(
+        initial_graph_state(
+            run_id=RUN_ID, user_text=EXPLICIT_DIRECT_TEXT_REQUEST
+        )
+    )
+    legacy_calls = _tool_calls_from_state(legacy_out)
+    assert len(legacy_calls) == 1
+    assert legacy_calls[0]["args"] == {"text": EXPLICIT_DIRECT_TEXT}
+    assert legacy_model.invoke_count == 0
