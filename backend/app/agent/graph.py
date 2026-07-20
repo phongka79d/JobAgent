@@ -52,6 +52,7 @@ from app.services.job_save_confirmation import (
     message_is_obvious_jd,
     message_is_sole_http_url,
 )
+from app.tools.active_cv import READ_ACTIVE_CV_NAME
 from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
 from app.tools.profile import (
     COMMIT_PROFILE_DRAFT_NAME,
@@ -88,6 +89,9 @@ PASSIVE_JD_REPAIR_TOOL_CHOICE: dict[str, Any] = {
 
 # Exact registered token only (word boundary). Not NL paraphrase detection.
 _SAVE_JOB_NAME_IN_REQUEST = re.compile(rf"\b{re.escape(SAVE_JOB_NAME)}\b")
+_RECENT_ROLE_AND_COMPANY_QUESTION = (
+    "What is the most recent role and company in my CV?"
+)
 _EXPLICIT_SAVE_JOB_TEXT_COMMAND = re.compile(
     r'^Please call save_job exactly once with text="([^"\r\n]+)" '
     r"Do not use source=current_message and do not call match_jobs\.$"
@@ -601,18 +605,62 @@ def _canonical_save_job_dispatch(
     return None
 
 
-def _turn_already_called_save_job(messages: Sequence[Any]) -> bool:
+def _turn_already_called_tool(
+    messages: Sequence[Any],
+    tool_name: str,
+) -> bool:
     for item in messages:
         if isinstance(item, AIMessage):
             for call in item.tool_calls or []:
-                if _tool_call_name(call) == SAVE_JOB_NAME:
+                if _tool_call_name(call) == tool_name:
                     return True
         if (
             isinstance(item, ToolMessage)
-            and getattr(item, "name", None) == SAVE_JOB_NAME
+            and getattr(item, "name", None) == tool_name
         ):
             return True
     return False
+
+
+def _turn_already_called_save_job(messages: Sequence[Any]) -> bool:
+    return _turn_already_called_tool(messages, SAVE_JOB_NAME)
+
+
+def _experience_section_id(state: AgentGraphState) -> str | None:
+    context = state.get("active_cv_context")
+    sections = context.get("sections") if isinstance(context, dict) else None
+    if not isinstance(sections, list):
+        return None
+    for section in sections:
+        if not isinstance(section, dict) or section.get("kind") != "experience":
+            continue
+        section_id = section.get("id")
+        if isinstance(section_id, str) and section_id.strip():
+            return section_id.strip()
+    return None
+
+
+def _auto_read_recent_role(
+    state: AgentGraphState,
+    *,
+    read_active_cv_available: bool,
+) -> AIMessage | None:
+    """Read the experience section before the approved factual CV answer."""
+    if not read_active_cv_available:
+        return None
+    if _initiating_user_text(state).strip() != _RECENT_ROLE_AND_COMPANY_QUESTION:
+        return None
+    messages = list(state.get(MESSAGES_KEY) or [])
+    if _turn_already_called_tool(messages, READ_ACTIVE_CV_NAME):
+        return None
+    section_id = _experience_section_id(state)
+    if section_id is None:
+        return None
+    return _canonical_tool_call(
+        READ_ACTIVE_CV_NAME,
+        {"mode": "section", "section_id": section_id},
+        "canonical-read-active-cv",
+    )
 
 
 def _is_sole_save_job_call(message: AIMessage | None) -> bool:
@@ -868,6 +916,7 @@ def build_agent_graph(
     provider_tools = _provider_bind_tools(tools)
     commit_available = COMMIT_PROFILE_DRAFT_NAME in set(tool_names)
     save_job_available = SAVE_JOB_NAME in set(tool_names)
+    read_active_cv_available = READ_ACTIVE_CV_NAME in set(tool_names)
     save_job_provider_tool: dict[str, Any] | None = (
         save_job_openai_tool_schema() if save_job_available else None
     )
@@ -929,6 +978,16 @@ def build_agent_graph(
             list(raw_messages) if isinstance(raw_messages, list) else []
         )
         user_text = _initiating_user_text(state)
+
+        auto_read = _auto_read_recent_role(
+            state,
+            read_active_cv_available=read_active_cv_available,
+        )
+        if auto_read is not None:
+            updates: dict[str, Any] = {MESSAGES_KEY: [auto_read]}
+            if int(state.get("tool_iteration_count") or 0) >= limit:
+                updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
+            return updates
         # Deterministic order: clear opt-out → positive exact-name → sole URL /
         # obvious passive JD. Opt-out suppresses both save repairs.
         clear_opt_out = message_has_clear_opt_out(user_text)

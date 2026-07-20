@@ -68,6 +68,27 @@ def counter_tool() -> str:
     return "tick"
 
 
+@tool("read_active_cv")
+def read_active_cv_tool(mode: str, section_id: str) -> dict[str, Any]:
+    """Return one deterministic active-CV experience record."""
+    return {
+        "ok": True,
+        "code": None,
+        "summary": "Read active CV experience section",
+        "data": {
+            "records": [
+                {
+                    "kind": "entry",
+                    "section_id": section_id,
+                    "title": "Senior Software Engineer",
+                    "company": "Northwind Labs",
+                }
+            ],
+            "mode": mode,
+        },
+    }
+
+
 # F-04 exact initiating request (failure report reproduction text).
 F04_NAMED_SAVE_JOB_REQUEST = (
     "Use save_job once again with the exact URL https://example.com and "
@@ -409,6 +430,70 @@ def test_auto_commit_helper_triggers_after_draft_propose() -> None:
     # Second time (commit already requested) must not loop.
     state[MESSAGES_KEY].append(auto)
     assert _auto_commit_after_draft_tool(state, commit_available=True) is None
+
+
+def _experience_outline(section_id: str) -> dict[str, Any]:
+    return {
+        "attachment_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "reprocess_required": False,
+        "sections": [
+            {
+                "id": section_id,
+                "ordinal": 0,
+                "heading": "Experience",
+                "kind": "experience",
+                "entry_count": 1,
+                "source_chunk_range": [0, 0],
+            }
+        ],
+    }
+
+
+def test_recent_role_question_reads_experience_before_narration() -> None:
+    section_id = "cv-document-v1:s0:experience"
+    model = FakeChatModel(
+        responses=[_ai_text("Senior Software Engineer at Northwind Labs")]
+    )
+    out = _bundle(model, [read_active_cv_tool]).compiled.invoke(
+        initial_graph_state(
+            run_id=RUN_ID,
+            user_text="What is the most recent role and company in my CV?",
+            active_cv_context=_experience_outline(section_id),
+        )
+    )
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert len(calls) == 1
+    assert calls[0]["name"] == "read_active_cv"
+    assert calls[0]["args"] == {
+        "mode": "section",
+        "section_id": section_id,
+    }
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 1
+    assert out[MESSAGES_KEY][-1].content == (
+        "Senior Software Engineer at Northwind Labs"
+    )
+
+
+def test_other_active_cv_question_remains_model_driven() -> None:
+    model = FakeChatModel(responses=[_ai_text("Please specify the section.")])
+    out = _bundle(model, [read_active_cv_tool]).compiled.invoke(
+        initial_graph_state(
+            run_id=RUN_ID,
+            user_text="Can you summarize my CV?",
+            active_cv_context=_experience_outline(
+                "cv-document-v1:s0:experience"
+            ),
+        )
+    )
+    assert model.invoke_count == 1
+    assert out["tool_iteration_count"] == 0
+    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
 
 
 def test_tool_round_trip_then_final_answer() -> None:
