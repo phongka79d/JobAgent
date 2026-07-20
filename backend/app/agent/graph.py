@@ -650,7 +650,10 @@ def _auto_read_recent_role(
         return None
     if _initiating_user_text(state).strip() != _RECENT_ROLE_AND_COMPANY_QUESTION:
         return None
-    messages = list(state.get(MESSAGES_KEY) or [])
+    raw_messages = state.get(MESSAGES_KEY)
+    messages: list[Any] = (
+        list(raw_messages) if isinstance(raw_messages, list) else []
+    )
     if _turn_already_called_tool(messages, READ_ACTIVE_CV_NAME):
         return None
     section_id = _experience_section_id(state)
@@ -984,10 +987,10 @@ def build_agent_graph(
             read_active_cv_available=read_active_cv_available,
         )
         if auto_read is not None:
-            updates: dict[str, Any] = {MESSAGES_KEY: [auto_read]}
+            auto_read_updates: dict[str, Any] = {MESSAGES_KEY: [auto_read]}
             if int(state.get("tool_iteration_count") or 0) >= limit:
-                updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
-            return updates
+                auto_read_updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
+            return auto_read_updates
         # Deterministic order: clear opt-out → positive exact-name → sole URL /
         # obvious passive JD. Opt-out suppresses both save repairs.
         clear_opt_out = message_has_clear_opt_out(user_text)
@@ -1020,10 +1023,12 @@ def build_agent_graph(
             save_job_already=save_job_already,
         )
         if canonical_save is not None:
-            updates: dict[str, Any] = {MESSAGES_KEY: [canonical_save]}
+            canonical_save_updates: dict[str, Any] = {
+                MESSAGES_KEY: [canonical_save]
+            }
             if int(state.get("tool_iteration_count") or 0) >= limit:
-                updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
-            return updates
+                canonical_save_updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
+            return canonical_save_updates
 
         prompt_messages = _build_model_messages(state, system_prompt)
         response_raw = chat.invoke(prompt_messages)

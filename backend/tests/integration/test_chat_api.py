@@ -707,8 +707,9 @@ def test_public_passive_binding_aware_confirmation_card(
         assert evaluation_spy.await_count == 0
         assert len(invoker.calls) == 0
         assert len(embedder.calls) == 0
-        # Repair path: mixed first decision + one forced repair.
-        assert model.invoke_count == 2
+        # Canonical path: the provider is bound for compatibility but never
+        # chooses source arguments for an obvious passive JD.
+        assert model.invoke_count == 0
         assert len(model.binding_log) == 2
         _normal_tools, normal_kwargs = model.binding_log[0]
         assert "tool_choice" not in normal_kwargs

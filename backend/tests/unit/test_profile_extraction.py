@@ -1107,7 +1107,6 @@ def test_tool_boundary_compact_and_not_production_registered(
     from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
     from app.repositories import agent_runs as runs_repo
     from app.repositories import chat_messages as messages_repo
-    from app.repositories import tool_executions as tool_repo
 
     storage = AttachmentStorage(files_root)
     invoker = CoveringDocumentInvoker()
