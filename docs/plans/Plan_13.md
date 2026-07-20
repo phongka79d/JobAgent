@@ -725,7 +725,16 @@ later execution; they are not implementation targets.
 | Fresh orchestration restart | Corrected `docs/tasks/task_13.md` | Five batches and eight unchecked canonical tasks map P13-JD-01 through P13-REG-01 to test-first A1/A2/A3 evidence; the new run does not consume abandoned run state as acceptance evidence. |
 | Future A1/A2/A3 execution | ShopAIKey-compatible provider schema, strict runtime validation, one bounded repair, a11y fix, diagnostic tests, ledger, and browser release matrix | Evidence proves the provider/runtime boundary repair, exact counters, accessible dialog, archived-CV paths, frozen-candidate gates, an A3 commit reference, and no scope expansion. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_14.md` consumes the completed Plan 13 provider/runtime boundary,
+current-message confirmation, strict `SaveJobInput` contract, and the existing
+single-Agent/ToolNode topology. It owns the approved intent-aware correction for
+large pasted JD messages; it must not reimplement provider schema compatibility,
+dialog accessibility, diagnostic failure mappings, CV lifecycle, or release
+ledger ownership.
+
+### Historical Completion Contract
 
 Plan 13 is complete only when the actual provider-visible `save_job` definition is
 one ShopAIKey-compatible `type='object'` with exactly `url`, `text`, `source`, and
