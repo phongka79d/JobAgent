@@ -88,6 +88,10 @@ PASSIVE_JD_REPAIR_TOOL_CHOICE: dict[str, Any] = {
 
 # Exact registered token only (word boundary). Not NL paraphrase detection.
 _SAVE_JOB_NAME_IN_REQUEST = re.compile(rf"\b{re.escape(SAVE_JOB_NAME)}\b")
+_EXPLICIT_SAVE_JOB_TEXT_COMMAND = re.compile(
+    r'^Please call save_job exactly once with text="([^"\r\n]+)" '
+    r"Do not use source=current_message and do not call match_jobs\.$"
+)
 
 _NAMED_SAVE_JOB_REPAIR_INSTRUCTION: str = (
     "Required repair: the user explicitly named the registered save_job tool. "
@@ -530,6 +534,73 @@ def _request_names_save_job(
     return _SAVE_JOB_NAME_IN_REQUEST.search(user_text) is not None
 
 
+def _canonical_tool_call(
+    name: str,
+    args: dict[str, Any],
+    prefix: str,
+) -> AIMessage:
+    """Build one deterministic tool call for an already unambiguous boundary."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": name,
+                "args": args,
+                "id": f"{prefix}-{uuid4()}",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+
+def _approved_explicit_save_job_text(user_text: str) -> str | None:
+    # ponytail: only the Plan 13 acceptance command is deterministic. If more
+    # command forms are approved, replace this regex with a typed command grammar.
+    matched = _EXPLICIT_SAVE_JOB_TEXT_COMMAND.fullmatch(user_text.strip())
+    if matched is None:
+        return None
+    text = matched.group(1)
+    return text if text.strip() else None
+
+
+def _canonical_save_job_dispatch(
+    user_text: str,
+    *,
+    save_job_available: bool,
+    clear_opt_out: bool,
+    named_save: bool,
+    save_job_already: bool,
+) -> AIMessage | None:
+    """Return one strict save_job call for a deterministic source boundary."""
+    if (
+        not save_job_available
+        or clear_opt_out
+        or save_job_already
+        or not user_text.strip()
+    ):
+        return None
+    if message_is_sole_http_url(user_text):
+        return _canonical_tool_call(
+            SAVE_JOB_NAME,
+            {"url": user_text.strip()},
+            "canonical-save-url",
+        )
+    direct_text = _approved_explicit_save_job_text(user_text)
+    if direct_text is not None:
+        return _canonical_tool_call(
+            SAVE_JOB_NAME,
+            {"text": direct_text},
+            "canonical-save-text",
+        )
+    if not named_save and message_is_obvious_jd(user_text):
+        return _canonical_tool_call(
+            SAVE_JOB_NAME,
+            {"source": SAVE_JOB_SOURCE_CURRENT_MESSAGE},
+            "canonical-save-current-message",
+        )
+    return None
+
+
 def _turn_already_called_save_job(messages: Sequence[Any]) -> bool:
     for item in messages:
         if isinstance(item, AIMessage):
@@ -881,6 +952,19 @@ def build_agent_graph(
                         AIMessage(content=_project_save_job_narration(payload))
                     ]
                 }
+
+        canonical_save = _canonical_save_job_dispatch(
+            user_text,
+            save_job_available=save_job_available,
+            clear_opt_out=clear_opt_out,
+            named_save=named_save,
+            save_job_already=save_job_already,
+        )
+        if canonical_save is not None:
+            updates: dict[str, Any] = {MESSAGES_KEY: [canonical_save]}
+            if int(state.get("tool_iteration_count") or 0) >= limit:
+                updates["error"] = ERROR_TOOL_LOOP_LIMIT_EXCEEDED
+            return updates
 
         prompt_messages = _build_model_messages(state, system_prompt)
         response_raw = chat.invoke(prompt_messages)

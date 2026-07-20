@@ -201,6 +201,19 @@ def _obvious_passive_jd(
     return body
 
 
+EXPLICIT_DIRECT_TEXT = (
+    "Job title: Synthetic API Engineer. Company: Plan13 Labs. "
+    "Responsibilities: build local APIs and deterministic tests. "
+    "Requirements: Python, FastAPI, SQL, and Docker. Location: Hanoi. "
+    "This is synthetic test data."
+)
+EXPLICIT_DIRECT_TEXT_REQUEST = (
+    'Please call save_job exactly once with text="'
+    + EXPLICIT_DIRECT_TEXT
+    + '" Do not use source=current_message and do not call match_jobs.'
+)
+
+
 def _ai_text(content: str) -> AIMessage:
     return AIMessage(content=content)
 
@@ -1000,7 +1013,7 @@ def test_positive_exact_name_precedes_passive_jd_repair() -> None:
     assert "returned" in final or "reused" in final
 
 
-def test_sole_url_and_ambiguous_prose_skip_passive_repair() -> None:
+def test_sole_url_dispatches_direct_save_and_ambiguous_prose_stays_normal() -> None:
     sole_url = "https://example.com/jobs/backend-engineer"
     assert conf.message_is_sole_http_url(sole_url)
     url_model = FakeChatModel(responses=[_ai_text("I can open that link.")])
@@ -1009,8 +1022,16 @@ def test_sole_url_and_ambiguous_prose_skip_passive_repair() -> None:
         initial_graph_state(run_id=RUN_ID, user_text=sole_url)
     )
     assert url_model.invoke_count == 1
-    assert url_out["tool_iteration_count"] == 0
-    assert not any(isinstance(m, ToolMessage) for m in url_out[MESSAGES_KEY])
+    assert url_out["tool_iteration_count"] == 1
+    assert any(isinstance(m, ToolMessage) for m in url_out[MESSAGES_KEY])
+    url_calls = [
+        call
+        for message in url_out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert len(url_calls) == 1
+    assert url_calls[0]["args"] == {"url": sole_url}
     assert url_out[MESSAGES_KEY][-1].content == "I can open that link."
 
     # Long ambiguous prose without distinct JD markers is not forced.
@@ -1027,7 +1048,7 @@ def test_sole_url_and_ambiguous_prose_skip_passive_repair() -> None:
     assert amb_out[MESSAGES_KEY][-1].content == "Thanks for sharing."
 
 
-def test_passive_first_tool_success_projects_without_repair() -> None:
+def test_passive_canonical_tool_success_projects_without_provider() -> None:
     """First decision already sole current-message: no repair, ToolResult narrates."""
     jd = _obvious_passive_jd()
     model = FakeChatModel(
@@ -1046,7 +1067,7 @@ def test_passive_first_tool_success_projects_without_repair() -> None:
     )
     assert out["error"] is None
     assert out["tool_iteration_count"] == 1
-    assert model.invoke_count == 1  # projection skips second model call
+    assert model.invoke_count == 0
     final = str(out[MESSAGES_KEY][-1].content)
     assert "job-cm-1" in final
     assert "brand new" not in final.lower()
@@ -1057,7 +1078,7 @@ def test_passive_first_tool_success_projects_without_repair() -> None:
     )
 
 
-def test_passive_one_repair_success_discards_plain_text() -> None:
+def test_passive_vietnamese_dispatch_discards_provider_script() -> None:
     """Plain-text miss → one current-message repair; discard never stored."""
     jd = _obvious_passive_jd(markers=("mô tả công việc", "yêu cầu"))
     model = FakeChatModel(
@@ -1079,7 +1100,7 @@ def test_passive_one_repair_success_discards_plain_text() -> None:
         initial_graph_state(run_id=RUN_ID, user_text=jd)
     )
     assert out["tool_iteration_count"] == 1
-    assert model.invoke_count == 2  # first + one repair only
+    assert model.invoke_count == 0
     joined = " ".join(
         str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
     )
@@ -1093,10 +1114,10 @@ def test_passive_one_repair_success_discards_plain_text() -> None:
         if isinstance(m, AIMessage) and (m.tool_calls or [])
     ]
     assert len(ai_calls) == 1
-    assert ai_calls[0].tool_calls[0]["args"].get("source") == "current_message"
+    assert ai_calls[0].tool_calls[0]["args"] == {"source": "current_message"}
 
 
-def test_passive_malformed_first_save_job_call_is_discarded_and_repaired_once() -> None:
+def test_passive_malformed_provider_call_cannot_override_canonical_source() -> None:
     """Malformed first passive call is discarded; only a source-only repair runs."""
     jd = _obvious_passive_jd()
     model = FakeChatModel(
@@ -1120,7 +1141,7 @@ def test_passive_malformed_first_save_job_call_is_discarded_and_repaired_once() 
     )
 
     assert out["error"] is None
-    assert model.invoke_count == 2  # first decision + exactly one repair
+    assert model.invoke_count == 0
     assert out["tool_iteration_count"] == 1
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
     assert len(tool_msgs) == 1
@@ -1132,14 +1153,14 @@ def test_passive_malformed_first_save_job_call_is_discarded_and_repaired_once() 
     ]
     assert len(ai_calls) == 1
     call = ai_calls[0].tool_calls[0]
-    assert call["id"] == "cm-repair"
+    assert str(call["id"]).startswith("canonical-save-current-message-")
     assert call["args"] == {"source": "current_message"}
     final = str(out[MESSAGES_KEY][-1].content)
     assert "job-cm-1" in final
     assert "brand new" not in final.lower()
 
 
-def test_passive_malformed_repair_call_yields_no_confirmation_without_tools() -> None:
+def test_passive_malformed_repair_script_cannot_block_confirmation() -> None:
     """A text-plus-source repair is rejected without executing save_job."""
     jd = _obvious_passive_jd()
     model = FakeChatModel(
@@ -1158,17 +1179,20 @@ def test_passive_malformed_repair_call_yields_no_confirmation_without_tools() ->
     )
 
     assert out["error"] is None
-    assert model.invoke_count == 2  # first response + one repair
-    assert out["tool_iteration_count"] == 0
-    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
-    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
-    assert not any(
-        isinstance(m, AIMessage) and (m.tool_calls or [])
-        for m in out[MESSAGES_KEY]
-    )
+    assert model.invoke_count == 0
+    assert out["tool_iteration_count"] == 1
+    assert any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"source": "current_message"}
 
 
-def test_passive_repair_refusal_is_fixed_truthful_no_save() -> None:
+def test_passive_plain_text_provider_script_is_not_invoked() -> None:
     jd = _obvious_passive_jd()
     model = FakeChatModel(
         responses=[
@@ -1185,10 +1209,10 @@ def test_passive_repair_refusal_is_fixed_truthful_no_save() -> None:
     out = bundle.compiled.invoke(
         initial_graph_state(run_id=RUN_ID, user_text=jd)
     )
-    assert out["tool_iteration_count"] == 0
-    assert model.invoke_count == 2  # first + one repair, no loop
-    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
-    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert out["tool_iteration_count"] == 1
+    assert model.invoke_count == 0
+    assert any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
     joined = " ".join(
         str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
     )
@@ -1196,7 +1220,7 @@ def test_passive_repair_refusal_is_fixed_truthful_no_save() -> None:
     assert "Still not calling tools" not in joined
 
 
-def test_passive_repair_rejects_non_current_message_tool() -> None:
+def test_passive_wrong_provider_tools_are_not_invoked() -> None:
     """Repair that calls another tool or non-CM save_job is refused."""
     jd = _obvious_passive_jd()
     model = FakeChatModel(
@@ -1209,8 +1233,9 @@ def test_passive_repair_rejects_non_current_message_tool() -> None:
     out = bundle.compiled.invoke(
         initial_graph_state(run_id=RUN_ID, user_text=jd)
     )
-    assert out["tool_iteration_count"] == 0
-    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert model.invoke_count == 0
+    assert out["tool_iteration_count"] == 1
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
 
     url_model = FakeChatModel(
         responses=[
@@ -1226,8 +1251,9 @@ def test_passive_repair_rejects_non_current_message_tool() -> None:
     url_out = url_bundle.compiled.invoke(
         initial_graph_state(run_id=RUN_ID, user_text=jd)
     )
-    assert url_out["tool_iteration_count"] == 0
-    assert url_out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert url_model.invoke_count == 0
+    assert url_out["tool_iteration_count"] == 1
+    assert "job-cm-1" in str(url_out[MESSAGES_KEY][-1].content)
 
 
 def test_cancellation_narration_from_tool_result_only() -> None:
@@ -1246,7 +1272,7 @@ def test_cancellation_narration_from_tool_result_only() -> None:
     out = bundle.compiled.invoke(
         initial_graph_state(run_id=RUN_ID, user_text=_obvious_passive_jd())
     )
-    assert model.invoke_count == 1
+    assert model.invoke_count == 0
     final = str(out[MESSAGES_KEY][-1].content)
     assert final == conf.CANCEL_SUMMARY
     assert "created" not in final.lower()
@@ -1299,12 +1325,12 @@ def test_unrelated_greeting_and_topology_six_pass_unchanged() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Plan 13 (01B): binding-aware passive repair + sanitized rejection logs
+# Plan 13 (01B/05B): provider binding plus canonical passive dispatch
 # ---------------------------------------------------------------------------
 
 
-def test_passive_binding_aware_repair_dispatches_source_only_once() -> None:
-    """Valid repair only when ordinary schema + canonical tool_choice bind."""
+def test_passive_binding_aware_provider_is_bound_but_not_invoked() -> None:
+    """Provider definitions remain compatible while canonical dispatch owns args."""
     jd = _obvious_passive_jd()
     model = PassiveJdBindingAwareFake(
         mixed_text=jd,
@@ -1319,7 +1345,7 @@ def test_passive_binding_aware_repair_dispatches_source_only_once() -> None:
     )
 
     assert out["error"] is None
-    assert model.invoke_count == 2  # first + one repair
+    assert model.invoke_count == 0
     assert out["tool_iteration_count"] == 1
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
     assert len(tool_msgs) == 1
@@ -1345,8 +1371,8 @@ def test_passive_binding_aware_repair_dispatches_source_only_once() -> None:
     assert PASSIVE_JD_REPAIR_TOOL_CHOICE == CANONICAL_SAVE_JOB_TOOL_CHOICE
 
 
-def test_passive_binding_aware_red_without_compatible_forced_choice() -> None:
-    """Without permit (or missing forced bind), repeated mixed refuses."""
+def test_passive_canonical_dispatch_ignores_binding_aware_mixed_output() -> None:
+    """Provider mixed output cannot block a deterministic source-only call."""
     jd = _obvious_passive_jd()
     model = PassiveJdBindingAwareFake(
         mixed_text=jd,
@@ -1361,20 +1387,24 @@ def test_passive_binding_aware_red_without_compatible_forced_choice() -> None:
     )
 
     assert out["error"] is None
-    assert model.invoke_count == 2
-    assert out["tool_iteration_count"] == 0
-    assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
-    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
-    assert not any(
-        isinstance(m, AIMessage) and (m.tool_calls or [])
-        for m in out[MESSAGES_KEY]
-    )
+    assert model.invoke_count == 0
+    assert out["tool_iteration_count"] == 1
+    assert any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"source": "current_message"}
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
 
 
-def test_passive_repair_diagnostics_never_log_content_or_arguments(
+def test_passive_canonical_dispatch_logs_no_content_or_rejection(
     caplog: Any,
 ) -> None:
-    """Rejection logs are shape-only: reason/call_count/tool_names/argument_keys."""
+    """Canonical dispatch neither invokes the provider nor logs JD content."""
     raw_sentinel = "RAW-JD-SENTINEL-DO-NOT-LOG"
     preview_sentinel = "PREVIEW-SENTINEL-DO-NOT-LOG"
     argument_sentinel = "ARGUMENT-VALUE-SENTINEL-DO-NOT-LOG"
@@ -1400,21 +1430,14 @@ def test_passive_repair_diagnostics_never_log_content_or_arguments(
     finally:
         graph_logger.disabled = was_disabled
 
-    assert out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
+    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
     repair_logs = [
         record.getMessage()
         for record in caplog.records
         if record.name == "app.agent.graph"
         and record.getMessage().startswith("passive_jd_call_rejected")
     ]
-    shape = (
-        "call_count=1 tool_names=('save_job',) "
-        "argument_keys=('preview', 'source', 'text')"
-    )
-    assert repair_logs == [
-        f"passive_jd_call_rejected reason=invalid_first_call {shape}",
-        f"passive_jd_call_rejected reason=invalid_repair_call {shape}",
-    ]
+    assert repair_logs == []
     joined = "\n".join(record.getMessage() for record in caplog.records)
     for forbidden in (
         jd,
@@ -1428,3 +1451,74 @@ def test_passive_repair_diagnostics_never_log_content_or_arguments(
         "Required repair:",
     ):
         assert forbidden not in joined
+
+
+def test_obvious_jd_dispatches_canonical_current_message_without_provider() -> None:
+    jd = _obvious_passive_jd()
+    model = PassiveJdBindingAwareFake(
+        mixed_text=jd,
+        preview_value="Synthetic Engineer",
+        argument_value="Plan13 Labs",
+        provider_payload_value="PROVIDER-PAYLOAD-SENTINEL-DO-NOT-LOG",
+        permit_valid_repair=False,
+    )
+    out = _bundle(model, [save_job_current_message_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert model.invoke_count == 0
+    assert out["tool_iteration_count"] == 1
+    assert len(calls) == 1
+    assert calls[0]["name"] == SAVE_JOB_NAME
+    assert calls[0]["args"] == {"source": "current_message"}
+
+
+def test_sole_url_dispatches_exact_url_without_provider() -> None:
+    sole_url = "https://example.com/jobs/plan13-synthetic-engineer"
+    model = FakeChatModel(responses=[_ai_text("provider must not run")])
+    out = _bundle(model, [save_job_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=f"  {sole_url}  ")
+    )
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert model.invoke_count == 1
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"url": sole_url}
+
+
+def test_approved_explicit_text_dispatches_exact_text() -> None:
+    model = FakeChatModel(responses=[_ai_text("provider must not choose args")])
+    out = _bundle(model, [save_job_created_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=EXPLICIT_DIRECT_TEXT_REQUEST)
+    )
+    calls = [
+        call
+        for message in out[MESSAGES_KEY]
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+    ]
+    assert model.invoke_count == 0
+    assert len(calls) == 1
+    assert calls[0]["args"] == {"text": EXPLICIT_DIRECT_TEXT}
+
+
+def test_near_miss_explicit_text_remains_model_driven() -> None:
+    request = EXPLICIT_DIRECT_TEXT_REQUEST.replace(
+        "Do not use source=current_message", "Avoid current-message mode"
+    )
+    model = FakeChatModel(responses=[_ai_text("Please clarify.")])
+    out = _bundle(model, [save_job_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=request)
+    )
+    assert model.invoke_count == 2
+    assert out["tool_iteration_count"] == 0
+    assert out[MESSAGES_KEY][-1].content == NAMED_SAVE_JOB_NO_ACTION_TEXT
