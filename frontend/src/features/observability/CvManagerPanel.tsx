@@ -56,6 +56,11 @@ export function canDeleteCv(item: CvHistoryItem): boolean {
   return item.state !== 'active';
 }
 
+/** Reprocess is supported only for approved active/archived CV documents. */
+export function canReprocessCv(item: CvHistoryItem): boolean {
+  return item.state === 'active' || item.state === 'archived';
+}
+
 function rowEndContent(item: CvHistoryItem) {
   if (item.state === 'active') {
     return (
@@ -93,6 +98,8 @@ export function CvManagerPanel({
     ? errorsByAttachment[selectedItem.id]
     : undefined;
   const isSelectedPending = selectedPending !== undefined;
+  const isSelectedReprocessable =
+    selectedItem !== null && canReprocessCv(selectedItem);
   const isDeletePending = selectedPending === 'delete';
   const isReprocessPending = selectedPending === 'reprocess';
 
@@ -227,7 +234,7 @@ export function CvManagerPanel({
               data-testid={`jobagent-obs-cv-open-${selectedItem.id}`}
             />
 
-            {selectedItem.state === 'active' ? (
+            {isSelectedReprocessable && selectedItem.state === 'active' ? (
               <Button
                 label="Re-extract"
                 variant="secondary"
@@ -237,7 +244,7 @@ export function CvManagerPanel({
                 onClick={() => onReprocess(selectedItem)}
                 data-testid={`jobagent-obs-cv-reextract-${selectedItem.id}`}
               />
-            ) : (
+            ) : isSelectedReprocessable && selectedItem.state === 'archived' ? (
               <Button
                 label="Make active"
                 variant="secondary"
@@ -247,7 +254,7 @@ export function CvManagerPanel({
                 onClick={() => onReprocess(selectedItem)}
                 data-testid={`jobagent-obs-cv-make-active-${selectedItem.id}`}
               />
-            )}
+            ) : null}
 
             {canDeleteCv(selectedItem) ? (
               <Button

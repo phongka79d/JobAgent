@@ -19,6 +19,7 @@ import type {ObservabilityApi} from '../features/observability/api';
 import {CV_DELETE_SCOPE_WARNING} from '../features/observability/CvDeleteDialog';
 import {
   canDeleteCv,
+  canReprocessCv,
   CvManagerPanel,
 } from '../features/observability/CvManagerPanel';
 import {toGraphModel} from '../features/observability/graphPresentation';
@@ -122,6 +123,15 @@ describe('canDeleteCv guard', () => {
     expect(canDeleteCv(archivedItem())).toBe(true);
     expect(canDeleteCv({...archivedItem(), state: 'failed'})).toBe(true);
     expect(canDeleteCv({...archivedItem(), state: 'staged'})).toBe(true);
+  });
+});
+
+describe('canReprocessCv guard', () => {
+  it('allows active/archived and rejects staged/failed states', () => {
+    expect(canReprocessCv(activeItem())).toBe(true);
+    expect(canReprocessCv(archivedItem())).toBe(true);
+    expect(canReprocessCv({...archivedItem(), state: 'staged'})).toBe(false);
+    expect(canReprocessCv({...archivedItem(), state: 'failed'})).toBe(false);
   });
 });
 
@@ -229,6 +239,43 @@ describe('CV Manager panel actions', () => {
       ),
     ).toBeNull();
   });
+
+  it.each(['staged', 'failed'] as const)(
+    'does not expose reprocess for %s selection',
+    (state) => {
+      const item: CvHistoryItem = {
+        ...archivedItem(),
+        id: `${state}-attachment`,
+        state,
+      };
+      renderPanel({
+        resource: {
+          phase: 'ready',
+          data: {items: [item], next_cursor: null},
+          error: null,
+          loaded: true,
+        },
+        selectedAttachmentId: item.id,
+      });
+
+      const actions = screen.getByTestId(
+        `jobagent-obs-cv-actions-${item.id}`,
+      );
+      expect(
+        within(actions).queryByTestId(
+          `jobagent-obs-cv-make-active-${item.id}`,
+        ),
+      ).toBeNull();
+      expect(
+        within(actions).queryByTestId(
+          `jobagent-obs-cv-reextract-${item.id}`,
+        ),
+      ).toBeNull();
+      expect(
+        within(actions).getByTestId(`jobagent-obs-cv-delete-${item.id}`),
+      ).toBeEnabled();
+    },
+  );
 
   it('disables row actions while a pending action is in flight', () => {
     renderPanel({
