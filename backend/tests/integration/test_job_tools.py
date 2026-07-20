@@ -2156,6 +2156,7 @@ def test_provider_save_job_dict_bound_toolnode_keeps_basetool() -> None:
     from app.agent.graph import build_agent_graph
     from app.tools.jobs import save_job_openai_tool_schema
     from app.tools.registry import ToolRegistry
+
     from tests.fakes.fake_chat_model import FakeChatModel
 
     tool_fn = build_save_job_tool(

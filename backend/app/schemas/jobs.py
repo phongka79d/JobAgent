@@ -184,7 +184,8 @@ class SaveJobInput(BaseModel):
     @field_validator("url", "text", mode="before")
     @classmethod
     def _blank_optional_source_to_none(cls, value: Any) -> str | None:
-        """Treat blank placeholders as omitted so provider empty strings match absent."""
+        """Treat blank placeholders as omitted so provider empty strings match absent.
+        """
         if value is None:
             return None
         if not isinstance(value, str):

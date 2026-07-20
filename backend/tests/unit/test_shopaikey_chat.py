@@ -382,8 +382,6 @@ def test_prompt_profile_and_failure_rules_remain_with_plan12_policy() -> None:
 
 def test_save_job_provider_schema_is_ordinary_object_without_combinators() -> None:
     """Actual OpenAI-format payload: ordinary properties, no required combinators."""
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
     from app.schemas.jobs import (
         SAVE_JOB_PREVIEW_COMPANY_MAX,
         SAVE_JOB_PREVIEW_SKILL_MAX,
@@ -395,6 +393,7 @@ def test_save_job_provider_schema_is_ordinary_object_without_combinators() -> No
         SAVE_JOB_NAME,
         save_job_openai_tool_schema,
     )
+    from langchain_core.utils.function_calling import convert_to_openai_tool
 
     raw = save_job_openai_tool_schema()
     spec = convert_to_openai_tool(raw)
@@ -469,6 +468,7 @@ def test_normal_model_binding_uses_provider_dict_without_forced_choice(
     from app.agent.graph import PASSIVE_JD_REPAIR_TOOL_CHOICE, build_agent_graph
     from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
     from app.tools.registry import production_registry
+
     from tests.fakes.fake_chat_model import FakeChatModel
 
     model = FakeChatModel(responses=[])

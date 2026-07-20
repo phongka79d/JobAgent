@@ -40,7 +40,10 @@ def _status_error(status: int) -> httpx.HTTPStatusError:
     )
 
 
-def _assert_terminal_failure(error: common.DiagnosticError, capsys: pytest.CaptureFixture[str]) -> None:
+def _assert_terminal_failure(
+    error: common.DiagnosticError,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     assert (
         common.emit_failure(
             code=error.code,
