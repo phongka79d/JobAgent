@@ -1107,6 +1107,7 @@ def test_tool_boundary_compact_and_not_production_registered(
     from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
     from app.repositories import agent_runs as runs_repo
     from app.repositories import chat_messages as messages_repo
+    from app.repositories import tool_executions as tool_repo
 
     storage = AttachmentStorage(files_root)
     invoker = CoveringDocumentInvoker()
@@ -1132,6 +1133,7 @@ def test_tool_boundary_compact_and_not_production_registered(
         run_id: str,
         tool_call_id: str,
         attachment_id: str,
+        attachment_ids: Sequence[str] | None = None,
     ) -> ToolResult:
         """ToolCall shape so InjectedToolCallId / InjectedState resolve."""
         raw = await tool_fn.ainvoke(
@@ -1141,7 +1143,10 @@ def test_tool_boundary_compact_and_not_production_registered(
                 "name": tool_fn.name,
                 "args": {
                     "attachment_id": attachment_id,
-                    "state": {"run_id": run_id},
+                    "state": {
+                        "run_id": run_id,
+                        "attachment_ids": list(attachment_ids or ()),
+                    },
                 },
             }
         )
@@ -1224,6 +1229,123 @@ def test_tool_boundary_compact_and_not_production_registered(
             )
             assert tr_miss.ok is False
             assert tr_miss.code == ERROR_ATTACHMENT_NOT_FOUND
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_upload_turn_attachment_wins_over_active_model_argument(
+    migrated_sqlite: Path, files_root: Path
+) -> None:
+    """A newly uploaded staged B cannot be shadowed by model-supplied A."""
+    import json
+
+    from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import chat_messages as messages_repo
+    from app.repositories import tool_executions as tool_repo
+
+    storage = AttachmentStorage(files_root)
+    invoker = CoveringDocumentInvoker()
+    normalizer = _normalizer()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            active_id = new_uuid()
+            staged_id = new_uuid()
+            active_rel = _write_pdf(storage, active_id, pdf)
+            staged_rel = _write_pdf(storage, staged_id, pdf)
+            async with factory() as session:
+                user = await messages_repo.insert_message(
+                    session,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="upload B",
+                )
+                run = await runs_repo.create_run(session, user_message_id=user.id)
+                await att_repo.create_staged(
+                    session,
+                    file_hash="active-a",
+                    original_name="a.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=active_rel,
+                    page_count=1,
+                    attachment_id=active_id,
+                )
+                await att_repo.mark_active(session, active_id, page_count=1)
+                await profile_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=active_id,
+                    profile_json=extracted_to_candidate_profile(
+                        _valid_extracted(), normalizer
+                    ).model_dump(mode="json"),
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="staged-b",
+                    original_name="b.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=staged_rel,
+                    page_count=1,
+                    attachment_id=staged_id,
+                )
+                await session.commit()
+
+            tool_fn = build_propose_profile_from_cv_tool(
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=normalizer,
+            )
+            raw = await tool_fn.ainvoke(
+                {
+                    "type": "tool_call",
+                    "id": "call-upload-b",
+                    "name": tool_fn.name,
+                    "args": {
+                        "attachment_id": active_id,
+                        "state": {
+                            "run_id": run.id,
+                            "attachment_ids": [staged_id],
+                        },
+                    },
+                }
+            )
+            if isinstance(raw, str):
+                payload = json.loads(raw)
+            elif hasattr(raw, "content"):
+                payload = json.loads(raw.content)
+            else:
+                payload = raw
+            result = ToolResult.model_validate(payload)
+            assert result.ok is True
+            assert result.data is not None
+            assert result.data["attachment_id"] == staged_id
+
+            async with factory() as session:
+                draft = await profile_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.source_attachment_id == staged_id
+                active = await profile_repo.get_active_profile(session)
+                assert active is not None
+                assert active.active_attachment_id == active_id
+                executions = await tool_repo.list_for_run_ids(session, [run.id])
+                propose = [
+                    item
+                    for item in executions
+                    if item.tool_name == PROPOSE_PROFILE_FROM_CV_NAME
+                ]
+                assert propose
+                raw_summary = propose[0].arguments_summary_json
+                summary = (
+                    json.loads(raw_summary)
+                    if isinstance(raw_summary, str)
+                    else raw_summary
+                )
+                assert summary["attachment_id"] == staged_id
         finally:
             await engine.dispose()
 

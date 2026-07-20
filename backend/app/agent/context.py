@@ -378,18 +378,13 @@ async def load_profile_working_memory_messages(
     return messages
 
 
-async def merge_turn_attachment_ids(
-    session: AsyncSession,
+def normalize_turn_attachment_ids(
     turn_attachment_ids: Sequence[str] | None,
 ) -> list[str]:
-    """Union turn-scoped attachment IDs with durable staged/active IDs."""
-    from app.services.attachment_resolve import list_processable_attachment_ids
-
+    """Return unique non-empty request IDs without durable-state widening."""
     out: list[str] = []
     seen: set[str] = set()
-    for raw in list(turn_attachment_ids or ()) + await list_processable_attachment_ids(
-        session
-    ):
+    for raw in turn_attachment_ids or ():
         if not isinstance(raw, str):
             continue
         value = raw.strip()
@@ -414,7 +409,7 @@ __all__ = [
     "load_candidate_context",
     "load_profile_working_memory_messages",
     "load_recent_context",
-    "merge_turn_attachment_ids",
+    "normalize_turn_attachment_ids",
     "project_active_cv_context",
     "project_candidate_context",
 ]

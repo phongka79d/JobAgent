@@ -97,26 +97,19 @@ async def resolve_attachment_id_for_propose(
     """Resolve a processable attachment id for ``propose_profile_from_cv``.
 
     Order:
-    1. *requested* when it is a real UUID that exists and is staged/active
-    2. First turn-scoped attachment id that exists and is processable
+    1. A sole turn-scoped attachment, or the requested member of a multi-ID turn
+    2. *requested* when no turn attachment exists and it is processable
     3. Current draft ``source_attachment_id`` when processable
     4. Newest staged attachment
     5. Active attachment
 
-    A concrete non-placeholder UUID that is missing or not processable fails
-    closed (returns ``None``) without falling through to draft/newest staged.
-    Placeholders such as ``current`` still recover via steps 2–5.
+    A requested UUID outside a multi-attachment turn, or a concrete UUID that
+    is missing/not processable, fails closed without falling through.
+    Placeholders such as ``current`` still recover when no turn IDs exist.
 
     Returns ``None`` when nothing processable is available.
     """
-    raw = requested.strip() if isinstance(requested, str) else ""
-    if raw and raw.lower() not in _PLACEHOLDER_IDS and looks_like_attachment_uuid(raw):
-        if await _is_processable(session, raw):
-            return raw
-        # Explicit UUID miss: do not rewrite to another attachment.
-        return None
-
-    candidates: list[str] = []
+    turn_candidates: list[str] = []
     for item in turn_attachment_ids or ():
         if not isinstance(item, str):
             continue
@@ -125,9 +118,26 @@ async def resolve_attachment_id_for_propose(
             value
             and value.lower() not in _PLACEHOLDER_IDS
             and looks_like_attachment_uuid(value)
-            and value not in candidates
+            and value not in turn_candidates
         ):
-            candidates.append(value)
+            turn_candidates.append(value)
+
+    raw = requested.strip() if isinstance(requested, str) else ""
+    if turn_candidates:
+        if raw in turn_candidates:
+            return raw if await _is_processable(session, raw) else None
+        if len(turn_candidates) == 1:
+            only = turn_candidates[0]
+            return only if await _is_processable(session, only) else None
+        return None
+
+    if raw and raw.lower() not in _PLACEHOLDER_IDS and looks_like_attachment_uuid(raw):
+        if await _is_processable(session, raw):
+            return raw
+        # Explicit UUID miss: do not rewrite to another attachment.
+        return None
+
+    candidates: list[str] = []
 
     draft = await profile_repo.get_current_draft(session)
     if draft is not None and isinstance(draft.source_attachment_id, str):

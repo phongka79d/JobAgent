@@ -12,6 +12,7 @@ from app.agent.context import (
     RECENT_CONTEXT_MAX_MESSAGES,
     apply_recent_context_budget,
     empty_candidate_context,
+    normalize_turn_attachment_ids,
 )
 from app.agent.state import (
     AGENT_CONVERSATION_ID,
@@ -130,6 +131,15 @@ def test_build_initial_state_attachment_ids_only_no_document_bodies() -> None:
     assert "document" not in state
     assert "cv_text" not in state
     assert "jd_text" not in state
+
+
+def test_normalize_turn_attachment_ids_does_not_add_durable_ids() -> None:
+    staged = "33333333-3333-4333-8333-333333333333"
+    active = "44444444-4444-4444-8444-444444444444"
+    assert normalize_turn_attachment_ids([staged, " ", staged, active]) == [
+        staged,
+        active,
+    ]
 
 
 def test_build_initial_state_defaults() -> None:

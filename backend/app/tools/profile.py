@@ -163,6 +163,17 @@ def build_propose_profile_from_cv_tool(
             ):
                 owned_attachment_id = run.source_attachment_id.strip()
         do_reprocess = bool(reprocess) or owned_attachment_id is not None
+        normalized_turn_ids = [
+            item.strip()
+            for item in turn_ids
+            if isinstance(item, str) and item.strip()
+        ]
+        unique_turn_ids = list(dict.fromkeys(normalized_turn_ids))
+        effective_attachment_id = attachment_id
+        if not do_reprocess and len(unique_turn_ids) == 1:
+            # The single upload returned by this turn is authoritative; a model
+            # cannot replace it with an older active UUID.
+            effective_attachment_id = unique_turn_ids[0]
 
         async def _invoke() -> ToolResult:
             from app.db.models.attachments import (
@@ -229,7 +240,7 @@ def build_propose_profile_from_cv_tool(
                     # Resolve placeholders like "current" to a staged/active UUID.
                     resolved = await resolve_attachment_id_for_propose(
                         session,
-                        attachment_id,
+                        effective_attachment_id,
                         turn_attachment_ids=turn_ids,
                     )
             if resolved is None:
@@ -237,15 +248,15 @@ def build_propose_profile_from_cv_tool(
                     ok=False,
                     code="ATTACHMENT_NOT_FOUND",
                     summary=(
-                        f"attachment {attachment_id!r} not found; upload a CV "
+                    f"attachment {effective_attachment_id!r} not found; upload a CV "
                         "or pass a staged attachment UUID"
                         if not do_reprocess
                         else (
-                            f"attachment {attachment_id!r} not found or not "
+                            f"attachment {effective_attachment_id!r} not found or not "
                             "eligible for reprocess"
                         )
                     ),
-                    data={"attachment_id": attachment_id},
+                    data={"attachment_id": effective_attachment_id},
                 )
             result = await propose_profile_from_cv(
                 attachment_id=resolved,
@@ -258,10 +269,9 @@ def build_propose_profile_from_cv_tool(
             )
             return result.tool_result
 
-        # Arguments summary uses the model-supplied value; durable result carries
-        # the resolved UUID after invoke. Report forced reprocess truthfully.
+        # Report the authoritative upload UUID; reprocess keeps its owned UUID.
         args_summary = arguments_summary_for_propose_cv(
-            attachment_id, reprocess=do_reprocess
+            effective_attachment_id, reprocess=do_reprocess
         )
         # CV-scoped reprocess: stamp tool ownership from the owned id when set.
         if do_reprocess and owned_attachment_id is not None:

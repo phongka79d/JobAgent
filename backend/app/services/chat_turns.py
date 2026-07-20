@@ -24,7 +24,7 @@ from app.agent.context import (
     load_candidate_context,
     load_profile_working_memory_messages,
     load_recent_context,
-    merge_turn_attachment_ids,
+    normalize_turn_attachment_ids,
 )
 from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
@@ -490,10 +490,7 @@ async def stream_chat_turn(
         candidate_context = await load_candidate_context(session)
         active_cv_context = await load_active_cv_context(session)
         working_memory = await load_profile_working_memory_messages(session)
-        effective_attachment_ids = await merge_turn_attachment_ids(
-            session,
-            attachment_ids,
-        )
+        effective_attachment_ids = normalize_turn_attachment_ids(attachment_ids)
     # Graph state uses list[dict] channels; ContextMessage is a TypedDict.
     recent_context: list[dict[str, Any]] = [
         dict(m) for m in working_memory
