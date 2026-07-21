@@ -12,8 +12,9 @@ without injecting the whole CV into each prompt.
 
 ## Source of Truth
 
-- `docs/plans/Master_plan.md` Version 1.7: Sections 2, 6-8, 10, 12-15,
-  20-21, 24-25, and the Phase 8 exit gate.
+- `docs/plans/Master_plan.md` Version 1.7 plus the current Section 23
+  configuration contract: Sections 2, 6-8, 10, 12-15, 20-21, 23-25, and the
+  Phase 8 exit gate. Master Version 2.0 preserves these five CV setting names.
 - `docs/plans/Plan_8.md`: implemented deterministic chunk persistence,
   observability API, retained PDF stream, run history, graph read model, and
   successor handoff.
@@ -37,12 +38,14 @@ without injecting the whole CV into each prompt.
 | M9-07 | 15 | CV History becomes CV Manager with active badge, Make active/Re-extract/Delete actions, confirmation, and focused cache invalidation. | Frontend interaction/accessibility/error tests. |
 | M9-08 | 15.1, 15.6 | Completed observability UI refresh, proportions, colors, components, graph controls, and responsive behavior remain intact. | Existing frontend regression suite and desktop/mobile screenshots. |
 | M9-09 | 20, 24 | Failure paths preserve the prior active CV, never publish partial extraction, and never report partial deletion as success. | Unit/integration fault tests and direct FE smoke. |
+| M9-10 | 23, 24 | Document extraction/consolidation and bounded active-CV reads consume the five exact Plan 2-owned Settings values without redefining their names/defaults or using the obsolete single batch variable. | Settings-consumer unit tests, override tests, rendered Compose inspection, and the Plan 2 → Plan 9 handoff. |
 
 ## Prerequisites
 
 | Producer plan or environment | Required artifact/contract | Check before work |
 |---|---|---|
 | Plans 1-7 | Stable SQLite, one Agent, SSE, approval, profile, job, matching, direct graph sync, Compose, and local release baseline | Run current backend/frontend suites before migration work and retain failures as baseline evidence. |
+| Plan_2 | Sole external configuration owner for `CV_EXTRACT_BATCH_MAX_CHARS=12000`, `CV_CONSOLIDATE_BATCH_MAX_CHARS=12000`, `CV_READ_DEFAULT_MAX_CHARS=6000`, `CV_READ_HARD_MAX_CHARS=12000`, and `CV_READ_MAX_RESULTS=10`, including Settings, `.env.example`, and backend Compose wiring | Run Settings tests and inspect rendered Compose; block on missing/renamed variables or any application/template/Compose owner for `CV_DOCUMENT_BATCH_MAX_CHARS`. |
 | Plan_8 | `attachment_text_chunks`, observability routes/services, retained PDF stream, run projection, and bounded graph response | Trace every attachment/chunk/profile/run/graph caller before changing ownership or delete rules. |
 | Implemented UI refresh | Resizable sidebar, vertical rail, D3 graph, pan/zoom/fit/reset, mobile drawer, focused modules/tests, and current `13fr 47fr` sidebar columns | Capture baseline desktop/mobile screenshots; do not plan or implement this UI again. |
 | Local services | Existing SQLite data, retained files, and Neo4j may contain pre-Phase-8 CVs without document snapshots | Migration must be data-preserving and must not call ShopAIKey. |
@@ -54,6 +57,9 @@ without injecting the whole CV into each prompt.
 - Refactor the existing profile extraction path into bounded document extraction,
   coverage/consolidation, and document-to-profile projection modules; reuse the
   parser, chunker, provider retry, Pydantic, and skill normalizer.
+- Consume the five Plan 2-owned CV Settings in extraction, consolidation, and
+  active-CV read services; add focused override tests proving each value changes
+  only its named runtime bound.
 - Add active/archived reprocessing and preserve the existing LangGraph
   interrupt/resume approval card and singleton draft lock.
 - Add retryable complete deletion for non-active CVs, including safe chat markers
@@ -83,6 +89,9 @@ without injecting the whole CV into each prompt.
   or changing the completed desktop/mobile navigation design.
 - Background workers, queues, distributed transactions, generic audit/event stores,
   or a new soft-delete framework.
+- Renaming the five CV variables, redefining their defaults/template/Compose
+  ownership, retaining `CV_DOCUMENT_BATCH_MAX_CHARS` as an alias, or adding a
+  second configuration source. Those external contracts belong to Plan 2.
 
 ## Target Directory Structure
 
@@ -142,6 +151,39 @@ be reduced or delegated to rather than expanded.
 
 ## Technical Specifications
 
+### CV Configuration Consumption
+
+- Consume, without renaming or redefining defaults, the five validated Settings
+  members produced by Plan 2:
+
+  ```text
+  CV_EXTRACT_BATCH_MAX_CHARS=12000
+  CV_CONSOLIDATE_BATCH_MAX_CHARS=12000
+  CV_READ_DEFAULT_MAX_CHARS=6000
+  CV_READ_HARD_MAX_CHARS=12000
+  CV_READ_MAX_RESULTS=10
+  ```
+
+- `CV_EXTRACT_BATCH_MAX_CHARS` bounds the raw ascending chunk-text payload sent
+  to each extraction batch. `CV_CONSOLIDATE_BATCH_MAX_CHARS` independently bounds
+  each fragment consolidation/merge payload; neither value is reused for the
+  other stage.
+- `CV_READ_DEFAULT_MAX_CHARS` is the server-selected response character cap when
+  a valid tool call omits `max_chars`. `CV_READ_HARD_MAX_CHARS` is the absolute
+  accepted response cap; a requested larger value is rejected by the existing
+  typed input boundary rather than silently bypassing it.
+- `CV_READ_MAX_RESULTS` is the absolute item-count cap for `section` and `search`;
+  `chunk` remains exactly one selected chunk page. A smaller valid caller value is
+  respected independently from the character cap.
+- Service constructors/functions receive these values from the one cached
+  Settings owner or explicit test seams. Do not import module-level duplicate
+  constants, read `.env` inside services, or accept client overrides beyond the
+  existing bounded tool fields.
+- Override tests must change one setting at a time and prove the corresponding
+  extraction, consolidation, default-read, hard-read, or result-count boundary
+  changes while the other four behaviors remain fixed. No test calls a real
+  provider or uses a real CV.
+
 ### Migration And Compatibility
 
 - Add `cv_documents` and `cv_document_drafts` exactly as defined by Master Section
@@ -166,15 +208,16 @@ be reduced or delegated to rather than expanded.
 
 - Keep `pypdf`, the existing deterministic chunker, provider retry wrapper, and
   structured-output adapter. Search their callers before extracting shared logic.
-- Partition the full ascending chunk sequence into bounded batches by a configured
-  character ceiling. Every batch carries attachment ID and exact ordinal range.
+- Partition the full ascending chunk sequence into bounded batches using
+  `CV_EXTRACT_BATCH_MAX_CHARS`. Every batch carries attachment ID and exact
+  ordinal range.
 - Each batch returns ordered `CVSection` fragments and `CVEntry` values with source
   chunk ordinals. Preserve original headings. Unknown headings use `kind='other'`;
   never coerce certificates, GPA, awards, projects, or other facts into skills.
 - Perform one logical consolidation stage over all fragments. If its input exceeds
-  the provider ceiling, merge adjacent fragment groups hierarchically with the same
-  bounded contract, then make one final merge. No model call receives the complete
-  raw PDF body merely because the CV is small enough.
+  `CV_CONSOLIDATE_BATCH_MAX_CHARS`, merge adjacent fragment groups hierarchically
+  under that independent ceiling, then make one final bounded merge. No model call
+  receives the complete raw PDF body merely because the CV is small enough.
 - Validate each structured model boundary and allow at most the existing one repair.
   Stable deterministic IDs derive from extraction version, section/entry ordinal,
   and normalized original heading, not model-generated UUIDs.
@@ -260,9 +303,11 @@ be reduced or delegated to rather than expanded.
   durable execution path. Do not add an Agent node or alter the six-iteration guard.
 - Implement `section`, `search`, and `chunk` modes from Master Section 13.7. Resolve
   active attachment server-side; reject archived/staged IDs even if guessed.
-- Enforce `max_results` and `max_chars` independently, return opaque cursor and
-  truncation metadata, and bind each cursor to active attachment ID, source hash,
-  mode, selector, and stable last ordinal/entry ID. An active switch invalidates it.
+- Enforce `max_results` and `max_chars` independently using
+  `CV_READ_MAX_RESULTS`, `CV_READ_DEFAULT_MAX_CHARS`, and
+  `CV_READ_HARD_MAX_CHARS`; return opaque cursor and truncation metadata, and bind
+  each cursor to active attachment ID, source hash, mode, selector, and stable last
+  ordinal/entry ID. An active switch invalidates it.
 - Search normalized structured entries and ordered chunks with a simple bounded local
   scan and stable source order. `ponytail:` O(n) search is intentional for one local
   active CV; replace it with SQLite FTS only if measured document size later exceeds
@@ -290,7 +335,10 @@ be reduced or delegated to rather than expanded.
 
 ## Implementation
 
-1. Run the existing backend/frontend baseline. Search all attachment, chunk,
+1. Run the existing backend/frontend baseline. Verify the Plan 2 Settings,
+   `.env.example`, and rendered backend Compose environment contain the five exact
+   CV variables and no obsolete `CV_DOCUMENT_BATCH_MAX_CHARS`; block before CV work
+   on any mismatch. Then search all attachment, chunk,
    extraction, approval, message/run/tool, checkpoint, storage, graph, observability,
    and sidebar callers. Record the existing ownership shapes needed for migration.
 2. Add failing schema/migration/repository tests, then implement document tables,
@@ -314,6 +362,7 @@ be reduced or delegated to rather than expanded.
 
 | Check | Command or procedure | Expected evidence |
 |---|---|---|
+| Configuration handoff | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_settings.py tests/unit/test_cv_document_extraction.py tests/unit/test_active_cv_reader.py -q`; then from root run `docker compose --env-file .env -f infrastructure/docker-compose.yml config` | Five exact Plan 2 variables/defaults are present in Settings/template/rendered backend env; one-at-a-time overrides affect only the named extraction/consolidation/read bound; obsolete `CV_DOCUMENT_BATCH_MAX_CHARS` is absent. |
 | Migration/schema | `Set-Location backend; py -3.13 -m pytest tests/integration/test_migrations.py tests/integration/test_database_contract.py -q` | Existing data survives; document/ownership/cascade/state contracts pass with no provider call. |
 | Document extraction | `Set-Location backend; py -3.13 -m pytest tests/unit/test_cv_document.py tests/unit/test_cv_document_extraction.py tests/unit/test_profile_extraction.py -q` | Full chunk coverage, bounded calls, deterministic IDs, Certifications/unknown heading retention, and profile projection pass. |
 | Reprocess/approval | `Set-Location backend; py -3.13 -m pytest tests/integration/test_cv_manager_api.py tests/integration/test_profile_approval.py tests/integration/test_interrupt_resume.py -q` | Active/archived reprocess, request changes, approval switch, rollback, SSE, and idempotency pass. |
@@ -334,6 +383,7 @@ be reduced or delegated to rather than expanded.
 | Producer | Artifact/contract | Assumption |
 |---|---|---|
 | Plans 1-7 | Implemented local product, one-Agent approval flow, source-of-truth data, graph/matching, and release baseline | Existing behavior is preserved unless Master Version 1.7 explicitly amends it. |
+| Plan_2 | Sole ownership of the five exact CV external names/defaults, Settings validation, `.env.example`, and backend Compose/process environment | Plan 9 consumes the five Settings members exactly and never creates another alias/default/env source. |
 | Plan_8 | Deterministic chunks, retained PDF/history, run observability, graph read model, and sidebar module baseline | Read functionality is extended, not reimplemented. |
 | UI refresh implementation | Resizable shell, tab rail, D3 graph, responsive drawer, tests, and current proportions | Phase 9 preserves colors, components, interaction model, and layout baseline. |
 | Master amendment | Phase 8 schema, extraction, lifecycle, API, graph, Agent, UI, and recovery contracts | Master Version 1.7 takes precedence over historical immutable-CV/read-only constraints. |
@@ -345,6 +395,7 @@ be reduced or delegated to rather than expanded.
 | Fresh portfolio review | Updated `Master_plan.md`, amended `Plan_8.md` handoff, and this `Plan_9.md` | Structural validator passes and requirement/ownership/verification contracts are reviewable end to end. |
 | Future task writing after approval | A reviewed Phase 8 implementation contract | Tasks may be derived only after a fresh plan review approves the complete portfolio. |
 | Implementation orchestration after tasks | CV Manager/document-first/active-read batch boundary | Future A1/A2/A3 evidence must map to this verification matrix without reopening prior UI scope. |
+| Future configuration maintenance | Effective extraction/consolidation/read consumers with one-at-a-time override coverage | Changes begin in Plan 2's external configuration owner and must rerun Plan 9 consumer tests; domain services never redefine the contract. |
 
 ### Next Consumer
 

@@ -215,7 +215,12 @@ and SSE/resume contracts are exercised unchanged through the browser.
 | Future maintenance | Prompt/graph tests and documented precedence | Regression suite proves analysis, opt-out, direct, malformed, and long-paste paths. |
 | Release handoff | Updated code, test/build evidence, healthy Docker stack | Commit, full gates, Compose health, and browser smoke are recorded. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_15.md` consumes the completed intent-aware pasted-JD confirmation and
+strict source-ownership baseline below, then improves semantic extraction quality
+and adds safe retained-JD re-extraction without changing Agent topology or the
+confirmation contract.
 
 Plan 14 is complete only when a large one-line or otherwise formatting-collapsed
 JD that the LLM recognizes as a passive save intent reaches the existing

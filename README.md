@@ -364,13 +364,28 @@ Python default.
 | `URL_FETCH_TIMEOUT_SECONDS` | Compose input; Settings default | Public JD URL request timeout | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
 | `URL_MAX_RESPONSE_MB` | Compose input; Settings default | Maximum public JD URL response size | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
 | `TOOL_LOOP_LIMIT` | Compose input; Settings default | Maximum Agent tool-loop passes | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
-| `CV_DOCUMENT_BATCH_MAX_CHARS` | No; Settings default | Character ceiling for document-first CV extraction batches | [Settings](backend/app/core/settings.py) |
 
-`CV_DOCUMENT_BATCH_MAX_CHARS` is currently a backend setting only: it is absent
-from the tracked template and is not passed into the backend container by
-Compose. Adding it only to the root `.env` therefore does not change the current
-Compose runtime; a deliberate Compose/process-environment change would also be
-required.
+### Pending CV configuration alignment
+
+The amended plan portfolio makes Plan 2 the sole external owner and Plan 9 the
+runtime consumer of this exact five-variable contract:
+
+| Variable | Required target behavior | Runtime consumer | Planning authority |
+| --- | --- | --- | --- |
+| `CV_EXTRACT_BATCH_MAX_CHARS=12000` | Root-template entry, validated Settings default, and explicit backend Compose pass-through | Raw ordered CV extraction batches | [Plan 2](docs/plans/Plan_2.md), [Plan 9](docs/plans/Plan_9.md) |
+| `CV_CONSOLIDATE_BATCH_MAX_CHARS=12000` | Root-template entry, validated Settings default, and explicit backend Compose pass-through | Fragment consolidation/merge batches | [Plan 2](docs/plans/Plan_2.md), [Plan 9](docs/plans/Plan_9.md) |
+| `CV_READ_DEFAULT_MAX_CHARS=6000` | Root-template entry, validated Settings default, and explicit backend Compose pass-through | Default bounded active-CV response size | [Plan 2](docs/plans/Plan_2.md), [Plan 9](docs/plans/Plan_9.md) |
+| `CV_READ_HARD_MAX_CHARS=12000` | Root-template entry, validated Settings default, and explicit backend Compose pass-through | Absolute active-CV response size | [Plan 2](docs/plans/Plan_2.md), [Plan 9](docs/plans/Plan_9.md) |
+| `CV_READ_MAX_RESULTS=10` | Root-template entry, validated Settings default, and explicit backend Compose pass-through | Absolute section/search result count | [Plan 2](docs/plans/Plan_2.md), [Plan 9](docs/plans/Plan_9.md) |
+
+This is an approved planning contract, not a claim that the current Plan 14
+runtime already supports those variables. The current source still contains the
+backend-only legacy `CV_DOCUMENT_BATCH_MAX_CHARS`; it is absent from
+`.env.example` and Compose. Do not add either the five new names or the legacy
+name to a local `.env` expecting them to affect the current Compose runtime.
+Implementation must replace the legacy field, wire all five names through the
+tracked template and backend Compose environment, add the Plan 2/Plan 9 tests,
+and revalidate before this section moves into the supported-variable table.
 
 ## Setup
 

@@ -16,7 +16,7 @@ At completion, the three services start locally, migrations work on fresh and in
 - Sections 14 and 14.1: `GET /api/health` is the only public functional endpoint owned in this phase.
 - Sections 15.1 and 15.3: Astryx shell/theme foundation and pinned public APIs.
 - Sections 21.1 and 21.2: SQLite-first ownership and idempotent Neo4j setup; domain sync remains later.
-- Sections 22–23: local bind safeguards and the exact one-root-`.env` contract.
+- Sections 22–23: local bind safeguards and the exact one-root-`.env` contract. Plan 2 solely owns external setting names/defaults, root-template entries, and Compose pass-through; later feature plans consume those settings in domain services.
 - Sections 24.1–24.2 and 24.5: database/infrastructure tests and local commands.
 - Section 25, “Phase 1 — Foundation, Docker, and source-of-truth data”: tasks and exit gate.
 
@@ -25,13 +25,14 @@ At completion, the three services start locally, migrations work on fresh and in
 | Requirement ID | Master section | Owned outcome | Verification evidence |
 |---|---|---|---|
 | Legacy Plan 2 scope | Master Phase 1: Foundation, Docker, and Source-of-Truth Data | Preserve the historical phase scope and outputs below. | Existing Verification section and accepted evidence. |
+| M2-CFG-01 | 23 | One authoritative Settings/root-`.env`/`.env.example`/Compose contract defines every Master variable, including the five CV extraction/read bounds later consumed by Plan 9. | Settings unit tests, rendered Compose environment inspection, root-template review, and the explicit Plan 2 → Plan 9 handoff. |
 
 ## Prerequisites
 
 - [ ] `docs/feasibility/phase_0_report.md` exists and every ShopAIKey, Astryx, pypdf, and embedding gate is PASS.
 - [ ] `frontend/package-lock.json` pins the verified Astryx version and the minimal frontend builds.
 - [ ] `backend/pyproject.toml` and the feasibility report identify compatible pinned dependency versions, including FastAPI `>=0.135.0`.
-- [ ] `.env.example` uses the Master Section 23 names and the developer’s root `.env` remains ignored.
+- [ ] `.env.example` is the documentation-only template for every Master Section 23 name, Compose passes every backend runtime variable from the root `.env`, and the developer’s root `.env` remains ignored.
 - [ ] The ShopAIKey diagnostic and PDF fixtures continue to pass; this phase does not replace them.
 
 ## Scope
@@ -40,6 +41,7 @@ At completion, the three services start locally, migrations work on fresh and in
 - Configure React, TypeScript, Vite, and the pinned Astryx neutral theme without building chat features.
 - Build backend/frontend Dockerfiles and local Docker Compose for frontend, backend, and Neo4j Community.
 - Load every runtime value from the single root `.env`; keep `.env.example` documentation-only.
+- Own the exact five CV setting names/defaults from Master Section 23 in the shared Settings model, `.env.example`, and backend Compose environment; Plan 9 owns only their document-extraction and active-read consumption.
 - Persist SQLite/files under one application volume and Neo4j data under its own volume.
 - Implement all application SQLAlchemy models, named constraints, indexes, foreign keys, and allowed static invariants from Master Section 6.
 - Create Alembic migrations for all application-owned tables and singleton seeds; never call `create_all()` at runtime.
@@ -151,9 +153,16 @@ MAX_PDF_PAGES: int = 10
 URL_FETCH_TIMEOUT_SECONDS: int = 10
 URL_MAX_RESPONSE_MB: int = 5
 TOOL_LOOP_LIMIT: int = 6
+CV_EXTRACT_BATCH_MAX_CHARS: int = 12000
+CV_CONSOLIDATE_BATCH_MAX_CHARS: int = 12000
+CV_READ_DEFAULT_MAX_CHARS: int = 6000
+CV_READ_HARD_MAX_CHARS: int = 12000
+CV_READ_MAX_RESULTS: int = 10
 ```
 
-The frontend reads only `VITE_API_BASE_URL`. Docker Compose loads the root `.env` and passes explicit variables to services. No frontend/backend `.env` files are allowed. Secrets must be masked by model representation and logs.
+The frontend reads only `VITE_API_BASE_URL`. Docker Compose loads the root `.env` and passes every backend variable above explicitly to the backend service; `.env.example` contains the same names and safe defaults but is never loaded at runtime. No frontend/backend `.env` files are allowed. Secrets must be masked by model representation and logs.
+
+Plan 2 is the sole owner of the five `CV_EXTRACT_*`, `CV_CONSOLIDATE_*`, and `CV_READ_*` external names, integer defaults, root-template entries, and Compose/process-environment wiring. All five values must be positive, and `CV_READ_DEFAULT_MAX_CHARS <= CV_READ_HARD_MAX_CHARS`. Do not retain or introduce `CV_DOCUMENT_BATCH_MAX_CHARS` as a Settings/template/Compose alias: an unrelated extra process variable may remain ignored under the existing Settings policy, but no application owner reads it. Plan 9 consumes the five Settings members directly and owns their domain behavior without redefining names or defaults.
 
 ### 7.2 Shared database conventions
 
@@ -256,6 +265,7 @@ SQLite health performs a trivial query through the configured application sessio
 - Mount one persistent application data volume for SQLite and uploaded files, and persistent Neo4j data/log volumes.
 - Backend depends on Neo4j health but treats Neo4j availability as a reported component state rather than changing SQLite ownership.
 - Load the single root `.env`; never mount `.env.example` as runtime configuration.
+- Pass the five Plan 2-owned CV variables explicitly into the backend container using the same root-`.env` interpolation contract as the other backend settings. A missing required root value must fail Compose configuration rather than silently create a second runtime default.
 
 ## Implementation
 
@@ -270,6 +280,7 @@ SQLite health performs a trivial query through the configured application sessio
 - [ ] Implement Neo4j driver lifecycle, connectivity, constraints, and 1536-dimensional cosine vector index setup.
 - [ ] Implement the validated health response and `GET /api/health` route.
 - [ ] Build Dockerfiles and Compose with root-env loading, persistent volumes, health checks, and loopback-only published ports.
+- [ ] Add the five CV setting fields/defaults and invariants to the shared Settings owner, document them in `.env.example`, pass them through Compose, and remove every application/template/Compose read of the obsolete `CV_DOCUMENT_BATCH_MAX_CHARS` name.
 - [ ] Add unit/integration tests for settings, secrets masking, PRAGMAs, every constraint/index/FK, singleton seeding, storage, health, and idempotent graph setup.
 - [ ] Run all local backend/frontend/migration/Compose checks and fix only Phase 1 scope failures.
 
@@ -316,6 +327,15 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml up --build
 Expected: Compose configuration resolves from the root env; frontend, backend, and Neo4j become healthy; no extra runtime service appears.
 
 ```powershell
+Set-Location backend
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_settings.py -q
+Set-Location ..
+docker compose --env-file .env -f infrastructure/docker-compose.yml config
+```
+
+Expected: Settings exposes the five exact Master names/defaults, rejects non-positive values and `CV_READ_DEFAULT_MAX_CHARS > CV_READ_HARD_MAX_CHARS`, `.env.example` documents all five, the rendered backend environment contains all five root-`.env` values, and no `CV_DOCUMENT_BATCH_MAX_CHARS` compatibility alias exists.
+
+```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
 
@@ -327,6 +347,7 @@ Expected: SQLite, filesystem, and Neo4j are `available` and overall health is su
 - Inspect published port bindings and confirm they use `127.0.0.1`.
 - Confirm application data survives container recreation and no runtime data enters Git.
 - Confirm `.env` is the only runtime environment file and secrets are absent from logs/health payloads.
+- Override each CV value in a disposable root `.env`, render Compose configuration, and prove the backend process receives that exact value; do not use real CV data or start extraction in this foundation check.
 - Inspect representative source files for single responsibility; split any newly created source file that grows materially beyond 300 lines unless a generated migration is the unavoidable exception.
 
 ### Failure handling
@@ -343,9 +364,13 @@ Expected: SQLite, filesystem, and Neo4j are `available` and overall health is su
 
 ### Produces
 - The completed Master Phase 1: Foundation, Docker, and Source-of-Truth Data artifacts, scope decisions, and verification evidence preserved below.
+- For Plan 9 specifically: the five exact validated CV Settings members, matching `.env.example` entries, and explicit backend Compose/process-environment pass-through. Plan 9 consumes these values and must not rename them, duplicate their defaults, or add another environment source.
 
 ### Next Consumer
-Plan_3.md consumes the produced artifacts and must not reimplement this phase's owned work.
+Plan_3.md consumes the produced foundation and must not reimplement this phase's
+owned work. Plan_9.md is the named later consumer of the five CV Settings values;
+the intervening plans pass through the one-root environment mechanism without
+renaming or taking ownership of those variables.
 
 ### Historical Handoff Notes
 
@@ -353,6 +378,7 @@ Plan 3 receives:
 
 - Runnable frontend/backend/Neo4j services under Docker Compose.
 - One validated settings object and one root `.env` contract.
+- A direct Plan 2 → Plan 9 configuration handoff for `CV_EXTRACT_BATCH_MAX_CHARS`, `CV_CONSOLIDATE_BATCH_MAX_CHARS`, `CV_READ_DEFAULT_MAX_CHARS`, `CV_READ_HARD_MAX_CHARS`, and `CV_READ_MAX_RESULTS`.
 - All application tables, named constraints, indexes, foreign keys, and singleton seeds at Alembic head.
 - Async application sessions with required PRAGMAs and shared UUID/UTC helpers.
 - Filesystem attachment storage primitives, but no upload/parse behavior.

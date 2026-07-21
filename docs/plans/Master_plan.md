@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 1.9
-**Date:** 2026-07-18
-**Status:** Amended for Plan 12 readable Agent responses, active-CV sources, and pasted-JD save confirmation; full plan portfolio requires fresh review before task writing
+**Version:** 2.0
+**Date:** 2026-07-21
+**Status:** Amended for Plan 15 guarded JD extraction, safe retained-JD re-extraction, and complete saved-JD detail; the incremental portfolio requires fresh review before task writing
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -29,6 +29,7 @@ The system must let the user:
 14. Persist at most one evaluation for the same JD and active CV/profile/preferences/scoring revision, mark older results as **Cần đánh giá lại**, and recompute only after an explicit user action.
 15. Render Agent answers as readable, conclusion-first Markdown and show an exact active-CV source dialog only when durable `read_active_cv` evidence exists.
 16. Recognize a passively pasted raw JD, show a concise preview, and require an explicit **Lưu JD** or **Không lưu** decision before any persistence, extraction, embedding, evaluation, or graph mutation.
+17. Validate extracted JD facts against their retained source, keep skill labels atomic, render the complete existing extraction contract, and let the user safely re-extract a retained JD without changing its identity or automatically evaluating it.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
@@ -65,7 +66,9 @@ Otherwise, it remains outside the MVP.
 - Manual JD input through public URL or raw text.
 - Conditional in-chat confirmation for passively pasted raw JD text before the input becomes an accepted Job.
 - JD persistence, quality classification, duplicate handling, and extraction.
+- Deterministic source-grounding, atomic-skill, duplicate, and required/preferred-group guards inside the existing single-pass JD extraction contract.
 - A compact saved-JD sidebar tab with detail, explicit evaluate/re-evaluate, and complete delete actions.
+- Explicit in-place re-extraction of one retained JD with compare-and-swap replacement, pre-commit preservation, stale evaluation projection, and rebuild guidance after post-commit graph failure.
 - Revision-keyed persisted JD evaluations that are reused for the same current context and become visibly stale after CV, profile, preference, or scoring-contract changes.
 - Vietnamese and English CV/JD content.
 - JD inputs from any job family, not only AI/NLP roles.
@@ -102,6 +105,9 @@ Otherwise, it remains outside the MVP.
 - LangSmith cloud dependency.
 - GitHub Actions or other CI workflows.
 - General-purpose external tools or long-term structured memory for unrelated conversation.
+- New JD fields for education, benefits, languages, compensation, employment type, hiring stages, or a generic JD document/section model.
+- Model comparison or upgrade, broad taxonomy expansion, blind delimiter-based skill splitting, or score-weight changes for JD extraction repair.
+- Automatic or bulk JD re-extraction, background extraction migration, and automatic evaluation after re-extraction.
 
 ---
 
@@ -363,7 +369,7 @@ Constraints:
 
 A scorable Job is exactly a row with `processing_status='processed'`, `jd_quality in ('full', 'partial')`, and embedding model/dimensions matching the locked runtime configuration; the database rules above guarantee that its embedding fields are present.
 
-Allowed transitions are `received → processing → processed | failed`, `received → failed` for fetch failure, and `failed → processing` only when the user resubmits the same content. `processed` is terminal in the MVP. A temporary URL placeholder may be deleted after its fetched hash selects an existing Job.
+Ordinary ingestion transitions are `received → processing → processed | failed`, `received → failed` for fetch failure, and `failed → processing` only when the user resubmits the same content. An explicit retained-JD re-extraction does not move the durable row into `processing`: it stages extraction and embedding outside a transaction, then compare-and-swap replaces only the processing result fields when the captured `updated_at` still matches and the new quality is `full` or `partial`. This permits failed, unscorable, partial, or full rows to become a new processed/scorable revision while preserving Job identity, source metadata, raw content/hash, and the current durable result on every pre-commit failure. A temporary URL placeholder may be deleted after its fetched hash selects an existing Job.
 
 #### `job_evaluations`
 
@@ -489,6 +495,7 @@ Application startup inserts missing singleton rows for `conversation('main')` an
 - **Profile approval decision:** both profile buttons resume the interrupted run. `request_changes` completes that run without deleting the draft; the following correction belongs to a new run.
 - **Pasted-JD confirmation:** a passive raw-JD paste first calls `save_job` with the durable current-message source. Validate and interrupt before any Job row, JD extraction/embedding provider call, evaluation, or graph write. The Agent's recognition decision may use its normal LLM call. `save_job` resumes the same `(run_id, tool_call_id)` and only then enters normal ingestion; `cancel_save_job` completes with `committed=false` and performs no ingestion side effect.
 - **JD ingestion:** for pasted text, compute the hash before insert; for a URL, commit a `received` placeholder, fetch outside a transaction, then compute the fetched-content hash. An exact match reuses the existing row: return it immediately when it is not failed, or clear its failure fields and retry it in place when `processing_status='failed'`; delete the temporary URL placeholder in either case. If no match exists, commit the raw text/hash with `processing_status='received'`. Set the selected row to `processing` in a short transaction, perform extraction and embedding calls without an open transaction, then persist the processed or failed terminal state in another short transaction. Direct Neo4j sync runs only after a scorable terminal commit.
+- **Retained-JD re-extraction:** load one Job and capture its `updated_at`; require its retained non-blank `raw_content`; then run guarded extraction, normalization, quality classification, and embedding outside a transaction without changing the row. If and only if the result is `full` or `partial`, atomically replace `processing_status`, `extraction_json`, `jd_quality`, `failure_code`, the embedding triplet, and `updated_at` where the captured revision still matches. A mismatch returns `JOB_REEXTRACT_CONFLICT`; provider, guard, normalization, quality, embedding, conflict, or SQLite failure preserves the prior Job and evaluation currentness. After commit, sync the same Job ID to Neo4j. A graph failure keeps the new SQLite truth, returns `NEO4J_SYNC_FAILED` plus rebuild guidance, and never rolls SQLite back. Re-extraction never changes source/raw identity and never invokes evaluation.
 - **JD evaluation:** resolve the current evaluation context from SQLite. Return a current persisted evaluation before any provider or graph scoring call. Otherwise compute one exact-Job result outside a transaction and insert it in a short transaction under the unique context key; a concurrent duplicate reloads the committed row. CV/profile/preference changes only alter the derived current hash and never launch background recomputation.
 - **JD deletion:** reject an unknown ID without mutation; idempotently delete only the exact Neo4j `Job.id` node and its incident Job relationships first, then delete the SQLite `job_posts` row in a short transaction so `job_evaluations` cascade. Preserve every shared `Skill` node, seed `RELATED_TO` relationship, Candidate/CV branch, and unrelated Job. Return success only after both stores confirm completion; a graph failure keeps SQLite data available for retry.
 - **Chat turn:** create the user message and `agent_runs` row together. Persist tool status transitions in short transactions. Persist the final assistant message and terminal run state together.
@@ -655,9 +662,15 @@ JobSkill
 - evidence: list[str]
 ```
 
-`JobPostExtraction` contains extracted facts only. The ingestion service assigns the authoritative `job_posts.jd_quality` column after validating the extraction.
+`JobPostExtraction` contains extracted facts only. Its field set remains unchanged for this increment. The locked structured provider remains `gpt-4o-mini`; the ingestion or re-extraction service assigns the authoritative `job_posts.jd_quality` column only after the semantic guard accepts the extraction.
 
 All evidence snippets must be short, relevant to the associated Candidate or Job skill, and copied from the source document. The LLM must not invent evidence.
+
+Before normalization or quality classification, one pure deterministic guard compares source facts using Unicode NFKC, collapsed whitespace, and Unicode casefold without removing punctuation or transliterating text. Every non-blank skill evidence snippet and responsibility, plus every non-null title, company, and location, must occur in the normalized retained JD. Summary remains a concise synthesis; seniority, work mode, and experience bounds remain schema-constrained model facts in this phase.
+
+Every provider skill label must name one atomic capability or technology. The guard never splits or rewrites labels and does not blindly split on `/`, `,`, or another delimiter. It rejects an unknown label that contains multiple approved skill aliases, combines an approved alias with qualifier words without exact normalizer resolution, or enumerates distinct skill-like terms. A small explicit punctuation-token exception set protects technical names such as `C/C++`, `.NET`, `Node.js`, and `CI/CD`; it is not a second taxonomy. Tentatively normalized canonical keys must be unique within each group and disjoint across required/preferred groups. Mandatory or neutral requirements remain required; preferred classification requires explicit optional/preferred wording in the source.
+
+The ordered internal guard vocabulary is exactly `EVIDENCE_NOT_IN_SOURCE`, `RESPONSIBILITY_NOT_IN_SOURCE`, `METADATA_NOT_IN_SOURCE`, `COMPOUND_SKILL_LABEL`, `DUPLICATE_SKILL`, and `SKILL_GROUP_CONFLICT`. At most 20 sanitized issues containing only code, field path, and safe structural counts may enter the existing single repair instruction. The complete raw JD remains only in the transient extraction messages; issue reports and logs contain no source/evidence values or provider payload. A second invalid result after that one repair fails safely as `INVALID_STRUCTURED_OUTPUT`; only an accepted extraction reaches `SkillNormalizer`, quality classification, embedding, persistence, graph synchronization, or scoring.
 
 ### 7.5 Tool execution result
 
@@ -714,9 +727,18 @@ SaveAndEvaluateResponse
 - evaluation_outcome: created | reused | unavailable
 - evaluation: JobEvaluationView | None
 - code: str | None
+
+ReextractJobResponse
+- outcome: updated
+- job: SavedJobListItem
+- sync_ok: bool
+- code: null | NEO4J_SYNC_FAILED
+- rebuild_instruction: str | None
 ```
 
 List responses never include raw JD text, extraction evidence bodies, embeddings, prompts, or provider payloads. Detail returns the validated extraction and may return the selected persisted raw JD within the existing accepted-input size bound. `evaluation_context_hash` is opaque comparison metadata; clients cannot submit or override it. `SaveAndEvaluateRequest` names only the initiating chat message; the server loads that exact durable content, treats a sole validated public HTTP(S) URL as URL input and otherwise treats the complete bounded message as raw JD text. It never accepts a client-supplied replacement body or infers from the latest message. A persisted but failed/unscorable JD returns `evaluation_outcome='unavailable'` plus a stable safe code rather than claiming that evaluation succeeded.
+
+Re-extraction accepts no request body containing replacement source, extraction, embedding, quality, or evaluation data. `sync_ok=true` requires null `code` and `rebuild_instruction`. A post-commit graph failure still returns HTTP 200 with `outcome='updated'`, `sync_ok=false`, `code='NEO4J_SYNC_FAILED'`, and the existing safe rebuild instruction because SQLite replacement succeeded. Every pre-commit failure uses the existing `detail={code, summary}` envelope and no response model; re-extraction adds `JOB_REEXTRACT_CONFLICT`, reuses the existing `JD_SOURCE_NOT_RECOVERABLE` with a path-appropriate safe summary, and preserves existing provider, embedding, `INVALID_STRUCTURED_OUTPUT`, `JOB_NOT_FOUND`, and `JOB_NOT_SCORABLE` codes.
 
 ---
 
@@ -922,8 +944,8 @@ accepted URL/text
 → delete the temporary URL placeholder when an existing row was selected
 → otherwise persist the unique pasted/fetched raw_content and hash before extraction
 → set processing_status=processing
-→ process/extract
-→ Pydantic validation and one repair
+→ one strict structured extraction with the locked provider
+→ Pydantic validation plus source/atomicity/group guard and at most one sanitized repair
 → normalize skills
 → classify quality
 → persist the terminal result
@@ -940,6 +962,12 @@ The submitted URL or pasted text is retained when fetching fails. Fetched/pasted
    - For text, do not insert a new row. For URL, delete the received placeholder before returning or retrying the existing row.
 
 Different content is always a new Job in the MVP. Do not add normalized-duplicate state or a `force_new` override.
+
+### 11.6 Retained-JD re-extraction
+
+The user may explicitly re-extract one retained failed, unscorable, partial, or full Job by ID. The server reloads its exact retained raw content and stages the same guarded extraction, deterministic normalization, quality classification, and embedding pipeline without mutating the current row or holding a transaction. A result replaces the existing processing fields only when it is `full` or `partial` and a repository compare-and-swap confirms the captured Job revision is still current.
+
+Replacement preserves Job ID, source type/URL, raw content/hash, and original identity. A successful SQLite replacement changes `updated_at`, so existing evaluations remain stored but become stale through the existing evaluation-context derivation; it never evaluates automatically. Every pre-commit failure leaves the previous extraction and evaluation state untouched. Neo4j synchronization occurs only after the SQLite commit and uses the existing same-ID Job sync; failure returns rebuild guidance while SQLite remains authoritative.
 
 ---
 
@@ -1166,6 +1194,7 @@ GET    /api/jobs?limit=<n>&before=<opaque_cursor>
 GET    /api/jobs/{job_id}
 POST   /api/jobs/save-and-evaluate
 POST   /api/jobs/{job_id}/evaluate
+POST   /api/jobs/{job_id}/reextract
 DELETE /api/jobs/{job_id}
 
 GET  /api/chat/history?limit=50&before=<opaque_cursor>
@@ -1182,8 +1211,8 @@ GET  /api/observability/graph
 
 ### 14.1 API rules
 
-- No public profile CRUD endpoints. The only direct CV writes are the named reprocess and delete actions; approval still uses the Agent interrupt/resume contract. Saved-JD routes are the only public Job write boundary and expose only save-and-evaluate, evaluate, and complete delete actions required by the sidebar/empty-state UX.
-- Agent Job tools and public saved-JD routes are thin adapters over the same JD ingestion, exact deduplication, matching/scoring, evaluation repository, graph synchronization/deletion, and safe-error services. Neither boundary duplicates business logic, and the deterministic public API does not depend on the LLM choosing or chaining `save_job → match_jobs`.
+- No public profile CRUD endpoints. The only direct CV writes are the named reprocess and delete actions; approval still uses the Agent interrupt/resume contract. Saved-JD routes are the only public Job write boundary and expose only save-and-evaluate, evaluate, retained-source re-extract, and complete delete actions required by the sidebar/empty-state UX.
+- Agent Job tools and public saved-JD routes are thin adapters over the same guarded JD extraction/ingestion, exact deduplication, matching/scoring, evaluation repository, graph synchronization/deletion, and safe-error services. Neither boundary duplicates business logic, and the deterministic public API does not depend on the LLM choosing or chaining `save_job → match_jobs`.
 - File upload and chat messages remain separate requests.
 - Sidebar upload immediately starts a chat turn containing the returned attachment ID.
 - `POST /api/chat/turns` returns an SSE stream.
@@ -1200,6 +1229,8 @@ GET  /api/observability/graph
 - `POST /api/jobs/save-and-evaluate` requires the exact initiating `source_message_id` from a completed run whose durable `match_jobs` result succeeded with `count=0`. The server loads that user message, resolves a sole validated public HTTP(S) URL or otherwise uses the complete bounded message as raw text, then reuses JD ingestion/exact deduplication and evaluates the resulting scorable Job. It returns an existing current evaluation when present. It never accepts replacement JD text from the client, selects the latest chat message, or asks the Agent to make a second tool decision.
 - `POST /api/jobs/{job_id}/evaluate` requires an active approved profile and a scorable Job. It returns `outcome='reused'` for the current context without provider/graph scoring calls, otherwise computes and persists exactly one result after the normal graph consistency gate. Stale rows remain immutable. No evaluation runs merely because a CV/profile/preference revision changed.
 - `DELETE /api/jobs/{job_id}` invokes the one complete deletion coordinator. It removes only exact Neo4j `Job.id` plus incident Job relationships, then the SQLite Job/evaluation rows, and returns `204` only after both stores succeed. It preserves shared Skill nodes, seed relationships, Candidate/CV data, and every unrelated Job; retry after a graph failure is safe.
+
+- `POST /api/jobs/{job_id}/reextract` accepts no replacement body, reloads the exact retained source, and stages guarded extraction/embedding before one compare-and-swap replacement. It returns `ReextractJobResponse` only after SQLite replacement; successful replacement preserves identity/source/raw fields, changes the Job revision, makes prior evaluations stale, and never evaluates. Pre-commit failure preserves the current Job. Post-commit graph failure returns HTTP 200 with `sync_ok=false`, `NEO4J_SYNC_FAILED`, and rebuild guidance. Unknown IDs, missing retained source, unscorable candidates, and revision conflicts use the safe typed errors in Section 7.7.
 
 ### 14.2 SSE contract
 
@@ -1239,6 +1270,8 @@ The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Neo4j gra
 - `Neo4j graph` renders the active CV, its dynamic sections/entries, and bounded Candidate/Job/Skill snapshot. After approval it changes to the newly active CV; after archived deletion it contains no nodes owned by the deleted CV.
 - `Agent runs` lists durable run/tool status and safe summaries, not arguments or internal traces.
 - `JD đã lưu` uses one sidebar-local compact list plus a selected detail view. Each row keeps title and company concise, shows processing/quality state and `none | current | stale` evaluation state, and may show the latest score. Selecting a row opens validated JD details and the persisted score/evidence breakdown. Per-JD actions are **Xem chi tiết**, **Đánh giá với CV** when no current result exists, **Đánh giá lại** only when stale, and **Xoá JD** behind an explicit confirmation. Use short one-line headings, existing typography/tokens/components, truncation with accessible full labels, and no overlapping or redundant titles.
+- The selected JD detail renders the complete existing extraction contract in four bounded areas: metadata (title, company, summary, seniority, experience range, location, work mode, and extraction confidence), ordered responsibilities, required skills, and preferred skills. Each skill shows its canonical display label and confidence; source evidence is expandable and collapsed by default. Empty lists render an explicit concise unavailable/none state, and raw source remains only in its existing bounded detail section.
+- The selected detail adds **Re-extract JD** behind a confirmation that states identity/raw source are preserved, pre-commit failure preserves the current extraction, successful replacement makes existing evaluation stale, and evaluation is never automatic. Disable the action while pending, never optimistically replace extraction state, refresh list/detail after success, surface a post-commit graph warning separately, and keep the displayed extraction on failure.
 - Collapsed state retains a keyboard-accessible expand control and compact active-profile/CV status. Responsive behavior must not hide the chat composer or trap focus.
 
 Do not add a full profile editor, arbitrary graph-query UI, a developer console, or direct activation that bypasses extraction and approval.
@@ -1293,7 +1326,7 @@ The observability tabs and CV Manager are sidebar-local read models plus two exp
 cache successful pages by query, and keep independent loading, empty, and error
 states. The graph panel renders the Master allowlisted bounded snapshot and its
 truncation metadata; it does not infer hidden properties or query for more nodes.
-Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Saved-JD reads/actions extend the same sidebar-local request/cache pattern with independent list/detail/action state. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, run, and evaluation-currentness caches; saved-JD evaluate/delete invalidates only affected job list/detail, graph, and visible chat-card state.
+Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Saved-JD reads/actions extend the same sidebar-local request/cache pattern with independent list/detail/action state. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, run, and evaluation-currentness caches; saved-JD evaluate/delete invalidates only affected job list/detail, graph, and visible chat-card state. Successful JD re-extraction refreshes the affected list/detail and evaluation-currentness projection, invalidates the bounded graph view, and never dispatches evaluate; a pre-commit error retains the current cached detail, while post-commit `NEO4J_SYNC_FAILED` refreshes SQLite-backed views and shows rebuild guidance.
 
 ### 15.7 Readable Agent responses and pasted-JD confirmation
 
@@ -1470,7 +1503,7 @@ Sort with unrounded values by `final_score DESC`, `skill_score DESC NULLS LAST`,
 
 ## 19. Manual JD Acceptance
 
-The developer validates JD behavior directly during local testing. No labeled JD dataset, benchmark suite, ranking metric, grid search, ablation, or evaluation report is required.
+The developer validates JD behavior directly during local testing. No broad labeled JD dataset, benchmark suite, ranking metric, grid search, ablation, model comparison, or evaluation report is required. Plan 15 does require a small repository-owned synthetic English/Vietnamese semantic corpus and one bounded explicit live-provider diagnostic because schema-only tests cannot prove source grounding, atomic skills, or required/preferred grouping.
 
 Use a small, disposable set of representative JDs to check:
 
@@ -1479,7 +1512,11 @@ Use a small, disposable set of representative JDs to check:
   evaluation work.
 - Full, partial, and unscorable JDs receive the expected quality status.
 - Title, required/preferred skills, seniority, location, and work mode look reasonable in the saved result.
+- Every guarded responsibility, title/company/location value, and skill evidence is grounded in the retained source under the NFKC/whitespace/casefold comparison contract; summary remains a synthesis.
+- Compound lists and alternatives become separate atomic skill rows, punctuation-bearing technical names remain atomic, unknown atomic skills remain valid, and canonical duplicates/cross-group conflicts are rejected rather than silently rewritten.
 - A processed exact duplicate returns the existing Job without reprocessing; a failed exact match retries the same row.
+- Re-extracting one retained synthetic JD preserves its ID/source/raw hash, replaces only with `full` or `partial`, makes an existing evaluation stale without evaluating, and leaves the prior extraction unchanged on a pre-commit failure.
+- Saved-JD detail displays metadata, experience, confidence, ordered responsibilities, distinct required/preferred skills, and expandable grounded evidence.
 - Matching returns plausible ordering for the active profile.
 - Score breakdown, matched skills, and missing skills agree with the displayed Candidate Profile and JD.
 - URL, extraction, provider, and Neo4j failures produce the documented fallback instead of false success.
@@ -1504,7 +1541,13 @@ These checks are manual product acceptance only. Automated functional tests rema
 | Passive pasted JD awaiting confirmation | Keep `save_job` running with no Job/JD-extraction/embedding/graph side effect; the normal Agent recognition call is allowed; require one allowed resume action |
 | User chooses **Không lưu** | Complete with `committed=false`; create no Job and make no extraction, embedding, evaluation, or Neo4j call |
 | JD extraction failure | Keep raw record with failed status |
+| Guarded output fails source/atomicity/group validation twice | Return `INVALID_STRUCTURED_OUTPUT`; persist no candidate replacement and expose no raw issue values |
 | Exact JD content match | Return an existing non-failed job; retry a failed row in place |
+| Retained Job has no recoverable raw source | Return `JD_SOURCE_NOT_RECOVERABLE`; preserve the Job |
+| Re-extraction result is unscorable | Return `JOB_NOT_SCORABLE`; preserve the current extraction and evaluation currentness |
+| Re-extraction snapshot changed before commit | Return `JOB_REEXTRACT_CONFLICT`; discard the staged result and never overwrite the newer revision |
+| Re-extraction provider/guard/embedding/SQLite failure | Preserve the exact current Job and evaluation currentness; return the existing safe typed error |
+| Neo4j unavailable after re-extraction SQLite commit | Keep the new SQLite revision; return HTTP 200 with `sync_ok=false`, `NEO4J_SYNC_FAILED`, and the rebuild instruction |
 | Neo4j unavailable during sync | Keep SQLite data; report `NEO4J_SYNC_FAILED` and offer the local rebuild command |
 | Neo4j unavailable during matching | Return `NEO4J_UNAVAILABLE`; do not return partial ranking |
 | SQLite/Neo4j revision mismatch | Return `NEO4J_REBUILD_REQUIRED`; do not rank stale graph data |
@@ -1525,6 +1568,7 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 - Use `Candidate.id='active'`, attachment UUID for `CV.id`, scoped deterministic CV section/entry IDs, the SQLite Job UUID, and `Skill.canonical_key` as Neo4j identities.
 - Copy the SQLite row's `updated_at` into Neo4j as `source_updated_at` on Candidate and Job nodes.
 - Use Neo4j uniqueness constraints and `MERGE` so rerunning the same sync is safe.
+- A successful retained-JD re-extraction synchronizes the same `Job.id`, replaces that Job's metadata plus `REQUIRES`/`PREFERS` edges from the committed SQLite extraction, and preserves shared Skill nodes, seed relationships, Candidate/CV data, and unrelated Jobs.
 - Do not add an outbox table, background worker, retry queue, or graph-sync state machine.
 
 ### 21.2 Local failure behavior
@@ -1614,6 +1658,8 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - UUID, UTC timestamp, enum, and singleton-ID conventions from Section 6.1.
 - Settings-dependent PDF/embedding limits are enforced by services rather than migration constants.
 - JD extraction and field validation.
+- NFKC/whitespace/casefold source comparison; grounded responsibility/evidence/direct-metadata checks; atomic-skill punctuation exceptions; unknown atomic acceptance; deterministic duplicate/cross-group issue ordering; and the exact six-code guard vocabulary.
+- One invalid semantic output sends at most 20 sanitized issues through the existing single repair, and a second invalid result fails without leaking source/evidence/provider values.
 - Skill canonicalization and alias resolution.
 - Exact-hash return and failed-row retry policies.
 - JD quality classification.
@@ -1647,6 +1693,9 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Active, staged, and failed CV hash reuse plus exact JD return/retry behavior.
 - `match_jobs` with deterministic fake embeddings.
 - Saved-JD list/detail pagination and redaction, one-click message/source binding, exact-hash save reuse, current evaluation reuse without provider calls, explicit stale re-evaluation, and no automatic recomputation after CV/profile/preference changes.
+- Retained-JD re-extraction success preserves identity/source/raw hash, replaces extraction/embedding under compare-and-swap, changes the revision, projects prior evaluation as stale, and makes zero evaluation calls. Provider, guard, embedding, unscorable, SQLite, and conflict failures preserve the prior row/currentness; post-commit Neo4j failure returns rebuildable partial success.
+- Text and URL ingestion use the same guarded extractor; exact non-failed duplicates still make zero provider, embedding, graph, or evaluation calls.
+- Same-ID Job graph synchronization replaces metadata and required/preferred edges while preserving shared Skills and unrelated graph branches.
 - Complete Job deletion removes SQLite evaluations and only the exact Neo4j Job branch while preserving shared Skill/seed/Candidate/CV data; graph failure retains SQLite state for retry.
 - Candidate/Job revision mismatch returns `NEO4J_REBUILD_REQUIRED`; unavailable Neo4j returns `NEO4J_UNAVAILABLE`.
 - Greeting and general-question turns persist messages and complete without tool events.
@@ -1679,6 +1728,7 @@ Normal automated tests must not call the real ShopAIKey API.
   preview-to-detail expansion, empty/loading/error states, and narrow layouts.
 - CV Manager active badge, reprocess/approval flow, active-delete guard, confirmed archived deletion, cache invalidation, and partial-cleanup errors within the existing refreshed layout.
 - `JD đã lưu` tab order, compact list/selected detail, current/stale labels, persisted evaluation rendering, explicit evaluate/re-evaluate/delete actions, concise headings, confirmation, and narrow-layout behavior.
+- Saved-JD detail renders metadata/experience/confidence, ordered responsibilities, distinct required/preferred skills, expandable evidence, and explicit empty states. Re-extract confirmation copy, request lock/cancel, success refresh/stale projection, graph warning, and pre-commit failure preservation are covered without optimistic replacement or raw-data leakage.
 
 ### 24.4 End-to-end smoke test
 
@@ -1701,6 +1751,9 @@ Send greeting
 → save/deduplicate/sync the exact initiating message without automatic evaluation
 → explicitly evaluate the saved JD with the active CV and display its persisted score and skill gaps
 → repeat evaluation with the same active context and verify the stored result is reused without provider scoring
+→ re-extract the retained synthetic JD and verify Job ID/source/raw hash stay unchanged while structured fields refresh
+→ verify the existing evaluation becomes stale and no evaluate request occurs
+→ inspect responsibilities, experience, confidence, required/preferred skills, and collapsed grounded evidence
 → activate an approved different CV and verify the saved JD shows Cần đánh giá lại without automatic recomputation
 → click Đánh giá lại and verify one new revision-keyed result
 → delete the JD and verify its SQLite evaluations and exact Neo4j Job branch are gone while shared Skills remain
@@ -1714,6 +1767,7 @@ The final README must provide single-purpose commands for:
 - Frontend lint/type-check/test.
 - Neo4j integration tests.
 - ShopAIKey compatibility smoke test.
+- Bounded guarded-JD synthetic live-provider diagnostic.
 - Manual JD acceptance checklist.
 - Full Docker Compose startup.
 
@@ -1969,6 +2023,27 @@ Exit gate:
 
 ---
 
+### Phase 11 - Guarded JD extraction and safe retained-JD re-extraction
+
+Tasks:
+
+- [ ] Strengthen the existing `gpt-4o-mini` structured-extraction prompt for source facts, atomic skills, and required/preferred semantics without changing `JobPostExtraction`.
+- [ ] Add the pure deterministic source/atomicity/duplicate/group guard, exact six issue codes, punctuation exceptions, sanitized 20-issue cap, and reuse of the one existing repair attempt before normalization.
+- [ ] Route ordinary text/URL ingestion through the guarded extractor while preserving exact duplicate, quality, embedding, persistence-first, graph-sync, and safe-failure behavior.
+- [ ] Add the retained-JD re-extraction service and repository compare-and-swap replacement, preserving identity/raw source on pre-commit failure, invalidating evaluation currentness only through Job revision, and synchronizing the committed same-ID Job to Neo4j.
+- [ ] Add `POST /api/jobs/{job_id}/reextract`, `ReextractJobResponse`, safe typed pre-commit errors, and SQLite-success/Neo4j-failure rebuild guidance without accepting client replacement content.
+- [ ] Render the full existing saved-JD extraction contract and add a locked confirmation-based **Re-extract JD** action with strict refresh/error behavior.
+- [ ] Add synthetic English/Vietnamese golden fixtures, deterministic unit/integration/frontend regressions, the bounded live-provider diagnostic, full local gates, and browser proof using synthetic content only.
+
+Exit gate:
+
+- Only source-grounded responsibilities/evidence/direct metadata and atomic, non-conflicting skill groups reach normalization, quality classification, embedding, persistence, graph synchronization, or scoring; a second invalid result fails safely after one sanitized repair.
+- Re-extraction preserves Job identity/source/raw content, atomically replaces only with `full` or `partial`, leaves the current row untouched on every pre-commit failure, makes prior evaluations stale without evaluating, and returns truthful rebuild guidance after a post-commit graph failure.
+- Saved-JD detail visibly exposes metadata, experience, confidence, ordered responsibilities, required/preferred skills, and collapsed source evidence, with usable empty states and no raw-data leakage.
+- Focused and full backend/frontend gates, plan validation, Docker health, bounded synthetic live-provider acceptance, and browser re-extraction evidence all pass without a new schema field, model, dependency, taxonomy owner, blind splitter, background worker, or scoring change.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -1986,8 +2061,9 @@ Recommended sequence for one intern developer:
 | Phase 8 | 5–8 days |
 | Phase 9 | 4–6 days |
 | Phase 10 | 5–8 days |
+| Phase 11 | 4–7 days |
 
-This is approximately 4–7 weeks part-time. Scope should be reduced, not infrastructure added, if the schedule slips.
+This is approximately 5–8 weeks part-time including the guarded-extraction repair increment. Scope should be reduced, not infrastructure added, if the schedule slips.
 
 ---
 
@@ -2007,8 +2083,10 @@ JobAgent MVP is done only when all conditions are true:
 - The user can submit public URL or raw JD text.
 - A passively pasted raw JD shows a concise unsaved preview and requires **Lưu JD** or **Không lưu** before any Job persistence, JD extraction/embedding, evaluation, or graph side effect; the normal Agent recognition call is allowed.
 - Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
+- Before a new extraction or re-extraction becomes scorable truth, guarded responsibilities/evidence/direct metadata are source-contained and skill rows are atomic, unique, and disjoint across required/preferred groups; the existing single repair is sanitized and bounded.
 - A successful zero-result match renders **Chưa có kết quả đánh giá** with a deterministic one-click **Lưu JD & đánh giá lại** recovery path.
 - The saved-JD library exposes compact list/detail and explicit evaluate/re-evaluate/delete actions directly below Agent runs.
+- Saved-JD detail renders the complete existing extraction fields and offers explicit safe re-extraction that preserves identity/raw source on pre-commit failure, replaces only with a scorable revision, makes prior evaluation stale, and never evaluates automatically.
 - The same JD and current evaluation context reuses one persisted result without repeat scoring; context changes show **Cần đánh giá lại** and never recompute automatically.
 - Complete JD deletion removes every persisted evaluation and only that Job's Neo4j node/relationships while preserving shared Skills and seed relationships.
 - Scorable jobs synchronize to Neo4j.
@@ -2017,10 +2095,10 @@ JobAgent MVP is done only when all conditions are true:
 - Assistant responses are readable semantic Markdown, user/system text remains literal, and active-CV source controls never appear without successful durable evidence.
 - The sidebar exposes CV Manager, opt-in chunk detail, Agent-run history, and the active-CV-derived graph without exposing internal data or redesigning the implemented observability shell.
 - Failure paths do not report false success.
-- Automated functional tests pass and the developer completes the manual JD acceptance checklist.
+- Automated functional tests pass, the bounded synthetic live-provider diagnostic proves semantic extraction invariants, and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.
 - No Qdrant, OCR, crawler, authentication, multi-agent, Redis, Celery, cloud deployment, or CI has been added.
-- No JD evaluation dataset/metric, outbox/worker/queue/sync-state machine, or production security subsystem has been added.
+- No broad JD benchmark/model-selection project, new JD schema field, blind skill splitter, outbox/worker/queue/sync-state machine, or production security subsystem has been added.
 
 ---
 
@@ -2045,11 +2123,11 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Phases 0-9 plus the completed Plan 11 desktop reliability repairs form the baseline. This Version 1.9 amendment locks the Phase 10 readable-response, active-CV-source, and pasted-JD save-confirmation increment, but implementation tasks must not be written until `Master_plan.md` and Plans 1-12 receive a fresh portfolio review.
+Phases 0-10 plus the approved Plan 14 intent-aware pasted-JD boundary form the baseline. This Version 2.0 amendment locks the Phase 11 guarded-extraction, complete saved-detail, and safe retained-JD re-extraction increment. `Plan_15.md` is the sole next implementation plan, but no `task_15.md` or product implementation may be written until the amended `Master_plan.md` and contiguous Plans 1-15 receive a fresh incremental portfolio review.
 
 The project remains intentionally narrow:
 
-> One user, one natural readable conversation, one approved active CV selected through CV Manager, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a compact saved-JD library, and explicit revision-keyed transparent evaluation.
+> One user, one natural readable conversation, one approved active CV selected through CV Manager, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, guarded source-grounded extraction with explicit safe repair, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a complete inspectable saved-JD detail, and explicit revision-keyed transparent evaluation.
 
 ---
 
