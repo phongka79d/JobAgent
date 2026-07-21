@@ -70,3 +70,120 @@ tuning. Secrets and raw CV/JD bodies are not recorded.
 ## Completeness reminder
 
 Mandatory Master §19 categories covered above: URL save; pasted-text save; full; partial; unscorable; extracted fields; exact duplicate return; failed-row retry; plausible ranking; score/evidence/gap agreement; URL/extraction/provider/Neo4j failures.
+
+---
+
+## Plan 15 Batch04 (04B) same-candidate release evidence
+
+Disposable sanitized observation only. Synthetic retained JD data only. No raw JD
+bodies, provider payloads, secrets, SQL/Cypher, screenshots, or runtime paths.
+
+### Attempt A1-a1 (historical — superseded by A1-a2 PASS below)
+
+- **plan_id / run / attempt:** plan15 · plan15-20260721T130225Z · 04B A1-a1
+- **Candidate HEAD:** `b98e606e4c3548db6dcf30e3c6c283ff9b67321f`
+- **Uncommitted Plan 15 allowed delta (read-only for 04B product code):** `README.md` (04A), `infrastructure/scripts/diagnose_jd_extraction.py` (04A); 04B product edit is this checklist append only
+- **Observation date (UTC):** 2026-07-21
+- **Stack:** normal three-service Compose (`infrastructure/docker-compose.yml`) rebuild + wait; health overall/sqlite/filesystem/neo4j all `available`
+- **Browser origin:** `http://localhost:5173/` (CORS-aligned with built `VITE_API_BASE_URL`); synthetic job id prefix `b62f6f20…`
+- **Overall gate result:** **BLOCKED / incomplete release** — full backend `pytest -q` failed (18 tests); repair is outside 04B docs-only scope
+
+### Automated and live gates (same candidate)
+
+| Gate | Result | Sanitized evidence |
+|---|---|---|
+| Focused backend Plan 15 pytest subset | PASS | exit 0 (all selected unit/integration dots green) |
+| Backend ruff | PASS | exit 0; All checks passed |
+| Backend mypy | PASS | exit 0; Success: no issues found in 127 source files |
+| Full backend pytest | **FAIL** | exit 1; 18 failed (route allowlists missing `POST /api/jobs/{job_id}/reextract`; `test_job_tools` / e2e demo FakeJdInvoker payloads ungrounded under semantic guard → PROVIDER_ERROR / call-count mismatch) |
+| Focused frontend saved-JD vitest | PASS | 4 files / 57 tests passed |
+| Full frontend vitest | PASS | 27 files / 332 tests passed |
+| Frontend lint / typecheck / build | PASS | all exit 0 |
+| Plan structure Plans 1–15 | PASS | `valid: true`, contiguous Plan_1…Plan_15, no errors |
+| Live synthetic JD diagnostic (04A) | PASS | exit 0; live_case_count=3; en_sectioned_atomic/vi_one_line_nfkc/en_contact_only PASS; JD_EXTRACTION_DIAGNOSTIC=PASS; no source/provider/secret print |
+| Docker Compose build/start/health | PASS | `up --build -d --wait --wait-timeout 180` exit 0; `/api/health` overall/sqlite/filesystem/neo4j=`available` |
+| Scope hygiene (04B product edit) | PASS for 04B owner | this file only for 04B; combined tree still carries 04A diagnostic+README and orchestrator checkbox on `docs/tasks/task_15.md` (not edited by 04B) |
+
+### Browser re-extraction success (synthetic retained Job)
+
+| Observation | Result | Sanitized evidence |
+|---|---|---|
+| Shell + Saved JDs tab | PASS | `http://localhost:5173/`; tab `jobagent-obs-tab-saved-jobs` |
+| Extraction groups visible | PASS | metadata, responsibilities, required/preferred skills, evidence, source, evaluation all present |
+| Confirm **Re-extract JD** once | PASS | dialog open → confirm; `POST /api/jobs/{id}/reextract` HTTP 200; dialog closed |
+| Stable Job identity / source type | PASS | same Job id prefix `b62f6f20…`; `source_type=text` retained |
+| Refreshed detail + stale evaluation | PASS | pre eval=`current` / no stale banner → post eval=`stale` + stale banner; extraction confidence refreshed (0.95→0.9); detail remains |
+| No evaluate side effect | PASS | zero `POST …/evaluate` network calls on success path |
+| Graph / rebuild | PASS | success path `sync_ok` implied by healthy reextract HTTP 200 without rebuild banner; Compose neo4j available |
+| Console / privacy | PASS | no secret/raw-JD console dumps; no Traceback observed on success path |
+
+### Controlled pre-commit failure browser check
+
+| Observation | Result | Sanitized evidence |
+|---|---|---|
+| Controlled pre-commit seam | PASS | Playwright route fulfill `POST …/reextract` → HTTP 502 `detail.code=PROVIDER_ERROR` (synthetic summary only) |
+| Dialog unlock / action re-enabled | PASS | dialog closed; re-extract control enabled after failure |
+| Prior detail/evaluation preserved | PASS | detail present; source length unchanged; stale banner state unchanged |
+| Safe error visible | PASS | action error surface + expected 502 console resource status only |
+| No optimistic graph/evaluate | PASS | zero evaluate POSTs; no graph mutation call observed |
+
+### Repair routing (not executed in 04B)
+
+1. **Public route allowlists** (`backend/tests/integration/test_chat_api.py`, `test_health.py`, `test_cv_api.py` and related source-tree route scanners): add exact `POST /api/jobs/{job_id}/reextract` after Plan 15 02B API. Owner: post-02B allowlist repair (outside 04B).
+2. **Agent save_job fakes** (`backend/tests/integration/test_job_tools.py`, e2e demo flow FakeJdInvoker payloads): ground title/company/responsibilities/skills/location evidence to the fixture JD text (same hygiene already applied in `test_saved_jobs_api.py`). Owner: post-01B guard regression in job-tool tests (outside 04B).
+
+After those repairs on an unchanged product candidate, re-run full backend pytest then re-execute 04B gates and replace/amend this evidence row with a full PASS release entry.
+
+### Attempt A1-a2 (authoritative release — supersedes A1-a1)
+
+- **plan_id / run / attempt:** plan15 · plan15-20260721T130225Z · 04B A1-a2
+- **Candidate HEAD:** `b98e606e4c3548db6dcf30e3c6c283ff9b67321f`
+- **Uncommitted Plan 15 candidate delta (read-only for 04B except this checklist):** `README.md` + `infrastructure/scripts/diagnose_jd_extraction.py` (04A); orchestrator-applied test hygiene (`backend/tests/integration/test_chat_api.py`, `test_health.py`, `test_cv_api.py`, `test_job_tools.py`, `backend/tests/e2e/test_demo_flow.py`); `docs/tasks/task_15.md` orchestrator checkbox (not edited by 04B)
+- **Observation date (UTC):** 2026-07-21
+- **Stack:** normal three-service Compose (`infrastructure/docker-compose.yml`) `up --build -d --wait --wait-timeout 180`; health overall/sqlite/filesystem/neo4j all `available`
+- **Browser origin:** `http://localhost:5173/`; synthetic job id prefix `b62f6f20…` (retained text JD with current evaluation before success path)
+- **Overall gate result:** **PASS / complete same-candidate release** — every required automated, live-provider, Docker, browser success/failure, privacy, and scope gate green on this candidate
+
+#### Automated and live gates (same candidate, fresh A1-a2)
+
+| Gate | Result | Sanitized evidence |
+|---|---|---|
+| Focused backend Plan 15 pytest subset | PASS | exit 0; all selected unit/integration tests green |
+| Backend ruff | PASS | exit 0; All checks passed |
+| Backend mypy | PASS | exit 0; Success: no issues found in 127 source files |
+| Full backend pytest | PASS | exit 0; full suite green (hygiene applied in worktree; no product edit by 04B) |
+| Focused frontend saved-JD vitest | PASS | 4 files / 57 tests passed |
+| Full frontend vitest | PASS | 27 files / 332 tests passed |
+| Frontend lint / typecheck / build | PASS | all exit 0 |
+| Plan structure Plans 1–15 | PASS | `valid: true`, contiguous Plan_1…Plan_15, `errors: []` |
+| Live synthetic JD diagnostic (04A) | PASS | exit 0; live_case_count=3; en_sectioned_atomic/vi_one_line_nfkc/en_contact_only PASS; JD_EXTRACTION_DIAGNOSTIC=PASS; no source/provider/secret print |
+| Docker Compose build/start/health | PASS | compose exit 0; `/api/health` overall/sqlite/filesystem/neo4j=`available` |
+| Scope hygiene (04B product edit) | PASS for 04B owner | 04B writes only this checklist; combined tree retains 04A diagnostic+README, orchestrator test hygiene, and task checkbox (not product repairs by 04B) |
+
+#### Browser re-extraction success (synthetic retained Job)
+
+| Observation | Result | Sanitized evidence |
+|---|---|---|
+| Shell + Saved JDs tab | PASS | `http://localhost:5173/`; tab `jobagent-obs-tab-saved-jobs` |
+| Extraction groups visible | PASS | extraction, metadata, responsibilities, required/preferred skills, evidence, source, evaluation all present |
+| Confirm **Re-extract JD** once | PASS | dialog open → confirm; `POST /api/jobs/{id}/reextract` HTTP 200; dialog closed; 1 success reextract POST |
+| Stable Job identity / source type | PASS | same Job id prefix `b62f6f20…`; `source_type=text` retained; source length unchanged |
+| Refreshed detail + stale evaluation | PASS | pre: no stale banner (current eval) → post: stale banner present; detail remains |
+| No evaluate side effect | PASS | zero `POST …/evaluate` network calls on success path |
+| Graph / rebuild | PASS | reextract HTTP 200 without rebuild/error surface; Compose neo4j available |
+| Console / privacy | PASS | no secret/raw-JD/traceback console dumps on success path |
+
+#### Controlled pre-commit failure browser check
+
+| Observation | Result | Sanitized evidence |
+|---|---|---|
+| Controlled pre-commit seam | PASS | Playwright route fulfill `POST …/reextract` → HTTP 502 `detail.code=PROVIDER_ERROR` (synthetic summary only) |
+| Dialog unlock / action re-enabled | PASS | dialog closed; re-extract control enabled after failure |
+| Prior detail/evaluation preserved | PASS | detail present; source length unchanged; stale banner state unchanged |
+| Safe error visible | PASS | action error surface shows safe PROVIDER_ERROR summary; console only expected 502 resource status |
+| No optimistic graph/evaluate | PASS | zero evaluate POSTs; no graph mutation call observed |
+
+#### Notes
+
+- Residual live-provider variance remains possible on reextract; A1-a2 success path used one retained synthetic job after ensuring evaluation current.
+- A1-a1 full-pytest red was resolved outside 04B via orchestrator test-only hygiene already present in the worktree; 04B re-verified full matrix freshly and did not edit tests/product.

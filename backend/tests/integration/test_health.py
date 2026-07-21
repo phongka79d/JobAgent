@@ -248,6 +248,7 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
         ("POST", "/api/cvs/{attachment_id}/reprocess"),
         ("POST", "/api/jobs/save-and-evaluate"),
         ("POST", "/api/jobs/{job_id}/evaluate"),
+        ("POST", "/api/jobs/{job_id}/reextract"),
     ]
     with health_client() as client:
         assert sorted(public_api_routes(client.app)) == sorted(expected)
@@ -292,6 +293,8 @@ def test_source_tree_has_no_other_route_decorators() -> None:
             "'/jobs', response_model=SavedJobListPage)",
             "jobs.py:post_evaluate_job:router.post("
             "'/jobs/{job_id}/evaluate', response_model=EvaluateJobResponse)",
+            "jobs.py:post_reextract_job:router.post("
+            "'/jobs/{job_id}/reextract', response_model=ReextractJobResponse)",
             "jobs.py:post_save_and_evaluate:router.post("
             "'/jobs/save-and-evaluate', response_model=SaveAndEvaluateResponse)",
             "observability.py:get_observability_chunk_detail:router.get("

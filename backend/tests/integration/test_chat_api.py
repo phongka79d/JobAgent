@@ -101,6 +101,7 @@ def test_public_routes_are_exactly_seven_master_endpoints(
         ("POST", "/api/cvs/{attachment_id}/reprocess"),
         ("POST", "/api/jobs/save-and-evaluate"),
         ("POST", "/api/jobs/{job_id}/evaluate"),
+        ("POST", "/api/jobs/{job_id}/reextract"),
     ]
     with health_client() as client:
         routes = sorted(public_api_routes(client.app))
@@ -550,6 +551,7 @@ def test_resume_unknown_run_404(
 _PUBLIC_JD_MESSAGE = (
     "Job Description\n"
     "Backend Engineer at Acme\n"
+    "Location: Berlin\n"
     "Responsibilities\n"
     "- Design REST services\n"
     "- Own deployments\n"
@@ -634,17 +636,18 @@ def test_public_passive_binding_aware_confirmation_card(
         Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
     )
     normalizer = SkillNormalizer.from_path(skills)
+    # Grounded to _BINDING_AWARE_PUBLIC_JD (Plan 15 semantic guard).
     extracted = ExtractedJobPost.model_validate(
         {
             "title": "Synthetic Platform Engineer",
             "company": "Plan13 Labs",
-            "summary": "Build local APIs.",
+            "summary": "Build FastAPI services",
             "responsibilities": ["Build FastAPI services"],
             "required_skills": [
                 {
                     "name": "Python",
                     "confidence": 0.9,
-                    "evidence": ["Python backend experience"],
+                    "evidence": ["two years of Python backend experience"],
                 }
             ],
             "preferred_skills": [],
@@ -652,7 +655,7 @@ def test_public_passive_binding_aware_confirmation_card(
             "min_experience_years": 2.0,
             "max_experience_years": 5.0,
             "location": "Hanoi",
-            "work_mode": "hybrid",
+            "work_mode": "unknown",
             "extraction_confidence": 0.85,
         }
     )
@@ -754,17 +757,20 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
     )
     normalizer = SkillNormalizer.from_path(skills)
 
+    # Grounded to _PUBLIC_JD_MESSAGE (Plan 15 semantic guard).
     extracted = ExtractedJobPost.model_validate(
         {
             "title": "Backend Engineer",
             "company": "Acme",
-            "summary": "Build and maintain APIs.",
+            "summary": "build APIs for local demo customers with care",
             "responsibilities": ["Design REST services", "Own deployments"],
             "required_skills": [
                 {
                     "name": "Python",
                     "confidence": 0.9,
-                    "evidence": ["Required: 3+ years Python"],
+                    "evidence": [
+                        "3+ years Python experience required for this role"
+                    ],
                 }
             ],
             "preferred_skills": [],
@@ -772,7 +778,7 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
             "min_experience_years": 3.0,
             "max_experience_years": 5.0,
             "location": "Berlin",
-            "work_mode": "hybrid",
+            "work_mode": "unknown",
             "extraction_confidence": 0.85,
         }
     )

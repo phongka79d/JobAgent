@@ -19,11 +19,12 @@ this repository is not configured as a public or multi-user service.
 
 ## Current Baseline
 
-The last committed product baseline is **Plan 15 Batch01** at commit
-`5208ea50` (`P15B1: Complete`). **Plan 15 Batch02** (Safe Retained-JD
-Replacement and Public API) and **Batch03** (Complete Saved-JD Detail and
-Re-extraction UI) are implemented on the working tree over that base:
+The last committed product baseline is **Plan 15 Batch03** at commit
+`b98e606e` (`P15B3: Complete`), after Batch01 (`5208ea50`) and Batch02
+(`186c7b8`):
 
+- Batch01: pure semantic guard, guarded extractor integration, synthetic golden
+  fixture, and ingestion routing through the guarded path.
 - Batch02: revision-checked same-ID extraction replacement, staged re-extraction
   coordinator (provider/embedding outside transactions; CAS on `id` +
   `updated_at`), and strict `POST /api/jobs/{job_id}/reextract` with coupled
@@ -32,6 +33,13 @@ Re-extraction UI) are implemented on the working tree over that base:
   `JobReextractDialog`, and sole-owner non-optimistic re-extraction through
   `useSavedJobsState` in `ObservabilitySidebar` (graph-generation invalidation
   reused; no second state owner).
+
+**Plan 15 Batch04** (Diagnostic and Release Evidence) is on the working tree over
+that base: bounded live synthetic JD diagnostic
+(`infrastructure/scripts/diagnose_jd_extraction.py`), README command docs,
+append-only sanitized acceptance ledger rows, and test-only allowlist/fixture
+hygiene so full backend gates stay green after the re-extract route and semantic
+guard.
 
 Scope, acceptance, and design authority:
 
@@ -519,6 +527,7 @@ Set-Location ..
 python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\verify_pdf_extraction.py
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\diagnose_shopaikey.py
+$env:PYTHONPATH=(Resolve-Path 'backend').Path; & '.\.venv\Scripts\python.exe' infrastructure/scripts/diagnose_jd_extraction.py --cases backend/tests/fixtures/jd_extraction_golden.json
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\rebuild_neo4j.py --help
 ```
 
@@ -527,6 +536,16 @@ provider credentials. It reports capability-level results without printing the
 key. The PDF diagnostic uses committed synthetic fixtures. Most backend and
 frontend automated tests use fakes, disposable stores, and synthetic fixtures;
 they do not require or justify using real CV or JD content.
+
+The JD extraction diagnostic is a separate explicit live-provider check over a
+finite approved subset of the repository-authored synthetic golden fixture. It
+requires valid root `.env` ShopAIKey credentials and network access, uses the
+locked configured chat model and the production guarded extractor only, and
+prints only case IDs with safe pass/fail codes (never source text, evidence,
+prompts, provider payloads, secrets, or raw errors). It does not persist,
+embed, sync graph state, or evaluate matches. Passing fake-provider unit tests
+alone does not prove live semantic extraction quality; this command is not a
+model benchmark or broad quality score.
 
 The host `rebuild_neo4j.py --help` command is non-destructive and prints the
 authorized Compose rebuild command. It never opens the stores. Use the live
@@ -659,9 +678,11 @@ sanitized manual and browser procedures.
 - [Master Plan](docs/plans/Master_plan.md) — stable product scope,
   architecture, data contracts, failure policy, and definition of done.
 - [Plan 15](docs/plans/Plan_15.md) — guarded JD extraction, safe re-extraction,
-  and saved-JD completeness (Batch01 committed; Batch02–Batch03 on the working
-  tree).
+  and saved-JD completeness (Batch01–Batch03 committed; Batch04 diagnostic and
+  release evidence on the working tree).
 - [Task 15](docs/tasks/task_15.md) — Plan 15 batch/task contracts and validation.
+- [Manual JD checklist](docs/acceptance/manual_jd_checklist.md) — includes dated
+  Plan 15 Batch04 same-candidate release evidence (synthetic/sanitized only).
 - [Plan 14](docs/plans/Plan_14.md) — prior committed intent-aware pasted-JD
   confirmation design and verification contract.
 - [Task 14](docs/tasks/task_14.md) — executable task boundaries, acceptance

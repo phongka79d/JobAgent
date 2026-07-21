@@ -93,17 +93,25 @@ def _vector(seed: float = 0.01) -> list[float]:
     return [seed + (i * 1e-6) for i in range(LOCKED_EMBEDDING_DIMENSIONS)]
 
 
+# Default retained source for FakeJdInvoker([_full_extracted()]) cases (Plan 15).
+_GROUNDED_SAVE_JD = (
+    "Backend Engineer at Acme. Design REST services. Own deployments. "
+    "Location: Berlin. Required: 3+ years Python."
+)
+
+
 def _full_extracted(**overrides: Any) -> ExtractedJobPost:
+    """Provider payload grounded against ``_GROUNDED_SAVE_JD`` (Plan 15 guard)."""
     base: dict[str, Any] = {
         "title": "Backend Engineer",
         "company": "Acme",
-        "summary": "Build and maintain APIs.",
+        "summary": "Design REST services",
         "responsibilities": ["Design REST services", "Own deployments"],
         "required_skills": [
             {
                 "name": "Python",
                 "confidence": 0.9,
-                "evidence": ["Required: 3+ years Python"],
+                "evidence": ["3+ years Python"],
             }
         ],
         "preferred_skills": [],
@@ -111,7 +119,7 @@ def _full_extracted(**overrides: Any) -> ExtractedJobPost:
         "min_experience_years": 3.0,
         "max_experience_years": 5.0,
         "location": "Berlin",
-        "work_mode": "hybrid",
+        "work_mode": "unknown",
         "extraction_confidence": 0.85,
     }
     base.update(overrides)
@@ -471,10 +479,7 @@ def test_save_job_created_compact_and_no_raw(db_path: Path) -> None:
                 embedding_client=embedder,
                 job_sync_fn=sync,
             )
-            jd = (
-                "Backend Engineer at Acme. Design REST services. "
-                "Required: 3+ years Python."
-            )
+            jd = _GROUNDED_SAVE_JD
             result = await _ainvoke_save(
                 tool_fn,
                 run_id=run_id,
@@ -522,7 +527,7 @@ def test_save_job_returned_and_retried_outcomes(db_path: Path) -> None:
                 embedding_client=embedder,
                 job_sync_fn=sync,
             )
-            jd = "Unique JD body for return/retry path. Python required."
+            jd = f"Unique JD body for return/retry path. {_GROUNDED_SAVE_JD}"
             first = await _ainvoke_save(
                 tool_fn, run_id=run_id, tool_call_id="call_new", text=jd
             )
@@ -612,7 +617,7 @@ def test_save_job_sync_failed_sqlite_committed_truth(db_path: Path) -> None:
                 tool_fn,
                 run_id=run_id,
                 tool_call_id="call_sync_fail",
-                text="JD that processes then fails graph sync. Python.",
+                text=f"JD that processes then fails graph sync. {_GROUNDED_SAVE_JD}",
             )
             assert result.ok is False
             assert result.code == NEO4J_SYNC_FAILED
@@ -680,10 +685,7 @@ def test_save_job_allowed_in_all_master_authorization_states(
                 tool_fn,
                 run_id=run_id,
                 tool_call_id=f"call_auth_{label}",
-                text=(
-                    f"Auth-state JD for {label}. "
-                    "Backend Engineer. Required: 3+ years Python."
-                ),
+                text=f"Auth-state JD for {label}. {_GROUNDED_SAVE_JD}",
             )
             assert result.ok is True, f"{label}: {result.code} {result.summary}"
             assert result.data is not None
@@ -716,10 +718,7 @@ def test_save_job_url_path_and_fetch_failure(db_path: Path) -> None:
 
             async def ok_fetcher(url: str) -> UrlFetchResult:
                 return UrlFetchResult(
-                    text=(
-                        "Fetched JD title Backend. Design REST services. "
-                        "Required: Python."
-                    ),
+                    text=f"Fetched JD body. {_GROUNDED_SAVE_JD}",
                     failure_code=None,
                 )
 
@@ -793,17 +792,18 @@ def test_save_job_same_identity_replay_no_second_side_effect(db_path: Path) -> N
                 embedding_client=embedder,
                 job_sync_fn=sync,
             )
+            replay_jd = f"Replay identity JD. {_GROUNDED_SAVE_JD}"
             first = await _ainvoke_save(
                 tool_fn,
                 run_id=run_id,
                 tool_call_id="call_replay_once",
-                text="Replay identity JD. Python engineer role.",
+                text=replay_jd,
             )
             second = await _ainvoke_save(
                 tool_fn,
                 run_id=run_id,
                 tool_call_id="call_replay_once",
-                text="Replay identity JD. Python engineer role.",
+                text=replay_jd,
             )
             assert first.model_dump(mode="json") == second.model_dump(mode="json")
             assert len(invoker.calls) == 1
@@ -1076,7 +1076,7 @@ def test_sync_failed_tool_execution_status_failed(db_path: Path) -> None:
                 tool_fn,
                 run_id=run_id,
                 tool_call_id="call_sync_status",
-                text="Sync fail status coupling JD. Python.",
+                text=f"Sync fail status coupling JD. {_GROUNDED_SAVE_JD}",
             )
             assert result.ok is False
             assert result.code == NEO4J_SYNC_FAILED
@@ -1106,7 +1106,7 @@ def test_save_job_history_and_current_sse_exclude_raw_and_embeddings(
 
     unique_raw = (
         "UNIQUE_RAW_JD_BODY_PRIVACY_MARKER_03B xyzzy-private-content. "
-        "Design REST services with embedded secrets. Required: Python."
+        f"{_GROUNDED_SAVE_JD} Design REST services with embedded secrets."
     )
 
     async def _body() -> None:
@@ -1232,6 +1232,7 @@ def test_save_job_history_and_current_sse_exclude_raw_and_embeddings(
 _OBVIOUS_JD_MESSAGE = (
     "Job Description\n"
     "Backend Engineer at Acme\n"
+    "Location: Berlin\n"
     "Responsibilities\n"
     "- Design REST services\n"
     "- Own deployments\n"

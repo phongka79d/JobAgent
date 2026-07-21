@@ -1262,4 +1262,6 @@ def test_profile_routes_have_no_write_crud_and_are_thin() -> None:
         if path in {"/api/profile", "/api/profile/cv"}:
             assert method == "GET"
     # Plan 10 expanded public surface (observability + CV manager + saved-JD jobs).
-    assert len(routes) == 20
+    # Plan 15 adds POST /api/jobs/{job_id}/reextract.
+    assert len(routes) == 21
+    assert ("POST", "/api/jobs/{job_id}/reextract") in routes

@@ -150,22 +150,23 @@ def _extracted_profile() -> ExtractedCandidateProfile:
 
 
 def _extracted_jd() -> ExtractedJobPost:
+    # Grounded to SYNTHETIC_JD_TEXT (Plan 15 semantic guard).
     return ExtractedJobPost.model_validate(
         {
             "title": "Backend Engineer",
             "company": "Acme Corp",
-            "summary": "Build and maintain REST APIs.",
-            "responsibilities": ["Design Python services", "Own deployments"],
+            "summary": "Build REST APIs in Python.",
+            "responsibilities": ["Build REST APIs in Python"],
             "required_skills": [
                 {
                     "name": "Python",
                     "confidence": 0.95,
-                    "evidence": ["Required: Python"],
+                    "evidence": ["Required: Python and SQL"],
                 },
                 {
                     "name": "SQL",
                     "confidence": 0.9,
-                    "evidence": ["Required: SQL"],
+                    "evidence": ["Required: Python and SQL"],
                 },
             ],
             "preferred_skills": [],

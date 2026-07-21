@@ -502,7 +502,7 @@ append sanitized acceptance evidence without using real JD data.
 
 ### Tasks
 
-- [ ] (04A): Add and run the bounded synthetic live-provider diagnostic
+- [x] (04A): Add and run the bounded synthetic live-provider diagnostic
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch04 - Diagnostic and Release Evidence` > `(04A)`
@@ -549,7 +549,7 @@ append sanitized acceptance evidence without using real JD data.
   - Blocked Condition: Missing accepted fixture/extractor is `BLOCKED_MISSING_REF`; source conflict on live scope/privacy is `BLOCKED_SOURCE_CONFLICT`; missing valid credentials/network requiring user setup is `BLOCKED_USER_ACTION`; unavailable Python/provider runtime is `BLOCKED_ENVIRONMENT`; a required product/fixture/dependency edit is `BLOCKED_SCOPE_CONFLICT`.
   - Files: `infrastructure/scripts/diagnose_jd_extraction.py`, `README.md`
 
-- [ ] (04B): Run same-candidate full gates and record sanitized browser acceptance
+- [x] (04B): Run same-candidate full gates and record sanitized browser acceptance
   - Task Type: docs-config
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch04 - Diagnostic and Release Evidence` > `(04B)`
