@@ -164,7 +164,7 @@ changing ordinary dedupe or ingestion lifecycle behavior.
 
 ### Tasks
 
-- [ ] (01A): Implement the pure source-grounding and atomic-skill guard
+- [x] (01A): Implement the pure source-grounding and atomic-skill guard
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch01 - Guarded Extraction and Ingestion Compatibility` > `(01A)`
@@ -213,7 +213,7 @@ changing ordinary dedupe or ingestion lifecycle behavior.
   - Blocked Condition: Missing/unreadable extractor or taxonomy authority is `BLOCKED_MISSING_REF`; plan/design disagreement on guard semantics is `BLOCKED_SOURCE_CONFLICT`; a root fix requiring files outside `Allowed Files` is `BLOCKED_SCOPE_CONFLICT`; unavailable Python/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/services/jd_extraction_guard.py`, `backend/tests/fixtures/jd_extraction_golden.json`, `backend/tests/unit/test_jd_extraction_guard.py`, conditionally `backend/app/services/skill_normalization.py`, `backend/tests/unit/test_skill_normalization.py`
 
-- [ ] (01B): Integrate guarded one-repair extraction into ordinary text and URL ingestion
+- [x] (01B): Integrate guarded one-repair extraction into ordinary text and URL ingestion
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch01 - Guarded Extraction and Ingestion Compatibility` > `(01B)`

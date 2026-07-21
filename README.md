@@ -19,10 +19,17 @@ this repository is not configured as a public or multi-user service.
 
 ## Current Baseline
 
-The current accepted product baseline is **Plan 14 complete** at commit
-`c8aa1da` (`P14B2: Complete`). Detailed scope, execution, and acceptance
-evidence remains in:
+The last committed product baseline is **Plan 14 complete** at commit
+`c8aa1da` (`P14B2: Complete`). **Plan 15 Batch01** (Guarded Extraction and
+Ingestion Compatibility) is implemented on the working tree over base
+`425ba9f`: a pure deterministic source-grounding and atomic-skill guard,
+repository-authored English/Vietnamese golden fixture, and guarded one-repair
+extraction shared by ordinary text and URL ingestion. Scope, acceptance, and
+design authority:
 
+- [Plan 15](docs/plans/Plan_15.md)
+- [Task 15](docs/tasks/task_15.md)
+- [JD extraction quality guard design](docs/superpowers/specs/2026-07-21-jd-extraction-quality-guard-design.md)
 - [Plan 14](docs/plans/Plan_14.md)
 - [Task 14](docs/tasks/task_14.md)
 - [Acceptance documents](docs/acceptance/)
@@ -195,12 +202,17 @@ The boundaries are intentionally narrow:
    durable current-message content.
 4. The [JD ingestion service](backend/app/services/jd_ingestion.py) computes the
    exact SHA-256 content hash and selects one branch: an existing non-failed Job
-   returns immediately without extraction, embedding, or graph sync; an existing
-   failed Job retries in place; otherwise a new Job row is created and processed.
-5. Retry/new processing performs structured extraction and ShopAIKey embedding
-   outside transactions, then persists one terminal result. Only a newly
-   processed scorable Job attempts post-commit Neo4j synchronization. Saving
-   alone does **not** automatically evaluate the Job.
+   returns immediately without extraction, guard, embedding, or graph sync; an
+   existing failed Job retries in place; otherwise a new Job row is created and
+   processed.
+5. Retry/new processing calls the shared
+   [JD extraction service](backend/app/services/jd_extraction.py): locked
+   structured provider output, pure
+   [semantic guard](backend/app/services/jd_extraction_guard.py) before
+   SkillNormalizer projection, and at most one sanitized schema-or-guard repair.
+   ShopAIKey embedding and terminal persistence follow only after an accepted
+   extraction. Only a newly processed scorable Job attempts post-commit Neo4j
+   synchronization. Saving alone does **not** automatically evaluate the Job.
 
 ### 4. Explicit saved-Job evaluation
 
@@ -443,6 +455,8 @@ the root. These commands use the project virtual environment created above:
 
 ```powershell
 Set-Location backend
+# Plan 15 Batch01 focused backend subset (guard + extraction + ingestion)
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction_guard.py tests/unit/test_jd_extraction.py tests/unit/test_skill_normalization.py tests/unit/test_jd_quality.py tests/integration/test_job_ingestion.py -q
 & '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache
 & '..\.venv\Scripts\python.exe' -m mypy app --no-incremental
 & '..\.venv\Scripts\python.exe' -m pytest -q
@@ -511,11 +525,12 @@ sanitized manual and browser procedures.
   source of truth.
 - **Structured CV/JD/profile extraction hits a provider failure:** the shared
   [retry owner](backend/app/services/provider_retry.py) permits at most one
-  application retry for timeouts or rate limits, and those extraction paths may
-  use one schema-repair attempt for invalid structured output. Ordinary Agent
-  chat and embedding requests have no promised application retry count. After
-  a durable failure, restore availability and explicitly retry the user action;
-  do not add unlimited retries, model switching, or hidden fallbacks.
+  application retry for timeouts or rate limits. JD extraction may use one
+  shared repair attempt for schema validation failure or semantic-guard
+  rejection, with fixed safe diagnostics only. Ordinary Agent chat and
+  embedding requests have no promised application retry count. After a durable
+  failure, restore availability and explicitly retry the user action; do not
+  add unlimited retries, model switching, or hidden fallbacks.
 - **A CV upload cannot be extracted:** use a digital-text PDF within the
   configured size and page limits. `NO_EXTRACTABLE_TEXT` is terminal for that
   attempt; there is no OCR path. Extraction failures publish no partial draft
@@ -595,7 +610,10 @@ sanitized manual and browser procedures.
 
 - [Master Plan](docs/plans/Master_plan.md) — stable product scope,
   architecture, data contracts, failure policy, and definition of done.
-- [Plan 14](docs/plans/Plan_14.md) — current incremental intent-aware pasted-JD
+- [Plan 15](docs/plans/Plan_15.md) — guarded JD extraction, safe re-extraction,
+  and saved-JD completeness (Batch01 implemented on the working tree).
+- [Task 15](docs/tasks/task_15.md) — Plan 15 batch/task contracts and validation.
+- [Plan 14](docs/plans/Plan_14.md) — prior committed intent-aware pasted-JD
   confirmation design and verification contract.
 - [Task 14](docs/tasks/task_14.md) — executable task boundaries, acceptance
   criteria, and validation ownership for Plan 14.

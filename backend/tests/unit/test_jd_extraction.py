@@ -1,11 +1,14 @@
 """Unit tests for Job extraction contracts and structured JD service.
 
-Covers Plan 5 §7.1 / §7.4. Schema tests cover exact Pydantic contracts.
-Service tests are fake-invoker only — never call the live ShopAIKey provider.
+Covers Plan 5 §7.1 / §7.4 and Plan 15 guarded extraction. Schema tests cover
+exact Pydantic contracts. Service tests are fake-invoker only — never call the
+live ShopAIKey provider. JD fixtures are synthetic repository-authored text.
 """
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Sequence
 from inspect import signature
 from pathlib import Path
 from typing import Any, get_args
@@ -49,6 +52,18 @@ from tests.fakes.structured_output import FakeJdInvoker
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
+
+# Synthetic grounded source for full valid extraction (no real JD content).
+_GROUNDED_JD: str = (
+    "Title: Backend Engineer\n"
+    "Company: Acme\n"
+    "Location: Berlin\n"
+    "Responsibilities:\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Required: 3+ years Python. Nice to have React.js.\n"
+    "Preferred: FastAPI\n"
+)
 
 _SKILL_REF_FIELDS = frozenset(
     {"canonical_key", "display_name", "aliases", "category"}
@@ -367,10 +382,35 @@ def test_shopaikey_jd_invoker_uses_with_structured_output() -> None:
     assert result.title == "Backend Engineer"
 
 
+class _RecordingInvoker:
+    """Local invoker that records message texts for privacy/repair assertions."""
+
+    def __init__(self, script: list[Any] | None = None) -> None:
+        self.script = list(script or [])
+        self.calls: list[dict[str, Any]] = []
+
+    def invoke_structured(
+        self,
+        messages: Sequence[Any],
+        *,
+        is_repair: bool = False,
+    ) -> Any:
+        texts = [
+            m.content if hasattr(m, "content") else str(m) for m in messages
+        ]
+        self.calls.append({"is_repair": is_repair, "texts": texts})
+        if not self.script:
+            raise RuntimeError("recording invoker script exhausted")
+        item = self.script.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
 def test_valid_fake_response_normalizes_skills_and_preserves_evidence() -> None:
     invoker = FakeJdInvoker([_valid_extracted()])
     outcome = extract_job_post_from_text(
-        "Synthetic JD text about Python and FastAPI.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -407,7 +447,7 @@ def test_exactly_one_schema_repair_then_success() -> None:
         ]
     )
     outcome = extract_job_post_from_text(
-        "JD text for repair path.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -426,11 +466,12 @@ def test_schema_repair_exhausted_fails() -> None:
     invoker = FakeJdInvoker([bad, bad])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD text for exhausted repair.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
     assert ei.value.code == FAILURE_INVALID_STRUCTURED_OUTPUT
+    assert ei.value.message == "structured output invalid after one repair attempt"
     assert len(invoker.calls) == 2
     assert "secret" not in ei.value.message.lower()
     assert "JD TEXT" not in ei.value.message
@@ -439,7 +480,7 @@ def test_schema_repair_exhausted_fails() -> None:
 def test_exactly_one_timeout_retry_then_success() -> None:
     invoker = FakeJdInvoker([APITimeoutError("timeout"), _valid_extracted()])
     outcome = extract_job_post_from_text(
-        "JD text for timeout retry.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -452,7 +493,7 @@ def test_timeout_retry_exhausted() -> None:
     invoker = FakeJdInvoker([APITimeoutError("t1"), APITimeoutError("t2")])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD text for timeout exhaustion.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
@@ -464,7 +505,7 @@ def test_timeout_retry_exhausted() -> None:
 def test_rate_limit_retry_once() -> None:
     invoker = FakeJdInvoker([RateLimitError("rate"), _valid_extracted()])
     outcome = extract_job_post_from_text(
-        "JD text for rate limit retry.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -476,7 +517,7 @@ def test_non_retryable_provider_error() -> None:
     invoker = FakeJdInvoker([AuthError("nope")])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD text for non-retryable provider error.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
@@ -508,7 +549,7 @@ def test_extra_fields_and_evidence_shape_rejected_then_repair() -> None:
         ]
     )
     outcome = extract_job_post_from_text(
-        "JD text with bad extra field first.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -524,7 +565,7 @@ def test_whitespace_only_skill_name_raises_for_repair() -> None:
             ExtractedJobSkillItem(
                 name="Python",
                 confidence=0.9,
-                evidence=["Python required"],
+                evidence=["Required: 3+ years Python"],
             ),
         ],
         preferred_skills=[],
@@ -536,14 +577,18 @@ def test_whitespace_only_skill_name_raises_for_repair() -> None:
 def test_blank_skill_name_uses_schema_repair_then_exhausts() -> None:
     blank = _valid_extracted(
         required_skills=[
-            ExtractedJobSkillItem(name="  \t  ", confidence=0.5, evidence=["x"]),
+            ExtractedJobSkillItem(
+                name="  \t  ",
+                confidence=0.5,
+                evidence=["Required: 3+ years Python"],
+            ),
         ],
         preferred_skills=[],
     )
     invoker = FakeJdInvoker([blank, blank])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD with blank skill names.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
@@ -560,7 +605,7 @@ def test_out_of_range_skill_confidence_uses_schema_repair_then_exhausts() -> Non
             ExtractedJobSkillItem(
                 name="Python",
                 confidence=1.5,
-                evidence=["Required Python"],
+                evidence=["Required: 3+ years Python"],
             ),
         ],
         preferred_skills=[],
@@ -568,7 +613,7 @@ def test_out_of_range_skill_confidence_uses_schema_repair_then_exhausts() -> Non
     invoker = FakeJdInvoker([bad, bad])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD with out-of-range skill confidence.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
@@ -582,7 +627,7 @@ def test_out_of_range_extraction_confidence_uses_schema_repair_then_exhausts() -
     invoker = FakeJdInvoker([bad, bad])
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD with out-of-range extraction confidence.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
@@ -597,14 +642,14 @@ def test_out_of_range_skill_confidence_then_repair_success() -> None:
             ExtractedJobSkillItem(
                 name="Python",
                 confidence=2.0,
-                evidence=["Required Python"],
+                evidence=["Required: 3+ years Python"],
             ),
         ],
         preferred_skills=[],
     )
     invoker = FakeJdInvoker([bad, _valid_extracted()])
     outcome = extract_job_post_from_text(
-        "JD repair after bad skill confidence.",
+        _GROUNDED_JD,
         invoker=invoker,
         normalizer=_normalizer(),
     )
@@ -672,9 +717,273 @@ def test_jd_timeout_exhaustion_never_exceeds_two_provider_calls() -> None:
     )
     with pytest.raises(JdExtractionError) as ei:
         extract_job_post_from_text(
-            "JD timeout hard cap.",
+            _GROUNDED_JD,
             invoker=invoker,
             normalizer=_normalizer(),
         )
     assert ei.value.code == FAILURE_PROVIDER_TIMEOUT
     assert len(invoker.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Plan 15: prompt rules, guard-before-normalize, sanitized one repair
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_includes_seven_approved_rules() -> None:
+    import app.services.jd_extraction as mod
+
+    prompt = mod._SYSTEM_PROMPT
+    assert "title" in prompt.lower() and "company" in prompt.lower()
+    assert "location" in prompt.lower()
+    assert "verbatim" in prompt.lower()
+    assert "atomic" in prompt.lower()
+    assert "C/C++" in prompt and ".NET" in prompt
+    assert "Node.js" in prompt and "CI/CD" in prompt
+    assert "preferred" in prompt.lower()
+    assert "required" in prompt.lower()
+    assert "jd_quality" in prompt
+    # Rule 7 forbids producing taxonomy identity fields.
+    assert "canonical" in prompt.lower()
+    source = inspect.getsource(mod.ExtractedJobPost)
+    assert "jd_quality" not in source
+
+
+def test_ungrounded_extraction_rejected_before_normalization() -> None:
+    """Guard runs before SkillNormalizer projection; invented evidence fails."""
+    ungrounded = _valid_extracted(
+        title="Invented Title",
+        required_skills=[
+            {
+                "name": "Python",
+                "confidence": 0.9,
+                "evidence": ["This evidence never appears in the source"],
+            }
+        ],
+        preferred_skills=[],
+    )
+    invoker = FakeJdInvoker([ungrounded, ungrounded])
+    with pytest.raises(JdExtractionError) as ei:
+        extract_job_post_from_text(
+            _GROUNDED_JD,
+            invoker=invoker,
+            normalizer=_normalizer(),
+        )
+    assert ei.value.code == FAILURE_INVALID_STRUCTURED_OUTPUT
+    assert len(invoker.calls) == 2
+    assert invoker.calls[1]["is_repair"] is True
+
+
+def test_guard_failure_then_repair_success_uses_one_call_cap() -> None:
+    bad = _valid_extracted(
+        title="Invented Title",
+        preferred_skills=[],
+        required_skills=[
+            {
+                "name": "Python",
+                "confidence": 0.9,
+                "evidence": ["Required: 3+ years Python"],
+            }
+        ],
+    )
+    invoker = FakeJdInvoker([bad, _valid_extracted()])
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.schema_repairs_used == 1
+    assert len(invoker.calls) == 2
+    assert invoker.calls[0]["is_repair"] is False
+    assert invoker.calls[1]["is_repair"] is True
+    assert outcome.extraction.title == "Backend Engineer"
+
+
+def test_schema_and_guard_share_single_repair_allowance() -> None:
+    """First schema failure consumes repair; subsequent guard failure exhausts."""
+    schema_err = ValidationError.from_exception_data(
+        "ExtractedJobPost",
+        [{"type": "missing", "loc": ("summary",), "input": {}}],
+    )
+    ungrounded = _valid_extracted(title="Not In Source At All")
+    invoker = FakeJdInvoker([schema_err, ungrounded])
+    with pytest.raises(JdExtractionError) as ei:
+        extract_job_post_from_text(
+            _GROUNDED_JD,
+            invoker=invoker,
+            normalizer=_normalizer(),
+        )
+    assert ei.value.code == FAILURE_INVALID_STRUCTURED_OUTPUT
+    assert len(invoker.calls) == 2
+    assert invoker.calls[0]["is_repair"] is False
+    assert invoker.calls[1]["is_repair"] is True
+
+
+def test_schema_repair_instruction_is_generic_and_redacted() -> None:
+    secret_value = "SECRET_PAYLOAD_VALUE_XYZ"
+    schema_err = ValidationError.from_exception_data(
+        "ExtractedJobPost",
+        [
+            {
+                "type": "missing",
+                "loc": ("summary",),
+                "input": {"leaked": secret_value},
+            }
+        ],
+    )
+    invoker = _RecordingInvoker([schema_err, _valid_extracted()])
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.schema_repairs_used == 1
+    repair_texts = invoker.calls[1]["texts"]
+    joined = "\n".join(str(t) for t in repair_texts)
+    assert "ExtractedJobPost" in joined
+    assert secret_value not in joined
+    assert "leaked" not in joined
+    # Exception type/message detail must not be echoed into the repair turn.
+    assert "ValidationError" not in joined
+    assert "field required" not in joined.lower()
+
+
+def test_guard_repair_includes_only_safe_codes_paths_counts() -> None:
+    invented_evidence = "Invented evidence body never in source or repair"
+    bad = _valid_extracted(
+        title="Invented Title",
+        required_skills=[
+            {
+                "name": "Python",
+                "confidence": 0.9,
+                "evidence": [invented_evidence],
+            }
+        ],
+        preferred_skills=[],
+    )
+    invoker = _RecordingInvoker([bad, _valid_extracted()])
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.schema_repairs_used == 1
+    repair_msg = invoker.calls[1]["texts"][-1]
+    assert "METADATA_NOT_IN_SOURCE" in repair_msg
+    assert "EVIDENCE_NOT_IN_SOURCE" in repair_msg
+    assert "title" in repair_msg
+    assert "required_skills[0].evidence[0]" in repair_msg
+    assert invented_evidence not in repair_msg
+    assert "Invented Title" not in repair_msg
+    assert "Backend Engineer" not in repair_msg or "JD TEXT" in "\n".join(
+        invoker.calls[1]["texts"]
+    )
+    # Source may appear only in the transient JD message, not the repair message.
+    assert invented_evidence not in repair_msg
+
+
+def test_guard_repair_caps_issues_at_twenty_with_omitted_count() -> None:
+    # Build >20 independent grounding failures via many responsibilities.
+    many_resp = [f"Invented responsibility number {i}" for i in range(25)]
+    bad = _valid_extracted(
+        responsibilities=many_resp,
+        required_skills=[],
+        preferred_skills=[],
+    )
+    good = _valid_extracted(
+        responsibilities=["Design REST services", "Own deployments"],
+    )
+    invoker = _RecordingInvoker([bad, good])
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.schema_repairs_used == 1
+    repair_msg = invoker.calls[1]["texts"][-1]
+    assert "omitted_issue_count=" in repair_msg
+    # At most 20 issue lines of the form "- CODE path count".
+    issue_lines = [
+        line
+        for line in repair_msg.splitlines()
+        if line.startswith("- RESPONSIBILITY_NOT_IN_SOURCE")
+    ]
+    assert len(issue_lines) <= 20
+    assert "Invented responsibility number 0" not in repair_msg
+
+
+def test_second_guard_invalid_raises_fixed_safe_error() -> None:
+    bad = _valid_extracted(title="Not Grounded Title")
+    invoker = FakeJdInvoker([bad, bad])
+    with pytest.raises(JdExtractionError) as ei:
+        extract_job_post_from_text(
+            _GROUNDED_JD,
+            invoker=invoker,
+            normalizer=_normalizer(),
+        )
+    assert ei.value.code == FAILURE_INVALID_STRUCTURED_OUTPUT
+    assert ei.value.message == "structured output invalid after one repair attempt"
+    assert "Not Grounded" not in ei.value.message
+    assert len(invoker.calls) == 2
+
+
+def test_provider_retry_still_applies_per_allowed_call_with_guard() -> None:
+    """Timeout retry is per allowed call; guard repair remains a separate call."""
+    # First allowed call: timeout then retry with ungrounded title (2 invoker hits).
+    # Second allowed call (one repair): grounded success (1 invoker hit).
+    invoker = FakeJdInvoker(
+        [
+            APITimeoutError("t1"),
+            _valid_extracted(title="Bad Title"),
+            _valid_extracted(),
+        ]
+    )
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.provider_retries_used == 1
+    assert outcome.schema_repairs_used == 1
+    assert len(invoker.calls) == 3
+    assert outcome.extraction.title == "Backend Engineer"
+
+
+def test_compound_skill_label_triggers_guard_repair() -> None:
+    compound = _valid_extracted(
+        required_skills=[
+            {
+                "name": "Python, FastAPI",
+                "confidence": 0.8,
+                "evidence": ["Required: 3+ years Python"],
+            }
+        ],
+        preferred_skills=[],
+    )
+    atomic = _valid_extracted(
+        required_skills=[
+            {
+                "name": "Python",
+                "confidence": 0.9,
+                "evidence": ["Required: 3+ years Python"],
+            }
+        ],
+        preferred_skills=[],
+    )
+    invoker = _RecordingInvoker([compound, atomic])
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+    assert outcome.schema_repairs_used == 1
+    repair_msg = invoker.calls[1]["texts"][-1]
+    assert "COMPOUND_SKILL_LABEL" in repair_msg
+    assert "Python, FastAPI" not in repair_msg
+    assert outcome.extraction.required_skills[0].skill.canonical_key == "python"
+
+
+def test_max_repair_attempts_constant_is_one() -> None:
+    import app.services.jd_extraction as mod
+
+    assert mod._MAX_REPAIR_ATTEMPTS == 1

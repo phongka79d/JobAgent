@@ -1,0 +1,264 @@
+{
+  "provenance": "repository-authored synthetic",
+  "description": "Synthetic English/Vietnamese JD cases for pure extraction-guard coverage. No provider payloads, secrets, personal data, or real JD text.",
+  "cases": [
+    {
+      "id": "en_sectioned_atomic",
+      "language": "en",
+      "form": "sectioned",
+      "raw_jd": "Title: Backend Engineer\nCompany: Northwind Labs\nLocation: Remote\n\nResponsibilities:\n- Design REST APIs with FastAPI\n- Maintain Python services\n\nRequired skills:\n- Python\n- FastAPI\n\nPreferred skills:\n- Docker\n\nEvidence phrases appear inline: Design REST APIs with FastAPI and Maintain Python services and Docker experience welcome.",
+      "extraction": {
+        "title": "Backend Engineer",
+        "company": "Northwind Labs",
+        "summary": "Concise model-authored synthesis not checked against source.",
+        "responsibilities": [
+          "Design REST APIs with FastAPI",
+          "Maintain Python services"
+        ],
+        "required_skills": [
+          {
+            "name": "Python",
+            "confidence": 0.95,
+            "evidence": ["Maintain Python services"]
+          },
+          {
+            "name": "FastAPI",
+            "confidence": 0.9,
+            "evidence": ["Design REST APIs with FastAPI"]
+          }
+        ],
+        "preferred_skills": [
+          {
+            "name": "Docker",
+            "confidence": 0.7,
+            "evidence": ["Docker experience welcome"]
+          }
+        ],
+        "seniority": "mid",
+        "min_experience_years": 3.0,
+        "max_experience_years": 5.0,
+        "location": "Remote",
+        "work_mode": "remote",
+        "extraction_confidence": 0.88
+      },
+      "expected_issues": []
+    },
+    {
+      "id": "vi_one_line_nfkc",
+      "language": "vi",
+      "form": "one_line",
+      "raw_jd": "Công ty: Ｓｏｕｔｈｗｉｎｄ  —  Vị trí: Kỹ sư dữ liệu  —  Địa điểm: Hà Nội  —  Yêu cầu: Python và SQL; trách nhiệm: Xây dựng pipeline dữ liệu; bằng chứng: Yêu cầu Python cho pipeline.",
+      "extraction": {
+        "title": "Kỹ sư dữ liệu",
+        "company": "Southwind",
+        "summary": "Tóm tắt do mô hình viết, không kiểm tra chuỗi con.",
+        "responsibilities": [
+          "Xây dựng pipeline dữ liệu"
+        ],
+        "required_skills": [
+          {
+            "name": "Python",
+            "confidence": 0.92,
+            "evidence": ["Yêu cầu Python cho pipeline"]
+          },
+          {
+            "name": "SQL",
+            "confidence": 0.9,
+            "evidence": ["Yêu cầu: Python và SQL"]
+          }
+        ],
+        "preferred_skills": [],
+        "seniority": "mid",
+        "min_experience_years": 2.0,
+        "max_experience_years": null,
+        "location": "Hà Nội",
+        "work_mode": "onsite",
+        "extraction_confidence": 0.84
+      },
+      "expected_issues": []
+    },
+    {
+      "id": "en_missing_grounding",
+      "language": "en",
+      "form": "sectioned",
+      "raw_jd": "Title: Support Analyst\nCompany: Contoso Demo\nLocation: Hybrid City\n\nResponsibilities:\n- Answer product questions\n\nSkills mentioned: Python only.",
+      "extraction": {
+        "title": "Invented Title",
+        "company": "Contoso Demo",
+        "summary": "Summary may invent phrasing freely.",
+        "responsibilities": [
+          "Answer product questions",
+          "Invented ownership of payroll systems"
+        ],
+        "required_skills": [
+          {
+            "name": "Python",
+            "confidence": 0.8,
+            "evidence": ["Source never mentions this evidence line"]
+          }
+        ],
+        "preferred_skills": [],
+        "seniority": "junior",
+        "min_experience_years": 1.0,
+        "max_experience_years": 2.0,
+        "location": "Hybrid City",
+        "work_mode": "hybrid",
+        "extraction_confidence": 0.4
+      },
+      "expected_issues": [
+        {
+          "code": "METADATA_NOT_IN_SOURCE",
+          "field_path": "title",
+          "count": 1
+        },
+        {
+          "code": "RESPONSIBILITY_NOT_IN_SOURCE",
+          "field_path": "responsibilities[1]",
+          "count": 1
+        },
+        {
+          "code": "EVIDENCE_NOT_IN_SOURCE",
+          "field_path": "required_skills[0].evidence[0]",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "vi_compound_labels",
+      "language": "vi",
+      "form": "sectioned",
+      "raw_jd": "Công ty: Demo Việt\nVị trí: Kỹ sư backend\nYêu cầu kỹ năng: Python FastAPI, Senior Python, Docker hoặc Kubernetes, AWS và Terraform.\nTrách nhiệm: Viết dịch vụ HTTP.\nBằng chứng: Viết dịch vụ HTTP với Python.",
+      "extraction": {
+        "title": "Kỹ sư backend",
+        "company": "Demo Việt",
+        "summary": "Tổng hợp ngắn.",
+        "responsibilities": [
+          "Viết dịch vụ HTTP"
+        ],
+        "required_skills": [
+          {
+            "name": "Python FastAPI",
+            "confidence": 0.7,
+            "evidence": ["Viết dịch vụ HTTP với Python"]
+          },
+          {
+            "name": "Senior Python",
+            "confidence": 0.6,
+            "evidence": []
+          },
+          {
+            "name": "Docker or Kubernetes",
+            "confidence": 0.6,
+            "evidence": []
+          },
+          {
+            "name": "AWS và Terraform",
+            "confidence": 0.55,
+            "evidence": []
+          }
+        ],
+        "preferred_skills": [],
+        "seniority": "mid",
+        "min_experience_years": null,
+        "max_experience_years": null,
+        "location": null,
+        "work_mode": "unknown",
+        "extraction_confidence": 0.5
+      },
+      "expected_issues": [
+        {
+          "code": "COMPOUND_SKILL_LABEL",
+          "field_path": "required_skills[0].name",
+          "count": 2
+        },
+        {
+          "code": "COMPOUND_SKILL_LABEL",
+          "field_path": "required_skills[1].name",
+          "count": 2
+        },
+        {
+          "code": "COMPOUND_SKILL_LABEL",
+          "field_path": "required_skills[2].name",
+          "count": 2
+        },
+        {
+          "code": "COMPOUND_SKILL_LABEL",
+          "field_path": "required_skills[3].name",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "id": "en_duplicates_and_conflicts",
+      "language": "en",
+      "form": "sectioned",
+      "raw_jd": "Title: Platform Engineer\nCompany: Fabrikam Synthetic\nLocation: Remote\n\nMust have Python. Preferred: Py for scripting.\nAlso lists python3 again under required.\nResponsibility: Operate CI pipelines.",
+      "extraction": {
+        "title": "Platform Engineer",
+        "company": "Fabrikam Synthetic",
+        "summary": "Platform support synthesis.",
+        "responsibilities": [
+          "Operate CI pipelines"
+        ],
+        "required_skills": [
+          {
+            "name": "Python",
+            "confidence": 0.9,
+            "evidence": ["Must have Python"]
+          },
+          {
+            "name": "python3",
+            "confidence": 0.85,
+            "evidence": ["lists python3 again under required"]
+          }
+        ],
+        "preferred_skills": [
+          {
+            "name": "Py",
+            "confidence": 0.7,
+            "evidence": ["Preferred: Py for scripting"]
+          }
+        ],
+        "seniority": "senior",
+        "min_experience_years": 5.0,
+        "max_experience_years": null,
+        "location": "Remote",
+        "work_mode": "remote",
+        "extraction_confidence": 0.77
+      },
+      "expected_issues": [
+        {
+          "code": "DUPLICATE_SKILL",
+          "field_path": "required_skills[1].name",
+          "count": 2
+        },
+        {
+          "code": "SKILL_GROUP_CONFLICT",
+          "field_path": "preferred_skills[0].name",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "id": "en_contact_only",
+      "language": "en",
+      "form": "contact_only",
+      "raw_jd": "Contact: hiring@example.invalid\nPhone: +1-555-0100\nNo role facts provided.",
+      "extraction": {
+        "title": null,
+        "company": null,
+        "summary": "Insufficient contact-only notice without inventing role facts.",
+        "responsibilities": [],
+        "required_skills": [],
+        "preferred_skills": [],
+        "seniority": "unknown",
+        "min_experience_years": null,
+        "max_experience_years": null,
+        "location": null,
+        "work_mode": "unknown",
+        "extraction_confidence": 0.1
+      },
+      "expected_issues": []
+    }
+  ]
+}

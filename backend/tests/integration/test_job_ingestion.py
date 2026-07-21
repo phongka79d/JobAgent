@@ -65,6 +65,25 @@ from tests.support.db_migration import run_async, session_factory
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
 
+# Synthetic grounded body for full/partial extraction (unique prefix for hashes).
+_GROUNDED_CORE: str = (
+    "Title: Backend Engineer\n"
+    "Company: Acme\n"
+    "Location: Berlin\n"
+    "Responsibilities:\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Required: 3+ years Python.\n"
+    "Preferred: FastAPI\n"
+)
+
+
+def _grounded_jd(unique: str = "") -> str:
+    """Repository-authored synthetic JD that grounds full/partial extractions."""
+    if unique:
+        return f"{unique}\n{_GROUNDED_CORE}"
+    return _GROUNDED_CORE
+
 
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
@@ -255,7 +274,7 @@ def test_new_raw_text_persists_before_processing_and_embeds_full(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Synthetic full JD about Python and FastAPI services."
+            jd = _grounded_jd("Synthetic full JD marker.")
             invoker = FakeJdInvoker([_full_extracted()])
             emb = FakeEmbeddingClient(vector=_vector(0.02))
             result = await ingest_raw_text(
@@ -296,7 +315,7 @@ def test_processed_partial_has_embedding_triplet(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Partial JD text with some signal."
+            jd = _grounded_jd("Partial JD text with some signal.")
             result = await ingest_raw_text(
                 jd,
                 invoker=FakeJdInvoker([_partial_extracted()]),
@@ -365,7 +384,7 @@ def test_non_failed_exact_duplicate_returns_same_id_zero_external_calls(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Duplicate candidate JD body."
+            jd = _grounded_jd("Duplicate candidate JD body.")
             invoker1 = FakeJdInvoker([_full_extracted()])
             emb1 = FakeEmbeddingClient()
             first = await ingest_raw_text(
@@ -409,14 +428,14 @@ def test_different_content_creates_new_row(db_path: Path) -> None:
         engine, factory = _factory(db_path)
         try:
             a = await ingest_raw_text(
-                "Content A unique",
+                _grounded_jd("Content A unique"),
                 invoker=FakeJdInvoker([_full_extracted()]),
                 normalizer=_normalizer(),
                 embedding_client=FakeEmbeddingClient(),
                 session_factory=factory,
             )
             b = await ingest_raw_text(
-                "Content B unique",
+                _grounded_jd("Content B unique"),
                 invoker=FakeJdInvoker([_partial_extracted()]),
                 normalizer=_normalizer(),
                 embedding_client=FakeEmbeddingClient(vector=_vector(0.5)),
@@ -442,7 +461,7 @@ def test_failed_exact_duplicate_retries_same_id_and_clears_terminal_fields(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Retryable failed JD content."
+            jd = _grounded_jd("Retryable failed JD content.")
             sync_calls = 0
 
             async def _sync(**kwargs: Any) -> None:
@@ -556,7 +575,7 @@ def test_embedding_failure_retains_raw_text_and_marks_failed(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Durable raw after embedding fail."
+            jd = _grounded_jd("Durable raw after embedding fail.")
             emb = FakeEmbeddingClient(
                 error=EmbeddingAdapterError(
                     FAILURE_EMBEDDING_TIMEOUT, "embedding request timed out"
@@ -589,7 +608,7 @@ def test_invalid_embedding_vector_fails_terminal_write(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Bad vector JD."
+            jd = _grounded_jd("Bad vector JD.")
             emb = FakeEmbeddingClient(vector=[1.0, 2.0])  # wrong length
             result = await ingest_raw_text(
                 jd,
@@ -658,7 +677,7 @@ def test_processed_row_cannot_be_reprocessed(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            jd = "Terminal processed content."
+            jd = _grounded_jd("Terminal processed content.")
             first = await ingest_raw_text(
                 jd,
                 invoker=FakeJdInvoker([_full_extracted()]),
@@ -744,7 +763,7 @@ def test_url_placeholder_committed_before_fetch_begins(db_path: Path) -> None:
         engine, factory = _factory(db_path)
         try:
             url = "https://example.com/jobs/placeholder-before-fetch"
-            acquired = "Unique fetched JD for placeholder visibility."
+            acquired = _grounded_jd("Unique fetched JD for placeholder visibility.")
             seen_placeholder: dict[str, Any] = {}
 
             async def on_fetch(_u: str) -> None:
@@ -873,7 +892,7 @@ def test_url_to_text_exact_match_deletes_placeholder_returns_existing(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Exact shared JD body across text and URL."
+            body = _grounded_jd("Exact shared JD body across text and URL.")
             text_result = await ingest_raw_text(
                 body,
                 invoker=FakeJdInvoker([_full_extracted()]),
@@ -919,7 +938,7 @@ def test_url_to_url_exact_match_deletes_placeholder_zero_external_calls(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Same fetched content from two URLs."
+            body = _grounded_jd("Same fetched content from two URLs.")
             first = await ingest_url(
                 "https://example.com/jobs/a",
                 invoker=FakeJdInvoker([_full_extracted()]),
@@ -962,7 +981,7 @@ def test_url_failed_exact_match_deletes_placeholder_retries_same_id(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Retryable URL-acquired JD content."
+            body = _grounded_jd("Retryable URL-acquired JD content.")
             # Seed a failed text row with the same content hash.
             fail_first = await ingest_raw_text(
                 body,
@@ -1005,7 +1024,7 @@ def test_url_unique_content_processed_on_placeholder_row(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Brand new URL-only JD content."
+            body = _grounded_jd("Brand new URL-only JD content.")
             url = "https://example.com/unique-jd"
             result = await ingest_url(
                 url,
@@ -1075,7 +1094,7 @@ def test_url_embedding_failure_retains_url_text_and_hash(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Acquired URL text retained after embed fail."
+            body = _grounded_jd("Acquired URL text retained after embed fail.")
             url = "https://example.com/embed-fail"
             emb = FakeEmbeddingClient(
                 error=EmbeddingAdapterError(
@@ -1146,7 +1165,7 @@ def test_scorable_processed_calls_job_sync_after_sqlite_commit(
                     sync_calls.append({"job_id": row.id})
 
             result = await ingest_raw_text(
-                "Scorable JD for post-commit sync.",
+                _grounded_jd("Scorable JD for post-commit sync."),
                 invoker=FakeJdInvoker([_full_extracted()]),
                 normalizer=_normalizer(),
                 embedding_client=FakeEmbeddingClient(vector=_vector(0.04)),
@@ -1199,7 +1218,7 @@ def test_exact_duplicate_return_does_not_call_job_sync(db_path: Path) -> None:
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
-            body = "Duplicate body for no-sync return."
+            body = _grounded_jd("Duplicate body for no-sync return.")
             sync_calls = 0
 
             async def _sync(**kwargs: Any) -> None:
@@ -1253,7 +1272,7 @@ def test_graph_failure_after_commit_returns_neo4j_sync_failed_row_unchanged(
                 raise JobSyncError("simulated graph failure")
 
             result = await ingest_raw_text(
-                "Scorable JD whose graph projection fails.",
+                _grounded_jd("Scorable JD whose graph projection fails."),
                 invoker=FakeJdInvoker([_full_extracted()]),
                 normalizer=_normalizer(),
                 embedding_client=FakeEmbeddingClient(vector=_vector(0.05)),
@@ -1273,6 +1292,185 @@ def test_graph_failure_after_commit_returns_neo4j_sync_failed_row_unchanged(
             assert row.jd_quality == JOB_JD_QUALITY_FULL
             assert row.failure_code is None
             assert row.embedding_json is not None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+# ---------------------------------------------------------------------------
+# Plan 15: guarded extractor shared by text/URL; dedupe stays provider-free
+# ---------------------------------------------------------------------------
+
+
+def test_text_ingestion_rejects_ungrounded_extraction_without_embedding(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            jd = _grounded_jd("Guard reject text path.")
+            ungrounded = _full_extracted(title="Invented Title Not In Source")
+            emb = FakeEmbeddingClient()
+            invoker = FakeJdInvoker([ungrounded, ungrounded])
+            result = await ingest_raw_text(
+                jd,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=emb,
+                session_factory=factory,
+            )
+            assert result.processing_status == JOB_PROCESSING_STATUS_FAILED
+            assert result.failure_code == FAILURE_INVALID_STRUCTURED_OUTPUT
+            assert emb.calls == []
+            assert len(invoker.calls) == 2
+            row = await _get_job(factory, result.job_id)
+            assert row.raw_content == jd
+            assert row.extraction_json is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_url_ingestion_uses_same_guarded_extractor_and_one_repair(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            body = _grounded_jd("URL guarded extract path.")
+            ungrounded = _full_extracted(title="Invented URL Title")
+            invoker = FakeJdInvoker([ungrounded, _full_extracted()])
+            emb = FakeEmbeddingClient()
+            result = await ingest_url(
+                "https://example.com/guarded-repair",
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=emb,
+                session_factory=factory,
+                url_fetcher=FakeUrlFetcher(text=body),
+            )
+            assert result.outcome == "created"
+            assert result.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert result.jd_quality == JOB_JD_QUALITY_FULL
+            assert len(invoker.calls) == 2
+            assert invoker.calls[0]["is_repair"] is False
+            assert invoker.calls[1]["is_repair"] is True
+            assert len(emb.calls) == 1
+            row = await _get_job(factory, result.job_id)
+            assert row.raw_content == body
+            assert row.extraction_json is not None
+            assert row.extraction_json["title"] == "Backend Engineer"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_exact_non_failed_duplicate_skips_provider_guard_embed_and_graph(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            body = _grounded_jd("Exact hash no reprocess.")
+            sync_calls = 0
+
+            async def _sync(**kwargs: Any) -> None:
+                nonlocal sync_calls
+                del kwargs
+                sync_calls += 1
+
+            first = await ingest_raw_text(
+                body,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert first.outcome == "created"
+            assert sync_calls == 1
+
+            invoker = FakeJdInvoker([_full_extracted()])
+            emb = FakeEmbeddingClient()
+            again = await ingest_raw_text(
+                body,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                embedding_client=emb,
+                session_factory=factory,
+                job_sync_fn=_sync,
+            )
+            assert again.outcome == "returned"
+            assert again.job_id == first.job_id
+            assert invoker.calls == []
+            assert emb.calls == []
+            assert sync_calls == 1
+            assert again.sync_ok is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_failed_retry_preserves_identity_through_guarded_pipeline(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            body = _grounded_jd("Failed retry identity.")
+            first = await ingest_raw_text(
+                body,
+                invoker=FakeJdInvoker([RuntimeError("provider down")]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+            )
+            assert first.processing_status == JOB_PROCESSING_STATUS_FAILED
+            job_id = first.job_id
+
+            second = await ingest_raw_text(
+                body,
+                invoker=FakeJdInvoker([_full_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=FakeEmbeddingClient(),
+                session_factory=factory,
+            )
+            assert second.outcome == "retried"
+            assert second.job_id == job_id
+            assert second.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert second.jd_quality == JOB_JD_QUALITY_FULL
+            assert await _count_jobs(factory) == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_ordinary_unscorable_remains_compatible_with_guard(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            jd = "Contact us for details. Thin synthetic contact-only listing."
+            emb = FakeEmbeddingClient()
+            result = await ingest_raw_text(
+                jd,
+                invoker=FakeJdInvoker([_unscorable_extracted()]),
+                normalizer=_normalizer(),
+                embedding_client=emb,
+                session_factory=factory,
+            )
+            assert result.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+            assert result.jd_quality == JOB_JD_QUALITY_UNSCORABLE
+            assert emb.calls == []
+            row = await _get_job(factory, result.job_id)
+            assert row.embedding_json is None
+            assert row.extraction_json is not None
         finally:
             await engine.dispose()
 

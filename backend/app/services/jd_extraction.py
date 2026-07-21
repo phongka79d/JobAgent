@@ -1,8 +1,8 @@
-"""Structured JD extraction via ShopAIKey (Plan 5 §7.4).
+"""Structured JD extraction via ShopAIKey (Plan 5 §7.4 / Plan 15).
 
-Locked gpt-4o-mini structured output, at most one schema repair, shared
-provider retry, and SkillNormalizer for all skills. Raw JD text is transient;
-no SQLite, embeddings, Neo4j, or jd_quality assignment.
+Locked gpt-4o-mini structured output, at most one schema-or-guard repair, shared
+provider retry, pure semantic guard before SkillNormalizer projection. Raw JD
+text is transient; no SQLite, embeddings, Neo4j, or jd_quality assignment.
 """
 
 from __future__ import annotations
@@ -33,6 +33,9 @@ from app.services.skill_normalization import SkillNormalizer
 logger = logging.getLogger(__name__)
 
 FAILURE_INVALID_STRUCTURED_OUTPUT: Final[str] = "INVALID_STRUCTURED_OUTPUT"
+_INVALID_AFTER_REPAIR_MESSAGE: Final[str] = (
+    "structured output invalid after one repair attempt"
+)
 
 STRUCTURED_OUTPUT_METHOD: Final[str] = "json_schema"
 STRUCTURED_OUTPUT_STRICT: Final[bool] = True
@@ -43,13 +46,43 @@ _MAX_REPAIR_ATTEMPTS: Final[int] = 1
 
 _SYSTEM_PROMPT: Final[str] = (
     "You extract structured Job Description facts from JD text. Return only "
-    "structured JSON matching the schema. Rules: (1) facts only — do not invent "
-    "skills or responsibilities without source support; (2) evidence must be short "
-    "verbatim snippets copied from the JD; (3) skill names are free-text labels "
-    "only (aliases/categories/relationships are filled by a separate normalizer); "
-    "(4) do not assign jd_quality or any quality label; (5) use seniority/work_mode "
-    "'unknown' when not explicit; use null for missing title/company/location/"
-    "experience years."
+    "structured JSON matching the schema. Rules: "
+    "(1) extract title, company, and location only when directly supported by "
+    "the source — do not infer them from general role content; "
+    "(2) responsibilities are concise verbatim source facts, not rewritten "
+    "marketing summaries; "
+    "(3) every skill name is one atomic capability or technology — lists and "
+    "alternatives such as 'Python, FastAPI' or 'Git/Docker/Kubernetes' become "
+    "separate rows that may share evidence; "
+    "(4) technical names containing punctuation, including C/C++, .NET, Node.js, "
+    "and CI/CD, remain single labels; "
+    "(5) mandatory or neutrally listed qualifications are required; a skill is "
+    "preferred only when the source explicitly marks it optional, preferred, "
+    "advantageous, or equivalent wording; "
+    "(6) a canonical skill may occur at most once and never in both required "
+    "and preferred groups; "
+    "(7) skill evidence is a short verbatim source snippet — do not produce "
+    "aliases, canonical keys, categories, relationships, or jd_quality. "
+    "Use seniority/work_mode 'unknown' when not explicit; use null for missing "
+    "title/company/location/experience years."
+)
+
+_SCHEMA_REPAIR_INSTRUCTION: Final[str] = (
+    "Previous structured output failed schema validation for ExtractedJobPost. "
+    "Return one valid ExtractedJobPost JSON object only matching the schema. "
+    "Use one atomic skill per row; protect C/C++, .NET, Node.js, and CI/CD as "
+    "single labels; mandatory or neutral skills are required; preferred only "
+    "when the source explicitly marks optional/preferred; keep canonical skills "
+    "unique and required/preferred disjoint; evidence short and verbatim. "
+    "Do not invent aliases, relationships, or jd_quality."
+)
+
+_GUARD_REPAIR_TRAILER: Final[str] = (
+    "Repair: return one valid ExtractedJobPost JSON object only. "
+    "Use one atomic skill per row; mandatory or neutral skills are required; "
+    "preferred only when the source explicitly marks optional/preferred; keep "
+    "canonical skills unique and required/preferred disjoint. Do not invent "
+    "aliases, relationships, or jd_quality. Evidence must be short and verbatim."
 )
 
 
@@ -225,7 +258,24 @@ class ShopAIKeyStructuredJdInvoker:
         return _coerce_extracted(result)
 
 
-def _build_messages(jd_text: str, *, repair_error: str | None) -> list[Any]:
+def _format_guard_repair_instruction(
+    issues: Sequence[Any],
+    omitted_issue_count: int,
+) -> str:
+    """Build a sanitized guard-repair message (codes/paths/counts only)."""
+    lines = [
+        "Previous structured output failed semantic validation.",
+        "Issues (code path count):",
+    ]
+    for issue in issues:
+        lines.append(f"- {issue.code} {issue.field_path} {issue.count}")
+    if omitted_issue_count > 0:
+        lines.append(f"omitted_issue_count={omitted_issue_count}")
+    lines.append(_GUARD_REPAIR_TRAILER)
+    return "\n".join(lines)
+
+
+def _build_messages(jd_text: str, *, repair_instruction: str | None) -> list[Any]:
     # Raw JD text appears only in this transient prompt; never in ToolResult/logs.
     messages: list[Any] = [
         SystemMessage(content=_SYSTEM_PROMPT),
@@ -236,18 +286,8 @@ def _build_messages(jd_text: str, *, repair_error: str | None) -> list[Any]:
             )
         ),
     ]
-    if repair_error is not None:
-        messages.append(
-            HumanMessage(
-                content=(
-                    "Your previous structured output failed validation with this "
-                    f"error:\n{repair_error}\n"
-                    "Repair: return one valid ExtractedJobPost JSON object only. "
-                    "Keep evidence short; do not invent aliases, relationships, "
-                    "or jd_quality."
-                )
-            )
-        )
+    if repair_instruction is not None:
+        messages.append(HumanMessage(content=repair_instruction))
     return messages
 
 
@@ -275,28 +315,57 @@ def extract_job_post_from_text(
     invoker: StructuredJdInvoker,
     normalizer: SkillNormalizer,
 ) -> JdExtractionOutcome:
-    """Extract + validate a JobPostExtraction from transient JD text."""
+    """Extract, guard, then normalize a JobPostExtraction from transient JD text.
+
+    Order: provider structured output → pure semantic guard → SkillNormalizer
+    projection. Schema and guard failures share one repair attempt; only an
+    accepted guarded result is normalized.
+    """
+    # Lazy import avoids circular load with jd_extraction_guard.
+    from app.services.jd_extraction_guard import guard_extracted_job_post
+
     if not isinstance(jd_text, str):
         raise JdExtractionError(
             FAILURE_INVALID_STRUCTURED_OUTPUT,
             "jd text must be a string",
         )
 
-    # Do not log jd_text or full extraction payloads.
+    # Do not log jd_text, evidence, or full extraction payloads.
     logger.debug("jd extraction starting strategy=%s", EXTRACTION_SCHEMA_STRATEGY)
 
     repairs_used = 0
     provider_retries_total = 0
-    repair_error: str | None = None
+    repair_instruction: str | None = None
 
     while True:
-        messages = _build_messages(jd_text, repair_error=repair_error)
-        is_repair = repair_error is not None
+        messages = _build_messages(jd_text, repair_instruction=repair_instruction)
+        is_repair = repair_instruction is not None
         try:
             extracted, retries = _invoke_structured(
                 invoker, messages, is_repair=is_repair
             )
             provider_retries_total += retries
+
+            guard_result = guard_extracted_job_post(jd_text, extracted, normalizer)
+            if not guard_result.accepted:
+                if repairs_used >= _MAX_REPAIR_ATTEMPTS:
+                    raise JdExtractionError(
+                        FAILURE_INVALID_STRUCTURED_OUTPUT,
+                        _INVALID_AFTER_REPAIR_MESSAGE,
+                    )
+                repairs_used += 1
+                repair_instruction = _format_guard_repair_instruction(
+                    guard_result.issues,
+                    guard_result.omitted_issue_count,
+                )
+                logger.debug(
+                    "jd extraction guard repair issue_count=%s omitted=%s",
+                    len(guard_result.issues),
+                    guard_result.omitted_issue_count,
+                )
+                continue
+
+            # Only after guard acceptance: final SkillNormalizer projection.
             extraction = extracted_to_job_post(extracted, normalizer)
             return JdExtractionOutcome(
                 extraction=extraction,
@@ -305,14 +374,16 @@ def extract_job_post_from_text(
             )
         except JdExtractionError:
             raise
-        except (ValidationError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        except (ValidationError, json.JSONDecodeError, TypeError, ValueError):
             if repairs_used >= _MAX_REPAIR_ATTEMPTS:
                 raise JdExtractionError(
                     FAILURE_INVALID_STRUCTURED_OUTPUT,
-                    "structured output invalid after one repair attempt",
-                ) from exc
+                    _INVALID_AFTER_REPAIR_MESSAGE,
+                ) from None
             repairs_used += 1
-            repair_error = str(exc)[:500]
+            # Fixed generic schema instruction — never echo exception/payload values.
+            repair_instruction = _SCHEMA_REPAIR_INSTRUCTION
+            logger.debug("jd extraction schema repair attempt=%s", repairs_used)
             continue
 
 
