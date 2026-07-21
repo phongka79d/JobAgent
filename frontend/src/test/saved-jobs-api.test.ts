@@ -10,6 +10,7 @@ import {
   fetchSavedJobDetail,
   fetchSavedJobs,
   isRetryableSavedJobDeleteError,
+  reextractSavedJob,
   SAVED_JOB_DELETE_RETRY_SUMMARY,
   SAVED_JOB_ERROR_CODES,
   saveAndEvaluateJob,
@@ -19,10 +20,12 @@ import {
   parseEvaluateJobResponse,
   parseJobEvaluationView,
   parseJobPostExtraction,
+  parseReextractJobResponse,
   parseSaveAndEvaluateResponse,
   parseSavedJobDetail,
   parseSavedJobListItem,
   parseSavedJobListPage,
+  REEXTRACT_GRAPH_FAILURE_CODE,
   selectSafeRemainingJobId,
 } from '../features/jobs/types';
 
@@ -338,6 +341,118 @@ describe('saved-JD strict parsers', () => {
     expect(selectSafeRemainingJobId(items, JOB_B, JOB_B)).toBe(JOB_A);
     expect(selectSafeRemainingJobId([{id: JOB_A}], JOB_A, JOB_A)).toBeNull();
   });
+
+  it('parses reextract success with strict sync_ok/code/rebuild coupling', () => {
+    const ok = parseReextractJobResponse({
+      outcome: 'updated',
+      job: listItemPayload(JOB_A, {
+        evaluation_state: 'stale',
+        latest_score: 0.81,
+      }),
+      sync_ok: true,
+      code: null,
+      rebuild_instruction: null,
+    });
+    expect(ok.outcome).toBe('updated');
+    expect(ok.sync_ok).toBe(true);
+    expect(ok.code).toBeNull();
+    expect(ok.rebuild_instruction).toBeNull();
+    expect(ok.job.evaluation_state).toBe('stale');
+
+    const graphPartial = parseReextractJobResponse({
+      outcome: 'updated',
+      job: listItemPayload(JOB_A, {evaluation_state: 'stale'}),
+      sync_ok: false,
+      code: REEXTRACT_GRAPH_FAILURE_CODE,
+      rebuild_instruction:
+        'Restore Neo4j connectivity and run the local graph rebuild command.',
+    });
+    expect(graphPartial.sync_ok).toBe(false);
+    expect(graphPartial.code).toBe(REEXTRACT_GRAPH_FAILURE_CODE);
+    expect(graphPartial.rebuild_instruction).toMatch(/rebuild/i);
+
+    // Malformed combinations must never coerce.
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: true,
+        code: REEXTRACT_GRAPH_FAILURE_CODE,
+        rebuild_instruction: null,
+      }),
+    ).toThrow(/sync_ok=true/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: true,
+        code: null,
+        rebuild_instruction: 'should not be set',
+      }),
+    ).toThrow(/sync_ok=true/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: false,
+        code: null,
+        rebuild_instruction: 'rebuild me',
+      }),
+    ).toThrow(/NEO4J_SYNC_FAILED/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: false,
+        code: REEXTRACT_GRAPH_FAILURE_CODE,
+        rebuild_instruction: null,
+      }),
+    ).toThrow(/rebuild_instruction/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: false,
+        code: REEXTRACT_GRAPH_FAILURE_CODE,
+        rebuild_instruction: '   ',
+      }),
+    ).toThrow(/non-blank/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'failed',
+        job: listItemPayload(JOB_A),
+        sync_ok: true,
+        code: null,
+        rebuild_instruction: null,
+      }),
+    ).toThrow(/outcome/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: true,
+        code: null,
+        rebuild_instruction: null,
+        embedding: [0.1],
+      }),
+    ).toThrow(/extra keys/);
+
+    expect(() =>
+      parseReextractJobResponse({
+        outcome: 'updated',
+        job: listItemPayload(JOB_A),
+        sync_ok: 'yes',
+        code: null,
+        rebuild_instruction: null,
+      }),
+    ).toThrow(/sync_ok/);
+  });
 });
 
 describe('saved-JD transport', () => {
@@ -431,7 +546,7 @@ describe('saved-JD transport', () => {
     }
   });
 
-  it('evaluate / save-and-evaluate / delete transport contracts', async () => {
+  it('evaluate / save-and-evaluate / reextract / delete transport contracts', async () => {
     const prev = import.meta.env.VITE_API_BASE_URL;
     // @ts-expect-error test mutation
     import.meta.env.VITE_API_BASE_URL = 'http://api.test';
@@ -454,6 +569,23 @@ describe('saved-JD transport', () => {
       evaluation: evaluationViewPayload(JOB_B, 0.5),
       code: null,
     };
+    const reextractOk = {
+      outcome: 'updated',
+      job: listItemPayload(JOB_A, {
+        evaluation_state: 'stale',
+        latest_score: 0.7,
+      }),
+      sync_ok: true,
+      code: null,
+      rebuild_instruction: null,
+    };
+    const reextractGraph = {
+      outcome: 'updated',
+      job: listItemPayload(JOB_A, {evaluation_state: 'stale'}),
+      sync_ok: false,
+      code: SAVED_JOB_ERROR_CODES.NEO4J_SYNC_FAILED,
+      rebuild_instruction: 'Run local graph rebuild after Neo4j is restored.',
+    };
 
     const fetchMock = vi
       .fn()
@@ -468,6 +600,29 @@ describe('saved-JD transport', () => {
           status: 200,
           headers: {'Content-Type': 'application/json'},
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(reextractOk), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(reextractGraph), {
+          status: 200,
+          headers: {'Content-Type': 'application/json'},
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: SAVED_JOB_ERROR_CODES.JOB_REEXTRACT_CONFLICT,
+              summary: 'Concurrent update',
+            },
+          }),
+          {status: 409, headers: {'Content-Type': 'application/json'}},
+        ),
       )
       .mockResolvedValueOnce(new Response(null, {status: 204}))
       .mockResolvedValueOnce(
@@ -508,8 +663,28 @@ describe('saved-JD transport', () => {
         source_message_id: MSG_ID,
       });
 
+      const reOk = await reextractSavedJob(JOB_A);
+      expect(reOk.outcome).toBe('updated');
+      expect(reOk.sync_ok).toBe(true);
+      expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+        `http://api.test/api/jobs/${JOB_A}/reextract`,
+      );
+      expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({method: 'POST'});
+      expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual(
+        {},
+      );
+
+      const reGraph = await reextractSavedJob(JOB_A);
+      expect(reGraph.sync_ok).toBe(false);
+      expect(reGraph.code).toBe(SAVED_JOB_ERROR_CODES.NEO4J_SYNC_FAILED);
+
+      await expect(reextractSavedJob(JOB_A)).rejects.toMatchObject({
+        code: SAVED_JOB_ERROR_CODES.JOB_REEXTRACT_CONFLICT,
+        summary: 'Concurrent update',
+      });
+
       await expect(deleteSavedJob(JOB_A)).resolves.toBeUndefined();
-      expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({method: 'DELETE'});
+      expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({method: 'DELETE'});
 
       await expect(deleteSavedJob(JOB_A)).rejects.toMatchObject({
         code: SAVED_JOB_ERROR_CODES.JOB_DELETE_GRAPH_FAILED,

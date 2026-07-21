@@ -343,6 +343,9 @@ export type SaveIngestOutcome = 'created' | 'existing' | 'retried';
 export type SaveEvaluationOutcome = 'created' | 'reused' | 'unavailable';
 export type EvaluateOutcome = 'created' | 'reused';
 
+/** Re-extraction success outcome (Plan 15 public contract). */
+export type ReextractOutcome = 'updated';
+
 export type SavedJobsSafeError = {
   code: string;
   summary: string;
@@ -389,6 +392,13 @@ export const EVALUATE_OUTCOMES: readonly EvaluateOutcome[] = [
   'created',
   'reused',
 ] as const;
+
+export const REEXTRACT_OUTCOMES: readonly ReextractOutcome[] = [
+  'updated',
+] as const;
+
+/** Coupled graph-failure code on re-extract success when sync_ok=false. */
+export const REEXTRACT_GRAPH_FAILURE_CODE = 'NEO4J_SYNC_FAILED' as const;
 
 export const SAVED_JOBS_LIMIT_MIN = 1;
 export const SAVED_JOBS_LIMIT_MAX = 50;
@@ -486,6 +496,17 @@ const SAVE_AND_EVALUATE_RESPONSE_KEYS = [
 ] as const;
 const SAVE_AND_EVALUATE_RESPONSE_KEY_SET: ReadonlySet<string> = new Set(
   SAVE_AND_EVALUATE_RESPONSE_KEYS,
+);
+
+const REEXTRACT_RESPONSE_KEYS = [
+  'outcome',
+  'job',
+  'sync_ok',
+  'code',
+  'rebuild_instruction',
+] as const;
+const REEXTRACT_RESPONSE_KEY_SET: ReadonlySet<string> = new Set(
+  REEXTRACT_RESPONSE_KEYS,
 );
 
 const EXTRACTION_KEYS = [
@@ -591,6 +612,18 @@ export type SaveAndEvaluateResponse = {
   evaluation_outcome: SaveEvaluationOutcome;
   evaluation: JobEvaluationView | null;
   code: string | null;
+};
+
+/**
+ * POST /api/jobs/{job_id}/reextract success after SQLite commit.
+ * sync_ok couples code/rebuild_instruction; never coerce malformed combos.
+ */
+export type ReextractJobResponse = {
+  outcome: ReextractOutcome;
+  job: SavedJobListItem;
+  sync_ok: boolean;
+  code: string | null;
+  rebuild_instruction: string | null;
 };
 
 export type SavedJobsPageQuery = {
@@ -1042,6 +1075,97 @@ export function parseSaveAndEvaluateResponse(
     evaluation_outcome: evalOutcome as SaveEvaluationOutcome,
     evaluation,
     code,
+  };
+}
+
+/**
+ * Strict parse of ReextractJobResponse.
+ * sync_ok=true requires null code and rebuild_instruction.
+ * sync_ok=false requires code=NEO4J_SYNC_FAILED and non-blank rebuild guidance.
+ * Never coerces malformed sync/code/rebuild combinations.
+ */
+export function parseReextractJobResponse(raw: unknown): ReextractJobResponse {
+  if (!isObject(raw) || !hasOnlyKeys(raw, REEXTRACT_RESPONSE_KEY_SET)) {
+    throw new Error('reextract response has invalid shape or extra keys');
+  }
+  rejectForbiddenKeys(raw, 'reextract response');
+  requireKeys(raw, REEXTRACT_RESPONSE_KEYS, 'reextract response');
+
+  const outcome = raw.outcome;
+  if (
+    typeof outcome !== 'string' ||
+    !(REEXTRACT_OUTCOMES as readonly string[]).includes(outcome)
+  ) {
+    throw new Error('reextract response.outcome is invalid');
+  }
+
+  if (typeof raw.sync_ok !== 'boolean') {
+    throw new Error('reextract response.sync_ok must be a boolean');
+  }
+  const syncOk = raw.sync_ok;
+
+  // code and rebuild_instruction are required keys; null is valid only for sync_ok=true.
+  if (!Object.prototype.hasOwnProperty.call(raw, 'code')) {
+    throw new Error('reextract response missing required key code');
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'rebuild_instruction')) {
+    throw new Error(
+      'reextract response missing required key rebuild_instruction',
+    );
+  }
+
+  let code: string | null;
+  if (raw.code === null) {
+    code = null;
+  } else if (typeof raw.code === 'string' && raw.code.trim() !== '') {
+    code = raw.code;
+  } else {
+    throw new Error('reextract response.code must be string or null');
+  }
+
+  let rebuildInstruction: string | null;
+  if (raw.rebuild_instruction === null) {
+    rebuildInstruction = null;
+  } else if (
+    typeof raw.rebuild_instruction === 'string' &&
+    raw.rebuild_instruction.trim() !== ''
+  ) {
+    rebuildInstruction = raw.rebuild_instruction;
+  } else if (typeof raw.rebuild_instruction === 'string') {
+    throw new Error(
+      'reextract response.rebuild_instruction must be non-blank when present',
+    );
+  } else {
+    throw new Error(
+      'reextract response.rebuild_instruction must be string or null',
+    );
+  }
+
+  if (syncOk) {
+    if (code !== null || rebuildInstruction !== null) {
+      throw new Error(
+        'reextract response sync_ok=true requires code and rebuild_instruction to be null',
+      );
+    }
+  } else {
+    if (code !== REEXTRACT_GRAPH_FAILURE_CODE) {
+      throw new Error(
+        "reextract response sync_ok=false requires code='NEO4J_SYNC_FAILED'",
+      );
+    }
+    if (rebuildInstruction === null) {
+      throw new Error(
+        'reextract response sync_ok=false requires non-blank rebuild_instruction',
+      );
+    }
+  }
+
+  return {
+    outcome: outcome as ReextractOutcome,
+    job: parseSavedJobListItem(raw.job),
+    sync_ok: syncOk,
+    code,
+    rebuild_instruction: rebuildInstruction,
   };
 }
 

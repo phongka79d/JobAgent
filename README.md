@@ -21,11 +21,19 @@ this repository is not configured as a public or multi-user service.
 
 The last committed product baseline is **Plan 15 Batch01** at commit
 `5208ea50` (`P15B1: Complete`). **Plan 15 Batch02** (Safe Retained-JD
-Replacement and Public API) is implemented on the working tree over that base:
-revision-checked same-ID extraction replacement, staged re-extraction
-coordinator (provider/embedding outside transactions; CAS on `id` +
-`updated_at`), and strict `POST /api/jobs/{job_id}/reextract` with coupled
-graph partial-success response. Scope, acceptance, and design authority:
+Replacement and Public API) and **Batch03** (Complete Saved-JD Detail and
+Re-extraction UI) are implemented on the working tree over that base:
+
+- Batch02: revision-checked same-ID extraction replacement, staged re-extraction
+  coordinator (provider/embedding outside transactions; CAS on `id` +
+  `updated_at`), and strict `POST /api/jobs/{job_id}/reextract` with coupled
+  graph partial-success response.
+- Batch03: complete saved-JD extraction detail groups, accessible
+  `JobReextractDialog`, and sole-owner non-optimistic re-extraction through
+  `useSavedJobsState` in `ObservabilitySidebar` (graph-generation invalidation
+  reused; no second state owner).
+
+Scope, acceptance, and design authority:
 
 - [Plan 15](docs/plans/Plan_15.md)
 - [Task 15](docs/tasks/task_15.md)
@@ -255,6 +263,20 @@ The boundaries are intentionally narrow:
 4. After SQLite commit, same-ID `sync_job` runs. Graph failure keeps SQLite truth
    and returns HTTP 200 with `sync_ok=false`, `NEO4J_SYNC_FAILED`, and the safe
    rebuild instruction. Pre-commit failures use `detail={code, summary}` only.
+5. In the UI, saved-JD detail renders metadata, ordered responsibilities,
+   required/preferred skills (with confidence), extraction confidence, and
+   collapsed evidence with explicit empty states. **Re-extract JD** opens
+   [`JobReextractDialog`](frontend/src/features/jobs/JobReextractDialog.tsx),
+   which names the Job and states identity/raw preservation, pre-commit
+   preservation, stale-on-success, and no automatic evaluation. Confirm runs
+   only through the sole
+   [`useSavedJobsState`](frontend/src/features/jobs/savedJobsState.ts) owner
+   wired from
+   [`ObservabilitySidebar`](frontend/src/features/observability/ObservabilitySidebar.tsx):
+   non-optimistic compact-row patch, forced detail GET, currentness refresh,
+   and graph-generation bump; graph-warning success still refreshes SQLite
+   views and shows rebuild guidance; pre-commit failure preserves cached
+   list/detail and shows only a safe summary.
 
 ### 5. CV and Job deletion
 
@@ -304,7 +326,11 @@ Key ownership rules:
 - `features/observability/` owns CV Manager, chunks, run history, bounded graph
   presentation, request/cache state, and deletion UI.
 - `features/jobs/` owns typed saved-JD contracts, list/detail/currentness state,
-  explicit evaluation/re-evaluation, deterministic match cards, and deletion UI.
+  complete extraction detail groups, explicit evaluation/re-evaluation,
+  confirmation-based same-ID re-extraction (`JobReextractDialog` +
+  `confirmReextract`), deterministic match cards, and deletion UI. The sole
+  `useSavedJobsState` instance lives in `ObservabilitySidebar` and is passed
+  into `SavedJobsPanel` by props only.
 - `lib/api/chat.ts` owns the frontend API origin and chat/resume/reprocess SSE
   transports; `lib/sse/` validates and consumes stream frames.
 
@@ -482,6 +508,8 @@ Set-Location backend
 & '..\.venv\Scripts\python.exe' -m pytest -q
 
 Set-Location ..\frontend
+# Plan 15 Batch03 focused frontend subset (parser/detail/dialog/state/sidebar)
+npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-sidebar.test.tsx
 npm test -- --run
 npm run lint
 npm run typecheck
@@ -631,7 +659,8 @@ sanitized manual and browser procedures.
 - [Master Plan](docs/plans/Master_plan.md) — stable product scope,
   architecture, data contracts, failure policy, and definition of done.
 - [Plan 15](docs/plans/Plan_15.md) — guarded JD extraction, safe re-extraction,
-  and saved-JD completeness (Batch01 committed; Batch02 on the working tree).
+  and saved-JD completeness (Batch01 committed; Batch02–Batch03 on the working
+  tree).
 - [Task 15](docs/tasks/task_15.md) — Plan 15 batch/task contracts and validation.
 - [Plan 14](docs/plans/Plan_14.md) — prior committed intent-aware pasted-JD
   confirmation design and verification contract.

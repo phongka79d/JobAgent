@@ -15,8 +15,10 @@ import {
   type SavedJobsApi,
 } from './api';
 import {
+  REEXTRACT_GRAPH_FAILURE_CODE,
   selectSafeRemainingJobId,
   type EvaluateJobResponse,
+  type ReextractJobResponse,
   type SaveAndEvaluateResponse,
   type SavedJobDetail,
   type SavedJobListItem,
@@ -44,7 +46,7 @@ export type CachedResource<T> = {
 };
 
 /** Per-Job action kinds (at most one pending per job_id). */
-export type SavedJobActionKind = 'evaluate' | 'delete';
+export type SavedJobActionKind = 'evaluate' | 'delete' | 'reextract';
 
 export type SavedJobsActionSlice = {
   pendingByJob: Readonly<Record<string, SavedJobActionKind>>;
@@ -257,6 +259,15 @@ type Action =
       jobId: string;
     }
   | {
+      /**
+       * Re-extract success after SQLite commit. Never patches extraction;
+       * compact list row is authoritative until detail is force-refetched.
+       */
+      type: 'reextract_success';
+      jobId: string;
+      response: ReextractJobResponse;
+    }
+  | {
       type: 'save_begin';
       sourceMessageId: string;
     }
@@ -447,6 +458,73 @@ export function savedJobsReducer(
             action.jobId,
           ),
           errorsByJob: dropJobError(state.actions.errorsByJob, action.jobId),
+        },
+        externalInvalidation: bumpExternal(state.externalInvalidation),
+      };
+    }
+    case 'reextract_success': {
+      // Patch compact list only — never invent or optimistically rewrite extraction.
+      const listData = patchListItem(state.list.data, action.response.job);
+      const nextDetails = {...state.details};
+      const priorDetail = nextDetails[action.jobId];
+      if (priorDetail?.data) {
+        nextDetails[action.jobId] = {
+          phase: 'loading',
+          data: {
+            ...priorDetail.data,
+            compact: action.response.job,
+          },
+          error: null,
+          // Force a server GET for extraction/currentness; preserve last safe view.
+          loaded: false,
+        };
+      } else {
+        nextDetails[action.jobId] = {
+          phase: 'loading',
+          data: {
+            compact: action.response.job,
+            extraction: null,
+            raw_content: null,
+            latest_evaluation: null,
+          },
+          error: null,
+          loaded: false,
+        };
+      }
+      // Graph partial success still refreshes SQLite views and surfaces rebuild guidance.
+      const graphWarning: SavedJobsSafeError | null =
+        action.response.sync_ok === false &&
+        action.response.code === REEXTRACT_GRAPH_FAILURE_CODE &&
+        typeof action.response.rebuild_instruction === 'string' &&
+        action.response.rebuild_instruction.trim() !== ''
+          ? {
+              code: REEXTRACT_GRAPH_FAILURE_CODE,
+              summary: action.response.rebuild_instruction,
+            }
+          : null;
+      return {
+        ...state,
+        list: listData
+          ? {
+              phase: phaseForPage(listData.items.length),
+              data: listData,
+              error: null,
+              loaded: state.list.loaded || true,
+            }
+          : state.list,
+        details: nextDetails,
+        actions: {
+          ...state.actions,
+          pendingByJob: dropPendingJob(
+            state.actions.pendingByJob,
+            action.jobId,
+          ),
+          errorsByJob: graphWarning
+            ? {
+                ...dropJobError(state.actions.errorsByJob, action.jobId),
+                [action.jobId]: graphWarning,
+              }
+            : dropJobError(state.actions.errorsByJob, action.jobId),
         },
         externalInvalidation: bumpExternal(state.externalInvalidation),
       };
@@ -742,6 +820,53 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     [api],
   );
 
+  /**
+   * Confirmed re-extraction. Never patches extraction optimistically.
+   * On success: compact row + currentness from response, force detail GET,
+   * graph generation bump; graph partial success still refreshes SQLite views.
+   * Pre-commit failure preserves cached list/detail and shows safe summary only.
+   * Never dispatches evaluate.
+   */
+  const confirmReextract = useCallback(
+    async (
+      jobId: string,
+      opts?: {signal?: AbortSignal},
+    ): Promise<'success' | 'duplicate' | 'error'> => {
+      if (actionInFlightRef.current.has(jobId)) {
+        return 'duplicate';
+      }
+      actionInFlightRef.current.add(jobId);
+      dispatch({type: 'action_begin', jobId, kind: 'reextract'});
+      try {
+        const response = await api.reextractSavedJob(jobId, opts?.signal);
+        if (opts?.signal?.aborted) {
+          actionInFlightRef.current.delete(jobId);
+          dispatch({type: 'action_end', jobId});
+          return 'error';
+        }
+        actionInFlightRef.current.delete(jobId);
+        dispatch({type: 'reextract_success', jobId, response});
+        // Server remains authoritative for extraction; force detail refresh.
+        await loadDetail(jobId, {force: true, signal: opts?.signal});
+        return 'success';
+      } catch (err) {
+        actionInFlightRef.current.delete(jobId);
+        if (opts?.signal?.aborted) {
+          dispatch({type: 'action_end', jobId});
+          return 'error';
+        }
+        const safe = toSavedJobActionError(err);
+        dispatch({
+          type: 'action_error',
+          jobId,
+          error: {code: safe.code, summary: safe.summary},
+        });
+        return 'error';
+      }
+    },
+    [api, loadDetail],
+  );
+
   const saveAndEvaluate = useCallback(
     async (
       sourceMessageId: string,
@@ -796,6 +921,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     loadDetail,
     evaluateJob,
     confirmDelete,
+    confirmReextract,
     saveAndEvaluate,
     invalidateCurrentness,
     isJobActionPending: (jobId: string) =>

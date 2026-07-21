@@ -1,10 +1,12 @@
 /**
  * Selected saved-JD detail: source/extraction + persisted MatchResult (Plan 10).
+ * Plan 15: complete extraction groups, bounded collapsed evidence, re-extract CTA.
  * Reuses MatchCard / ScoreBreakdown; does not duplicate score formatting maps.
  */
 
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
+import {Collapsible} from '@astryxdesign/core/Collapsible';
 import {HStack} from '@astryxdesign/core/HStack';
 import {
   MetadataList,
@@ -15,8 +17,11 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CachedResource, SavedJobActionKind} from './savedJobsState';
 import {MatchCard} from './MatchCard';
+import {REEXTRACT_GRAPH_FAILURE_CODE} from './types';
 import type {
   EvaluationCurrentness,
+  JobPostExtractionView,
+  JobSkillView,
   SavedJobDetail as SavedJobDetailData,
   SavedJobListItem,
   SavedJobsSafeError,
@@ -29,6 +34,7 @@ export type SavedJobDetailProps = {
   actionError: SavedJobsSafeError | undefined;
   onEvaluate: (jobId: string) => void;
   onRequestDelete: (job: SavedJobListItem) => void;
+  onRequestReextract: (job: SavedJobListItem) => void;
   onClearError: (jobId: string) => void;
   onRefreshDetail: (jobId: string) => void;
 };
@@ -64,6 +70,247 @@ export function evaluateActionLabel(
   return null;
 }
 
+function formatExperienceRange(
+  minYears: number | null,
+  maxYears: number | null,
+): string {
+  if (minYears === null && maxYears === null) {
+    return 'Not specified';
+  }
+  if (minYears !== null && maxYears !== null) {
+    return `${minYears}–${maxYears} years`;
+  }
+  if (minYears !== null) {
+    return `${minYears}+ years`;
+  }
+  return `Up to ${maxYears} years`;
+}
+
+function formatSkillConfidence(confidence: number): string {
+  if (!Number.isFinite(confidence)) {
+    return '—';
+  }
+  return confidence.toFixed(2);
+}
+
+function SkillListSection({
+  title,
+  skills,
+  emptyLabel,
+  testId,
+}: {
+  title: string;
+  skills: JobSkillView[];
+  emptyLabel: string;
+  testId: string;
+}) {
+  return (
+    <VStack gap={1} width="100%" data-testid={testId}>
+      <Text type="label" as="p">
+        {title}
+      </Text>
+      {skills.length === 0 ? (
+        <Text type="supporting" color="secondary" as="p">
+          {emptyLabel}
+        </Text>
+      ) : (
+        <VStack gap={1} width="100%">
+          {skills.map((item, index) => (
+            <Text
+              key={`${item.skill.canonical_key}-${index}`}
+              type="body"
+              as="p"
+              data-testid={`${testId}-item-${index}`}
+            >
+              {item.skill.display_name}
+              {' · '}
+              {formatSkillConfidence(item.confidence)}
+            </Text>
+          ))}
+        </VStack>
+      )}
+    </VStack>
+  );
+}
+
+function ExtractionEvidenceSection({
+  extraction,
+}: {
+  extraction: JobPostExtractionView;
+}) {
+  const entries: {label: string; quote: string}[] = [];
+  for (const skill of extraction.required_skills) {
+    for (const quote of skill.evidence) {
+      entries.push({
+        label: skill.skill.display_name,
+        quote,
+      });
+    }
+  }
+  for (const skill of extraction.preferred_skills) {
+    for (const quote of skill.evidence) {
+      entries.push({
+        label: skill.skill.display_name,
+        quote,
+      });
+    }
+  }
+
+  return (
+    <VStack
+      gap={1}
+      width="100%"
+      data-testid="jobagent-saved-job-evidence"
+    >
+      <Collapsible
+        defaultIsOpen={false}
+        trigger={
+          <Text type="label" as="span">
+            Evidence ({entries.length})
+          </Text>
+        }
+      >
+        {entries.length === 0 ? (
+          <Text
+            type="supporting"
+            color="secondary"
+            as="p"
+            data-testid="jobagent-saved-job-evidence-empty"
+          >
+            No evidence available
+          </Text>
+        ) : (
+          <VStack gap={1} width="100%" data-testid="jobagent-saved-job-evidence-list">
+            {entries.map((entry, index) => (
+              <VStack
+                key={`${entry.label}-${index}`}
+                gap={0}
+                width="100%"
+                data-testid={`jobagent-saved-job-evidence-item-${index}`}
+              >
+                <Text type="supporting" color="secondary" as="p">
+                  {entry.label}
+                </Text>
+                <Text type="body" as="p" maxLines={4} hasTruncateTooltip>
+                  {entry.quote}
+                </Text>
+              </VStack>
+            ))}
+          </VStack>
+        )}
+      </Collapsible>
+    </VStack>
+  );
+}
+
+function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
+  const summaryText =
+    extraction.summary.trim() === ''
+      ? 'No summary available'
+      : extraction.summary;
+
+  return (
+    <VStack
+      gap={2}
+      width="100%"
+      data-testid="jobagent-saved-job-extraction"
+    >
+      <Text type="label" as="p">
+        Extraction
+      </Text>
+
+      <VStack
+        gap={1}
+        width="100%"
+        data-testid="jobagent-saved-job-extraction-metadata"
+      >
+        <MetadataList columns="single" label={{position: 'start'}}>
+          <MetadataListItem label="Title">
+            <Text type="body" maxLines={2} hasTruncateTooltip as="span">
+              {extraction.title?.trim() || 'Not specified'}
+            </Text>
+          </MetadataListItem>
+          <MetadataListItem label="Company">
+            {extraction.company?.trim() || 'Not specified'}
+          </MetadataListItem>
+          <MetadataListItem label="Summary">
+            <Text type="body" maxLines={4} hasTruncateTooltip as="span">
+              {summaryText}
+            </Text>
+          </MetadataListItem>
+          <MetadataListItem label="Seniority">
+            {extraction.seniority}
+          </MetadataListItem>
+          <MetadataListItem label="Experience">
+            {formatExperienceRange(
+              extraction.min_experience_years,
+              extraction.max_experience_years,
+            )}
+          </MetadataListItem>
+          <MetadataListItem label="Location">
+            {extraction.location?.trim() || 'Not specified'}
+          </MetadataListItem>
+          <MetadataListItem label="Work mode">
+            {extraction.work_mode}
+          </MetadataListItem>
+          <MetadataListItem label="Extraction confidence">
+            {formatSkillConfidence(extraction.extraction_confidence)}
+          </MetadataListItem>
+        </MetadataList>
+      </VStack>
+
+      <VStack
+        gap={1}
+        width="100%"
+        data-testid="jobagent-saved-job-responsibilities"
+      >
+        <Text type="label" as="p">
+          Responsibilities
+        </Text>
+        {extraction.responsibilities.length === 0 ? (
+          <Text
+            type="supporting"
+            color="secondary"
+            as="p"
+            data-testid="jobagent-saved-job-responsibilities-empty"
+          >
+            No responsibilities extracted
+          </Text>
+        ) : (
+          <VStack gap={1} width="100%">
+            {extraction.responsibilities.map((item, index) => (
+              <Text
+                key={`resp-${index}`}
+                type="body"
+                as="p"
+                data-testid={`jobagent-saved-job-responsibility-${index}`}
+              >
+                {item}
+              </Text>
+            ))}
+          </VStack>
+        )}
+      </VStack>
+
+      <SkillListSection
+        title="Required skills"
+        skills={extraction.required_skills}
+        emptyLabel="No required skills extracted"
+        testId="jobagent-saved-job-required-skills"
+      />
+
+      <SkillListSection
+        title="Preferred skills"
+        skills={extraction.preferred_skills}
+        emptyLabel="No preferred skills extracted"
+        testId="jobagent-saved-job-preferred-skills"
+      />
+
+      <ExtractionEvidenceSection extraction={extraction} />
+    </VStack>
+  );
+}
+
 export function SavedJobDetailView({
   job,
   detail,
@@ -71,17 +318,21 @@ export function SavedJobDetailView({
   actionError,
   onEvaluate,
   onRequestDelete,
+  onRequestReextract,
   onClearError,
   onRefreshDetail,
 }: SavedJobDetailProps) {
   const isPending = pendingKind !== undefined;
   const isEvaluatePending = pendingKind === 'evaluate';
   const isDeletePending = pendingKind === 'delete';
+  const isReextractPending = pendingKind === 'reextract';
   const evaluateLabel = evaluateActionLabel(job.evaluation_state);
   const data = detail?.data ?? null;
   const extraction = data?.extraction ?? null;
   const evaluation = data?.latest_evaluation ?? null;
   const jobLabel = formatSavedJobLabel(job);
+  const isGraphWarning =
+    actionError?.code === REEXTRACT_GRAPH_FAILURE_CODE;
 
   return (
     <VStack
@@ -146,47 +397,16 @@ export function SavedJobDetailView({
       ) : null}
 
       {extraction ? (
-        <VStack
-          gap={1}
-          width="100%"
-          data-testid="jobagent-saved-job-extraction"
+        <ExtractionGroups extraction={extraction} />
+      ) : data && detail?.phase !== 'loading' ? (
+        <Text
+          type="supporting"
+          color="secondary"
+          as="p"
+          data-testid="jobagent-saved-job-extraction-empty"
         >
-          <Text type="label" as="p">
-            Extraction
-          </Text>
-          <MetadataList columns="single" label={{position: 'start'}}>
-            {extraction.title ? (
-              <MetadataListItem label="Title">
-                <Text type="body" maxLines={2} hasTruncateTooltip as="span">
-                  {extraction.title}
-                </Text>
-              </MetadataListItem>
-            ) : null}
-            {extraction.company ? (
-              <MetadataListItem label="Company">
-                {extraction.company}
-              </MetadataListItem>
-            ) : null}
-            <MetadataListItem label="Summary">
-              <Text type="body" maxLines={4} hasTruncateTooltip as="span">
-                {extraction.summary.trim() === ''
-                  ? 'No summary available'
-                  : extraction.summary}
-              </Text>
-            </MetadataListItem>
-            <MetadataListItem label="Seniority">
-              {extraction.seniority}
-            </MetadataListItem>
-            <MetadataListItem label="Work mode">
-              {extraction.work_mode}
-            </MetadataListItem>
-            {extraction.location ? (
-              <MetadataListItem label="Location">
-                {extraction.location}
-              </MetadataListItem>
-            ) : null}
-          </MetadataList>
-        </VStack>
+          No structured extraction available
+        </Text>
       ) : null}
 
       {data?.raw_content ? (
@@ -229,8 +449,12 @@ export function SavedJobDetailView({
 
       {actionError ? (
         <Banner
-          status="error"
-          title="Action failed"
+          status={isGraphWarning ? 'warning' : 'error'}
+          title={
+            isGraphWarning
+              ? 'Graph rebuild required'
+              : 'Action failed'
+          }
           description={`${actionError.summary} (${actionError.code})`}
           container="section"
           data-testid={`jobagent-saved-job-action-error-${job.id}`}
@@ -255,6 +479,16 @@ export function SavedJobDetailView({
             data-testid={`jobagent-saved-job-evaluate-${job.id}`}
           />
         ) : null}
+
+        <Button
+          label="Re-extract JD"
+          variant="secondary"
+          size="sm"
+          isDisabled={isPending}
+          isLoading={isReextractPending}
+          onClick={() => onRequestReextract(job)}
+          data-testid={`jobagent-saved-job-reextract-${job.id}`}
+        />
 
         <Button
           label="Xoá JD"

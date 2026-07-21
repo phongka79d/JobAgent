@@ -17,6 +17,7 @@ import {ObservabilityListSkeleton} from '../observability/ObservabilityListSkele
 import {ObservabilityPanelHeader} from '../observability/ObservabilityPanelHeader';
 import {formatDisplayScore} from './matchResult';
 import {JobDeleteDialog} from './JobDeleteDialog';
+import {JobReextractDialog} from './JobReextractDialog';
 import {
   formatSavedJobLabel,
   SavedJobDetailView,
@@ -46,6 +47,9 @@ export type SavedJobsPanelProps = {
   onRefresh: () => void;
   onEvaluate: (jobId: string) => Promise<'success' | 'duplicate' | 'error'>;
   onConfirmDelete: (
+    jobId: string,
+  ) => Promise<'success' | 'duplicate' | 'error'>;
+  onConfirmReextract: (
     jobId: string,
   ) => Promise<'success' | 'duplicate' | 'error'>;
   onClearError: (jobId: string) => void;
@@ -140,6 +144,7 @@ export function SavedJobsPanel({
   onRefresh,
   onEvaluate,
   onConfirmDelete,
+  onConfirmReextract,
   onClearError,
   onRefreshDetail,
 }: SavedJobsPanelProps) {
@@ -151,6 +156,8 @@ export function SavedJobsPanel({
   const [deleteTarget, setDeleteTarget] = useState<SavedJobListItem | null>(
     null,
   );
+  const [reextractTarget, setReextractTarget] =
+    useState<SavedJobListItem | null>(null);
 
   // Load once when the tab panel mounts; state owner skips when already cached.
   // Mount-only on purpose: remount on tab re-entry; parent callback identity may churn.
@@ -234,7 +241,11 @@ export function SavedJobsPanel({
                   <HStack gap={1} vAlign="center">
                     {pending ? (
                       <Text type="supporting" color="secondary" as="span">
-                        {pending === 'evaluate' ? 'Evaluating…' : 'Deleting…'}
+                        {pending === 'evaluate'
+                          ? 'Evaluating…'
+                          : pending === 'reextract'
+                            ? 'Re-extracting…'
+                            : 'Deleting…'}
                       </Text>
                     ) : null}
                     {evaluationEndContent(item)}
@@ -263,6 +274,7 @@ export function SavedJobsPanel({
             void onEvaluate(jobId);
           }}
           onRequestDelete={(job) => setDeleteTarget(job)}
+          onRequestReextract={(job) => setReextractTarget(job)}
           onClearError={onClearError}
           onRefreshDetail={onRefreshDetail}
         />
@@ -294,6 +306,37 @@ export function SavedJobsPanel({
               outcome === 'error'
             ) {
               setDeleteTarget(null);
+            }
+          });
+        }}
+      />
+
+      <JobReextractDialog
+        isOpen={reextractTarget !== null}
+        jobLabel={
+          reextractTarget ? formatSavedJobLabel(reextractTarget) : ''
+        }
+        isReextracting={
+          reextractTarget !== null &&
+          actions.pendingByJob[reextractTarget.id] === 'reextract'
+        }
+        onOpenChange={(open) => {
+          if (!open) {
+            setReextractTarget(null);
+          }
+        }}
+        onConfirm={() => {
+          if (!reextractTarget) {
+            return;
+          }
+          const target = reextractTarget;
+          void onConfirmReextract(target.id).then((outcome) => {
+            if (
+              outcome === 'success' ||
+              outcome === 'duplicate' ||
+              outcome === 'error'
+            ) {
+              setReextractTarget(null);
             }
           });
         }}

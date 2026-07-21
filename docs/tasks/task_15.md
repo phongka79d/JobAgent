@@ -420,7 +420,7 @@ sidebar-local state/cache owner and graph-generation invalidation seam.
 
 ### Tasks
 
-- [ ] (03A): Render complete extraction detail and wire sole-owner re-extraction
+- [x] (03A): Render complete extraction detail and wire sole-owner re-extraction
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch03 - Complete Saved-JD Detail and Re-extraction UI` > `(03A)`

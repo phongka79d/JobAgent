@@ -312,6 +312,7 @@ export function ObservabilitySidebar({
             onRefresh={refreshSavedJobsList}
             onEvaluate={savedJobs.evaluateJob}
             onConfirmDelete={savedJobs.confirmDelete}
+            onConfirmReextract={savedJobs.confirmReextract}
             onClearError={savedJobs.clearActionError}
             onRefreshDetail={(jobId) => {
               void savedJobs.loadDetail(jobId, {force: true});

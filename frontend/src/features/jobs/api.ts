@@ -11,10 +11,12 @@ import {
 } from '../../lib/api/chat';
 import {
   parseEvaluateJobResponse,
+  parseReextractJobResponse,
   parseSaveAndEvaluateResponse,
   parseSavedJobDetail,
   parseSavedJobListPage,
   type EvaluateJobResponse,
+  type ReextractJobResponse,
   type SaveAndEvaluateResponse,
   type SavedJobDetail,
   type SavedJobListPage,
@@ -30,6 +32,7 @@ export const SAVED_JOB_ERROR_CODES = {
   JOB_NOT_SCORABLE: 'JOB_NOT_SCORABLE',
   ACTIVE_PROFILE_REQUIRED: 'ACTIVE_PROFILE_REQUIRED',
   JOB_DELETE_GRAPH_FAILED: 'JOB_DELETE_GRAPH_FAILED',
+  JOB_REEXTRACT_CONFLICT: 'JOB_REEXTRACT_CONFLICT',
   EVALUATION_CONTEXT_CHANGED: 'EVALUATION_CONTEXT_CHANGED',
   INVALID_MATCH_RESULT: 'INVALID_MATCH_RESULT',
   INVALID_LIMIT: 'INVALID_LIMIT',
@@ -298,6 +301,24 @@ export async function saveAndEvaluateJob(
 }
 
 /**
+ * POST /api/jobs/{job_id}/reextract — same-ID retained-JD replacement.
+ * Empty body only; never accepts client replacement fields.
+ * HTTP 200 may still report graph partial success (sync_ok=false).
+ */
+export async function reextractSavedJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<ReextractJobResponse> {
+  const path = `/api/jobs/${encodeURIComponent(jobId)}/reextract`;
+  const json = await postJson(path, {}, signal);
+  try {
+    return parseReextractJobResponse(json);
+  } catch (err) {
+    throw wrapParseError('INVALID_REEXTRACT_PAYLOAD', err);
+  }
+}
+
+/**
  * DELETE /api/jobs/{job_id} — complete deletion.
  * 204 = success (no body). Maps documented codes; graph failure stays retryable.
  */
@@ -349,6 +370,7 @@ export type SavedJobsApi = {
   fetchSavedJobDetail: typeof fetchSavedJobDetail;
   evaluateSavedJob: typeof evaluateSavedJob;
   saveAndEvaluateJob: typeof saveAndEvaluateJob;
+  reextractSavedJob: typeof reextractSavedJob;
   deleteSavedJob: typeof deleteSavedJob;
 };
 
@@ -357,5 +379,6 @@ export const defaultSavedJobsApi: SavedJobsApi = {
   fetchSavedJobDetail,
   evaluateSavedJob,
   saveAndEvaluateJob,
+  reextractSavedJob,
   deleteSavedJob,
 };

@@ -136,12 +136,34 @@ function readyDetail(
         title: job.title,
         company: job.company,
         summary: 'Build reliable APIs and services for the platform.',
-        responsibilities: ['Design services'],
-        required_skills: [],
-        preferred_skills: [],
+        responsibilities: ['Design services', 'Own on-call'],
+        required_skills: [
+          {
+            skill: {
+              canonical_key: 'python',
+              display_name: 'Python',
+              aliases: [],
+              category: 'language',
+            },
+            confidence: 0.91,
+            evidence: ['Required: Python 3+'],
+          },
+        ],
+        preferred_skills: [
+          {
+            skill: {
+              canonical_key: 'kubernetes',
+              display_name: 'Kubernetes',
+              aliases: [],
+              category: 'platform',
+            },
+            confidence: 0.7,
+            evidence: ['Nice to have: Kubernetes'],
+          },
+        ],
         seniority: 'senior',
         min_experience_years: 5,
-        max_experience_years: null,
+        max_experience_years: 8,
         location: 'Berlin',
         work_mode: 'hybrid',
         extraction_confidence: 0.9,
@@ -169,13 +191,16 @@ function renderPanel(opts: {
   items: SavedJobListItem[];
   selectedJobId?: string | null;
   details?: Record<string, CachedResource<SavedJobDetail>>;
-  pendingByJob?: Record<string, 'evaluate' | 'delete'>;
+  pendingByJob?: Record<string, 'evaluate' | 'delete' | 'reextract'>;
   errorsByJob?: Record<string, {code: string; summary: string}>;
   onSelect?: (id: string) => void;
   onEvaluate?: (
     id: string,
   ) => Promise<'success' | 'duplicate' | 'error'>;
   onConfirmDelete?: (
+    id: string,
+  ) => Promise<'success' | 'duplicate' | 'error'>;
+  onConfirmReextract?: (
     id: string,
   ) => Promise<'success' | 'duplicate' | 'error'>;
 }) {
@@ -192,6 +217,8 @@ function renderPanel(opts: {
   const onEvaluate = opts.onEvaluate ?? vi.fn().mockResolvedValue('success');
   const onConfirmDelete =
     opts.onConfirmDelete ?? vi.fn().mockResolvedValue('success');
+  const onConfirmReextract =
+    opts.onConfirmReextract ?? vi.fn().mockResolvedValue('success');
   const onClearError = vi.fn();
   const onLoad = vi.fn();
   const onRefresh = vi.fn();
@@ -213,6 +240,7 @@ function renderPanel(opts: {
         onRefresh={onRefresh}
         onEvaluate={onEvaluate}
         onConfirmDelete={onConfirmDelete}
+        onConfirmReextract={onConfirmReextract}
         onClearError={onClearError}
         onRefreshDetail={onRefreshDetail}
       />
@@ -223,6 +251,7 @@ function renderPanel(opts: {
     onSelect,
     onEvaluate,
     onConfirmDelete,
+    onConfirmReextract,
     onClearError,
     onRefresh,
     onRefreshDetail,
@@ -417,6 +446,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
           onRefresh={vi.fn()}
           onEvaluate={vi.fn().mockResolvedValue('success')}
           onConfirmDelete={vi.fn().mockResolvedValue('success')}
+          onConfirmReextract={vi.fn().mockResolvedValue('success')}
           onClearError={vi.fn()}
           onRefreshDetail={vi.fn()}
         />
@@ -438,6 +468,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
           onRefresh={vi.fn()}
           onEvaluate={vi.fn().mockResolvedValue('success')}
           onConfirmDelete={vi.fn().mockResolvedValue('success')}
+          onConfirmReextract={vi.fn().mockResolvedValue('success')}
           onClearError={vi.fn()}
           onRefreshDetail={vi.fn()}
         />
@@ -521,6 +552,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
           onRefresh={vi.fn()}
           onEvaluate={vi.fn().mockResolvedValue('success')}
           onConfirmDelete={vi.fn().mockResolvedValue('success')}
+          onConfirmReextract={vi.fn().mockResolvedValue('success')}
           onClearError={vi.fn()}
           onRefreshDetail={vi.fn()}
         />
@@ -565,6 +597,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
           onRefresh={vi.fn()}
           onEvaluate={vi.fn().mockResolvedValue('error')}
           onConfirmDelete={vi.fn().mockResolvedValue('success')}
+          onConfirmReextract={vi.fn().mockResolvedValue('success')}
           onClearError={onClearError}
           onRefreshDetail={vi.fn()}
         />
@@ -577,6 +610,172 @@ describe('SavedJobsPanel list, detail, and actions', () => {
       screen.getByTestId(`jobagent-saved-job-clear-error-${JOB_NONE}`),
     );
     expect(onClearError).toHaveBeenCalledWith(JOB_NONE);
+  });
+
+  it('renders every extraction group with experience, skills, and confidence', () => {
+    const job = listItem(JOB_CURRENT, {
+      evaluation_state: 'current',
+      latest_score: 0.88,
+    });
+    renderPanel({items: [job], selectedJobId: JOB_CURRENT});
+
+    const extraction = screen.getByTestId('jobagent-saved-job-extraction');
+    expect(
+      screen.getByTestId('jobagent-saved-job-extraction-metadata'),
+    ).toBeInTheDocument();
+    expect(extraction).toHaveTextContent('5–8 years');
+    expect(extraction).toHaveTextContent('0.90');
+    expect(
+      screen.getByTestId('jobagent-saved-job-responsibilities'),
+    ).toHaveTextContent('Design services');
+    expect(
+      screen.getByTestId('jobagent-saved-job-required-skills'),
+    ).toHaveTextContent('Python');
+    expect(
+      screen.getByTestId('jobagent-saved-job-preferred-skills'),
+    ).toHaveTextContent('Kubernetes');
+    expect(screen.getByTestId('jobagent-saved-job-evidence')).toHaveTextContent(
+      'Evidence (2)',
+    );
+  });
+
+  it('shows explicit empty states and keeps evidence collapsed by default', async () => {
+    const job = listItem(JOB_NONE, {evaluation_state: 'none'});
+    const detail = readyDetail(job, {withEvaluation: false});
+    detail.data!.extraction = {
+      ...detail.data!.extraction!,
+      responsibilities: [],
+      required_skills: [],
+      preferred_skills: [],
+      min_experience_years: null,
+      max_experience_years: null,
+      location: null,
+      title: null,
+      company: null,
+    };
+
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_NONE,
+      details: {[JOB_NONE]: detail},
+    });
+
+    expect(
+      screen.getByTestId('jobagent-saved-job-responsibilities-empty'),
+    ).toHaveTextContent('No responsibilities extracted');
+    expect(
+      screen.getByTestId('jobagent-saved-job-required-skills'),
+    ).toHaveTextContent('No required skills extracted');
+    expect(
+      screen.getByTestId('jobagent-saved-job-preferred-skills'),
+    ).toHaveTextContent('No preferred skills extracted');
+    expect(
+      screen.getByTestId('jobagent-saved-job-extraction-metadata'),
+    ).toHaveTextContent('Not specified');
+
+    // Collapsible starts closed: trigger is aria-expanded=false; content is not shown.
+    const evidenceTrigger = screen.getByRole('button', {
+      name: /Evidence \(0\)/,
+    });
+    expect(evidenceTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(evidenceTrigger);
+    expect(evidenceTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      await screen.findByTestId('jobagent-saved-job-evidence-empty'),
+    ).toHaveTextContent('No evidence available');
+  });
+
+  it('names the Job in re-extract dialog, states consequences, and confirms', async () => {
+    const job = listItem(JOB_NONE, {
+      title: 'Platform Engineer',
+      company: 'Nimbus',
+    });
+    const onConfirmReextract = vi.fn().mockResolvedValue('success');
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_NONE,
+      onConfirmReextract,
+    });
+
+    await userEvent.click(
+      screen.getByTestId(`jobagent-saved-job-reextract-${JOB_NONE}`),
+    );
+    const dialog = await screen.findByTestId(
+      'jobagent-saved-job-reextract-dialog',
+    );
+    expect(dialog).toHaveTextContent('Platform Engineer · Nimbus');
+    expect(dialog).toHaveTextContent('identity and raw source are preserved');
+    expect(dialog).toHaveTextContent('fails before commit');
+    expect(dialog).toHaveTextContent('evaluation becomes stale');
+    expect(dialog).toHaveTextContent('not run automatically');
+
+    const action = within(dialog).getByRole('button', {
+      name: 'Re-extract JD',
+    });
+    await userEvent.click(action);
+    await waitFor(() => {
+      expect(onConfirmReextract).toHaveBeenCalledWith(JOB_NONE);
+    });
+  });
+
+  it('cancels re-extract without calling confirm and locks while pending', async () => {
+    const job = listItem(JOB_STALE, {
+      evaluation_state: 'stale',
+      latest_score: 0.3,
+      title: 'SRE',
+      company: 'Acme',
+    });
+    const onConfirmReextract = vi.fn().mockResolvedValue('success');
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_STALE,
+      onConfirmReextract,
+    });
+
+    await userEvent.click(
+      screen.getByTestId(`jobagent-saved-job-reextract-${JOB_STALE}`),
+    );
+    const dialog = await screen.findByTestId(
+      'jobagent-saved-job-reextract-dialog',
+    );
+    const cancel = within(dialog).getByRole('button', {name: 'Huỷ'});
+    await userEvent.click(cancel);
+    expect(onConfirmReextract).not.toHaveBeenCalled();
+
+    cleanup();
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_STALE,
+      pendingByJob: {[JOB_STALE]: 'reextract'},
+      onConfirmReextract,
+    });
+    expect(
+      screen.getByTestId(`jobagent-saved-job-reextract-${JOB_STALE}`),
+    ).toBeDisabled();
+    expect(
+      screen.getByTestId(`jobagent-saved-job-delete-${JOB_STALE}`),
+    ).toBeDisabled();
+    expect(screen.getByText('Re-extracting…')).toBeInTheDocument();
+  });
+
+  it('shows graph rebuild guidance banner for NEO4J_SYNC_FAILED after reextract', () => {
+    const job = listItem(JOB_NONE, {evaluation_state: 'stale'});
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_NONE,
+      errorsByJob: {
+        [JOB_NONE]: {
+          code: 'NEO4J_SYNC_FAILED',
+          summary: 'Restore Neo4j and run local graph rebuild.',
+        },
+      },
+    });
+    const banner = screen.getByTestId(
+      `jobagent-saved-job-action-error-${JOB_NONE}`,
+    );
+    expect(banner).toHaveTextContent('Graph rebuild required');
+    expect(banner).toHaveTextContent('local graph rebuild');
   });
 });
 

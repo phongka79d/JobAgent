@@ -16,10 +16,12 @@ import {
 } from '../features/jobs/savedJobsState';
 import type {
   EvaluateJobResponse,
+  ReextractJobResponse,
   SavedJobDetail,
   SavedJobListItem,
   SavedJobListPage,
 } from '../features/jobs/types';
+import {REEXTRACT_GRAPH_FAILURE_CODE} from '../features/jobs/types';
 
 const JOB_A = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const JOB_B = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
@@ -114,7 +116,20 @@ function detailFor(jobId: string): SavedJobDetail {
       evaluation_state: 'stale',
       latest_score: 0.4,
     }),
-    extraction: null,
+    extraction: {
+      title: 'Old title',
+      company: 'Acme',
+      summary: 'Old extraction',
+      responsibilities: ['Old resp'],
+      required_skills: [],
+      preferred_skills: [],
+      seniority: 'mid',
+      min_experience_years: 2,
+      max_experience_years: 4,
+      location: 'Berlin',
+      work_mode: 'hybrid',
+      extraction_confidence: 0.5,
+    },
     raw_content: 'raw',
     latest_evaluation: {
       id: EVAL_ID,
@@ -125,6 +140,24 @@ function detailFor(jobId: string): SavedJobDetail {
       created_at: TS,
       updated_at: TS,
     },
+  };
+}
+
+function reextractResponse(
+  jobId: string,
+  overrides: Partial<ReextractJobResponse> = {},
+): ReextractJobResponse {
+  return {
+    outcome: 'updated',
+    job: listItem(jobId, {
+      evaluation_state: 'stale',
+      latest_score: 0.4,
+      title: 'Refreshed title',
+    }),
+    sync_ok: true,
+    code: null,
+    rebuild_instruction: null,
+    ...overrides,
   };
 }
 
@@ -608,5 +641,262 @@ describe('saved-JD actions, invalidation, and selection', () => {
       result.current.state.details[JOB_A]?.data?.compact.evaluation_state,
     ).toBe('stale');
     expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
+  it('reextract success patches compact row, never invents extraction, bumps graph', () => {
+    let state = initialSavedJobsState;
+    const priorDetail = detailFor(JOB_A);
+    state = savedJobsReducer(state, {
+      type: 'list_success',
+      data: listPage([
+        listItem(JOB_A, {
+          evaluation_state: 'current',
+          latest_score: 0.9,
+          title: 'Old title',
+        }),
+        listItem(JOB_B),
+      ]),
+    });
+    state = savedJobsReducer(state, {
+      type: 'detail_success',
+      jobId: JOB_A,
+      data: priorDetail,
+    });
+    state = savedJobsReducer(state, {
+      type: 'action_begin',
+      jobId: JOB_A,
+      kind: 'reextract',
+    });
+    const priorGraph = state.externalInvalidation.graphGeneration;
+    const priorExtraction = state.details[JOB_A]?.data?.extraction;
+
+    state = savedJobsReducer(state, {
+      type: 'reextract_success',
+      jobId: JOB_A,
+      response: reextractResponse(JOB_A),
+    });
+
+    expect(state.list.data?.items[0]?.title).toBe('Refreshed title');
+    expect(state.list.data?.items[0]?.evaluation_state).toBe('stale');
+    expect(state.list.data?.items[1]?.id).toBe(JOB_B);
+    // Prior extraction remains until force-refetch; never optimistically rewritten.
+    expect(state.details[JOB_A]?.data?.extraction).toEqual(priorExtraction);
+    expect(state.details[JOB_A]?.data?.compact.title).toBe('Refreshed title');
+    expect(state.details[JOB_A]?.loaded).toBe(false);
+    expect(state.details[JOB_A]?.phase).toBe('loading');
+    expect(state.actions.pendingByJob[JOB_A]).toBeUndefined();
+    expect(state.externalInvalidation.graphGeneration).toBe(priorGraph + 1);
+    expect(state.actions.errorsByJob[JOB_A]).toBeUndefined();
+  });
+
+  it('reextract graph-warning success still refreshes and shows rebuild guidance', () => {
+    let state = initialSavedJobsState;
+    state = savedJobsReducer(state, {
+      type: 'list_success',
+      data: listPage([listItem(JOB_A, {evaluation_state: 'current'})]),
+    });
+    state = savedJobsReducer(state, {
+      type: 'detail_success',
+      jobId: JOB_A,
+      data: detailFor(JOB_A),
+    });
+    state = savedJobsReducer(state, {
+      type: 'action_begin',
+      jobId: JOB_A,
+      kind: 'reextract',
+    });
+
+    state = savedJobsReducer(state, {
+      type: 'reextract_success',
+      jobId: JOB_A,
+      response: reextractResponse(JOB_A, {
+        sync_ok: false,
+        code: REEXTRACT_GRAPH_FAILURE_CODE,
+        rebuild_instruction: 'Run local graph rebuild.',
+      }),
+    });
+
+    expect(state.list.data?.items[0]?.title).toBe('Refreshed title');
+    expect(state.details[JOB_A]?.loaded).toBe(false);
+    expect(state.externalInvalidation.graphGeneration).toBe(1);
+    expect(state.actions.errorsByJob[JOB_A]?.code).toBe(
+      REEXTRACT_GRAPH_FAILURE_CODE,
+    );
+    expect(state.actions.errorsByJob[JOB_A]?.summary).toMatch(/rebuild/i);
+  });
+
+  it('reextract pre-commit failure preserves list/detail and shows safe summary only', async () => {
+    const reextractSavedJob = vi.fn().mockRejectedValue(
+      new ChatApiError(422, 'JD_SOURCE_NOT_RECOVERABLE', 'Source not recoverable'),
+    );
+    const evaluateSavedJob = vi.fn();
+    const fetchSavedJobs = vi
+      .fn()
+      .mockResolvedValue(
+        listPage([
+          listItem(JOB_A, {
+            evaluation_state: 'current',
+            latest_score: 0.9,
+            title: 'Stable',
+          }),
+        ]),
+      );
+    const fetchSavedJobDetail = vi.fn().mockResolvedValue(detailFor(JOB_A));
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {
+          reextractSavedJob,
+          evaluateSavedJob,
+          fetchSavedJobs,
+          fetchSavedJobDetail,
+        },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadList();
+      await result.current.loadDetail(JOB_A);
+    });
+    const priorList = result.current.state.list.data;
+    const priorDetail = result.current.state.details[JOB_A]?.data;
+    const priorGraph = result.current.state.externalInvalidation.graphGeneration;
+
+    let outcome: 'success' | 'duplicate' | 'error' = 'success';
+    await act(async () => {
+      outcome = await result.current.confirmReextract(JOB_A);
+    });
+
+    expect(outcome).toBe('error');
+    expect(result.current.state.list.data).toEqual(priorList);
+    expect(result.current.state.details[JOB_A]?.data).toEqual(priorDetail);
+    expect(result.current.state.actions.errorsByJob[JOB_A]?.code).toBe(
+      'JD_SOURCE_NOT_RECOVERABLE',
+    );
+    expect(result.current.state.actions.errorsByJob[JOB_A]?.summary).toBe(
+      'Source not recoverable',
+    );
+    expect(result.current.state.actions.pendingByJob[JOB_A]).toBeUndefined();
+    expect(result.current.state.externalInvalidation.graphGeneration).toBe(
+      priorGraph,
+    );
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
+  it('reextract hook success force-refetches detail and never calls evaluate', async () => {
+    const reextractSavedJob = vi.fn().mockResolvedValue(
+      reextractResponse(JOB_A, {
+        job: listItem(JOB_A, {
+          evaluation_state: 'stale',
+          latest_score: 0.9,
+          title: 'After reextract',
+        }),
+      }),
+    );
+    const evaluateSavedJob = vi.fn();
+    const refreshedDetail: SavedJobDetail = {
+      compact: listItem(JOB_A, {
+        evaluation_state: 'stale',
+        latest_score: 0.9,
+        title: 'After reextract',
+      }),
+      extraction: {
+        title: 'After reextract',
+        company: 'Acme',
+        summary: 'New extraction',
+        responsibilities: ['New duty'],
+        required_skills: [],
+        preferred_skills: [],
+        seniority: 'senior',
+        min_experience_years: 5,
+        max_experience_years: null,
+        location: 'Remote',
+        work_mode: 'remote',
+        extraction_confidence: 0.95,
+      },
+      raw_content: 'raw',
+      latest_evaluation: {
+        id: EVAL_ID,
+        job_id: JOB_A,
+        evaluation_state: 'stale',
+        evaluation_context_hash: 'old',
+        result: matchResult(JOB_A, 0.9),
+        created_at: TS,
+        updated_at: TS,
+      },
+    };
+    const fetchSavedJobs = vi
+      .fn()
+      .mockResolvedValue(
+        listPage([
+          listItem(JOB_A, {
+            evaluation_state: 'current',
+            latest_score: 0.9,
+            title: 'Before',
+          }),
+        ]),
+      );
+    const fetchSavedJobDetail = vi
+      .fn()
+      .mockResolvedValueOnce(detailFor(JOB_A))
+      .mockResolvedValueOnce(refreshedDetail);
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {
+          reextractSavedJob,
+          evaluateSavedJob,
+          fetchSavedJobs,
+          fetchSavedJobDetail,
+        },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadList();
+      await result.current.loadDetail(JOB_A);
+    });
+    expect(result.current.state.details[JOB_A]?.data?.extraction?.summary).toBe(
+      'Old extraction',
+    );
+
+    let outcome: 'success' | 'duplicate' | 'error' = 'error';
+    await act(async () => {
+      outcome = await result.current.confirmReextract(JOB_A);
+    });
+
+    expect(outcome).toBe('success');
+    expect(reextractSavedJob).toHaveBeenCalledTimes(1);
+    expect(fetchSavedJobDetail).toHaveBeenCalledTimes(2);
+    expect(result.current.state.list.data?.items[0]?.title).toBe(
+      'After reextract',
+    );
+    expect(result.current.state.list.data?.items[0]?.evaluation_state).toBe(
+      'stale',
+    );
+    expect(result.current.state.details[JOB_A]?.data?.extraction?.summary).toBe(
+      'New extraction',
+    );
+    expect(result.current.state.externalInvalidation.graphGeneration).toBe(1);
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
+  it('blocks duplicate reextract while pending', async () => {
+    const gate = deferred<ReextractJobResponse>();
+    const reextractSavedJob = vi.fn().mockReturnValue(gate.promise);
+    const {result} = renderHook(() =>
+      useSavedJobsState({api: {reextractSavedJob}}),
+    );
+
+    let first!: Promise<'success' | 'duplicate' | 'error'>;
+    let second!: Promise<'success' | 'duplicate' | 'error'>;
+    act(() => {
+      first = result.current.confirmReextract(JOB_A);
+      second = result.current.confirmReextract(JOB_A);
+    });
+    expect(await second).toBe('duplicate');
+    await act(async () => {
+      gate.resolve(reextractResponse(JOB_A));
+      await first;
+    });
+    expect(reextractSavedJob).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,9 +10,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {CvSidebar} from '../features/profile/CvSidebar';
 import {
@@ -23,6 +24,15 @@ import {
   mockObservabilityApi,
   renderObservabilitySidebar,
 } from './support/observability';
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute('open', '');
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.removeAttribute('open');
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -205,6 +215,226 @@ describe('ObservabilitySidebar composition', () => {
     expect(
       await screen.findByTestId(`jobagent-obs-run-detail-${RUN_ID}`),
     ).toHaveTextContent('propose_profile_from_cv');
+  });
+
+  it('wires sole useSavedJobsState owner for reextract and graph invalidation', async () => {
+    const prev = import.meta.env.VITE_API_BASE_URL;
+    // @ts-expect-error test mutation of Vite env
+    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
+
+    const JOB_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const TS = '2024-08-01T12:00:00.000Z';
+    const listItemPayload = {
+      id: JOB_ID,
+      title: 'Sidebar Reextract Job',
+      company: 'Acme',
+      processing_status: 'processed',
+      jd_quality: 'full',
+      source_type: 'text',
+      source_url: null,
+      created_at: TS,
+      updated_at: TS,
+      evaluation_state: 'current',
+      latest_score: 0.88,
+    };
+    const extraction = {
+      title: 'Sidebar Reextract Job',
+      company: 'Acme',
+      summary: 'Build services.',
+      responsibilities: ['Own APIs'],
+      required_skills: [
+        {
+          skill: {
+            canonical_key: 'python',
+            display_name: 'Python',
+            aliases: [],
+            category: 'language',
+          },
+          confidence: 0.9,
+          evidence: ['Python required'],
+        },
+      ],
+      preferred_skills: [],
+      seniority: 'mid',
+      min_experience_years: 3,
+      max_experience_years: 5,
+      location: 'Berlin',
+      work_mode: 'hybrid',
+      extraction_confidence: 0.85,
+    };
+    const detailBody = {
+      compact: listItemPayload,
+      extraction,
+      raw_content: 'raw source',
+      latest_evaluation: {
+        id: 'cccccccc-dddd-4eee-8fff-000000000000',
+        job_id: JOB_ID,
+        evaluation_state: 'current',
+        evaluation_context_hash: 'ctx-1',
+        result: {
+          job_id: JOB_ID,
+          title: 'Sidebar Reextract Job',
+          company: 'Acme',
+          location: 'Berlin',
+          work_mode: 'hybrid',
+          source_url: null,
+          final_score: 0.88,
+          quality_multiplier: 1.0,
+          components: {
+            semantic_similarity: 0.88,
+            skill_score: null,
+            seniority_score: null,
+            experience_score: null,
+            location_score: null,
+            work_mode_score: null,
+          },
+          effective_weights: {semantic_similarity: 1.0},
+          matched_required_skills: [],
+          matched_preferred_skills: [],
+          related_skills: [],
+          missing_required_skills: [],
+          summary: 'Solid fit',
+        },
+        created_at: TS,
+        updated_at: TS,
+      },
+    };
+    const reextractBody = {
+      outcome: 'updated',
+      job: {
+        ...listItemPayload,
+        evaluation_state: 'stale',
+        title: 'Sidebar Reextract Job',
+      },
+      sync_ok: true,
+      code: null,
+      rebuild_instruction: null,
+    };
+    const refreshedDetail = {
+      ...detailBody,
+      compact: reextractBody.job,
+      extraction: {
+        ...extraction,
+        summary: 'Refreshed extraction after reextract',
+      },
+      latest_evaluation: {
+        ...detailBody.latest_evaluation,
+        evaluation_state: 'stale',
+      },
+    };
+
+    let detailGets = 0;
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (url.endsWith('/api/jobs') || url.includes('/api/jobs?')) {
+          return new Response(
+            JSON.stringify({items: [listItemPayload], next_cursor: null}),
+            {status: 200, headers: {'Content-Type': 'application/json'}},
+          );
+        }
+        if (url.includes(`/api/jobs/${JOB_ID}/reextract`) && method === 'POST') {
+          expect(JSON.parse(String(init?.body ?? '{}'))).toEqual({});
+          return new Response(JSON.stringify(reextractBody), {
+            status: 200,
+            headers: {'Content-Type': 'application/json'},
+          });
+        }
+        if (url.includes(`/api/jobs/${JOB_ID}`) && method === 'GET') {
+          detailGets += 1;
+          const body = detailGets === 1 ? detailBody : refreshedDetail;
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: {'Content-Type': 'application/json'},
+          });
+        }
+        if (url.includes('/api/observability/graph')) {
+          return new Response(
+            JSON.stringify({
+              status: 'ready',
+              generated_at: TS,
+              node_count: 0,
+              edge_count: 0,
+              truncated: false,
+              rebuild_instruction: null,
+              candidate: null,
+              cv: null,
+              jobs: [],
+              skills: [],
+              sections: [],
+              edges: [],
+            }),
+            {status: 200, headers: {'Content-Type': 'application/json'}},
+          );
+        }
+        return new Response(JSON.stringify({detail: {code: 'X', summary: 'unexpected'}}), {
+          status: 500,
+          headers: {'Content-Type': 'application/json'},
+        });
+      });
+
+    try {
+      const api = mockObservabilityApi();
+      renderObservabilitySidebar(api);
+
+      await userEvent.click(screen.getByTestId('jobagent-obs-tab-saved-jobs'));
+      expect(
+        await screen.findByTestId(`jobagent-saved-job-select-${JOB_ID}`),
+      ).toBeInTheDocument();
+      await userEvent.click(
+        screen.getByTestId(`jobagent-saved-job-select-${JOB_ID}`),
+      );
+      expect(
+        await screen.findByTestId('jobagent-saved-job-extraction'),
+      ).toHaveTextContent('Build services.');
+
+      await userEvent.click(
+        screen.getByTestId(`jobagent-saved-job-reextract-${JOB_ID}`),
+      );
+      const dialog = await screen.findByTestId(
+        'jobagent-saved-job-reextract-dialog',
+      );
+      expect(dialog).toHaveTextContent('Sidebar Reextract Job · Acme');
+      await userEvent.click(
+        within(dialog).getByRole('button', {name: 'Re-extract JD'}),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId(`jobagent-saved-job-select-${JOB_ID}`),
+        ).toHaveAttribute('data-evaluation-state', 'stale');
+      });
+      await waitFor(() => {
+        expect(
+          screen.getByTestId('jobagent-saved-job-extraction'),
+        ).toHaveTextContent('Refreshed extraction after reextract');
+      });
+
+      // No evaluate request on reextract success path.
+      const evaluateCalls = fetchMock.mock.calls.filter(([input, init]) => {
+        const url = String(input);
+        return (
+          url.includes('/evaluate') &&
+          (init?.method ?? 'GET').toUpperCase() === 'POST'
+        );
+      });
+      expect(evaluateCalls).toHaveLength(0);
+
+      // Sole ownership: only one saved-jobs panel instance mounted.
+      expect(screen.getAllByTestId('jobagent-obs-saved-jobs')).toHaveLength(1);
+
+      // Graph generation invalidation is consumed by existing effect (graph may load).
+      await userEvent.click(screen.getByTestId('jobagent-obs-tab-graph'));
+      await waitFor(() => {
+        expect(api.fetchGraphSnapshot).toHaveBeenCalled();
+      });
+    } finally {
+      fetchMock.mockRestore();
+      // @ts-expect-error restore
+      import.meta.env.VITE_API_BASE_URL = prev;
+    }
   });
 
   it('collapse control exposes aria-expanded and toggles compact status', async () => {
