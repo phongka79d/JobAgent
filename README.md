@@ -11,8 +11,8 @@ verification is complete: dated PASS evidence for Automated Coverage through
 Final Rerun lives in `docs/acceptance/local_release_checklist.md` on product
 HEAD `1fdc93b`.
 
-**Current status (Plan 14 Batch01 A3 PASS — commit-ready on worktree; base
-`91f0a43`; Plan 13 Batch01–Batch04 remain accepted prior baseline on product
+**Current status (Plan 14 Batch02 A3 PASS — commit-ready on worktree; base
+`d772a8d`; Plan 13 Batch01–Batch04 remain accepted prior baseline on product
 worktree / Batch04 base `175c404`; Plan 12 Batch01–Batch05 remain accepted
 baseline on product HEAD `887d4f6` / P12B4; final commits remain
 orchestrator-owned):**
@@ -29,8 +29,18 @@ work; opt-out, sole URL, and legacy direct paths stay truthful; zero pre-
 confirmation domain side effects. Architecture remains one Agent, one decision
 node, one ToolNode, seven tools, and `TOOL_LOOP_LIMIT=6`. Focused combined
 Batch01 pytest (graph / confirmation / shopaikey / chat-api / job-tools) exits
-`0` with **163** passed on the accepted worktree. Batch02 full gates, Docker,
-and browser smoke remain next.
+`0` with **163** passed on the accepted worktree. Plan 14 **Batch02** (task
+**02A**) closes the release contract: the public-boundary demo E2E now verifies
+confirmation before JD mutation, resumed save through the existing endpoint,
+truthful stored results, and zero automatic evaluation. Full backend
+ruff/mypy/pytest and frontend test/lint/typecheck/build gates exit `0`; the
+shared validator accepts contiguous Plans 1–14. The rebuilt backend/frontend/
+Neo4j Compose stack remains healthy with SQLite, filesystem, and Neo4j
+available and existing volumes preserved. Desktop synthetic browser smoke
+passes one-card action locking, cancel with zero mutation, created save, exact
+dedupe, clean console/network behavior, and sanitized logs without raw JD
+content. No production endpoint, migration, dependency, service, store, or
+evaluation behavior changed.
 
 Plan 13 **Batch01** (tasks **01A**/**01B**/**01C**) repairs the provider-to-Agent
 boundary for reliable passive pasted-JD confirmation without changing topology,

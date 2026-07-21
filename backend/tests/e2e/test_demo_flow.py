@@ -23,6 +23,7 @@ from app.db.models.chat import (
     ChatMessage,
     ToolExecution,
 )
+from app.db.models.job_evaluations import JobEvaluation
 from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_PROCESSING_STATUS_PROCESSED,
@@ -485,7 +486,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         noop_events = parse_sse_wire(noop.text)
         assert _event_names(noop_events) == ["run_started", "run_completed"]
 
-        # --- 7. Synthetic JD text → save/extract/embed/sync ---
+        # --- 7. Synthetic JD text → confirm → save/extract/embed/sync ---
         override_chat_deps(
             client,
             model=FakeChatModel(
@@ -510,10 +511,57 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         )
         assert jd_turn.status_code == 200, jd_turn.text
         jd_events = parse_sse_wire(jd_turn.text)
-        assert _event_names(jd_events)[0] == "run_started"
-        assert _event_names(jd_events)[-1] == "run_completed"
-        assert "tool_status" in _event_names(jd_events)
+        jd_names = _event_names(jd_events)
+        assert jd_names[0] == "run_started"
+        assert jd_names[-1] == "approval_required"
+        assert "run_completed" not in jd_names
+        approval = jd_events[-1]
+        assert approval["payload"]["kind"] == "job_save_confirmation"
+        assert approval["payload"]["allowed_actions"] == [
+            "save_job",
+            "cancel_save_job",
+        ]
+        assert approval["payload"]["card"]["source"] == "current_message"
+        jd_run_id = approval["run_id"]
         _assert_no_false_success(jd_turn.text)
+        assert SYNTHETIC_JD_TEXT not in jd_turn.text
+        assert jd_invoker.call_count == 0
+        assert embedder.call_count == 0
+        assert job_sync.calls == 0
+
+        async def _assert_job_pending() -> None:
+            factory = get_session_factory()
+            async with factory() as session:
+                job_count = await session.execute(
+                    select(func.count()).select_from(JobPost)
+                )
+                assert int(job_count.scalar_one()) == 0
+                evaluation_count = await session.execute(
+                    select(func.count()).select_from(JobEvaluation)
+                )
+                assert int(evaluation_count.scalar_one()) == 0
+
+        run_async(_assert_job_pending())
+
+        override_chat_deps(
+            client,
+            model=FakeChatModel(responses=[ai_text(JD_REPLY)]),
+            registry=registry,
+            db_path=db_path,
+        )
+        jd_resume = client.post(
+            f"/api/chat/runs/{jd_run_id}/resume",
+            json={"action": "save_job"},
+        )
+        assert jd_resume.status_code == 200, jd_resume.text
+        jd_resume_events = parse_sse_wire(jd_resume.text)
+        jd_resume_names = _event_names(jd_resume_events)
+        assert jd_resume_names[0] == "run_started"
+        assert jd_resume_events[0]["payload"]["resumed"] is True
+        assert "tool_status" in jd_resume_names
+        assert jd_resume_names[-1] == "run_completed"
+        assert "approval_required" not in jd_resume_names
+        _assert_no_false_success(jd_resume.text)
         assert jd_invoker.call_count == 1
         assert embedder.call_count >= 1
         assert job_sync.calls == 1
@@ -532,6 +580,18 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 assert job.embedding_json is not None
                 assert job.extraction_json["title"] == "Backend Engineer"
                 assert job.extraction_json["company"] == "Acme Corp"
+                tools = await tool_repo.list_for_run_ids(session, [jd_run_id])
+                assert len(tools) == 1
+                assert tools[0].status == TOOL_EXECUTION_STATUS_COMPLETED
+                result = tool_repo.load_stored_result(tools[0])
+                assert result.ok is True
+                assert result.data is not None
+                assert result.data.get("outcome") == "created"
+                assert result.data.get("job_id") == job.id
+                evaluation_count = await session.execute(
+                    select(func.count()).select_from(JobEvaluation)
+                )
+                assert int(evaluation_count.scalar_one()) == 0
                 return job.id
 
         job_id = run_async(_assert_job())

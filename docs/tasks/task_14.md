@@ -300,7 +300,7 @@ smoke without expanding product scope or exposing raw JD content.
 
 ### Tasks
 
-- [ ] (02A): Run full gates, Docker health, and browser confirmation smoke
+- [x] (02A): Run full gates, Docker health, and browser confirmation smoke
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_14.md` > `## Mandatory Batch02 - Release Gates and Browser Confirmation Smoke` > `(02A)`
