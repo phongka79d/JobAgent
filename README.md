@@ -40,7 +40,7 @@ This is a full-stack local application workspace. A user can:
    text before saving, and retain exact-hash-deduplicated Jobs.
 5. Explicitly evaluate a saved Job against the current approved CV/profile and
    inspect deterministic score components and skill gaps.
-6. Browse paginated CV history and chunk lists, open retained CVs and chunk
+6. Browse CV history and chunk lists, open retained CVs and chunk
    details, inspect Agent runs and saved Jobs, and view a bounded Neo4j graph.
 
 Runtime behavior is authoritative in source code and configuration. The
@@ -331,16 +331,270 @@ graph dumps, provider transcripts, and secrets must remain outside Git.
 
 ## Configuration
 
+The backend [settings owner](backend/app/core/settings.py) reads only the
+repository-root `.env`; process environment variables take precedence. The
+tracked [.env.example](.env.example) is documentation only and is never loaded
+as runtime configuration. The supported Compose workflow interpolates its
+inputs from the root `.env`, while Vite consumes `VITE_API_BASE_URL` when the
+frontend image is built.
+
+In the table, **Compose input; Settings default** means the Python setting has a
+default, but Compose still passes an explicitly interpolated value. Keep every
+Compose input populated: a missing or blank interpolation can replace the
+Python default.
+
+| Variable | Required | Purpose | Evidence |
+| --- | --- | --- | --- |
+| `APP_ENV` | Compose input; Settings default | Runtime environment selector and local rebuild guard | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `FRONTEND_ORIGIN` | Yes | Allowed browser origin for backend CORS | [Settings](backend/app/core/settings.py), [application](backend/app/main.py) |
+| `VITE_API_BASE_URL` | Yes, at frontend build | Browser-visible backend API origin | [frontend image](infrastructure/docker/frontend.Dockerfile), [API client](frontend/src/lib/api/chat.ts) |
+| `SQLITE_PATH` | Yes | Authoritative SQLite database path | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `FILES_DIR` | Yes | Retained CV file root | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `NEO4J_URI` | Yes | Neo4j Bolt connection target | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `NEO4J_USER` | Yes | Neo4j authentication username | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `NEO4J_PASSWORD` | Yes, secret | Neo4j authentication password | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `SHOPAIKEY_BASE_URL` | Yes | OpenAI-compatible provider base URL | [Settings](backend/app/core/settings.py), [diagnostic](infrastructure/scripts/diagnose_shopaikey.py) |
+| `SHOPAIKEY_API_KEY` | Yes, secret | Provider credential for live chat and embeddings | [Settings](backend/app/core/settings.py), [diagnostic](infrastructure/scripts/diagnose_shopaikey.py) |
+| `LLM_MODEL` | Compose input; Settings default | Chat, tool-choice, and structured-extraction model | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `LLM_TEMPERATURE` | Compose input; Settings default | LLM sampling temperature | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `EMBEDDING_MODEL` | Compose input; Settings default | Candidate and Job embedding model | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `EMBEDDING_DIMENSIONS` | Compose input; Settings default | Locked embedding vector width | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `MAX_PDF_SIZE_MB` | Compose input; Settings default | Maximum accepted PDF upload size | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `MAX_PDF_PAGES` | Compose input; Settings default | Maximum accepted PDF page count | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `URL_FETCH_TIMEOUT_SECONDS` | Compose input; Settings default | Public JD URL request timeout | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `URL_MAX_RESPONSE_MB` | Compose input; Settings default | Maximum public JD URL response size | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `TOOL_LOOP_LIMIT` | Compose input; Settings default | Maximum Agent tool-loop passes | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_DOCUMENT_BATCH_MAX_CHARS` | No; Settings default | Character ceiling for document-first CV extraction batches | [Settings](backend/app/core/settings.py) |
+
+`CV_DOCUMENT_BATCH_MAX_CHARS` is currently a backend setting only: it is absent
+from the tracked template and is not passed into the backend container by
+Compose. Adding it only to the root `.env` therefore does not change the current
+Compose runtime; a deliberate Compose/process-environment change would also be
+required.
+
 ## Setup
+
+Run setup from the repository root in PowerShell. Copy the tracked template,
+fill the local secret fields without printing them, create the project virtual
+environment, install the backend and then install the locked frontend tree:
+
+```powershell
+Copy-Item .env.example .env
+python -m venv .venv
+& '.\.venv\Scripts\python.exe' -m pip install -e .\backend
+Set-Location frontend
+npm ci
+Set-Location ..
+```
+
+Keep `.env` ignored and local. Do not create nested backend or frontend env
+files, and do not stage generated dependency directories.
 
 ## Running the Project
 
+The supported runtime is the root Compose project. First validate its service
+shape, then build and wait for the three health checks:
+
+```powershell
+docker compose --env-file .env -f infrastructure/docker-compose.yml config --services
+docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d --wait --wait-timeout 180
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+```
+
+The confirmed local endpoints are:
+
+| Surface | Endpoint |
+| --- | --- |
+| Frontend | `http://localhost:5173/` |
+| Backend health | `http://127.0.0.1:8000/api/health` |
+| Neo4j Browser | `http://127.0.0.1:7474/` |
+| Neo4j Bolt | `bolt://127.0.0.1:7687` |
+
+An HTTP 200 from health is not sufficient by itself: confirm `overall` and the
+SQLite, filesystem, and Neo4j component states are all available.
+
+SQLite application-schema migration is explicit. The
+[backend container command](infrastructure/docker/backend.Dockerfile) runs
+`alembic upgrade head` before it executes Uvicorn. The separate
+[FastAPI lifespan](backend/app/main.py) does not create or migrate the SQLite
+application schema; it may initialize required singleton data and, when Neo4j
+is reachable, ensure idempotent Neo4j constraints and indexes. Do not add
+`create_all()` or SQLite migration work to application startup.
+
 ## Testing and Validation
+
+Run focused tests for the area changed, then use the full repository gates from
+the root. These commands use the project virtual environment created above:
+
+```powershell
+Set-Location backend
+& '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache
+& '..\.venv\Scripts\python.exe' -m mypy app --no-incremental
+& '..\.venv\Scripts\python.exe' -m pytest -q
+
+Set-Location ..\frontend
+npm test -- --run
+npm run lint
+npm run typecheck
+npm run build
+
+Set-Location ..
+python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py docs/plans --json
+& '.\.venv\Scripts\python.exe' infrastructure\scripts\verify_pdf_extraction.py
+& '.\.venv\Scripts\python.exe' infrastructure\scripts\diagnose_shopaikey.py
+& '.\.venv\Scripts\python.exe' infrastructure\scripts\rebuild_neo4j.py --help
+```
+
+The ShopAIKey diagnostic is a live network check and requires configured
+provider credentials. It reports capability-level results without printing the
+key. The PDF diagnostic uses committed synthetic fixtures. Most backend and
+frontend automated tests use fakes, disposable stores, and synthetic fixtures;
+they do not require or justify using real CV or JD content.
+
+The host `rebuild_neo4j.py --help` command is non-destructive and prints the
+authorized Compose rebuild command. It never opens the stores. Use the live
+rebuild only for the recovery case described below.
+
+Keep raw manual/browser data out of documentation and reports. Use the
+[local release checklist](docs/acceptance/local_release_checklist.md),
+[CV Manager checklist](docs/acceptance/cv_manager_checklist.md),
+[saved-JD evaluation checklist](docs/acceptance/saved_jd_evaluation_checklist.md),
+[full functional matrix](docs/acceptance/full_functional_test_matrix.md), and
+[Plan 13 acceptance ledger](docs/acceptance/plan13_acceptance_ledger.md) for the
+sanitized manual and browser procedures.
 
 ## Failure and Recovery
 
+- **Health is degraded:** inspect the `overall`, `sqlite`, `filesystem`, and
+  `neo4j` fields, then restore the failing dependency. A healthy HTTP transport
+  with an unavailable component is not a healthy application. Preserve the
+  named volumes while diagnosing.
+- **An SSE stream disconnects:** the [reducer](frontend/src/features/chat/reducer.ts)
+  treats it as nonterminal. Wait, then reload durable history; never infer
+  completion or immediately repeat the action. Resume only if recovered history
+  shows an interrupted approval.
+- **A run reaches `TOOL_LOOP_LIMIT_EXCEEDED`:** the
+  [Agent graph](backend/app/agent/graph.py) blocks the excess tool from executing,
+  and the runner persists a durable terminal failure. Inspect durable history for
+  tool behavior, then retry as a new bounded turn; do not raise the limit or
+  resume the failed run.
+- **Migration or backend start fails:** the Compose backend runs Alembic before
+  Uvicorn, so a migration error prevents serving. Correct the configuration or
+  migration issue and recreate the backend container; never bypass Alembic with
+  `create_all()` or schema mutations in FastAPI startup.
+- **Neo4j is unavailable, stale, or a post-commit sync fails:** SQLite and
+  retained files remain authoritative. Restore Neo4j, then rebuild the derived
+  projection from the running Compose backend:
+
+  ```powershell
+  docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T backend python -m app.graph.rebuild
+  ```
+
+  The rebuild preflights stored embeddings, clears only JobAgent-owned graph
+  labels and relationships, calls no provider, and does not mutate SQLite. Do
+  not repair drift with independent Cypher edits or treat Neo4j as another
+  source of truth.
+- **Structured CV/JD/profile extraction hits a provider failure:** the shared
+  [retry owner](backend/app/services/provider_retry.py) permits at most one
+  application retry for timeouts or rate limits, and those extraction paths may
+  use one schema-repair attempt for invalid structured output. Ordinary Agent
+  chat and embedding requests have no promised application retry count. After
+  a durable failure, restore availability and explicitly retry the user action;
+  do not add unlimited retries, model switching, or hidden fallbacks.
+- **A CV upload cannot be extracted:** use a digital-text PDF within the
+  configured size and page limits. `NO_EXTRACTABLE_TEXT` is terminal for that
+  attempt; there is no OCR path. Extraction failures publish no partial draft
+  and preserve the approved active CV.
+- **A public JD URL cannot be fetched:** paste the JD text through the supported
+  confirmation flow. Do not bypass URL limits or add crawler behavior.
+- **CV deletion is partial:** it remains retryable in `deleting`. Use the stable
+  [coordinator](backend/app/services/cv_manager.py) error to identify
+  checkpoint/SQLite access, retained-file storage, Neo4j, or final SQLite
+  cleanup; restore that dependency, then retry the same deletion. The retry
+  includes checkpoint cleanup and final run/tool/attachment deletion, not only
+  file or graph cleanup. Never delete the active CV directly or report success
+  while owned cleanup remains.
+- **Job deletion cannot confirm graph removal:** the SQLite Job and evaluations
+  are preserved. Restore Neo4j and retry the same delete; do not manually remove
+  the SQLite row first.
+- **A profile or passive-JD confirmation is interrupted:** resume the existing
+  run with one allowed UI action. Never bypass confirmation with direct database
+  or graph edits. CV activation and passive JD mutation occur only after the
+  corresponding explicit approval.
+
 ## Development Notes for AI Agents
+
+- Read the task contract, the relevant plan, and current runtime owners before
+  editing. Prefer executable source and manifests over historical prose when
+  they disagree.
+- Search for existing owners, helpers, callers, and tests before adding logic.
+  Preserve one business-rule owner and avoid parallel service or state paths.
+- Keep the single LangGraph Agent, one decision node, one ToolNode, exactly
+  seven production tools, and `TOOL_LOOP_LIMIT=6` unless the
+  [Master Plan](docs/plans/Master_plan.md) is explicitly amended.
+- Preserve confirmation before CV activation and before passive pasted-JD
+  mutation. Never auto-evaluate a saved JD; evaluation is explicit and keyed to
+  the exact Job, CV/profile/preferences, embedding, and scoring revision.
+- When a contract changes, coordinate its Pydantic/domain schema, API response,
+  frontend parser and type, SSE/history projection, owning callers, and focused
+  tests. Do not update only one side of a transport boundary.
+- Read [`frontend/AGENTS.md`](frontend/AGENTS.md) before UI work. Discover Astryx
+  components with its CLI guidance, use Astryx components and design tokens,
+  and do not invent component props or a second stream store.
+- Ignore generated, dependency, coverage, bytecode, and tool-cache paths,
+  including `.venv/`, `node_modules/`, `dist/`, `coverage`, `__pycache__/`,
+  `.pytest_cache/`, `.mypy_cache/`, and `.ruff_cache/`.
+- Never stage `.agent/`, root `.env`, runtime SQLite/files, retained CV/JD data,
+  provider payloads, authorization material, or secrets. Only tracked synthetic
+  fixtures belong in repository evidence.
+- Keep changes within the authorized file list. Preserve public interfaces and
+  unrelated behavior; do not mix cleanup, dependency upgrades, or speculative
+  abstractions into a focused task.
+- Before completion, run relevant focused tests plus the full gates in
+  proportion to risk. Inspect `git diff --check`, `git status --short`, and every
+  changed path; report skipped checks and residual risk rather than claiming
+  unverified success.
 
 ## Known Gaps and Limitations
 
+- JobAgent is a local, single-user MVP with no authentication, authorization,
+  roles, or public deployment hardening.
+- CV input is PDF-only and requires extractable digital text; DOCX, image CVs,
+  and OCR are not supported.
+- Live chat, structured extraction, and embeddings depend on configured
+  ShopAIKey credentials, network access, model availability, and provider
+  compatibility.
+- The supported Compose services publish only to loopback. The stack is not a
+  production or multi-host deployment.
+- [URL fetching](backend/app/services/url_fetch.py) accepts only HTTP(S) URLs with a
+  network location and enforces timeout/size/content bounds, but does not
+  validate public destinations or reject private/internal targets. Avoid
+  untrusted internal/private URLs and keep the service loopback-only.
+- Acceptance examples and committed fixtures are synthetic. They are not a
+  production evaluation dataset, quality metric, or substitute for testing with
+  authorized domain data outside Git.
+- Neo4j is derived state. Graph reads and matching can be unavailable until the
+  projection is rebuilt from authoritative SQLite and retained documents.
+
 ## Documentation Map
+
+- [Master Plan](docs/plans/Master_plan.md) — stable product scope,
+  architecture, data contracts, failure policy, and definition of done.
+- [Plan 14](docs/plans/Plan_14.md) — current incremental intent-aware pasted-JD
+  confirmation design and verification contract.
+- [Task 14](docs/tasks/task_14.md) — executable task boundaries, acceptance
+  criteria, and validation ownership for Plan 14.
+- [Local release checklist](docs/acceptance/local_release_checklist.md) — local
+  installation, Compose, diagnostics, recovery, rebuild, and demo evidence.
+- [CV Manager checklist](docs/acceptance/cv_manager_checklist.md) — synthetic CV
+  lifecycle, document extraction, activation, deletion, graph, and UI checks.
+- [Saved-JD evaluation checklist](docs/acceptance/saved_jd_evaluation_checklist.md)
+  — synthetic saved-JD, revision-currentness, explicit evaluation, and deletion
+  checks.
+- [Full functional test matrix](docs/acceptance/full_functional_test_matrix.md)
+  — consolidated backend, frontend, Compose, API, and browser coverage contract.
+- [Plan 13 acceptance ledger](docs/acceptance/plan13_acceptance_ledger.md) —
+  append-only requirement outcomes, preserved failures, reruns, and warnings.
+- [README restructure design](docs/superpowers/specs/2026-07-21-readme-restructure-design.md)
+  — approved audience, information architecture, evidence hierarchy, and
+  validation rules for this guide.
