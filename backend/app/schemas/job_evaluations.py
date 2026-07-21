@@ -19,11 +19,14 @@ from app.schemas.jobs import (
     JobProcessingStatus,
 )
 from app.schemas.matching import MatchResult, parse_match_result
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 EvaluationCurrentnessLiteral = Literal["none", "current", "stale"]
 EvaluationRowStateLiteral = Literal["current", "stale"]
 JobSourceTypeLiteral = Literal["url", "text"]
+ReextractOutcomeLiteral = Literal["updated"]
+# Graph partial-success code on ReextractJobResponse only.
+REEXTRACT_GRAPH_FAILURE_CODE: str = "NEO4J_SYNC_FAILED"
 
 # Public saved-JD list uses the same opaque (created_at, id) cursor owner as chat.
 encode_saved_jobs_cursor = encode_history_cursor
@@ -182,6 +185,54 @@ class EvaluateJobResponse(BaseModel):
     evaluation: JobEvaluationView
 
 
+class ReextractJobRequest(BaseModel):
+    """``POST /api/jobs/{job_id}/reextract`` body: zero fields only.
+
+    Absent or empty JSON is allowed. ``extra='forbid'`` rejects raw JD, URL,
+    extraction, embedding, quality, evaluation, and arbitrary replacement fields
+    before the service runs.
+    """
+
+    model_config = StrictModelConfig
+
+
+class ReextractJobResponse(BaseModel):
+    """``POST /api/jobs/{job_id}/reextract`` success after SQLite commit.
+
+    ``sync_ok=true`` requires null ``code`` and ``rebuild_instruction``.
+    ``sync_ok=false`` (post-commit graph failure) requires
+    ``code='NEO4J_SYNC_FAILED'`` and non-blank safe rebuild guidance. Pre-commit
+    failures never use this model.
+    """
+
+    model_config = StrictModelConfig
+
+    outcome: ReextractOutcomeLiteral
+    job: SavedJobListItem
+    sync_ok: bool
+    code: str | None = None
+    rebuild_instruction: str | None = None
+
+    @model_validator(mode="after")
+    def sync_fields_coupled(self) -> ReextractJobResponse:
+        if self.sync_ok:
+            if self.code is not None or self.rebuild_instruction is not None:
+                raise ValueError(
+                    "sync_ok=true requires code and rebuild_instruction to be null"
+                )
+            return self
+        if self.code != REEXTRACT_GRAPH_FAILURE_CODE:
+            raise ValueError(
+                "sync_ok=false requires code='NEO4J_SYNC_FAILED'"
+            )
+        rebuild = self.rebuild_instruction
+        if not isinstance(rebuild, str) or rebuild.strip() == "":
+            raise ValueError(
+                "sync_ok=false requires non-blank rebuild_instruction"
+            )
+        return self
+
+
 def validate_match_result_payload(payload: Any) -> MatchResult:
     """Validate a compact MatchResult for persistence."""
     return parse_match_result(payload)
@@ -250,6 +301,10 @@ __all__ = [
     "JobEvaluationRecord",
     "JobEvaluationView",
     "JobSourceTypeLiteral",
+    "REEXTRACT_GRAPH_FAILURE_CODE",
+    "ReextractJobRequest",
+    "ReextractJobResponse",
+    "ReextractOutcomeLiteral",
     "SAVED_JOBS_DEFAULT_LIMIT",
     "SAVED_JOBS_LIMIT_MAX",
     "SAVED_JOBS_LIMIT_MIN",

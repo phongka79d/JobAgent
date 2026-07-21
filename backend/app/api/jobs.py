@@ -19,6 +19,8 @@ from app.db.session import get_session_factory
 from app.schemas.common import UuidStr
 from app.schemas.job_evaluations import (
     EvaluateJobResponse,
+    ReextractJobRequest,
+    ReextractJobResponse,
     SaveAndEvaluateRequest,
     SaveAndEvaluateResponse,
     SavedJobDetail,
@@ -32,11 +34,13 @@ from app.services.saved_jobs import (
     ERROR_JOB_DELETE_GRAPH_FAILED,
     ERROR_JOB_NOT_FOUND,
     ERROR_JOB_NOT_SCORABLE,
+    ERROR_JOB_REEXTRACT_CONFLICT,
     SavedJobsServiceError,
     delete_saved_job,
     evaluate_saved_job,
     get_saved_job_detail,
     get_saved_jobs_page,
+    reextract_saved_job,
     save_and_evaluate_from_source,
 )
 
@@ -48,15 +52,21 @@ _ERROR_STATUS: dict[str, int] = {
     ERROR_JOB_NOT_SCORABLE: 409,
     ERROR_ACTIVE_PROFILE_REQUIRED: 409,
     ERROR_JOB_DELETE_GRAPH_FAILED: 409,
+    ERROR_JOB_REEXTRACT_CONFLICT: 409,
     "EVALUATION_CONTEXT_CHANGED": 409,
     "INVALID_MATCH_RESULT": 422,
     "INVALID_LIMIT": 422,
+    "INVALID_STRUCTURED_OUTPUT": 422,
     "NEO4J_UNAVAILABLE": 409,
     "NEO4J_REBUILD_REQUIRED": 409,
     "NEO4J_SYNC_FAILED": 409,
     "EMBEDDING_TIMEOUT": 502,
     "EMBEDDING_UNAVAILABLE": 502,
     "EMBEDDING_INVALID_RESPONSE": 502,
+    "EMBEDDING_RATE_LIMIT": 502,
+    "PROVIDER_ERROR": 502,
+    "PROVIDER_TIMEOUT": 502,
+    "PROVIDER_RATE_LIMIT": 502,
 }
 
 
@@ -186,6 +196,34 @@ async def delete_saved_job_route(
     except SavedJobsServiceError as exc:
         raise _http_for_service_error(exc) from exc
     return Response(status_code=204)
+
+
+@router.post(
+    "/jobs/{job_id}/reextract",
+    response_model=ReextractJobResponse,
+)
+async def post_reextract_job(
+    request: Request,
+    job_id: Annotated[UuidStr, Path()],
+    body: ReextractJobRequest | None = None,
+) -> ReextractJobResponse:
+    """``POST /api/jobs/{job_id}/reextract`` — same-ID retained-JD replacement.
+
+    Absent or empty JSON is allowed. Replacement/arbitrary fields are rejected
+    by the zero-field ``extra='forbid'`` request model (422) before service work.
+    """
+    del body  # Boundary-only; server reloads retained Job by ID.
+    factory = get_session_factory()
+    try:
+        return await reextract_saved_job(
+            job_id,
+            session_factory=factory,
+            graph_driver=_graph_driver(request),
+            invoker=ShopAIKeyStructuredJdInvoker(),
+            embedding_client=ShopAIKeyEmbeddingAdapter(),
+        )
+    except SavedJobsServiceError as exc:
+        raise _http_for_service_error(exc) from exc
 
 
 __all__ = ["router"]

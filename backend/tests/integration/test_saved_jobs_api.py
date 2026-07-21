@@ -1,23 +1,30 @@
-"""Integration tests for Plan 10 saved-JD list/detail and mutation HTTP contracts.
+"""Integration tests for Plan 10/15 saved-JD list/detail and mutation HTTP contracts.
 
 Covers ``GET /api/jobs`` / detail, ``POST save-and-evaluate``, ``POST evaluate``,
-and ``DELETE``: source authorization, URL/text ingestion, reuse, unavailable,
-safe errors, and redaction.
+``POST reextract``, and ``DELETE``: source authorization, URL/text ingestion,
+reuse, unavailable, strict re-extraction body/response, safe errors, and redaction.
 """
 
 from __future__ import annotations
 
 import ast
 import inspect
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from app.adapters.shopaikey_embeddings import (
+    FAILURE_EMBEDDING_TIMEOUT,
+    EmbeddingAdapterError,
+)
 from app.core.ids import new_uuid
 from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
 from app.db.session import build_async_engine
+from app.graph.sync_job import NEO4J_REBUILD_INSTRUCTION, JobSyncError
 from app.main import create_app
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
@@ -29,8 +36,11 @@ from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tools_repo
 from app.schemas.job_evaluations import (
     EvaluateJobResponse,
+    ReextractJobRequest,
+    ReextractJobResponse,
     SaveAndEvaluateResponse,
     SavedJobDetail,
+    SavedJobListItem,
     SavedJobListPage,
     decode_saved_jobs_cursor,
     encode_saved_jobs_cursor,
@@ -43,7 +53,18 @@ from app.services.evaluation_context import (
     EvaluationContextFacts,
     evaluation_context_hash,
 )
-from app.services.jd_extraction import ExtractedJobPost, JdExtractionError
+from app.services.jd_extraction import (
+    FAILURE_INVALID_STRUCTURED_OUTPUT,
+    FAILURE_PROVIDER_ERROR,
+    ExtractedJobPost,
+    JdExtractionError,
+)
+from app.services.job_reextraction import (
+    ERROR_JOB_NOT_SCORABLE,
+    ERROR_JOB_REEXTRACT_CONFLICT,
+    JobReextractError,
+    JobReextractResult,
+)
 from app.services.saved_jobs import (
     ERROR_JD_SOURCE_NOT_RECOVERABLE,
     ERROR_JOB_NOT_FOUND,
@@ -52,6 +73,7 @@ from app.services.saved_jobs import (
 from app.services.skill_normalization import SkillNormalizer
 from app.services.url_fetch import UrlFetchResult
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -298,6 +320,20 @@ def _normalizer() -> SkillNormalizer:
     return SkillNormalizer.from_path(SKILLS_FIXTURE)
 
 
+# Source text that grounds ``_full_extracted`` after the Plan 15 quality guard.
+_FULL_EXTRACTED_SOURCE: str = (
+    "Title: Backend Engineer\n"
+    "Company: Acme\n"
+    "Location: Berlin\n"
+    "Build and maintain APIs.\n"
+    "Responsibilities:\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Required: 3+ years Python\n"
+    "Work mode: hybrid\n"
+)
+
+
 def _full_extracted(**overrides: Any) -> ExtractedJobPost:
     base: dict[str, Any] = {
         "title": "Backend Engineer",
@@ -321,6 +357,102 @@ def _full_extracted(**overrides: Any) -> ExtractedJobPost:
     }
     base.update(overrides)
     return ExtractedJobPost.model_validate(base)
+
+
+# Grounded retained source + provider payload for Plan 15 re-extraction API tests.
+_REEXTRACT_GROUNDED_RAW: str = (
+    "Title: Backend Engineer\n"
+    "Company: Acme\n"
+    "Location: Berlin\n"
+    "Responsibilities:\n"
+    "- Design REST services\n"
+    "- Own deployments\n"
+    "Required: 3+ years Python.\n"
+    "Preferred: FastAPI\n"
+)
+
+
+def _reextract_extracted(**overrides: Any) -> ExtractedJobPost:
+    base: dict[str, Any] = {
+        "title": "Backend Engineer",
+        "company": "Acme",
+        "summary": "Design REST services",
+        "responsibilities": ["Design REST services", "Own deployments"],
+        "required_skills": [
+            {
+                "name": "Python",
+                "confidence": 0.9,
+                "evidence": ["Required: 3+ years Python."],
+            }
+        ],
+        "preferred_skills": [
+            {
+                "name": "FastAPI",
+                "confidence": 0.6,
+                "evidence": ["Preferred: FastAPI"],
+            }
+        ],
+        "seniority": "mid",
+        "min_experience_years": 3.0,
+        "max_experience_years": 5.0,
+        "location": "Berlin",
+        "work_mode": "hybrid",
+        "extraction_confidence": 0.91,
+    }
+    base.update(overrides)
+    return ExtractedJobPost.model_validate(base)
+
+
+def _unscorable_extracted(**overrides: Any) -> ExtractedJobPost:
+    base: dict[str, Any] = {
+        "title": None,
+        "company": None,
+        "summary": "Contact us for details.",
+        "responsibilities": [],
+        "required_skills": [],
+        "preferred_skills": [],
+        "seniority": "unknown",
+        "min_experience_years": None,
+        "max_experience_years": None,
+        "location": None,
+        "work_mode": "unknown",
+        "extraction_confidence": 0.1,
+    }
+    base.update(overrides)
+    return ExtractedJobPost.model_validate(base)
+
+
+def _patch_reextract_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+    invoker: FakeJdInvoker,
+    emb: FakeEmbeddingClient,
+    *,
+    job_sync_fn: Any | None = None,
+) -> None:
+    """Patch route adapters and optionally inject a graph sync seam.
+
+    Always wraps the real coordinator (not a prior wrap) so nested patches cannot
+    leave a success-only ``job_sync_fn`` sticky across cases.
+    """
+    from app.services import job_reextraction as reextract_mod
+
+    monkeypatch.setattr(
+        "app.api.jobs.ShopAIKeyStructuredJdInvoker",
+        lambda: invoker,
+    )
+    monkeypatch.setattr(
+        "app.api.jobs.ShopAIKeyEmbeddingAdapter",
+        lambda: emb,
+    )
+    if job_sync_fn is None:
+        return
+    real = reextract_mod.reextract_job
+
+    async def _wrapped(job_id: str, **kwargs: Any) -> Any:
+        kwargs["job_sync_fn"] = job_sync_fn
+        return await real(job_id, **kwargs)
+
+    monkeypatch.setattr(saved_jobs_service, "reextract_job", _wrapped)
 
 
 async def _seed_zero_result_source(
@@ -411,6 +543,7 @@ def test_routes_registered(jobs_env: tuple[Path, Path, FakeDriver]) -> None:
     assert ("GET", "/api/jobs/{job_id}") in routes
     assert ("POST", "/api/jobs/save-and-evaluate") in routes
     assert ("POST", "/api/jobs/{job_id}/evaluate") in routes
+    assert ("POST", "/api/jobs/{job_id}/reextract") in routes
     assert ("DELETE", "/api/jobs/{job_id}") in routes
 
 
@@ -919,6 +1052,7 @@ def test_api_module_is_thin_transport() -> None:
         "get_saved_job",
         "post_save_and_evaluate",
         "post_evaluate_job",
+        "post_reextract_job",
         "delete_saved_job_route",
     } <= names
 
@@ -987,7 +1121,7 @@ def test_save_and_evaluate_rejects_invalid_source_relationships(
         async with factory() as session:
             await _seed_profile(session)
             ok_id = await _seed_zero_result_source(
-                session, content="Backend Engineer JD body for auth tests"
+                session, content=_FULL_EXTRACTED_SOURCE
             )
             missing_run = await messages_repo.insert_message(
                 session, role=CHAT_MESSAGE_ROLE_USER, content="no run"
@@ -1072,7 +1206,7 @@ def test_save_and_evaluate_text_created_and_exact_hash_existing(
     jobs_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     db_path, _, _ = jobs_env
-    jd_text = "Senior Backend Engineer at Acme. Python required. Berlin hybrid."
+    jd_text = _FULL_EXTRACTED_SOURCE
     invoker = FakeJdInvoker([_full_extracted(), _full_extracted()])
     emb = FakeEmbeddingClient()
     engine = build_async_engine(db_path)
@@ -1130,14 +1264,14 @@ def test_save_and_evaluate_url_vs_text_and_no_latest_message_inference(
 ) -> None:
     db_path, _, _ = jobs_env
     url = "https://example.com/jobs/backend-engineer"
-    invoker = FakeJdInvoker([_full_extracted()])
+    invoker = FakeJdInvoker([_full_extracted(), _full_extracted()])
     emb = FakeEmbeddingClient()
     fetched: list[str] = []
 
     async def _fetcher(u: str) -> UrlFetchResult:
         fetched.append(u)
         return UrlFetchResult(
-            text="URL job text body for ingestion path.",
+            text=_FULL_EXTRACTED_SOURCE,
             failure_code=None,
         )
 
@@ -1156,7 +1290,10 @@ def test_save_and_evaluate_url_vs_text_and_no_latest_message_inference(
             )
             mixed = await _seed_zero_result_source(
                 session,
-                content="See https://example.com/x and also paste this JD text",
+                content=(
+                    "See https://example.com/x and also paste this JD text.\n"
+                    + _FULL_EXTRACTED_SOURCE
+                ),
             )
             await session.commit()
             return url_mid, mixed
@@ -1231,7 +1368,8 @@ def test_save_and_evaluate_http_source_binding_and_redaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, _, _ = jobs_env
-    secret_jd = "SECRET_JD_BODY_DO_NOT_LEAK_IN_ERRORS"
+    secret_token = "SECRET_JD_BODY_DO_NOT_LEAK_IN_ERRORS"
+    secret_jd = f"{_FULL_EXTRACTED_SOURCE}\n{secret_token}"
 
     async def _seed() -> str:
         engine = build_async_engine(db_path)
@@ -1259,6 +1397,7 @@ def test_save_and_evaluate_http_source_binding_and_redaction(
         detail = bad.json()["detail"]
         assert detail["code"] == ERROR_JD_SOURCE_NOT_RECOVERABLE
         blob = str(bad.json())
+        assert secret_token not in blob
         assert secret_jd not in blob
         assert FAKE_SHOPAIKEY not in blob
         assert "SELECT " not in blob
@@ -1292,6 +1431,7 @@ def test_save_and_evaluate_http_source_binding_and_redaction(
         assert body.ingest_outcome in {"created", "existing", "retried"}
         assert body.evaluation_outcome in {"created", "reused", "unavailable"}
         blob_ok = str(ok.json())
+        assert secret_token not in blob_ok
         assert secret_jd not in blob_ok
         assert "raw_content" not in ok.json().get("job", {})
 
@@ -1436,6 +1576,7 @@ def test_mutation_errors_omit_sensitive_fields(
         for path, method in (
             ("/api/jobs/save-and-evaluate", "post"),
             (f"/api/jobs/{new_uuid()}/evaluate", "post"),
+            (f"/api/jobs/{new_uuid()}/reextract", "post"),
             (f"/api/jobs/{new_uuid()}", "delete"),
         ):
             if method == "post" and path.endswith("save-and-evaluate"):
@@ -1458,4 +1599,467 @@ def test_mutation_errors_omit_sensitive_fields(
                 str(FAKE_SHOPAIKEY).lower(),
             ):
                 assert forbidden not in blob
+
+
+# ---------------------------------------------------------------------------
+# Plan 15 re-extraction public API
+# ---------------------------------------------------------------------------
+
+
+def test_reextract_request_schema_forbids_replacement_fields() -> None:
+    """Zero-field request accepts empty payload and rejects arbitrary fields."""
+    assert ReextractJobRequest.model_validate({}) is not None
+    for payload in (
+        {"raw_content": "x"},
+        {"text": "x"},
+        {"url": "https://example.com"},
+        {"extraction": {}},
+        {"embedding": [0.1]},
+        {"jd_quality": "full"},
+        {"evaluation": {}},
+        {"extra": True},
+    ):
+        with pytest.raises(ValidationError):
+            ReextractJobRequest.model_validate(payload)
+
+
+def test_reextract_response_schema_sync_coupling() -> None:
+    """Response coupling: true/null vs false/NEO4J_SYNC_FAILED/nonblank."""
+    job = SavedJobListItem(
+        id=new_uuid(),
+        title="T",
+        company="C",
+        processing_status="processed",
+        jd_quality="full",
+        source_type="text",
+        source_url=None,
+        created_at=T0,
+        updated_at=T0,
+        evaluation_state="none",
+        latest_score=None,
+    )
+    ok = ReextractJobResponse(
+        outcome="updated",
+        job=job,
+        sync_ok=True,
+        code=None,
+        rebuild_instruction=None,
+    )
+    assert ok.sync_ok is True
+    with pytest.raises(ValidationError):
+        ReextractJobResponse(
+            outcome="updated",
+            job=job,
+            sync_ok=True,
+            code="NEO4J_SYNC_FAILED",
+            rebuild_instruction=None,
+        )
+    with pytest.raises(ValidationError):
+        ReextractJobResponse(
+            outcome="updated",
+            job=job,
+            sync_ok=False,
+            code=None,
+            rebuild_instruction=NEO4J_REBUILD_INSTRUCTION,
+        )
+    with pytest.raises(ValidationError):
+        ReextractJobResponse(
+            outcome="updated",
+            job=job,
+            sync_ok=False,
+            code="NEO4J_SYNC_FAILED",
+            rebuild_instruction="   ",
+        )
+    warn = ReextractJobResponse(
+        outcome="updated",
+        job=job,
+        sync_ok=False,
+        code="NEO4J_SYNC_FAILED",
+        rebuild_instruction=NEO4J_REBUILD_INSTRUCTION,
+    )
+    assert warn.code == "NEO4J_SYNC_FAILED"
+    assert warn.rebuild_instruction
+
+
+def test_reextract_absent_empty_and_forbidden_bodies(
+    jobs_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only absent/empty bodies reach the service; replacement fields → 422."""
+    db_path, _, _ = jobs_env
+    service_calls: list[str] = []
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await _seed_profile(session)
+                jid = await _create_processed_job(
+                    session,
+                    raw_content=_REEXTRACT_GROUNDED_RAW,
+                    raw_hash="hash-reextract-body",
+                )
+                await session.commit()
+                return jid
+        finally:
+            await engine.dispose()
+
+    job_id = run_async(_seed())
+
+    async def _spy(job_id: str, **kwargs: Any) -> ReextractJobResponse:
+        del kwargs
+        service_calls.append(job_id)
+        emb_job = SavedJobListItem(
+            id=job_id,
+            title="Backend Engineer",
+            company="Acme",
+            processing_status="processed",
+            jd_quality="full",
+            source_type="text",
+            source_url=None,
+            created_at=T0,
+            updated_at=T0,
+            evaluation_state="none",
+            latest_score=None,
+        )
+        return ReextractJobResponse(
+            outcome="updated",
+            job=emb_job,
+            sync_ok=True,
+            code=None,
+            rebuild_instruction=None,
+        )
+
+    monkeypatch.setattr("app.api.jobs.reextract_saved_job", _spy)
+
+    with _client() as client:
+        for forbidden in (
+            {"raw_content": "client replacement"},
+            {"text": "client text"},
+            {"url": "https://example.com/jd"},
+            {"extraction": {"title": "x"}},
+            {"embedding": [0.1]},
+            {"jd_quality": "full"},
+            {"evaluation": {"id": new_uuid()}},
+            {"unexpected": 1},
+        ):
+            resp = client.post(f"/api/jobs/{job_id}/reextract", json=forbidden)
+            assert resp.status_code == 422, forbidden
+        assert service_calls == []
+
+        empty = client.post(f"/api/jobs/{job_id}/reextract", json={})
+        assert empty.status_code == 200
+        assert service_calls == [job_id]
+
+        service_calls.clear()
+        absent = client.post(f"/api/jobs/{job_id}/reextract")
+        assert absent.status_code == 200
+        assert service_calls == [job_id]
+
+
+def test_reextract_success_and_graph_partial_stale_no_evaluate(
+    jobs_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP 200 success + graph warning; evaluation becomes stale; no evaluate."""
+    db_path, _, _ = jobs_env
+    evaluate_calls: list[str] = []
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                att_id = await _seed_profile(session)
+                job_id = await _create_processed_job(
+                    session,
+                    raw_content=_REEXTRACT_GROUNDED_RAW,
+                    raw_hash="hash-reextract-ok",
+                    title="Prior Title",
+                    company="Prior Co",
+                )
+                await session.commit()
+            async with factory() as session:
+                job = await jobs_repo.get_by_id(session, job_id)
+                profile = await prof_repo.get_active_profile(session)
+                prefs = await prof_repo.get_job_preferences(session)
+                assert job and profile and prefs
+                ctx = await _current_hash_for_job(session, job_id)
+                await _insert_evaluation(
+                    session,
+                    job_id=job_id,
+                    attachment_id=att_id,
+                    context_hash=ctx,
+                    job_revision=job.updated_at
+                    if job.updated_at.tzinfo
+                    else job.updated_at.replace(tzinfo=UTC),
+                    profile_revision=profile.updated_at
+                    if profile.updated_at.tzinfo
+                    else profile.updated_at.replace(tzinfo=UTC),
+                    preferences_revision=prefs.updated_at
+                    if prefs.updated_at.tzinfo
+                    else prefs.updated_at.replace(tzinfo=UTC),
+                    final_score=0.77,
+                    summary="pre-reextract-current",
+                )
+                await session.commit()
+                return job_id
+        finally:
+            await engine.dispose()
+
+    job_id = run_async(_seed())
+
+    real_evaluate = saved_jobs_service.evaluate_job
+
+    async def _eval_spy(*args: Any, **kwargs: Any) -> Any:
+        evaluate_calls.append(str(kwargs.get("job_id") or (args[0] if args else "")))
+        return await real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(saved_jobs_service, "evaluate_job", _eval_spy)
+
+    async def _sync_ok(**_kwargs: Any) -> None:
+        return None
+
+    invoker = FakeJdInvoker([_reextract_extracted()])
+    emb = FakeEmbeddingClient()
+    _patch_reextract_adapters(monkeypatch, invoker, emb, job_sync_fn=_sync_ok)
+
+    with _client() as client:
+        # Confirm evaluation is current before re-extract.
+        detail_before = SavedJobDetail.model_validate(
+            client.get(f"/api/jobs/{job_id}").json()
+        )
+        assert detail_before.compact.evaluation_state == "current"
+
+        ok = client.post(f"/api/jobs/{job_id}/reextract", json={})
+        assert ok.status_code == 200
+        body = ReextractJobResponse.model_validate(ok.json())
+        assert body.outcome == "updated"
+        assert body.job.id == job_id
+        assert body.sync_ok is True
+        assert body.code is None
+        assert body.rebuild_instruction is None
+        assert body.job.evaluation_state == "stale"
+        assert body.job.latest_score == pytest.approx(0.77)
+        assert body.job.title == "Backend Engineer"
+        _assert_no_forbidden_list(ok.json())
+        assert evaluate_calls == []
+        assert invoker.call_count >= 1
+        assert emb.call_count >= 1
+
+    # Graph partial success after SQLite commit (failing same-ID sync seam).
+    invoker2 = FakeJdInvoker([_reextract_extracted(extraction_confidence=0.92)])
+    emb2 = FakeEmbeddingClient()
+
+    async def _sync_fail(**_kwargs: Any) -> None:
+        raise JobSyncError(
+            "graph down",
+            code="NEO4J_SYNC_FAILED",
+            rebuild_instruction=NEO4J_REBUILD_INSTRUCTION,
+        )
+
+    _patch_reextract_adapters(
+        monkeypatch, invoker2, emb2, job_sync_fn=_sync_fail
+    )
+    with _client() as client:
+        partial = client.post(f"/api/jobs/{job_id}/reextract", json={})
+        assert partial.status_code == 200
+        warn = ReextractJobResponse.model_validate(partial.json())
+        assert warn.outcome == "updated"
+        assert warn.sync_ok is False
+        assert warn.code == "NEO4J_SYNC_FAILED"
+        assert warn.rebuild_instruction == NEO4J_REBUILD_INSTRUCTION
+        assert warn.job.evaluation_state == "stale"
+        _assert_no_forbidden_list(partial.json())
+        assert evaluate_calls == []
+
+
+def test_reextract_precommit_error_families(
+    jobs_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-commit failures use safe detail and never return the success model."""
+    db_path, _, _ = jobs_env
+
+    async def _seed() -> tuple[str, str]:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await _seed_profile(session)
+                good = await _create_processed_job(
+                    session,
+                    raw_content=_REEXTRACT_GROUNDED_RAW,
+                    raw_hash="hash-reextract-err",
+                )
+                blank = await jobs_repo.create_text_job(
+                    session,
+                    raw_content="placeholder",
+                    raw_content_hash="hash-blank-raw",
+                )
+                # Force blank retained source after create.
+                blank.raw_content = "   "
+                await session.flush()
+                await session.commit()
+                return good, blank.id
+        finally:
+            await engine.dispose()
+
+    good_id, blank_id = run_async(_seed())
+
+    async def _sync_ok(**_kwargs: Any) -> None:
+        return None
+
+    # not found
+    with _client() as client:
+        missing = client.post(f"/api/jobs/{new_uuid()}/reextract", json={})
+        assert missing.status_code == 404
+        assert missing.json()["detail"]["code"] == ERROR_JOB_NOT_FOUND
+        assert "summary" in missing.json()["detail"]
+        assert "raw_content" not in str(missing.json()).lower()
+
+    # blank source
+    _patch_reextract_adapters(
+        monkeypatch,
+        FakeJdInvoker([_reextract_extracted()]),
+        FakeEmbeddingClient(),
+        job_sync_fn=_sync_ok,
+    )
+    with _client() as client:
+        blank = client.post(f"/api/jobs/{blank_id}/reextract", json={})
+        assert blank.status_code == 400
+        assert blank.json()["detail"]["code"] == ERROR_JD_SOURCE_NOT_RECOVERABLE
+        assert "outcome" not in blank.json()
+
+    # unscorable
+    _patch_reextract_adapters(
+        monkeypatch,
+        FakeJdInvoker([_unscorable_extracted()]),
+        FakeEmbeddingClient(),
+        job_sync_fn=_sync_ok,
+    )
+    with _client() as client:
+        unscorable = client.post(f"/api/jobs/{good_id}/reextract", json={})
+        assert unscorable.status_code == 409
+        assert unscorable.json()["detail"]["code"] == ERROR_JOB_NOT_SCORABLE
+        assert "job" not in unscorable.json()
+
+    # extraction provider failure
+    _patch_reextract_adapters(
+        monkeypatch,
+        FakeJdInvoker([RuntimeError("provider down")]),
+        FakeEmbeddingClient(),
+        job_sync_fn=_sync_ok,
+    )
+    with _client() as client:
+        prov = client.post(f"/api/jobs/{good_id}/reextract", json={})
+        assert prov.status_code == 502
+        assert prov.json()["detail"]["code"] in {
+            FAILURE_PROVIDER_ERROR,
+            "PROVIDER_ERROR",
+        }
+
+    # embedding failure
+    _patch_reextract_adapters(
+        monkeypatch,
+        FakeJdInvoker([_reextract_extracted()]),
+        FakeEmbeddingClient(
+            error=EmbeddingAdapterError(
+                FAILURE_EMBEDDING_TIMEOUT,
+                "embedding timed out",
+            )
+        ),
+        job_sync_fn=_sync_ok,
+    )
+    with _client() as client:
+        emb_err = client.post(f"/api/jobs/{good_id}/reextract", json={})
+        assert emb_err.status_code == 502
+        assert emb_err.json()["detail"]["code"] == FAILURE_EMBEDDING_TIMEOUT
+
+    # conflict mapped through service (simulated)
+    async def _conflict(job_id: str, **kwargs: Any) -> JobReextractResult:
+        del job_id, kwargs
+        raise JobReextractError(
+            ERROR_JOB_REEXTRACT_CONFLICT,
+            "The Job was modified concurrently; re-extraction did not overwrite it.",
+        )
+
+    monkeypatch.setattr(saved_jobs_service, "reextract_job", _conflict)
+    monkeypatch.setattr(
+        "app.api.jobs.ShopAIKeyStructuredJdInvoker",
+        lambda: FakeJdInvoker([_reextract_extracted()]),
+    )
+    monkeypatch.setattr(
+        "app.api.jobs.ShopAIKeyEmbeddingAdapter",
+        lambda: FakeEmbeddingClient(),
+    )
+    with _client() as client:
+        conflict = client.post(f"/api/jobs/{good_id}/reextract", json={})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["code"] == ERROR_JOB_REEXTRACT_CONFLICT
+        assert "summary" in conflict.json()["detail"]
+        blob = str(conflict.json()).lower()
+        assert "traceback" not in blob
+        assert FAKE_SHOPAIKEY.lower() not in blob
+
+
+def test_reextract_logs_omit_raw_and_secrets(
+    jobs_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Route/service logs may include job id/code/sync only — never raw/secrets."""
+    db_path, _, _ = jobs_env
+    secret = "SECRET_RAW_JD_DO_NOT_LOG_12345"
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await _seed_profile(session)
+                jid = await _create_processed_job(
+                    session,
+                    raw_content=_REEXTRACT_GROUNDED_RAW + "\n" + secret,
+                    raw_hash="hash-reextract-log",
+                )
+                await session.commit()
+                return jid
+        finally:
+            await engine.dispose()
+
+    job_id = run_async(_seed())
+
+    async def _sync_ok(**_kwargs: Any) -> None:
+        return None
+
+    invoker = FakeJdInvoker([_reextract_extracted()])
+    emb = FakeEmbeddingClient()
+    _patch_reextract_adapters(monkeypatch, invoker, emb, job_sync_fn=_sync_ok)
+
+    with caplog.at_level(logging.INFO), _client() as client:
+        resp = client.post(f"/api/jobs/{job_id}/reextract", json={})
+        assert resp.status_code == 200
+        text_blob = caplog.text
+        assert secret not in text_blob
+        assert FAKE_SHOPAIKEY not in text_blob
+        assert "embedding_json" not in text_blob
+        assert "SELECT " not in text_blob
+        assert "MATCH (" not in text_blob
+        # Failure path log redaction
+        monkeypatch.setattr(
+            saved_jobs_service,
+            "reextract_job",
+            MagicMock(
+                side_effect=JobReextractError(
+                    FAILURE_INVALID_STRUCTURED_OUTPUT,
+                    "structured output invalid after one repair attempt",
+                )
+            ),
+        )
+        bad = client.post(f"/api/jobs/{job_id}/reextract", json={})
+        assert bad.status_code == 422
+        assert secret not in caplog.text
+        assert "prompt" not in caplog.text.lower() or job_id in caplog.text
 

@@ -52,6 +52,7 @@ from app.schemas.job_evaluations import (
     EvaluationRowStateLiteral,
     JobEvaluationRecord,
     JobEvaluationView,
+    ReextractJobResponse,
     SaveAndEvaluateResponse,
     SavedJobDetail,
     SavedJobListItem,
@@ -99,6 +100,14 @@ from app.services.job_evaluation import (
     ERROR_ACTIVE_PROFILE_REQUIRED,
     ERROR_JOB_NOT_SCORABLE,
     evaluate_job,
+)
+from app.services.job_reextraction import (
+    ERROR_JOB_REEXTRACT_CONFLICT,
+    JobReextractError,
+    reextract_job,
+)
+from app.services.job_reextraction import (
+    JobSyncFn as ReextractJobSyncFn,
 )
 from app.services.skill_normalization import SkillNormalizer
 from app.services.url_fetch import validate_url_scheme
@@ -735,12 +744,71 @@ async def delete_saved_job(
         raise SavedJobsServiceError(code, exc.message) from exc
 
 
+async def reextract_saved_job(
+    job_id: str,
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    invoker: StructuredJdInvoker,
+    embedding_client: EmbeddingClient,
+    graph_driver: AsyncGraphDriver | None = None,
+    normalizer: SkillNormalizer | None = None,
+    job_sync_fn: ReextractJobSyncFn | None = None,
+) -> ReextractJobResponse:
+    """Explicit same-ID re-extraction via the accepted (02A) coordinator.
+
+    Does not accept client replacement data. Does not call evaluation or
+    matching. Projects one current saved-list row after SQLite commit; graph
+    failure remains HTTP success with coupled ``sync_ok``/code/rebuild fields.
+    """
+    if not isinstance(job_id, str) or job_id.strip() == "":
+        raise SavedJobsServiceError(ERROR_JOB_NOT_FOUND, JOB_NOT_FOUND_MESSAGE)
+    jid = job_id.strip()
+    skill_normalizer = (
+        normalizer if normalizer is not None else SkillNormalizer.production()
+    )
+
+    try:
+        result = await reextract_job(
+            jid,
+            invoker=invoker,
+            normalizer=skill_normalizer,
+            embedding_client=embedding_client,
+            session_factory=session_factory,
+            graph_driver=graph_driver,
+            job_sync_fn=job_sync_fn,
+        )
+    except JobReextractError as exc:
+        logger.info(
+            "saved-job reextract failed job_id=%s code=%s",
+            jid,
+            exc.code,
+        )
+        raise SavedJobsServiceError(exc.code, exc.message) from exc
+
+    async with session_scope(session_factory) as session:
+        _, job_item, _ = await _project_job_item(session, result.job_id)
+
+    logger.info(
+        "saved-job reextract ok job_id=%s sync_ok=%s",
+        result.job_id,
+        result.sync_ok,
+    )
+    return ReextractJobResponse(
+        outcome="updated",
+        job=job_item,
+        sync_ok=result.sync_ok,
+        code=result.sync_code,
+        rebuild_instruction=result.rebuild_instruction,
+    )
+
+
 __all__ = [
     "ERROR_ACTIVE_PROFILE_REQUIRED",
     "ERROR_JD_SOURCE_NOT_RECOVERABLE",
     "ERROR_JOB_DELETE_GRAPH_FAILED",
     "ERROR_JOB_NOT_FOUND",
     "ERROR_JOB_NOT_SCORABLE",
+    "ERROR_JOB_REEXTRACT_CONFLICT",
     "JD_SOURCE_NOT_RECOVERABLE_MESSAGE",
     "JOB_NOT_FOUND_MESSAGE",
     "SavedJobsServiceError",
@@ -748,5 +816,6 @@ __all__ = [
     "evaluate_saved_job",
     "get_saved_job_detail",
     "get_saved_jobs_page",
+    "reextract_saved_job",
     "save_and_evaluate_from_source",
 ]

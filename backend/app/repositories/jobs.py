@@ -3,14 +3,16 @@
 Flush-only/read primitives over the existing schema. Callers own the session and
 commit. No HTTP, providers, Neo4j, graph, or presentation logic. Full extraction
 validation and embedding finiteness stay service-owned.
+
+Also owns the Plan 15 revision-checked same-ID extraction replacement (CAS).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
 
-from sqlalchemy import null, select
+from sqlalchemy import CursorResult, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -56,6 +58,10 @@ class JobNotFoundError(JobRepositoryError):
 
 class InvalidJobTransitionError(JobRepositoryError):
     """Raised when a status transition is skipped, backward, or terminal."""
+
+
+class JobReextractConflictError(JobRepositoryError):
+    """Raised when revision-checked replacement matches zero rows (CAS miss)."""
 
 
 class JobCompact(TypedDict):
@@ -286,6 +292,115 @@ async def mark_processed(
     await session.flush()
     if embedding_json is None or jd_quality not in _SCORABLE:
         set_committed_value(row, "embedding_json", None)
+    return row
+
+
+def _strictly_later_revision(captured: datetime) -> datetime:
+    """Return a UTC revision strictly later than *captured* (Plan 15 CAS)."""
+    if not isinstance(captured, datetime):
+        raise JobRepositoryError("expected_updated_at must be a datetime")
+    if captured.tzinfo is None:
+        cap = captured.replace(tzinfo=UTC)
+    else:
+        offset = captured.utcoffset()
+        if offset is None or offset.total_seconds() != 0:
+            cap = captured.astimezone(UTC)
+        else:
+            cap = captured
+    now = utc_now()
+    if now > cap:
+        return now
+    return cap + timedelta(microseconds=1)
+
+
+async def replace_extraction_if_unchanged(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    expected_updated_at: datetime,
+    extraction_json: dict[str, Any],
+    jd_quality: str,
+    embedding_json: list[Any],
+    embedding_model: str,
+    embedding_dimensions: int,
+) -> JobPost:
+    """Conditionally replace scorable extraction fields when revision matches.
+
+    One ``UPDATE`` matching ``id`` and captured ``updated_at``. Mutates only
+    ``processing_status``, ``extraction_json``, ``jd_quality``, ``failure_code``,
+    the complete embedding triplet, and a strictly later ``updated_at``. Preserves
+    identity, source, raw content/hash, ``created_at``, and all evaluation rows.
+
+    Zero-row match raises :class:`JobReextractConflictError` (no retry). Accepts
+    only ``full|partial`` with a complete embedding triplet. Callers own commit.
+    """
+    job_id = _require_non_empty("job_id", job_id)
+    if not isinstance(extraction_json, dict):
+        raise JobRepositoryError("extraction_json must be a mapping")
+    if jd_quality not in _SCORABLE:
+        raise JobRepositoryError(
+            "replace_extraction_if_unchanged requires jd_quality full|partial"
+        )
+    if not isinstance(embedding_json, list):
+        raise JobRepositoryError("embedding_json must be a list")
+    embedding_model = _require_non_empty("embedding_model", embedding_model)
+    if not isinstance(embedding_dimensions, int) or isinstance(
+        embedding_dimensions, bool
+    ):
+        raise JobRepositoryError("embedding_dimensions must be a positive int")
+    if embedding_dimensions <= 0:
+        raise JobRepositoryError("embedding_dimensions must be a positive int")
+    if not isinstance(expected_updated_at, datetime):
+        raise JobRepositoryError("expected_updated_at must be a datetime")
+
+    new_revision = _strictly_later_revision(expected_updated_at)
+    stmt = (
+        update(JobPost)
+        .where(
+            JobPost.id == job_id,
+            JobPost.updated_at == expected_updated_at,
+        )
+        .values(
+            processing_status=JOB_PROCESSING_STATUS_PROCESSED,
+            failure_code=None,
+            extraction_json=extraction_json,
+            jd_quality=jd_quality,
+            embedding_json=embedding_json,
+            embedding_model=embedding_model,
+            embedding_dimensions=embedding_dimensions,
+            updated_at=new_revision,
+        )
+    )
+    result = await session.execute(stmt)
+    if not isinstance(result, CursorResult) or result.rowcount != 1:
+        raise JobReextractConflictError(
+            f"job {job_id!r} revision conflict on re-extraction replacement"
+        )
+    await session.flush()
+    row = await session.get(JobPost, job_id)
+    if row is None:  # pragma: no cover - concurrent delete after zero-row check
+        raise JobNotFoundError(f"job {job_id!r} not found after replacement")
+    # Defensive reload contract for the persistence boundary.
+    if row.processing_status != JOB_PROCESSING_STATUS_PROCESSED:
+        raise JobRepositoryError("committed job processing_status is not processed")
+    if row.jd_quality != jd_quality:
+        raise JobRepositoryError("committed job jd_quality mismatch")
+    if row.failure_code is not None:
+        raise JobRepositoryError("committed job failure_code must be null")
+    reloaded_ts = (
+        row.updated_at
+        if row.updated_at.tzinfo is not None
+        else row.updated_at.replace(tzinfo=UTC)
+    )
+    captured_ts = (
+        expected_updated_at
+        if expected_updated_at.tzinfo is not None
+        else expected_updated_at.replace(tzinfo=UTC)
+    )
+    if reloaded_ts <= captured_ts:
+        raise JobRepositoryError(
+            "committed job updated_at must be strictly later than capture"
+        )
     return row
 
 

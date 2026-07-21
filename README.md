@@ -19,13 +19,13 @@ this repository is not configured as a public or multi-user service.
 
 ## Current Baseline
 
-The last committed product baseline is **Plan 14 complete** at commit
-`c8aa1da` (`P14B2: Complete`). **Plan 15 Batch01** (Guarded Extraction and
-Ingestion Compatibility) is implemented on the working tree over base
-`425ba9f`: a pure deterministic source-grounding and atomic-skill guard,
-repository-authored English/Vietnamese golden fixture, and guarded one-repair
-extraction shared by ordinary text and URL ingestion. Scope, acceptance, and
-design authority:
+The last committed product baseline is **Plan 15 Batch01** at commit
+`5208ea50` (`P15B1: Complete`). **Plan 15 Batch02** (Safe Retained-JD
+Replacement and Public API) is implemented on the working tree over that base:
+revision-checked same-ID extraction replacement, staged re-extraction
+coordinator (provider/embedding outside transactions; CAS on `id` +
+`updated_at`), and strict `POST /api/jobs/{job_id}/reextract` with coupled
+graph partial-success response. Scope, acceptance, and design authority:
 
 - [Plan 15](docs/plans/Plan_15.md)
 - [Task 15](docs/tasks/task_15.md)
@@ -239,6 +239,23 @@ The boundaries are intentionally narrow:
    `none`, `current`, or `stale`. CV/profile/preference changes only mark prior
    results stale; recomputation requires another explicit action.
 
+### 4b. Explicit same-ID re-extraction (Plan 15 Batch02)
+
+1. `POST /api/jobs/{job_id}/reextract` accepts only an absent or empty JSON body
+   (`extra='forbid'`); the server reloads the retained Job by ID and never takes
+   client replacement fields.
+2. The [re-extraction coordinator](backend/app/services/job_reextraction.py)
+   stages guarded extraction, quality classification, and locked embedding
+   outside SQLite transactions; only a `full` or `partial` result reaches one
+   revision-checked repository CAS update
+   ([jobs repository](backend/app/repositories/jobs.py)).
+3. Successful replacement advances `job_posts.updated_at`, preserves identity,
+   source, raw content/hash, and all evaluation rows, and projects prior
+   evaluations as `stale` with zero evaluation/scoring calls.
+4. After SQLite commit, same-ID `sync_job` runs. Graph failure keeps SQLite truth
+   and returns HTTP 200 with `sync_ok=false`, `NEO4J_SYNC_FAILED`, and the safe
+   rebuild instruction. Pre-commit failures use `detail={code, summary}` only.
+
 ### 5. CV and Job deletion
 
 1. CV deletion enters through the [CV routes](backend/app/api/cvs.py) and
@@ -308,7 +325,8 @@ The main layers are:
   and the request-scoped runner.
 - `app/tools/`: seven Agent-facing tools and durable execution wrappers.
 - `app/services/`: CV/JD ingestion, approval, evaluation, matching,
-  observability, and deletion orchestration.
+  same-ID re-extraction (`job_reextraction`), observability, and deletion
+  orchestration.
 - `app/repositories/`, `app/db/`, `app/schemas/`: persistence access, database
   models/session ownership, and validated public/domain contracts.
 - `app/graph/`: constraints, consistency gates, retrieval, focused sync/delete,
@@ -322,7 +340,7 @@ The main layers are:
 The public API is registered in [`backend/app/main.py`](backend/app/main.py).
 There is no public profile CRUD: profile writes flow through the Agent approval
 interrupt. Public saved-JD mutations are deliberately limited to explicit
-save-and-evaluate, evaluate, and delete routes.
+save-and-evaluate, evaluate, re-extract, and delete routes.
 
 ## Data, Storage, and External Services
 
@@ -457,6 +475,8 @@ the root. These commands use the project virtual environment created above:
 Set-Location backend
 # Plan 15 Batch01 focused backend subset (guard + extraction + ingestion)
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction_guard.py tests/unit/test_jd_extraction.py tests/unit/test_skill_normalization.py tests/unit/test_jd_quality.py tests/integration/test_job_ingestion.py -q
+# Plan 15 Batch02 focused backend subset (CAS repo + re-extraction + API)
+& '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_jobs_repository.py tests/integration/test_job_reextraction.py tests/integration/test_job_sync.py tests/integration/test_saved_jobs_api.py -q
 & '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache
 & '..\.venv\Scripts\python.exe' -m mypy app --no-incremental
 & '..\.venv\Scripts\python.exe' -m pytest -q
@@ -611,7 +631,7 @@ sanitized manual and browser procedures.
 - [Master Plan](docs/plans/Master_plan.md) — stable product scope,
   architecture, data contracts, failure policy, and definition of done.
 - [Plan 15](docs/plans/Plan_15.md) — guarded JD extraction, safe re-extraction,
-  and saved-JD completeness (Batch01 implemented on the working tree).
+  and saved-JD completeness (Batch01 committed; Batch02 on the working tree).
 - [Task 15](docs/tasks/task_15.md) — Plan 15 batch/task contracts and validation.
 - [Plan 14](docs/plans/Plan_14.md) — prior committed intent-aware pasted-JD
   confirmation design and verification contract.

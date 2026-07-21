@@ -293,7 +293,7 @@ graph failure.
 
 ### Tasks
 
-- [ ] (02A): Implement revision-checked replacement and staged re-extraction service
+- [x] (02A): Implement revision-checked replacement and staged re-extraction service
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch02 - Safe Retained-JD Replacement and Public API` > `(02A)`
@@ -345,7 +345,7 @@ graph failure.
   - Blocked Condition: Missing accepted Batch01 extractor is `BLOCKED_MISSING_REF`; source conflict on field ownership/transaction/graph ordering is `BLOCKED_SOURCE_CONFLICT`; a required model/migration/evaluation/API edit is `BLOCKED_SCOPE_CONFLICT`; unavailable DB/test tooling is `BLOCKED_ENVIRONMENT`.
   - Files: `backend/app/repositories/jobs.py`, `backend/app/services/job_reextraction.py`, `backend/tests/integration/test_jobs_repository.py`, `backend/tests/integration/test_job_reextraction.py`, conditionally `backend/app/graph/sync_job.py`, `backend/tests/integration/test_job_sync.py`
 
-- [ ] (02B): Expose the strict re-extraction request, response, and safe error contract
+- [x] (02B): Expose the strict re-extraction request, response, and safe error contract
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_15.md` > `## Mandatory Batch02 - Safe Retained-JD Replacement and Public API` > `(02B)`

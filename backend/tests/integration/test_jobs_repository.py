@@ -34,6 +34,7 @@ from app.repositories import jobs as jobs_repo
 from app.repositories.jobs import (
     InvalidJobTransitionError,
     JobNotFoundError,
+    JobReextractConflictError,
     JobRepositoryError,
 )
 from sqlalchemy import func, select, text
@@ -937,6 +938,237 @@ def test_utc_now_used_for_transition_timestamps(db_path: Path) -> None:
                     and processing.updated_at.utcoffset() == timedelta(0)
                 )
                 assert before <= processing.updated_at <= after + timedelta(seconds=1)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+# ---------------------------------------------------------------------------
+# Plan 15 revision-checked extraction replacement (CAS)
+# ---------------------------------------------------------------------------
+
+
+_EXTRACTION_V2: dict[str, Any] = {
+    **_EXTRACTION,
+    "title": "Senior Backend Engineer",
+    "summary": "Own platform APIs",
+    "responsibilities": ["Ship features", "Own on-call"],
+}
+
+
+def test_replace_extraction_if_unchanged_success_and_field_ownership(
+    db_path: Path,
+) -> None:
+    """CAS replaces only approved fields and advances revision strictly."""
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                row = await jobs_repo.create_text_job(
+                    session,
+                    raw_content="retained JD body",
+                    raw_content_hash="h-cas-ok",
+                )
+                await jobs_repo.mark_processing(session, row.id)
+                await jobs_repo.mark_processed(
+                    session,
+                    row.id,
+                    extraction_json=dict(_EXTRACTION),
+                    jd_quality=JOB_JD_QUALITY_FULL,
+                    embedding_json=_embedding(3),
+                    embedding_model="text-embedding-3-small",
+                    embedding_dimensions=3,
+                )
+                await session.commit()
+                job_id = row.id
+                created_at = row.created_at
+                captured = row.updated_at
+                source_type = row.source_type
+                raw = row.raw_content
+                raw_hash = row.raw_content_hash
+
+            async with factory() as session:
+                replaced = await jobs_repo.replace_extraction_if_unchanged(
+                    session,
+                    job_id,
+                    expected_updated_at=captured,
+                    extraction_json=dict(_EXTRACTION_V2),
+                    jd_quality=JOB_JD_QUALITY_PARTIAL,
+                    embedding_json=_embedding(5),
+                    embedding_model="text-embedding-3-small",
+                    embedding_dimensions=5,
+                )
+                await session.commit()
+                assert replaced.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+                assert replaced.jd_quality == JOB_JD_QUALITY_PARTIAL
+                assert replaced.failure_code is None
+                assert replaced.extraction_json is not None
+                assert replaced.extraction_json["title"] == "Senior Backend Engineer"
+                assert replaced.embedding_dimensions == 5
+                assert replaced.embedding_model == "text-embedding-3-small"
+                assert replaced.raw_content == raw
+                assert replaced.raw_content_hash == raw_hash
+                assert replaced.source_type == source_type
+                created_ts = (
+                    created_at
+                    if created_at.tzinfo is not None
+                    else created_at.replace(tzinfo=UTC)
+                )
+                replaced_created = (
+                    replaced.created_at
+                    if replaced.created_at.tzinfo is not None
+                    else replaced.created_at.replace(tzinfo=UTC)
+                )
+                assert replaced_created == created_ts
+                reloaded_ts = (
+                    replaced.updated_at
+                    if replaced.updated_at.tzinfo is not None
+                    else replaced.updated_at.replace(tzinfo=UTC)
+                )
+                cap_ts = (
+                    captured
+                    if captured.tzinfo is not None
+                    else captured.replace(tzinfo=UTC)
+                )
+                assert reloaded_ts > cap_ts
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_replace_extraction_conflict_on_stale_revision(db_path: Path) -> None:
+    """Zero-row CAS when captured updated_at no longer matches leaves row intact."""
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                row = await jobs_repo.create_text_job(
+                    session,
+                    raw_content="conflict body",
+                    raw_content_hash="h-cas-conflict",
+                )
+                await jobs_repo.mark_processing(session, row.id)
+                await jobs_repo.mark_processed(
+                    session,
+                    row.id,
+                    extraction_json=dict(_EXTRACTION),
+                    jd_quality=JOB_JD_QUALITY_FULL,
+                    embedding_json=_embedding(2),
+                    embedding_model="text-embedding-3-small",
+                    embedding_dimensions=2,
+                )
+                await session.commit()
+                job_id = row.id
+                stale_capture = row.updated_at
+                title_before = row.extraction_json["title"]  # type: ignore[index]
+
+            # Concurrent writer advances revision.
+            async with factory() as session:
+                concurrent = await jobs_repo.get_by_id(session, job_id)
+                assert concurrent is not None
+                concurrent.updated_at = utc_now() + timedelta(seconds=5)
+                await session.flush()
+                await session.commit()
+                concurrent_ts = concurrent.updated_at
+                concurrent_title = concurrent.extraction_json["title"]  # type: ignore[index]
+
+            async with factory() as session:
+                with pytest.raises(JobReextractConflictError):
+                    await jobs_repo.replace_extraction_if_unchanged(
+                        session,
+                        job_id,
+                        expected_updated_at=stale_capture,
+                        extraction_json=dict(_EXTRACTION_V2),
+                        jd_quality=JOB_JD_QUALITY_PARTIAL,
+                        embedding_json=_embedding(9),
+                        embedding_model="text-embedding-3-small",
+                        embedding_dimensions=9,
+                    )
+                await session.rollback()
+
+            async with factory() as session:
+                final = await jobs_repo.get_by_id(session, job_id)
+                assert final is not None
+                assert final.extraction_json is not None
+                assert final.extraction_json["title"] == concurrent_title
+                assert final.extraction_json["title"] == title_before
+                assert final.embedding_dimensions == 2
+                final_ts = (
+                    final.updated_at
+                    if final.updated_at.tzinfo is not None
+                    else final.updated_at.replace(tzinfo=UTC)
+                )
+                conc_ts = (
+                    concurrent_ts
+                    if concurrent_ts.tzinfo is not None
+                    else concurrent_ts.replace(tzinfo=UTC)
+                )
+                assert final_ts == conc_ts
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_replace_extraction_repairs_failed_row_and_rejects_unscorable(
+    db_path: Path,
+) -> None:
+    """Failed retained rows can be replaced; unscorable quality is rejected."""
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                row = await jobs_repo.create_text_job(
+                    session,
+                    raw_content="failed retained",
+                    raw_content_hash="h-cas-failed",
+                )
+                await jobs_repo.mark_processing(session, row.id)
+                await jobs_repo.mark_failed(
+                    session, row.id, failure_code="PROVIDER_ERROR"
+                )
+                await session.commit()
+                job_id = row.id
+                captured = row.updated_at
+                raw_hash = row.raw_content_hash
+
+            async with factory() as session:
+                with pytest.raises(JobRepositoryError, match="full|partial"):
+                    await jobs_repo.replace_extraction_if_unchanged(
+                        session,
+                        job_id,
+                        expected_updated_at=captured,
+                        extraction_json=dict(_EXTRACTION),
+                        jd_quality=JOB_JD_QUALITY_UNSCORABLE,
+                        embedding_json=_embedding(2),
+                        embedding_model="text-embedding-3-small",
+                        embedding_dimensions=2,
+                    )
+
+                repaired = await jobs_repo.replace_extraction_if_unchanged(
+                    session,
+                    job_id,
+                    expected_updated_at=captured,
+                    extraction_json=dict(_EXTRACTION_V2),
+                    jd_quality=JOB_JD_QUALITY_FULL,
+                    embedding_json=_embedding(4),
+                    embedding_model="text-embedding-3-small",
+                    embedding_dimensions=4,
+                )
+                await session.commit()
+                assert repaired.processing_status == JOB_PROCESSING_STATUS_PROCESSED
+                assert repaired.failure_code is None
+                assert repaired.jd_quality == JOB_JD_QUALITY_FULL
+                assert repaired.raw_content_hash == raw_hash
+                assert repaired.raw_content == "failed retained"
         finally:
             await engine.dispose()
 
