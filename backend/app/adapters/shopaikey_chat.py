@@ -51,7 +51,7 @@ def build_shopaikey_chat(
     base_url = str(cfg.SHOPAIKEY_BASE_URL).rstrip("/")
     return ChatOpenAI(
         model=cfg.LLM_MODEL,
-        temperature=float(cfg.LLM_TEMPERATURE),
+        temperature=LOCKED_CHAT_TEMPERATURE,
         api_key=cfg.SHOPAIKEY_API_KEY,
         base_url=base_url,
     )

@@ -110,6 +110,13 @@ def test_build_shopaikey_chat_uses_injected_settings() -> None:
     assert model.openai_api_key.get_secret_value() == SECRET_API_KEY
 
 
+def test_build_shopaikey_chat_uses_locked_temperature_even_when_settings_drift() -> None:
+    """Structured extraction must stay deterministic even if local .env drifts."""
+    settings = _settings(LLM_TEMPERATURE=0.7)
+    model = build_shopaikey_chat(settings)
+    assert model.temperature == LOCKED_CHAT_TEMPERATURE
+
+
 def test_build_shopaikey_chat_uses_get_settings_when_not_injected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
