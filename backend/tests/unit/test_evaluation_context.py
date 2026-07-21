@@ -17,6 +17,10 @@ from app.services.evaluation_context import (
 _TS = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
+def test_matching_contract_invalidates_pre_skill_normalization_results() -> None:
+    assert MATCHING_CONTRACT_VERSION == "match_v2"
+
+
 def _facts(**overrides: object) -> EvaluationContextFacts:
     base: dict[str, object] = {
         "job_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
@@ -41,7 +45,7 @@ def test_canonical_bytes_stable_and_sorted() -> None:
         b'"cv_source_hash":"cvhash-aaa",'
         b'"job_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",'
         b'"job_revision":"2020-01-01T12:00:00+00:00",'
-        b'"matching_contract_version":"match_v1",'
+        b'"matching_contract_version":"match_v2",'
         b'"preferences_revision":"2020-01-01T12:00:00+00:00",'
         b'"profile_revision":"2020-01-01T12:00:00+00:00"}'
     )
@@ -76,7 +80,7 @@ def test_same_facts_same_hash_independent_of_construction_order() -> None:
         ("cv_source_hash", "cvhash-bbb"),
         ("profile_revision", _TS + timedelta(days=1)),
         ("preferences_revision", _TS + timedelta(hours=1)),
-        ("matching_contract_version", "match_v2"),
+        ("matching_contract_version", "match_v3"),
     ],
 )
 def test_each_revision_fact_changes_hash(field: str, value: object) -> None:

@@ -63,6 +63,9 @@ _SYSTEM_PROMPT: Final[str] = (
     "and preferred groups; "
     "(7) skill evidence is a short verbatim source snippet — do not produce "
     "aliases, canonical keys, categories, relationships, or jd_quality. "
+    "(8) extract every source-supported technical skill, framework, model, "
+    "method, or platform named in responsibilities or qualifications; do not omit "
+    "methods listed in qualification enumerations. "
     "Use seniority/work_mode 'unknown' when not explicit; use null for missing "
     "title/company/location/experience years."
 )
@@ -74,6 +77,8 @@ _SCHEMA_REPAIR_INSTRUCTION: Final[str] = (
     "single labels; mandatory or neutral skills are required; preferred only "
     "when the source explicitly marks optional/preferred; keep canonical skills "
     "unique and required/preferred disjoint; evidence short and verbatim. "
+    "Extract every source-supported technical skill and do not omit methods listed "
+    "in qualification enumerations. "
     "Do not invent aliases, relationships, or jd_quality."
 )
 
@@ -82,7 +87,9 @@ _GUARD_REPAIR_TRAILER: Final[str] = (
     "Use one atomic skill per row; mandatory or neutral skills are required; "
     "preferred only when the source explicitly marks optional/preferred; keep "
     "canonical skills unique and required/preferred disjoint. Do not invent "
-    "aliases, relationships, or jd_quality. Evidence must be short and verbatim."
+    "aliases, relationships, or jd_quality. Evidence must be short and verbatim. "
+    "Extract every source-supported technical skill and do not omit methods listed "
+    "in qualification enumerations."
 )
 
 

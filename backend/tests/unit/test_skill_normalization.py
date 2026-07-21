@@ -160,6 +160,51 @@ def test_correction_and_exclusion_fields_preserved(
     assert out.evidence == ["user removed this skill"]
 
 
+def test_grouped_candidate_skill_expansion_reuses_known_prefix_and_suffix(
+    normalizer: SkillNormalizer,
+) -> None:
+    original = CandidateSkill(
+        skill=SkillRef(
+            canonical_key="python_tooling_fast_api",
+            display_name="Python & Tooling: Fast API",
+            aliases=[],
+            category=None,
+        ),
+        confidence=0.73,
+        proficiency="intermediate",
+        years=2.0,
+        source="cv",
+        excluded=False,
+        evidence=["Python & Tooling: Fast API"],
+    )
+
+    expanded = normalizer.expand_candidate_skill(original)
+
+    assert [item.skill.canonical_key for item in expanded] == [
+        "python",
+        "fastapi",
+    ]
+    assert all(item.confidence == 0.73 for item in expanded)
+    assert all(item.proficiency == "intermediate" for item in expanded)
+    assert all(item.years == 2.0 for item in expanded)
+    assert all(item.evidence == original.evidence for item in expanded)
+
+
+def test_production_ai_aliases_resolve_to_shared_canonical_keys() -> None:
+    production = SkillNormalizer.production()
+
+    expected = {
+        "ML": "machine_learning",
+        "Model Fine-tuning": "fine_tuning",
+        "GenAI": "generative_ai",
+        "RAG Frameworks": "rag",
+    }
+
+    assert {
+        raw: production.normalize_name(raw).canonical_key for raw in expected
+    } == expected
+
+
 def test_duplicate_canonical_key_fails() -> None:
     payload = {
         "skills": [

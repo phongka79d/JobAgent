@@ -417,6 +417,81 @@ def test_projection_profile_facts_only_from_document() -> None:
     assert any(o["kind"] == "other" and o["heading"] == "Memberships" for o in outline)
 
 
+def test_projection_normalizes_grouped_skill_entries_from_real_cv_shape() -> None:
+    chunks = [_chunk(0, "Technical skills")]
+    consolidated = ExtractedConsolidation(
+        detected_languages=["en"],
+        sections=[
+            _section_frag(
+                "TECHNICAL SKILLS",
+                "skills",
+                [
+                    _entry_frag(
+                        title="TECHNICAL SKILLS",
+                        body=(
+                            "Programming & Tools: Python, SQL, Git, Docker, Linux"
+                        ),
+                        ordinals=[0],
+                    ),
+                    _entry_frag(
+                        title="TECHNICAL SKILLS",
+                        body=(
+                            "Machine Learning & CV: XGBoost, PyTorch, "
+                            "Model Fine-tuning"
+                        ),
+                        ordinals=[0],
+                    ),
+                    _entry_frag(
+                        title="TECHNICAL SKILLS",
+                        body=(
+                            "Generative AI: LangChain, LangGraph, RAG Frameworks"
+                        ),
+                        ordinals=[0],
+                    ),
+                ],
+                [0],
+            )
+        ],
+        extraction_warnings=[],
+        extraction_confidence=0.9,
+    )
+    document = build_cv_document_from_consolidated(
+        consolidated,
+        chunks,
+        attachment_id=_ATTACHMENT,
+    )
+
+    profile = project_candidate_profile(
+        document,
+        SkillNormalizer.production(),
+    )
+    skill_keys = {item.skill.canonical_key for item in profile.skills}
+
+    assert {
+        "python",
+        "sql",
+        "docker",
+        "machine_learning",
+        "xgboost",
+        "pytorch",
+        "fine_tuning",
+        "generative_ai",
+        "langchain",
+        "langgraph",
+        "rag",
+    }.issubset(skill_keys)
+    assert skill_keys.isdisjoint(
+        {
+            "technical_skills",
+            "programming_tools_python",
+            "machine_learning_cv_xgboost",
+            "generative_ai_langchain",
+            "model_fine_tuning",
+            "rag_frameworks",
+        }
+    )
+
+
 def test_extract_pipeline_bounded_calls_and_no_raw_pdf() -> None:
     chunks = [
         _chunk(0, "Summary\nEngineer with email and python experience. " + ("x" * 20)),

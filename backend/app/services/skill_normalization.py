@@ -447,6 +447,59 @@ class SkillNormalizer:
             evidence=list(skill.evidence),
         )
 
+    def normalize_grouped_name(self, raw_name: str) -> tuple[SkillRef, ...]:
+        """Expand one ``category: skill`` label through the approved taxonomy.
+
+        The right-hand value is always treated as the atomic skill assertion.
+        Prefix parts separated by ``&`` are retained only when they already
+        resolve to an approved seed skill. This recovers provider-produced CV
+        labels such as ``Programming & Tools: Python`` without turning generic
+        category words into new skills.
+        """
+        cleaned = display_name_from_raw(raw_name)
+        prefix, separator, suffix = cleaned.partition(":")
+        if not separator or not suffix.strip():
+            return (self.normalize_name(cleaned),)
+
+        refs: list[SkillRef] = []
+        for part in prefix.split("&"):
+            label = part.strip()
+            if not label:
+                continue
+            ref = self.normalize_name(label)
+            if self.is_seed_skill(ref.canonical_key):
+                refs.append(ref)
+        refs.append(self.normalize_name(suffix.strip()))
+
+        unique: list[SkillRef] = []
+        seen: set[str] = set()
+        for ref in refs:
+            if ref.canonical_key in seen:
+                continue
+            seen.add(ref.canonical_key)
+            unique.append(ref)
+        return tuple(unique)
+
+    def expand_candidate_skill(
+        self,
+        skill: CandidateSkill,
+    ) -> tuple[CandidateSkill, ...]:
+        """Normalize and atomize one stored Candidate skill assertion."""
+        raw_for_lookup = skill.skill.display_name.strip() or skill.skill.canonical_key
+        refs = self.normalize_grouped_name(raw_for_lookup)
+        return tuple(
+            CandidateSkill(
+                skill=ref,
+                confidence=skill.confidence,
+                proficiency=skill.proficiency,
+                years=skill.years,
+                source=skill.source,
+                excluded=skill.excluded,
+                evidence=list(skill.evidence),
+            )
+            for ref in refs
+        )
+
     def normalize_names(self, names: Iterable[str]) -> list[SkillRef]:
         """Normalize many names; repeats of equivalent inputs yield equal SkillRefs."""
         return [self.normalize_name(name) for name in names]

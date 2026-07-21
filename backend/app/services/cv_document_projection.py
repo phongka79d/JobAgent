@@ -19,8 +19,10 @@ from app.schemas.profile import (
     LanguageItem,
     parse_candidate_profile,
 )
-from app.schemas.skills import SkillRef
-from app.services.skill_normalization import SkillNormalizer
+from app.services.skill_normalization import (
+    SkillNormalizer,
+    comparison_fingerprint,
+)
 
 _MAX_EVIDENCE_SNIPPET_LEN: Final[int] = 240
 _YEAR_RE: Final[re.Pattern[str]] = re.compile(r"\b(19|20)\d{2}\b")
@@ -119,9 +121,14 @@ def _project_education(document: CVDocument) -> list[EducationItem]:
     return items
 
 
-def _skill_names_from_entry(entry: CVEntry) -> list[str]:
+def _skill_names_from_entry(entry: CVEntry, *, section_heading: str) -> list[str]:
     names: list[str] = []
-    if entry.title and entry.title.strip():
+    if (
+        entry.title
+        and entry.title.strip()
+        and comparison_fingerprint(entry.title)
+        != comparison_fingerprint(section_heading)
+    ):
         names.append(entry.title.strip())
     for bullet in entry.bullets:
         for part in re.split(r"[,;/|]", bullet):
@@ -158,22 +165,25 @@ def _project_skills(
             evidence = _clip_evidence(
                 [s for s in [entry.body, *entry.bullets, entry.title or ""] if s]
             )
-            for name in _skill_names_from_entry(entry):
-                ref: SkillRef = normalizer.normalize_name(name)
-                if ref.canonical_key in seen:
-                    continue
-                seen.add(ref.canonical_key)
-                skills.append(
-                    CandidateSkill(
-                        skill=ref,
-                        confidence=0.7,
-                        proficiency="unknown",
-                        years=None,
-                        source="cv",
-                        excluded=False,
-                        evidence=evidence or _clip_evidence([name]),
+            for name in _skill_names_from_entry(
+                entry,
+                section_heading=section.heading,
+            ):
+                for ref in normalizer.normalize_grouped_name(name):
+                    if ref.canonical_key in seen:
+                        continue
+                    seen.add(ref.canonical_key)
+                    skills.append(
+                        CandidateSkill(
+                            skill=ref,
+                            confidence=0.7,
+                            proficiency="unknown",
+                            years=None,
+                            source="cv",
+                            excluded=False,
+                            evidence=evidence or _clip_evidence([name]),
+                        )
                     )
-                )
     return skills
 
 

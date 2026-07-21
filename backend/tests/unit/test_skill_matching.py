@@ -239,3 +239,39 @@ def test_empty_lists_are_unavailable_but_zero_matches_are_available(
     assert result.required_skill_coverage == expected_required
     assert result.preferred_skill_coverage == expected_preferred
     assert result.skill_score == expected_score
+
+
+def test_coverage_recovers_grouped_legacy_candidate_skill_keys() -> None:
+    production = SkillNormalizer.production()
+    candidates = [
+        _candidate(
+            "programming_tools_python",
+            display_name="Programming & Tools: Python",
+        ),
+        _candidate(
+            "machine_learning_cv_xgboost",
+            display_name="Machine Learning & CV: XGBoost",
+        ),
+        _candidate(
+            "model_fine_tuning",
+            display_name="Model Fine-tuning",
+        ),
+    ]
+
+    result = compute_skill_coverage(
+        candidates,
+        required_skills=[
+            _job("python", display_name="Python"),
+            _job("machine_learning", display_name="Machine Learning"),
+            _job("fine_tuning", display_name="Fine-tuning"),
+        ],
+        preferred_skills=[],
+        normalizer=production,
+    )
+
+    assert result.required_skill_coverage == 1.0
+    assert [fact.match_type for fact in result.required_matches] == [
+        "direct",
+        "direct",
+        "direct",
+    ]

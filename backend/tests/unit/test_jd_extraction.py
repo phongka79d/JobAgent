@@ -730,7 +730,7 @@ def test_jd_timeout_exhaustion_never_exceeds_two_provider_calls() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_system_prompt_includes_seven_approved_rules() -> None:
+def test_system_prompt_includes_approved_grounding_and_atomicity_rules() -> None:
     import app.services.jd_extraction as mod
 
     prompt = mod._SYSTEM_PROMPT
@@ -747,6 +747,15 @@ def test_system_prompt_includes_seven_approved_rules() -> None:
     assert "canonical" in prompt.lower()
     source = inspect.getsource(mod.ExtractedJobPost)
     assert "jd_quality" not in source
+
+
+def test_system_prompt_requires_complete_atomic_skill_recall() -> None:
+    import app.services.jd_extraction as mod
+
+    prompt = mod._SYSTEM_PROMPT.lower()
+    assert "every source-supported technical skill" in prompt
+    assert "do not omit" in prompt
+    assert "methods listed in qualification" in prompt
 
 
 def test_ungrounded_extraction_rejected_before_normalization() -> None:

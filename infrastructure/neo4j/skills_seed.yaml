@@ -48,6 +48,30 @@
       "category": "framework"
     },
     {
+      "canonical_key": "machine_learning",
+      "display_name": "Machine Learning",
+      "aliases": ["ML", "Machine Learning & CV"],
+      "category": "ai"
+    },
+    {
+      "canonical_key": "fine_tuning",
+      "display_name": "Fine-tuning",
+      "aliases": ["fine tuning", "finetuning", "model fine-tuning"],
+      "category": "ai"
+    },
+    {
+      "canonical_key": "generative_ai",
+      "display_name": "Generative AI",
+      "aliases": ["GenAI"],
+      "category": "ai"
+    },
+    {
+      "canonical_key": "rag",
+      "display_name": "RAG",
+      "aliases": ["RAG Frameworks", "Retrieval-Augmented Generation"],
+      "category": "ai"
+    },
+    {
       "canonical_key": "neo4j",
       "display_name": "Neo4j",
       "aliases": [],

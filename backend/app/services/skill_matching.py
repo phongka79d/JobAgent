@@ -86,8 +86,21 @@ def compute_skill_coverage(
 ) -> SkillCoverageResult:
     """Compute required/preferred coverage and the renormalized skill score."""
 
-    required_matches = _match_skills(required_skills, candidate_skills, normalizer)
-    preferred_matches = _match_skills(preferred_skills, candidate_skills, normalizer)
+    normalized_candidates = tuple(
+        expanded
+        for candidate in candidate_skills
+        for expanded in normalizer.expand_candidate_skill(candidate)
+    )
+    required_matches = _match_skills(
+        required_skills,
+        normalized_candidates,
+        normalizer,
+    )
+    preferred_matches = _match_skills(
+        preferred_skills,
+        normalized_candidates,
+        normalizer,
+    )
     required_coverage = _coverage(required_matches)
     preferred_coverage = _coverage(preferred_matches)
 
