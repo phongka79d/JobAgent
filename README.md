@@ -460,11 +460,15 @@ environment, install the backend and then install the locked frontend tree:
 ```powershell
 Copy-Item .env.example .env
 python -m venv .venv
-& '.\.venv\Scripts\python.exe' -m pip install -e .\backend
+& '.\.venv\Scripts\python.exe' -m pip install -e '.\backend[dev]'
 Set-Location frontend
 npm ci
 Set-Location ..
 ```
+
+The production image installs `backend` without `[dev]`; the local editable
+install uses `[dev]` so Pytest, Ruff, Mypy, and pytest-asyncio are available for
+repository gates.
 
 Keep `.env` ignored and local. Do not create nested backend or frontend env
 files, and do not stage generated dependency directories.
