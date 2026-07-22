@@ -580,7 +580,6 @@ async def read_active_cv(
     max_results: int = DEFAULT_MAX_RESULTS,
     max_chars: int = DEFAULT_MAX_CHARS,
     expected_identity: ActiveCvIdentity | None = None,
-    expected_no_active: bool = False,
 ) -> ToolResult:
     """Read one bounded page of active-CV evidence.
 
@@ -642,9 +641,7 @@ async def read_active_cv(
         attachment_id=target.attachment_id,
         source_hash=target.source_hash,
     )
-    if expected_no_active or (
-        expected_identity is not None and actual_identity != expected_identity
-    ):
+    if expected_identity is not None and actual_identity != expected_identity:
         return _fail(ERROR_ACTIVE_CV_CHANGED, ACTIVE_CV_CHANGED_SUMMARY)
 
     selector = _selector_for(
