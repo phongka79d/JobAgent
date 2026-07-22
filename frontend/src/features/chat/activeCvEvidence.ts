@@ -7,7 +7,7 @@
  * Stream tool_status keeps resultData=null; only terminal history supplies evidence.
  */
 
-import type {ClientToolActivity} from './reducer';
+import type {ClientToolActivity} from './model';
 import type {JsonObject} from './types';
 import {isUuidV4} from './types';
 
