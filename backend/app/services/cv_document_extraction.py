@@ -30,7 +30,7 @@ from app.schemas.cv_document import (
     CVSectionKind,
     parse_cv_document,
 )
-from app.services.profile_extraction import (
+from app.services.cv_chunk_contracts import (
     CHUNK_JOIN,
     FAILURE_EMPTY_CHUNKS,
     CanonicalChunk,

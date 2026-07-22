@@ -22,10 +22,8 @@ from app.db.models.attachments import (
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import cv_documents as cv_doc_repo
-from app.services.profile_extraction import (
-    CanonicalChunk,
-    compute_canonical_source_hash,
-)
+from app.services.cv_chunk_contracts import CanonicalChunk
+from app.services.profile_extraction import compute_canonical_source_hash
 
 
 class ActivationError(Exception):

@@ -42,6 +42,11 @@ from app.schemas.profile import (
     ProfileDraftPayload,
     parse_profile_draft_payload,
 )
+from app.services.cv_chunk_contracts import (
+    CHUNK_JOIN,
+    FAILURE_EMPTY_CHUNKS,
+    CanonicalChunk,
+)
 from app.services.pdf_extraction import (
     NO_EXTRACTABLE_TEXT,
     PdfMalformedError,
@@ -62,7 +67,6 @@ logger = logging.getLogger(__name__)
 FAILURE_NO_EXTRACTABLE_TEXT: Final[str] = NO_EXTRACTABLE_TEXT
 FAILURE_MALFORMED_PDF: Final[str] = "MALFORMED_PDF"
 FAILURE_INVALID_STRUCTURED_OUTPUT: Final[str] = "INVALID_STRUCTURED_OUTPUT"
-FAILURE_EMPTY_CHUNKS: Final[str] = "EMPTY_CHUNKS"
 
 STRUCTURED_OUTPUT_METHOD: Final[str] = "json_schema"
 STRUCTURED_OUTPUT_STRICT: Final[bool] = True
@@ -71,7 +75,6 @@ EXTRACTION_SCHEMA_STRATEGY: Final[str] = "strict_json_schema"
 # Deterministic chunker contract (Plan 8 Persistence And Extraction).
 MAX_CHUNK_CHARS: Final[int] = 1200
 CHUNK_OVERLAP: Final[int] = 0
-CHUNK_JOIN: Final[str] = "\n\n"
 
 
 class ProfileExtractionError(Exception):
@@ -81,26 +84,6 @@ class ProfileExtractionError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-@dataclass(frozen=True, slots=True)
-class CanonicalChunk:
-    """One nonempty source-ordered text segment for model input + persistence."""
-
-    ordinal: int
-    text: str
-
-    @property
-    def char_count(self) -> int:
-        return len(self.text)
-
-    @property
-    def token_estimate(self) -> int:
-        return chunk_repo.token_estimate_for_chars(self.char_count)
-
-    @property
-    def preview(self) -> str:
-        return chunk_repo.preview_for_text(self.text)
 
 
 @dataclass(frozen=True, slots=True)

@@ -111,32 +111,6 @@ async def list_chunks_after(
     return list(result.scalars().all())
 
 
-async def count_chunks_for_attachment(
-    session: AsyncSession,
-    attachment_id: str,
-) -> int:
-    """Return the number of chunk rows for *attachment_id*."""
-    stmt = select(AttachmentTextChunk.id).where(
-        AttachmentTextChunk.attachment_id == attachment_id
-    )
-    result = await session.execute(stmt)
-    return len(list(result.scalars().all()))
-
-
-async def get_chunk_by_ordinal(
-    session: AsyncSession,
-    attachment_id: str,
-    ordinal: int,
-) -> AttachmentTextChunk | None:
-    """Return one chunk by attachment + ordinal, or ``None``."""
-    stmt = select(AttachmentTextChunk).where(
-        AttachmentTextChunk.attachment_id == attachment_id,
-        AttachmentTextChunk.ordinal == ordinal,
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
-
-
 async def list_runs_before(
     session: AsyncSession,
     *,
@@ -189,9 +163,7 @@ async def list_tool_executions_for_run_ids(
 
 __all__ = [
     "ObservabilityRepositoryError",
-    "count_chunks_for_attachment",
     "get_attachment",
-    "get_chunk_by_ordinal",
     "list_attachments_before",
     "list_chunks_after",
     "list_runs_before",
