@@ -44,9 +44,9 @@ import {
   NEO4J_SYNC_FAILED_CODE,
   parseSaveJobResultData,
   projectCompactResultData,
-  safeHttpUrl,
   type CompactSaveJobResult,
 } from '../features/jobs/types';
+import {safeHttpUrl} from '../lib/url';
 import type {StreamCallbacks} from '../lib/api/chat';
 
 const RUN_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';

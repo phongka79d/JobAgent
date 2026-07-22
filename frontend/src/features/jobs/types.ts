@@ -12,6 +12,7 @@ import {
   type JobWorkMode,
   JOB_WORK_MODES,
 } from './matchResult';
+import {safeHttpUrl} from '../../lib/url';
 
 /** Exact job_posts.processing_status vocabulary. */
 export type JobProcessingStatus =
@@ -117,28 +118,6 @@ function asNullableBoolean(value: unknown): boolean | null | undefined {
     return undefined;
   }
   return typeof value === 'boolean' ? value : undefined;
-}
-
-/**
- * Accept only http(s) absolute URLs for display; reject javascript: and relatives.
- */
-export function safeHttpUrl(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (trimmed === '') {
-    return null;
-  }
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    return parsed.toString();
-  } catch {
-    return null;
-  }
 }
 
 /**

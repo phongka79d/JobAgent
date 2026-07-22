@@ -5,7 +5,7 @@
  */
 
 import type {JsonObject, JsonValue} from '../chat/types';
-import {safeHttpUrl} from './types';
+import {safeHttpUrl} from '../../lib/url';
 
 export const MATCH_JOBS_TOOL_NAME = 'match_jobs' as const;
 
