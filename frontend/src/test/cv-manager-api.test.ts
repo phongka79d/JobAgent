@@ -12,9 +12,9 @@ import {
   CV_REPROCESS_ERROR_CODES,
   deleteCv,
   isRetryableDeleteError,
-  streamCvReprocess,
   toCvManagerActionError,
 } from '../features/observability/api';
+import {streamCvReprocess} from '../lib/api/chat';
 import {
   selectSafeRemainingAttachmentId,
 } from '../features/observability/cvManagerTypes';

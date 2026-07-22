@@ -241,7 +241,6 @@ export function mockObservabilityApi(
     getRetainedCvUrl: (id: string) =>
       `http://api.test/api/observability/cvs/${id}/file`,
     deleteCv: vi.fn().mockResolvedValue(undefined),
-    streamCvReprocess: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

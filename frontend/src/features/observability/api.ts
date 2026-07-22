@@ -9,7 +9,6 @@ import {
   apiUrl,
   ChatApiError,
   parseErrorBody,
-  streamCvReprocess,
 } from '../../lib/api/chat';
 import {
   asCvDeleteErrorCode,
@@ -33,7 +32,7 @@ import {
   type RunHistoryPage,
 } from './types';
 
-export {ChatApiError, streamCvReprocess};
+export {ChatApiError};
 export {
   asCvDeleteErrorCode,
   asCvReprocessErrorCode,
@@ -281,7 +280,6 @@ export type ObservabilityApi = {
   fetchGraphSnapshot: typeof fetchGraphSnapshot;
   getRetainedCvUrl: typeof getRetainedCvUrl;
   deleteCv: typeof deleteCv;
-  streamCvReprocess: typeof streamCvReprocess;
 };
 
 export const defaultObservabilityApi: ObservabilityApi = {
@@ -292,5 +290,4 @@ export const defaultObservabilityApi: ObservabilityApi = {
   fetchGraphSnapshot,
   getRetainedCvUrl,
   deleteCv,
-  streamCvReprocess,
 };
