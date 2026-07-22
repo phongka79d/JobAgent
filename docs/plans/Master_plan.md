@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** 2026-07-22
-**Status:** Amended for Plan 16 domain-neutral CV/JD skill extraction and the selected-JD compatibility map; the incremental portfolio requires fresh review before task writing
+**Status:** Amended for Plan 16 profession-neutral semantic skill labels, verbatim source evidence, and the selected-JD compatibility map
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -618,7 +618,7 @@ ExtractedCandidateSkillAssertion (internal provider/guard contract only)
 - source_entry_ids: list[str]
 ```
 
-The stage examines all source-ordered entries from every section kind, not only `kind='skills'`. It extracts only explicitly named professional capabilities, tools, methods, platforms, and domain practices; a section heading, category heading, certificate title, employer, degree, achievement, or general noun phrase is not a skill by itself. Every assertion must reference existing entry IDs, every evidence snippet must occur in those entries under NFKC/whitespace/casefold comparison, and the asserted name or one already-approved alias must occur in the referenced evidence. Provider output must contain one atomic skill per row. The deterministic guard rejects missing entry ownership, ungrounded evidence/name, heading-only labels, obvious multi-skill rows, and duplicate normalized keys; it returns only bounded code/path/count issues and permits at most the existing one repair. Only accepted atomic assertions reach `SkillNormalizer` and `CandidateProfile`.
+The stage examines all source-ordered entries from every section kind, not only `kind='skills'`. It extracts source-supported professional capabilities, tools, methods, platforms, and domain practices; a section heading, category heading, certificate title, employer, degree, achievement, or general noun phrase is not a skill by itself. Every assertion must reference existing entry IDs and every evidence snippet must occur in those entries under NFKC/whitespace/casefold comparison. The provider emits one concise semantic label for each atomic capability, supported by that verbatim evidence; the label need not repeat the source wording and must not invent an unsupported capability. The deterministic guard rejects missing entry ownership, ungrounded evidence, heading-only labels, obvious multi-skill rows, and duplicate normalized keys; it returns only bounded code/path/count issues and permits at most the existing one repair. Only accepted atomic assertions reach `SkillNormalizer` and `CandidateProfile`.
 
 Document headings and list formatting are never parsed into skills with profession-specific dictionaries, colon-prefix recovery, or blind delimiter splitting. Matching, Candidate Neo4j synchronization, the selected-JD map, and explanations all consume the exact approved `CandidateProfile.skills` collection; no downstream owner expands or repairs it differently.
 
@@ -690,9 +690,9 @@ All evidence snippets must be short, relevant to the associated Candidate or Job
 
 Before normalization or quality classification, one pure deterministic guard compares source facts using Unicode NFKC, collapsed whitespace, and Unicode casefold without removing punctuation or transliterating text. Every non-blank skill evidence snippet and responsibility, plus every non-null title, company, and location, must occur in the normalized retained JD. Summary remains a concise synthesis; seniority, work mode, and experience bounds remain schema-constrained model facts in this phase.
 
-Every provider skill label must name one atomic professional capability. The provider owns atomic emission; the guard never silently splits or rewrites a label. Its compound check is profession-neutral and structural: exact approved aliases remain atomic, punctuation internal to a contiguous label remains valid, and only an unambiguous enumeration of multiple non-empty skill-like labels is rejected. No code-level allowlist of technical, marketing, finance, healthcare, sales, or other profession names is permitted, and seed membership cannot turn category prefixes into skills. Unknown atomic punctuation-bearing labels remain valid. The asserted name or one already-approved alias must be grounded in its evidence/source. Tentatively normalized canonical keys must be unique within each group and disjoint across required/preferred groups. Mandatory or neutral requirements remain required; preferred classification requires explicit optional/preferred wording in the source.
+Every provider skill label must name one atomic professional capability and be semantically supported by its verbatim source evidence. The provider owns semantic labeling and atomic emission; the guard never silently splits or rewrites a label. Its compound check is profession-neutral and structural: exact approved aliases remain atomic, punctuation internal to a contiguous label remains valid, and only an unambiguous enumeration of multiple non-empty skill-like labels is rejected. No code-level allowlist of technical, marketing, finance, healthcare, sales, or other profession names is permitted, and seed membership cannot turn category prefixes into skills. Unknown atomic punctuation-bearing labels remain valid. Tentatively normalized canonical keys must be unique within each group and disjoint across required/preferred groups. Mandatory or neutral requirements remain required; preferred classification requires explicit optional/preferred wording in the source.
 
-The ordered internal guard vocabulary is exactly `EVIDENCE_NOT_IN_SOURCE`, `SKILL_NAME_NOT_IN_SOURCE`, `RESPONSIBILITY_NOT_IN_SOURCE`, `METADATA_NOT_IN_SOURCE`, `COMPOUND_SKILL_LABEL`, `DUPLICATE_SKILL`, and `SKILL_GROUP_CONFLICT`. At most 20 sanitized issues containing only code, field path, and safe structural counts may enter the existing single repair instruction. The complete raw JD remains only in the transient extraction messages; issue reports and logs contain no source/evidence values or provider payload. A second invalid result after that one repair fails safely as `INVALID_STRUCTURED_OUTPUT`; only an accepted extraction reaches `SkillNormalizer`, quality classification, embedding, persistence, graph synchronization, or scoring.
+The ordered internal guard vocabulary is exactly `EVIDENCE_NOT_IN_SOURCE`, `RESPONSIBILITY_NOT_IN_SOURCE`, `METADATA_NOT_IN_SOURCE`, `COMPOUND_SKILL_LABEL`, `DUPLICATE_SKILL`, and `SKILL_GROUP_CONFLICT`. At most 20 sanitized issues containing only code, field path, and safe structural counts may enter the existing single repair instruction. The complete raw JD remains only in the transient extraction messages; issue reports and logs contain no source/evidence values or provider payload. A second invalid result after that one repair fails safely as `INVALID_STRUCTURED_OUTPUT`; only an accepted extraction reaches `SkillNormalizer`, quality classification, embedding, persistence, graph synchronization, or scoring.
 
 ### 7.5 Tool execution result
 
@@ -866,7 +866,7 @@ The existing global bounded graph endpoint remains the explicit technical view. 
 5. Resolve against aliases in a small `skills_seed.yaml`.
 6. If unresolved, create a deterministic canonical key without related-skill edges.
 
-The input to this pipeline is already one guarded atomic assertion. The normalizer does not split category prefixes, delimiters, headings, or grouped values and does not expand a stored Candidate skill at matching time. Significant punctuation must be handled consistently enough that the same unknown atomic source label receives the same key, while the original normalized source label remains `display_name`.
+The input to this pipeline is already one guarded atomic assertion. The normalizer does not split category prefixes, delimiters, headings, or grouped values and does not expand a stored Candidate skill at matching time. Significant punctuation must be handled consistently enough that the same unknown atomic semantic label receives the same key, while the normalized provider label remains `display_name` and its source evidence remains attached.
 
 ### 9.2 Seed taxonomy
 
@@ -1733,13 +1733,13 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Pydantic validation.
 - Dynamic `CVDocument` section/entry validation, unknown-heading retention, deterministic IDs, and document-to-profile projection.
 - Profession-neutral PDF extractability with no identity/role/tool keyword requirement; image-only, empty, punctuation-only, and below-threshold failures remain exact.
-- All-section Candidate skill assertion extraction with source-entry ownership, grounded evidence/name, heading/category rejection, atomicity, duplicate handling, and no delimiter/grouped-name recovery.
+- All-section Candidate skill assertion extraction with source-entry ownership, semantic labels backed by grounded evidence, heading/category rejection, atomicity, duplicate handling, and no delimiter/grouped-name recovery.
 - Bounded extraction batching/consolidation coverage and `read_active_cv` mode/cursor/character caps.
 - `ToolResult` success/failure coupling with tool status and `error_code`.
 - UUID, UTC timestamp, enum, and singleton-ID conventions from Section 6.1.
 - Settings-dependent PDF/embedding limits are enforced by services rather than migration constants.
 - JD extraction and field validation.
-- NFKC/whitespace/casefold source comparison; grounded skill name/evidence/responsibility/direct-metadata checks; profession-neutral structural atomicity; unknown punctuation-bearing atomic acceptance; deterministic duplicate/cross-group issue ordering; and the exact seven-code JD guard vocabulary.
+- NFKC/whitespace/casefold source comparison for evidence/responsibility/direct metadata; semantic skill labels backed by verbatim evidence; profession-neutral structural atomicity; unknown punctuation-bearing atomic acceptance; deterministic duplicate/cross-group issue ordering; and the exact six-code JD guard vocabulary.
 - One invalid semantic output sends at most 20 sanitized issues through the existing single repair, and a second invalid result fails without leaking source/evidence/provider values.
 - Skill canonicalization and alias resolution.
 - Empty/minimal-taxonomy normalization and direct matching for synthetic software, marketing, sales/operations, finance/healthcare, bilingual, and unknown atomic skills without production-seed edits.
@@ -2140,7 +2140,7 @@ Tasks:
 - [ ] Replace profession-specific PDF meaningful-text markers with the domain-neutral digital-text rule while preserving pypdf-only/image-only behavior.
 - [ ] Add a bounded all-section Candidate-skill assertion model/invoker/guard over validated `CVDocument` entries and make it the sole producer of persisted CV skills.
 - [ ] Remove blind delimiter/category-heading projection and matching-only grouped-skill expansion; make Candidate sync, matching, explanations, and embedding text consume the same approved atomic assertions.
-- [ ] Make JD prompt/repair language profession-neutral, add skill-name grounding, replace technology-specific exception logic with structural atomicity, and retain one bounded sanitized repair.
+- [ ] Make JD prompt/repair language profession-neutral, require semantic skill labels backed by verbatim evidence, replace technology-specific exception logic with structural atomicity, and retain one bounded sanitized repair.
 - [ ] Audit the production seed so it remains optional curated alias/relatedness knowledge; remove case-specific parsing aliases and prove new profession fixtures need no seed additions.
 - [ ] Bump the matching/evaluation contract version and document explicit CV reprocess, JD re-extract, and Neo4j rebuild rollout without silently rewriting approved records.
 - [ ] Add the selected-JD compatibility schema/service/read-only endpoint, reuse deterministic skill coverage/explanation owners, and withhold the map on revision or exact selected-relationship mismatch.
@@ -2243,7 +2243,7 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Phases 0-11 plus the completed Plan 15 guarded-extraction/re-extraction boundary form the baseline. This Version 2.1 amendment locks Phase 12 profession-neutral CV/JD skill extraction, one authoritative atomic-skill path, exact selected-relationship integrity, and the non-technical selected-JD compatibility map. `Plan_16.md` is the sole next implementation plan, but no `task_16.md` or product implementation may be written until the amended `Master_plan.md` and contiguous Plans 1-16 receive a fresh incremental portfolio review.
+Phases 0-11 plus the completed Plan 15 guarded-extraction/re-extraction boundary form the baseline. This Version 2.2 amendment locks Phase 12 profession-neutral CV/JD semantic skill extraction with verbatim source evidence, one authoritative atomic-skill path, exact selected-relationship integrity, and the non-technical selected-JD compatibility map. `Plan_16.md` remains the implementation and rollout authority for this increment.
 
 The project remains intentionally narrow:
 

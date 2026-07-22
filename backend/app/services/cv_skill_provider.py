@@ -25,13 +25,27 @@ from app.services.skill_assertion_guard import (
 _MAX_REPAIR_ATTEMPTS: Final[int] = 1
 
 _SYSTEM_PROMPT: Final[str] = (
-    "Extract explicit professional capabilities, tools, methods, platforms, and "
-    "domain practices from every supplied CV entry record. Return one atomic source "
-    "label per assertion with confidence, supported proficiency/years, short verbatim "
-    "evidence, and existing source_entry_ids. Do not emit headings, group/category "
-    "labels, employers, role titles, degrees, certificate titles, achievements, or "
-    "generic nouns by themselves. Do not emit aliases, categories, or relationships. "
-    "Preserve source order and return only structured JSON."
+    "Extract every source-supported professional capability, tool, method, platform, "
+    "and domain practice from every supplied CV entry record; do not omit capabilities "
+    "that are directly evidenced by the source. Return one concise semantic skill "
+    "label per atomic capability. Each label must be supported by short verbatim "
+    "evidence copied from its referenced records; never invent an unsupported skill. "
+    "Return one assertion per distinct capability and merge repeated occurrences, "
+    "source_entry_ids, and unique evidence in source order. Return confidence and only "
+    "source-supported proficiency/years. Do not emit headings, group/category labels, "
+    "employers, role titles, degrees, certificate titles, achievements, or generic "
+    "nouns by themselves. Do not emit aliases, categories, or relationships. Preserve "
+    "source order and return only structured JSON."
+)
+
+_REPAIR_INSTRUCTION: Final[str] = (
+    "Previous structured output failed validation. Return a complete replacement "
+    "candidate skill batch matching the schema, including every valid assertion from "
+    "the supplied records. Use one concise semantic skill label supported by its "
+    "evidence. Copy each evidence snippet exactly from the supplied source records. "
+    "Omit any assertion whose evidence cannot be grounded in its referenced source "
+    "entries. Keep one atomic capability per row, merge duplicate capabilities, "
+    "preserve source order, and use only existing source_entry_ids."
 )
 
 GuardCandidateBatch = Callable[
@@ -62,9 +76,15 @@ def _messages(
             }
             for issue in issues
         ]
-        repair = "\nSANITIZED ISSUES START\n" + json.dumps(
-            safe,
-            separators=(",", ":"),
+        repair = (
+            "\nREPAIR INSTRUCTIONS START\n"
+            + _REPAIR_INSTRUCTION
+            + "\nREPAIR INSTRUCTIONS END"
+            + "\nSANITIZED ISSUES START\n"
+            + json.dumps(
+                safe,
+                separators=(",", ":"),
+            )
         )
     return [
         SystemMessage(content=_SYSTEM_PROMPT),

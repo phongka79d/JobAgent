@@ -31,7 +31,7 @@ single active-Candidate product boundary remains unchanged.
 
 ## Source of Truth
 
-- `docs/plans/Master_plan.md` Version 2.1: Sections 2, 7.1-7.4, 8.4-8.5, 9,
+- `docs/plans/Master_plan.md` Version 2.2: Sections 2, 7.1-7.4, 8.4-8.5, 9,
   10.2, 14, 15.2, 15.6, 18.1, 19-21, 24-25, 27, and 29.
 - `docs/plans/Plan_9.md`: document-first CV extraction, active-CV lifecycle,
   bounded graph projection, and explicit reprocessing baseline.
@@ -55,7 +55,7 @@ single active-Candidate product boundary remains unchanged.
   default direction.
 - **Change type:** `feature`.
 - **Master impact:** `amendment`, explicitly authorized by the current user and
-  applied as Master Version 2.1. The amendment changes the CV digital-text rule,
+  applied as Master Version 2.2. The amendment changes the CV digital-text rule,
   Candidate/JD skill projection rules, JD guard vocabulary, matching contract
   behavior, public read-only API, graph DTO, and graph-panel UX. It adds no database
   table, provider model, dependency, Agent/tool, worker, or multi-candidate scope.
@@ -65,9 +65,9 @@ single active-Candidate product boundary remains unchanged.
 | Requirement ID | Master section | Owned outcome | Verification evidence |
 |---|---|---|---|
 | P16-DOM-01 | 2.1, 10.2, 24.1 | Digital CV text is accepted by content bounds rather than English/software identity, role, heading, or tool markers. | Domain-neutral PDF unit tests plus cross-profession PDF fixtures and image-only regressions. |
-| P16-CV-01 | 7.2, 10.2 | One bounded internal assertion stage extracts explicit atomic skills from all validated CV sections with source-entry ownership and grounded evidence/name. | Schema, batching, guard, aggregation, and full publication tests. |
+| P16-CV-01 | 7.2, 10.2 | One bounded internal assertion stage extracts atomic semantic skill labels from all validated CV sections with source-entry ownership and verbatim grounded evidence. | Schema, batching, guard, aggregation, and full publication tests. |
 | P16-CV-02 | 7.2, 9, 18.1 | CandidateProfile persistence is the sole CV skill truth; delimiter/category parsing and matching-only grouped-skill expansion are removed. | Negative source inspection, exact profile/matching/sync parity, and legacy grouped-shape regression tests. |
-| P16-JD-01 | 7.4, 11.4, 19 | JD extraction and its one repair ask for professional capabilities across occupations; name/evidence grounding and structural atomicity use no profession allowlist. | Prompt/guard call-count/redaction tests and cross-profession JD golden cases. |
+| P16-JD-01 | 7.4, 11.4, 19 | JD extraction and its one repair ask for semantic professional capability labels across occupations; verbatim evidence grounding and structural atomicity use no profession allowlist. | Prompt/guard call-count/redaction tests and cross-profession JD golden cases. |
 | P16-NRM-01 | 7.1, 9 | Unknown atomic skills retain display labels, normalize deterministically, and direct-match without seed membership; seed is optional curated alias/relatedness only. | Empty/minimal-taxonomy normalization and matching matrix plus production-seed audit. |
 | P16-MAT-01 | 7.1, 18.1, 7.7 | Matching consumes stored atomic skills without repair and bumps the evaluation contract so prior rows derive stale until explicit re-evaluation. | Matching parity tests, context-hash tests, and zero-auto-evaluate assertions. |
 | P16-SYNC-01 | 8, 21 | Candidate/Job sync and rebuild project exactly the approved SQLite assertion sets and relationship properties. | Candidate/Job sync, rebuild, and injected mismatch tests. |
@@ -83,7 +83,7 @@ single active-Candidate product boundary remains unchanged.
 
 | Producer or environment | Required artifact/contract | Gate before implementation |
 |---|---|---|
-| Master Version 2.1 | Authorized profession-neutral extraction, optional-seed, selected-map, API, UX, consistency, and rollout contracts | Shared plan validator and fresh portfolio review must approve Plans 1-16 before task writing. |
+| Master Version 2.2 | Authorized profession-neutral semantic extraction, optional-seed, selected-map, API, UX, consistency, and rollout contracts | Shared plan validator and fresh portfolio review must approve Plans 1-16 before task writing. |
 | Plan_9 | Validated `CVDocument`, complete chunks, active/archived reprocessing, profile approval, CV graph/rebuild, and one active Candidate | Run current CV document/profile/approval/sync suites and trace every profile-publication caller. |
 | Plan_15 | Guarded JD extractor, one repair, retained re-extraction, saved-JD detail/state, same-ID sync, and no automatic evaluation | Run focused JD/re-extraction/saved-JD tests and preserve compare-and-swap/failure contracts. |
 | Existing skill owners | `SkillRef`, `CandidateSkill`, `JobSkill`, `SkillNormalizer.normalize_name`, `compute_skill_coverage`, and match explanations | Prove which owners can be reused before adding the shared assertion guard or selected-map projector. |
@@ -101,8 +101,8 @@ single active-Candidate product boundary remains unchanged.
   cross-batch aggregation over the complete validated `CVDocument`.
 - Integrate accepted Candidate assertions into document-first publication and remove
   local skill extraction from section headings, delimiters, and category prefixes.
-- Generalize JD prompt/repair language and guard rules across professions; add
-  asserted-name grounding and remove code-level technology exception/seed parsing
+- Generalize JD prompt/repair language and guard rules across professions; require
+  semantic labels backed by verbatim evidence and remove code-level technology exception/seed parsing
   dependence while preserving source grounding, duplicate/group rules, issue caps,
   retry limits, and redaction.
 - Keep one atomic-name normalizer and optional seed alias/relationship owner; audit
@@ -300,9 +300,9 @@ ExtractedCandidateSkillBatch
 - Batch by serialized character count under one module-owned provider safety bound.
   This bound is a resource constant, not a profession rule, and introduces no new
   environment variable or duplicate Settings owner.
-- The prompt asks for explicit professional capabilities, tools, methods, platforms,
-  and domain practices from every section. It requires one source label per row,
-  original source-entry IDs, short verbatim evidence, and no aliases/categories/
+- The prompt asks for source-supported professional capabilities, tools, methods,
+  platforms, and domain practices from every section. It requires one concise semantic
+  label per atomic capability, original source-entry IDs, short verbatim evidence, and no aliases/categories/
   relationships. It explicitly excludes headings/group labels, employers, degrees,
   certificates as credentials, achievements, and generic nouns unless the source
   separately names them as a capability.
@@ -310,8 +310,8 @@ ExtractedCandidateSkillBatch
   Schema or semantic failure receives at most one sanitized repair for that batch.
   Logs contain batch/entry/issue counts only.
 - The pure guard validates existing source-entry IDs, ascending unique ownership,
-  evidence containment in the referenced entries, asserted-name or approved-alias
-  containment, non-heading labels, structural atomicity, and within-batch normalized
+  evidence containment in the referenced entries, non-heading semantic labels,
+  structural atomicity, and within-batch normalized
   uniqueness. It neither calls the provider nor returns source values in issues.
 - Normalize only accepted atomic names. Across batches, merge equal canonical keys in
   first-source order, merge unique evidence stably, use maximum accepted confidence,
@@ -331,14 +331,14 @@ compound detection, and safe issue projection. It has no provider, database, gra
 FastAPI, logging, or frontend imports.
 
 - Seed membership never decides whether a label is a skill and never promotes a
-  category prefix. An exact full-label seed alias may establish source-name
-  equivalence only.
+  category prefix. An exact full-label seed alias may establish normalization
+  identity and approved atomic punctuation only.
 - Do not split. Reject clear enumerations containing multiple non-empty skill-like
   labels. Preserve punctuation inside contiguous unknown labels; no list of valid
   technical/marketing/finance tokens exists in code.
 - CV-specific ownership/heading rules remain in the CV projection owner. JD-specific
-  required/preferred group checks remain in `jd_extraction_guard.py`. Both reuse the
-  same atomic-name and grounding primitives instead of duplicating them.
+  required/preferred group checks remain in `jd_extraction_guard.py`. Both apply the
+  same semantic-label, verbatim-evidence, and structural-atomicity invariant.
 - Guard issue payloads contain code, field path, and structural count only, capped at
   20. Source/evidence/name values, provider payloads, prompts, and exception text do
   not enter repair diagnostics or logs.
@@ -351,9 +351,9 @@ FastAPI, logging, or frontend imports.
   source-supported professional capabilities across any occupation. Examples are
   prohibited in the production prompt when they would bias one profession; synthetic
   examples belong in tests only.
-- Require the asserted name or an approved alias plus every evidence snippet to occur
-  in the retained source. Add `SKILL_NAME_NOT_IN_SOURCE` to the ordered guard
-  vocabulary and retain grounding, metadata/responsibility, duplicate, and
+- Permit a concise semantic skill label that need not repeat the JD wording, while
+  requiring every evidence snippet to occur in the retained source. Keep the ordered
+  six-code guard vocabulary plus metadata/responsibility, duplicate, and
   required/preferred-disjoint rules.
 - Replace the code-level `C/C++`/`.NET`/`Node.js`/`CI/CD` exemption set and
   taxonomy-qualified compound rule with the shared structural guard. Unknown
@@ -498,7 +498,7 @@ FastAPI, logging, or frontend imports.
    and matching-only expansion. Update all callers and add exact CandidateProfile →
    embedding/matching/explanation/sync/rebuild parity tests.
 5. Add JD prompt/guard RED cases for marketing, sales/operations, finance/healthcare,
-   bilingual, unknown punctuation, name grounding, and second-invalid repair. Reuse
+   bilingual, unknown punctuation, semantic labels with grounded evidence, and second-invalid repair. Reuse
    the shared guard while preserving Plan 15 extraction/retry/re-extraction behavior.
 6. Audit the production seed and matching version. Remove only case-specific parsing
    aliases/relations, set the new contract version, and prove old evaluations derive
@@ -530,9 +530,9 @@ FastAPI, logging, or frontend imports.
 |---|---|---|
 | Pre-change RED | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_pdf_extraction.py tests/unit/test_cv_skill_projection.py tests/unit/test_skill_assertion_guard.py tests/unit/test_skill_matching.py -q` | New non-technical PDF, all-section atomic skill, and no-matching-repair assertions fail for the diagnosed old behavior before production edits. |
 | PDF/CV skills | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_pdf_extraction.py tests/unit/test_cv_skill_projection.py tests/unit/test_skill_assertion_guard.py tests/unit/test_cv_document_extraction.py tests/unit/test_profile_extraction.py -q` | Cross-profession digital PDFs pass, image/empty/short fail, all-section source-owned atomic assertions and one repair/aggregation/publication rules pass. |
-| JD/normalizer/matching | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction.py tests/unit/test_jd_extraction_guard.py tests/unit/test_skill_normalization.py tests/unit/test_skill_matching.py tests/unit/test_match_explanations.py tests/unit/test_evaluation_context.py -q` | Profession-neutral recall/grounding, seven-code JD guard, empty-taxonomy unknown matching, no grouped expansion, explanation parity, and contract bump pass. |
+| JD/normalizer/matching | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction.py tests/unit/test_jd_extraction_guard.py tests/unit/test_skill_normalization.py tests/unit/test_skill_matching.py tests/unit/test_match_explanations.py tests/unit/test_evaluation_context.py -q` | Profession-neutral semantic labels with grounded evidence, six-code JD guard, empty-taxonomy unknown matching, no grouped expansion, explanation parity, and contract bump pass. |
 | Lifecycle/sync/rebuild | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_profile_approval.py tests/integration/test_candidate_sync.py tests/integration/test_job_ingestion.py tests/integration/test_job_reextraction.py tests/integration/test_job_sync.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_job_evaluations.py -q` | Explicit approval/re-extraction, exact assertion sync/rebuild, stale evaluation with no auto-run, same identities, and failure preservation pass. |
-| Selected map backend/API | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_skill_compatibility.py tests/unit/test_observability_graph.py tests/integration/test_observability_api.py -q` | Connected-only map, source labels/evidence, all five statuses, exact relationship mismatch withholding, redaction, 200 bound, zero evaluation/mutation, and raw display metadata pass. |
+| Selected map backend/API | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_skill_compatibility.py tests/unit/test_observability_graph.py tests/integration/test_observability_api.py -q` | Connected-only map, semantic skill labels/source evidence, all five statuses, exact relationship mismatch withholding, redaction, 200 bound, zero evaluation/mutation, and raw display metadata pass. |
 | Frontend focused | `Set-Location frontend; npm test -- --run src/test/skill-compatibility-api.test.ts src/test/skill-compatibility-map.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-sidebar.test.tsx src/test/graph-presentation.test.ts src/test/graph-panel.test.tsx` | Sole selection/cache owner, strict DTO, invalidation, filters/evidence/accessibility/safe states, no canonical labels in default mode, and unchanged technical interactions pass. |
 | Existing frontend regressions | `Set-Location frontend; npm test -- --run src/test/match-card.test.tsx src/test/saved-jobs-panel.test.tsx src/test/cv-manager.test.tsx src/test/observability-api.test.ts src/test/graph-interaction.test.tsx` | Match/saved-JD/CV Manager/raw graph behavior remains compatible. |
 | Backend full/static | `Set-Location backend; & '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache; & '..\.venv\Scripts\python.exe' -m mypy app --no-incremental; & '..\.venv\Scripts\python.exe' -m pytest -q` | Full backend passes with fakes, no real provider in normal tests, and no schema/topology drift. |
@@ -541,7 +541,7 @@ FastAPI, logging, or frontend imports.
 | Hardcode audit | Review `rg -n -i "python|docker|engineer|technical skill|machine learning|google ads|marketing" backend/app frontend/src -g "!**/test/**" -g "!**/tests/**"` plus the changed diff and seed file. | Any occurrence is a justified framework/product string or optional seed datum; no PDF/extraction/guard/matching/frontend branch or formatter depends on a named profession/skill. |
 | Plan structure | `& '.\.venv\Scripts\python.exe' 'C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure.py' 'docs/plans' --json` | Plans 1-16 are contiguous; Plans 1-15 hand off normally and only Plan 16 is terminal. |
 | Docker health | `docker compose --env-file .env -f infrastructure/docker-compose.yml up --build -d --wait --wait-timeout 180`; then `Invoke-RestMethod http://127.0.0.1:8000/api/health` | Frontend/backend/Neo4j and SQLite/filesystem/Neo4j components are healthy on the candidate build. |
-| Synthetic browser map | At `http://localhost:5173`, approve an unseeded-profession synthetic CV, save/re-extract a different-profession synthetic JD, select it, open `Bản đồ CV–JD`, exercise every filter/evidence row, then switch to `Kỹ thuật`. | Correct source labels/evidence and backend classes appear; no unrelated seed skill/raw key/relationship code appears in default mode; technical mode retains raw controls; no evaluate request or console error occurs. |
+| Synthetic browser map | At `http://localhost:5173`, approve an unseeded-profession synthetic CV, save/re-extract a different-profession synthetic JD, select it, open `Bản đồ CV–JD`, exercise every filter/evidence row, then switch to `Kỹ thuật`. | Correct semantic labels/source evidence and backend classes appear; no unrelated seed skill/raw key/relationship code appears in default mode; technical mode retains raw controls; no evaluate request or console error occurs. |
 | Mismatch/failure browser check | Use the controlled graph fake/integration seam to remove or alter one selected skill relationship, then refresh the map. | UI shows stale/rebuild guidance and no partial compatibility items; it never repairs or claims readiness. |
 | Local supplied-record acceptance | Without committing identifiers/content, use existing CV Manager/JD actions to reprocess the supplied local CV, re-extract the selected local JD, rebuild if instructed, inspect the map, and explicitly evaluate once. | Group headings are absent as skills, atomic source skills agree across approved profile/Neo4j/map, actual absent JD skills remain missing, prior evaluation was stale before the explicit rerun, and logs/output contain no raw document data. |
 | Scope hygiene | `git diff --check; git status --short` plus changed-path, migration/manifest/route/tool/Agent/source-length/data/secret review | Only authorized Master/Plan 15/Plan 16 and Plan 16 implementation owners change; no database migration, dependency, new Agent/tool, auto-evaluation, global ontology, multi-candidate feature, real data, or secret appears. |
@@ -556,8 +556,8 @@ reruns affected evidence.
 
 | Producer | Artifact/contract | Assumption |
 |---|---|---|
-| Master Version 2.1 | Profession-neutral PDF/CV/JD skill, optional-seed, selected-map, public API, UX, consistency, and rollout authority | Version 2.1 remains the architecture authority for this increment. |
-| Plans 1-8 | Local runtime, one Agent, source-of-truth schemas, profile approval, normalizer, graph sync/rebuild, matching, and observability baseline | Historical ownership remains unchanged except where Version 2.1 explicitly amends it. |
+| Master Version 2.2 | Profession-neutral PDF/CV/JD skill, optional-seed, selected-map, public API, UX, consistency, and rollout authority | Version 2.2 remains the architecture authority for this increment. |
+| Plans 1-8 | Local runtime, one Agent, source-of-truth schemas, profile approval, normalizer, graph sync/rebuild, matching, and observability baseline | Historical ownership remains unchanged except where Version 2.2 explicitly amends it. |
 | Plans 9-14 | Document-first CV Manager, active reads, saved-JD/evaluation lifecycle, readable UX, and reliable passive saving | Reuse these owners; do not reopen their unrelated scope. |
 | Plan_15 | Source-grounded JD extraction, safe retained re-extraction, saved detail, same-ID sync, and explicit no-auto-evaluation | Profession-neutral changes preserve grounding, one repair, CAS, and failure truth. |
 | Current user authorization | 2026-07-22 request for every profession plus full FE/BE hardcode audit/removal | Authorizes Master amendment, Plan 15 terminal replacement, and this Plan 16. |
@@ -566,7 +566,7 @@ reruns affected evidence.
 
 | Consumer | Artifact/contract | Acceptance evidence |
 |---|---|---|
-| Fresh portfolio review | Master Version 2.1, amended Plan 15 handoff, and `Plan_16.md` | Shared validator plus independent full portfolio review approve requirement ownership and execution readiness. |
+| Fresh portfolio review | Master Version 2.2, amended Plan 15 handoff, and `Plan_16.md` | Shared validator plus independent full portfolio review approve requirement ownership and execution readiness. |
 | `task-writing-agent` after approval | `docs/tasks/task_16.md` | One authoritative task maps P16-DOM-01 through P16-REG-01 to bounded A1/A2/A3 work and evidence. |
 | Future A1 implementation | Test-first PDF/CV/JD/normalizer/matching/sync/map/API/FE rollout sequence | The task reuses named owners and preserves all out-of-scope boundaries. |
 | Future A2/A3 review | Independent functional and scope acceptance | Evidence proves cross-profession behavior, one skill truth, exact cross-store parity, non-technical display, explicit rollout, and no hardcoded domain repair. |
@@ -584,8 +584,8 @@ skill must be atomic, source-grounded, and normalized only after its guard passe
 Unknown skills must retain display labels, direct-match, synchronize, rebuild, and
 render with an empty/minimal taxonomy. Matching, explanations, embedding text,
 Candidate/Job sync, rebuild, and UI may not split, promote, infer, or repair a
-different skill set. JD extraction must use profession-neutral wording, name/evidence
-grounding, structural atomicity, the seven safe issue codes, and no technology-token
+different skill set. JD extraction must use profession-neutral wording, semantic labels
+with verbatim evidence grounding, structural atomicity, the six safe issue codes, and no technology-token
 exception list while preserving Plan 15's one repair, dedupe, re-extraction, and
 failure boundaries.
 

@@ -15,7 +15,7 @@ from typing import Any, Final, Literal, Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.adapters.shopaikey_chat import LOCKED_CHAT_MODEL, build_shopaikey_chat
 from app.schemas.jobs import JobPostExtraction, JobSkill, parse_job_post_extraction
@@ -61,9 +61,10 @@ _SYSTEM_PROMPT: Final[str] = (
     "advantageous, or equivalent wording; "
     "(6) a canonical skill may occur at most once and never in both required "
     "and preferred groups; "
-    "(7) every skill name and every evidence snippet must be directly supported "
-    "by the source; evidence is short and verbatim. Do not produce aliases, "
-    "canonical keys, categories, relationships, or jd_quality. "
+    "(7) every skill uses one concise semantic skill label supported by short "
+    "verbatim evidence copied from the source; never invent a capability unsupported "
+    "by its evidence. Do not produce aliases, canonical keys, categories, "
+    "relationships, or jd_quality. "
     "(8) extract every source-supported professional capability across any "
     "occupation, including explicitly named tools, methods, platforms, and domain "
     "practices in responsibilities or qualifications; do not omit explicit "
@@ -74,26 +75,29 @@ _SYSTEM_PROMPT: Final[str] = (
 
 _SCHEMA_REPAIR_INSTRUCTION: Final[str] = (
     "Previous structured output failed schema validation for ExtractedJobPost. "
-    "Return one valid ExtractedJobPost JSON object only matching the schema. "
+    "Return a complete replacement ExtractedJobPost JSON object only matching the "
+    "schema. "
     "Use one source-supported atomic professional capability per row and preserve "
     "punctuation inside a contiguous label; mandatory or neutral capabilities are "
     "required; preferred only "
     "when the source explicitly marks optional/preferred; keep canonical skills "
-    "unique and required/preferred disjoint; every skill name and evidence snippet "
-    "must occur in the source, with evidence short and verbatim. Extract every "
+    "unique and required/preferred disjoint. Use one concise semantic skill label "
+    "supported by its evidence. Copy each evidence snippet exactly from the supplied "
+    "source. Omit any assertion whose evidence cannot be grounded. Extract every "
     "source-supported professional capability across any occupation; do not omit "
     "explicit tools, methods, platforms, or domain practices. "
     "Do not invent aliases, relationships, or jd_quality."
 )
 
 _GUARD_REPAIR_TRAILER: Final[str] = (
-    "Repair: return one valid ExtractedJobPost JSON object only. "
+    "Repair: return a complete replacement ExtractedJobPost JSON object only. "
     "Use one source-supported atomic professional capability per row; mandatory "
     "or neutral capabilities are required; "
     "preferred only when the source explicitly marks optional/preferred; keep "
     "canonical skills unique and required/preferred disjoint. Do not invent "
-    "aliases, relationships, or jd_quality. Every skill name and evidence snippet "
-    "must occur in the source, with evidence short and verbatim. Extract every "
+    "aliases, relationships, or jd_quality. Use one concise semantic skill label "
+    "supported by its evidence. Copy each evidence snippet exactly from the supplied "
+    "source. Omit any assertion whose evidence cannot be grounded. Extract every "
     "source-supported professional capability across any occupation, including "
     "explicit tools, methods, platforms, and domain practices."
 )
@@ -116,9 +120,19 @@ class ExtractedJobSkillItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
+    name: str = Field(
+        description=(
+            "Concise semantic label for one atomic professional capability, supported "
+            "by verbatim evidence; never invent an unsupported skill."
+        )
+    )
     confidence: float
-    evidence: list[str]
+    evidence: list[str] = Field(
+        description=(
+            "Short verbatim snippets copied from the retained JD source; never "
+            "paraphrase."
+        )
+    )
 
 
 class ExtractedJobPost(BaseModel):

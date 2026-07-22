@@ -18,7 +18,7 @@ Neo4j model.
 - README identifies Plan 15 as the current guarded-JD/re-extraction baseline.
   Runtime source and fresh tests remain authoritative; this task must not infer
   implementation state from prose alone.
-- The amended Master Version 2.1 and contiguous Plans 1-16 passed a fresh
+- The amended Master Version 2.2 and contiguous Plans 1-16 passed a fresh
   portfolio review with all hard gates passing. This file authorizes only the
   bounded Plan 16 execution chain; it does not broaden product scope.
 - Current root Git status contains the authorized planning changes to
@@ -39,7 +39,7 @@ Neo4j model.
 ### Primary Source
 
 - Primary: `docs/plans/Plan_16.md`.
-- Supporting: `docs/plans/Master_plan.md` Version 2.1 and
+- Supporting: `docs/plans/Master_plan.md` Version 2.2 and
   `docs/plans/Plan_15.md` handoff.
 - Context only: `README.md`, `frontend/AGENTS.md`, current source/tests,
   `infrastructure/docker-compose.yml`, and existing acceptance documents.
@@ -247,7 +247,7 @@ every downstream Candidate consumer use the persisted collection unchanged.
 
 ### Tasks
 
-- [ ] (02A): Make guarded JD extraction profession-neutral and name-grounded
+- [ ] (02A): Make guarded JD extraction profession-neutral and evidence-grounded
   - Task Type: bugfix
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_16.md` > `## Mandatory Batch02 - Profession-Neutral JD and Matching Parity` > `(02A)`
@@ -259,7 +259,7 @@ every downstream Candidate consumer use the persisted collection unchanged.
     - owner-jd: repository `backend/app/services/jd_extraction.py` and `backend/app/services/jd_extraction_guard.py` -> current extractor/guard
     - validation-jd: repository `backend/tests/unit/test_jd_extraction.py` and `backend/tests/unit/test_jd_extraction_guard.py` -> focused regressions
   - Source Requirements:
-    - Replace technical-only recall language with explicit professional capabilities across occupations and add `SKILL_NAME_NOT_IN_SOURCE` to the exact seven-code ordered vocabulary.
+    - Replace technical-only recall language with semantic professional capability labels across occupations, each backed by verbatim source evidence, under the exact six-code ordered vocabulary.
     - Reuse shared structural primitives; remove named technology punctuation exceptions and seed-qualified compound parsing.
     - Preserve Plan 15 one repair, issue cap/redaction, exact dedupe, ordinary ingestion, retained re-extraction CAS, quality, embedding, sync, and failures.
   - Dependencies: (01A) accepted shared primitives
@@ -272,16 +272,16 @@ every downstream Candidate consumer use the persisted collection unchanged.
   - Likely Files: `backend/app/services/jd_extraction.py`, `backend/app/services/jd_extraction_guard.py`, `backend/tests/unit/test_jd_extraction.py`, `backend/tests/unit/test_jd_extraction_guard.py`, `backend/tests/integration/test_job_ingestion.py`, `backend/tests/integration/test_job_reextraction.py`, `backend/tests/fixtures/skill_extraction_golden.json`
   - Allowed Files: listed JD extraction/guard/tests and synthetic fixture only; shared guard is read-only unless a reviewed Batch01 repair is required; exclude schemas, matching, graph/API, frontend, seed, and runtime data
   - Agent Work:
-    1. Add RED cases for marketing, sales/operations, finance/healthcare, bilingual, unknown punctuation, name grounding, and second-invalid repair behavior.
+    1. Add RED cases for marketing, sales/operations, finance/healthcare, bilingual, unknown punctuation, semantic labels with grounded evidence, and second-invalid repair behavior.
     2. Generalize prompts and reuse shared primitives while preserving exact repair/call/redaction contracts.
     3. Run focused unit plus text/URL/re-extraction integration regressions green.
   - Output: One profession-neutral guarded extractor shared by ordinary ingestion and retained re-extraction.
-  - A1 Outcome: JD capabilities from unseeded professions are emitted atomically and grounded by name/evidence under the exact seven-code, one-repair contract.
+  - A1 Outcome: JD capabilities from unseeded professions are emitted as atomic semantic labels backed by verbatim evidence under the exact six-code, one-repair contract.
   - A2 Review Focus: Confirm no prompt/example/exception bias, exact issue ordering, no leak, and full Plan 15 lifecycle preservation.
   - A3 Batch Evidence: P16-JD-01 and shared Candidate/JD guard parity.
   - Acceptance:
     - Production JD prompts contain no technical-only capability restriction or named profession examples.
-    - Skill name and evidence are source-grounded before normalization; unknown punctuation labels remain valid unless clearly enumerations.
+    - Each semantic skill label has source-grounded verbatim evidence before normalization; unknown punctuation labels remain valid unless clearly enumerations.
     - Text, URL, exact duplicate, and retained re-extraction behavior remains compatible and second-invalid output fails safely.
   - Validation:
     - Required: `Set-Location backend; & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction.py tests/unit/test_jd_extraction_guard.py tests/integration/test_job_ingestion.py tests/integration/test_job_reextraction.py -q` -> PASS evidence: exit 0; freshness: final attempt only
@@ -398,7 +398,7 @@ returning no items unless Neo4j exactly represents authoritative SQLite skills.
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_16.md` > `## Mandatory Batch03 - Exact Graph Integrity and Compatibility API` > `(03B)`
-  - Source of Truth: `docs/plans/Plan_16.md` > `### Read-only API and raw technical graph`, Master Version 2.1 > `### 8.5 Selected-JD compatibility projection`, and `## 14. Public FastAPI Boundary`.
+  - Source of Truth: `docs/plans/Plan_16.md` > `### Read-only API and raw technical graph`, Master Version 2.2 > `### 8.5 Selected-JD compatibility projection`, and `## 14. Public FastAPI Boundary`.
   - Suggested Refs:
     - task-contract: repository `docs/tasks/task_16.md` > `(03B)` -> execution authority
     - source-api: repository `docs/plans/Plan_16.md` > `### Read-only API and raw technical graph` -> route/DTO behavior
@@ -501,7 +501,7 @@ technical inspector.
   - Task Type: feature
   - Artifact Root: `.agent/<plan-id>/<run-id>/`
   - Task Contract: `docs/tasks/task_16.md` > `## Mandatory Batch04 - Readable Frontend Compatibility Map` > `(04B)`
-  - Source of Truth: `docs/plans/Plan_16.md` > `### Frontend state, map, and technical mode`, Master Version 2.1 > `### 15.2 Sidebar`, and `frontend/AGENTS.md`.
+  - Source of Truth: `docs/plans/Plan_16.md` > `### Frontend state, map, and technical mode`, Master Version 2.2 > `### 15.2 Sidebar`, and `frontend/AGENTS.md`.
   - Suggested Refs:
     - task-contract: repository `docs/tasks/task_16.md` > `(04B)` -> execution authority
     - source-fe-map: repository `docs/plans/Plan_16.md` > `### Frontend state, map, and technical mode` -> map/view behavior

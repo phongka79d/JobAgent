@@ -8,7 +8,6 @@ from typing import Final, Literal
 from app.services.jd_extraction import ExtractedJobPost, ExtractedJobSkillItem
 from app.services.skill_assertion_guard import (
     StructuralSkillIssue,
-    is_label_grounded,
     is_source_grounded,
     normalize_assertion_text,
     structural_compound_part_count,
@@ -18,7 +17,6 @@ from app.services.skill_normalization import SkillNormalizer
 
 GuardIssueCode = Literal[
     "EVIDENCE_NOT_IN_SOURCE",
-    "SKILL_NAME_NOT_IN_SOURCE",
     "RESPONSIBILITY_NOT_IN_SOURCE",
     "METADATA_NOT_IN_SOURCE",
     "COMPOUND_SKILL_LABEL",
@@ -28,7 +26,6 @@ GuardIssueCode = Literal[
 
 ISSUE_CODES: Final[tuple[GuardIssueCode, ...]] = (
     "EVIDENCE_NOT_IN_SOURCE",
-    "SKILL_NAME_NOT_IN_SOURCE",
     "RESPONSIBILITY_NOT_IN_SOURCE",
     "METADATA_NOT_IN_SOURCE",
     "COMPOUND_SKILL_LABEL",
@@ -122,12 +119,6 @@ def guard_extracted_job_post(
     for index, item in enumerate(extracted.required_skills):
         name_path = f"required_skills[{index}].name"
         approved_labels = _approved_labels(item, normalizer)
-        if not is_label_grounded(
-            item.name,
-            (normalized_source,),
-            approved_aliases=approved_labels,
-        ):
-            add("SKILL_NAME_NOT_IN_SOURCE", name_path)
         compound_count = structural_compound_part_count(
             item.name,
             approved_atomic_labels=approved_labels,
@@ -152,12 +143,6 @@ def guard_extracted_job_post(
     for index, item in enumerate(extracted.preferred_skills):
         name_path = f"preferred_skills[{index}].name"
         approved_labels = _approved_labels(item, normalizer)
-        if not is_label_grounded(
-            item.name,
-            (normalized_source,),
-            approved_aliases=approved_labels,
-        ):
-            add("SKILL_NAME_NOT_IN_SOURCE", name_path)
         compound_count = structural_compound_part_count(
             item.name,
             approved_atomic_labels=approved_labels,

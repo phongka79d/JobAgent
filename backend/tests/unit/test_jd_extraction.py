@@ -765,6 +765,18 @@ def test_system_and_repair_prompts_are_profession_neutral_and_grounded() -> None
         "docker",
     ):
         assert forbidden not in combined
+    for repair_prompt in (
+        mod._SCHEMA_REPAIR_INSTRUCTION,
+        mod._GUARD_REPAIR_TRAILER,
+    ):
+        lowered_repair = repair_prompt.lower()
+        for required_instruction in (
+            "complete replacement",
+            "semantic skill label supported by its evidence",
+            "copy each evidence snippet exactly",
+            "omit any assertion whose evidence cannot be grounded",
+        ):
+            assert required_instruction in lowered_repair
 
 
 def test_system_prompt_requires_complete_atomic_skill_recall() -> None:
@@ -776,18 +788,36 @@ def test_system_prompt_requires_complete_atomic_skill_recall() -> None:
     assert "tools, methods, platforms, and domain practices" in prompt
 
 
-def test_ungrounded_skill_name_triggers_one_sanitized_repair() -> None:
-    bad = _valid_extracted(
+def test_job_schema_requires_semantic_labels_with_source_evidence() -> None:
+    import app.services.jd_extraction as mod
+
+    prompt = mod._SYSTEM_PROMPT.lower()
+    assert "concise semantic skill label" in prompt
+    assert "supported by" in prompt
+    assert "verbatim evidence" in prompt
+
+    fields = mod.ExtractedJobSkillItem.model_fields
+    name_description = (fields["name"].description or "").lower()
+    evidence_description = (fields["evidence"].description or "").lower()
+    assert "concise semantic" in name_description
+    assert "supported by" in name_description
+    assert "exact contiguous" not in name_description
+    assert "verbatim" in evidence_description
+    assert "never paraphrase" in evidence_description
+
+
+def test_semantic_skill_name_with_grounded_evidence_needs_no_repair() -> None:
+    semantic = _valid_extracted(
         required_skills=[
             {
-                "name": "Invented capability marker",
+                "name": "API Design",
                 "confidence": 0.8,
                 "evidence": ["Design REST services"],
             }
         ],
         preferred_skills=[],
     )
-    invoker = _RecordingInvoker([bad, _valid_extracted()])
+    invoker = _RecordingInvoker([semantic])
 
     outcome = extract_job_post_from_text(
         _GROUNDED_JD,
@@ -795,11 +825,9 @@ def test_ungrounded_skill_name_triggers_one_sanitized_repair() -> None:
         normalizer=_normalizer(),
     )
 
-    assert outcome.schema_repairs_used == 1
-    repair_msg = invoker.calls[1]["texts"][-1]
-    assert "SKILL_NAME_NOT_IN_SOURCE" in repair_msg
-    assert "required_skills[0].name" in repair_msg
-    assert "Invented capability marker" not in repair_msg
+    assert outcome.schema_repairs_used == 0
+    assert len(invoker.calls) == 1
+    assert outcome.extraction.required_skills[0].skill.canonical_key == "api_design"
 
 
 @pytest.mark.parametrize(
@@ -885,7 +913,7 @@ def test_cross_profession_jds_use_one_guarded_extractor_without_seed_terms(
     assert outcome.extraction.required_skills[0].skill.aliases == []
 
 
-def test_bilingual_healthcare_jd_repairs_ungrounded_name_once() -> None:
+def test_bilingual_jd_accepts_semantic_label_with_grounded_evidence() -> None:
     raw_jd = (
         "Trách nhiệm: Hướng dẫn xuất viện. "
         "Yêu cầu: Điều phối chăm sóc."
@@ -897,7 +925,7 @@ def test_bilingual_healthcare_jd_repairs_ungrounded_name_once() -> None:
         responsibilities=["Hướng dẫn xuất viện"],
         required_skills=[
             {
-                "name": "Nhãn không có trong nguồn",
+                "name": "Quản lý chăm sóc",
                 "confidence": 0.8,
                 "evidence": ["Điều phối chăm sóc"],
             }
@@ -926,11 +954,11 @@ def test_bilingual_healthcare_jd_repairs_ungrounded_name_once() -> None:
         normalizer=empty,
     )
 
-    assert outcome.schema_repairs_used == 1
-    assert len(invoker.calls) == 2
+    assert outcome.schema_repairs_used == 0
+    assert len(invoker.calls) == 1
     assert (
         outcome.extraction.required_skills[0].skill.display_name
-        == "Điều phối chăm sóc"
+        == bad.required_skills[0].name
     )
 
 

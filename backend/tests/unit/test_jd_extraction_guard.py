@@ -25,7 +25,6 @@ GUARD_SOURCE = (
 
 EXPECTED_CODES = (
     "EVIDENCE_NOT_IN_SOURCE",
-    "SKILL_NAME_NOT_IN_SOURCE",
     "RESPONSIBILITY_NOT_IN_SOURCE",
     "METADATA_NOT_IN_SOURCE",
     "COMPOUND_SKILL_LABEL",
@@ -208,10 +207,10 @@ def test_unknown_contiguous_punctuation_labels_pass_without_seed_membership(
     assert result.accepted
 
 
-def test_skill_name_or_approved_alias_must_be_grounded_in_retained_source(
+def test_semantic_skill_name_is_accepted_when_evidence_is_grounded(
     normalizer: SkillNormalizer,
 ) -> None:
-    ungrounded = _extracted(
+    semantic = _extracted(
         {
             "title": None,
             "company": None,
@@ -219,7 +218,7 @@ def test_skill_name_or_approved_alias_must_be_grounded_in_retained_source(
             "responsibilities": [],
             "required_skills": [
                 {
-                    "name": "Invented capability",
+                    "name": "Stakeholder Facilitation",
                     "confidence": 0.8,
                     "evidence": ["Lead stakeholder workshops"],
                 }
@@ -235,20 +234,14 @@ def test_skill_name_or_approved_alias_must_be_grounded_in_retained_source(
     )
     result = _guard(
         "Responsibilities: Lead stakeholder workshops.",
-        ungrounded,
+        semantic,
         normalizer,
     )
-    assert _issue_dicts(result) == [
-        {
-            "code": "SKILL_NAME_NOT_IN_SOURCE",
-            "field_path": "required_skills[0].name",
-            "count": 1,
-        }
-    ]
+    assert result.accepted
 
     alias_grounded = _extracted(
         {
-            **ungrounded.model_dump(mode="json"),
+            **semantic.model_dump(mode="json"),
             "required_skills": [
                 {
                     "name": "Python",
@@ -339,13 +332,9 @@ def test_issues_are_ordered_by_provider_field_index_then_rule(
         "METADATA_NOT_IN_SOURCE",
         "METADATA_NOT_IN_SOURCE",
         "RESPONSIBILITY_NOT_IN_SOURCE",
-        "SKILL_NAME_NOT_IN_SOURCE",
         "COMPOUND_SKILL_LABEL",
         "EVIDENCE_NOT_IN_SOURCE",
-        "SKILL_NAME_NOT_IN_SOURCE",
-        "SKILL_NAME_NOT_IN_SOURCE",
         "DUPLICATE_SKILL",
-        "SKILL_NAME_NOT_IN_SOURCE",
         "SKILL_GROUP_CONFLICT",
         "METADATA_NOT_IN_SOURCE",
     ]
@@ -354,12 +343,8 @@ def test_issues_are_ordered_by_provider_field_index_then_rule(
         "company",
         "responsibilities[0]",
         "required_skills[0].name",
-        "required_skills[0].name",
         "required_skills[0].evidence[0]",
-        "required_skills[1].name",
         "required_skills[2].name",
-        "required_skills[2].name",
-        "preferred_skills[0].name",
         "preferred_skills[0].name",
         "location",
     ]

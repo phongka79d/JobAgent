@@ -269,6 +269,138 @@ def test_extracts_atomic_skills_from_every_section_kind() -> None:
     assert _ATTACHMENT not in joined
 
 
+def test_name_grounded_in_selected_entry_does_not_need_to_repeat_in_evidence() -> None:
+    module = _module()
+    extract = getattr(module, "extract_candidate_skills_from_document", None)
+    assert callable(extract)
+    document = _document(
+        _section(
+            "experience",
+            0,
+            "Work History",
+            "experience",
+            _entry(
+                "experience-entry",
+                body="Audience Segmentation improved retention across the region.",
+            ),
+        )
+    )
+    source_grounded = {
+        "assertions": [
+            _assertion(
+                "Audience Segmentation",
+                "improved retention across the region",
+                "experience-entry",
+            )
+        ]
+    }
+    evidence_repeats_name = {
+        "assertions": [
+            _assertion(
+                "Audience Segmentation",
+                "Audience Segmentation improved retention",
+                "experience-entry",
+            )
+        ]
+    }
+    invoker = ScriptedSkillInvoker([source_grounded, evidence_repeats_name])
+
+    outcome = extract(document, invoker=invoker, normalizer=_normalizer())
+
+    assert [item.skill.canonical_key for item in outcome.skills] == [
+        "audience_segmentation"
+    ]
+    assert outcome.schema_repairs_used == 0
+    assert [call["is_repair"] for call in invoker.calls] == [False]
+
+
+def test_semantic_skill_label_with_grounded_evidence_is_accepted() -> None:
+    module = _module()
+    extract = getattr(module, "extract_candidate_skills_from_document", None)
+    assert callable(extract)
+    document = _document(
+        _section(
+            "experience",
+            0,
+            "Work History",
+            "experience",
+            _entry(
+                "experience-entry",
+                body="Led stakeholder workshops across regional partner groups.",
+            ),
+        )
+    )
+    semantic_label = {
+        "assertions": [
+            _assertion(
+                "Stakeholder Facilitation",
+                "Led stakeholder workshops across regional partner groups",
+                "experience-entry",
+            )
+        ]
+    }
+    literal_fallback = {
+        "assertions": [
+            _assertion(
+                "stakeholder workshops",
+                "stakeholder workshops across regional partner groups",
+                "experience-entry",
+            )
+        ]
+    }
+    invoker = ScriptedSkillInvoker([semantic_label, literal_fallback])
+
+    outcome = extract(document, invoker=invoker, normalizer=_normalizer())
+
+    assert [item.skill.canonical_key for item in outcome.skills] == [
+        "stakeholder_facilitation"
+    ]
+    assert outcome.schema_repairs_used == 0
+    assert [call["is_repair"] for call in invoker.calls] == [False]
+
+
+def test_evidence_remains_grounded_when_name_is_present_in_selected_entry() -> None:
+    module = _module()
+    extract = getattr(module, "extract_candidate_skills_from_document", None)
+    error_type = getattr(module, "CandidateSkillExtractionError", None)
+    assert callable(extract)
+    assert error_type is not None
+    document = _document(
+        _section(
+            "experience",
+            0,
+            "Work History",
+            "experience",
+            _entry(
+                "experience-entry",
+                body="Audience Segmentation improved retention across the region.",
+            ),
+        )
+    )
+    ungrounded_evidence = {
+        "assertions": [
+            _assertion(
+                "Audience Segmentation",
+                "invented outcome outside the selected entry",
+                "experience-entry",
+            )
+        ]
+    }
+    invoker = ScriptedSkillInvoker([ungrounded_evidence, ungrounded_evidence])
+
+    with pytest.raises(error_type) as exc_info:
+        extract(document, invoker=invoker, normalizer=_normalizer())
+
+    assert exc_info.value.code == "INVALID_STRUCTURED_OUTPUT"
+    assert [call["is_repair"] for call in invoker.calls] == [False, True]
+    diagnostics = invoker.calls[1]["joined"].split(
+        "SANITIZED ISSUES START",
+        maxsplit=1,
+    )[1]
+    assert "EVIDENCE_NOT_IN_SOURCE" in diagnostics
+    assert "invented outcome outside the selected entry" not in diagnostics
+
+
 def test_invalid_heading_only_batch_gets_one_sanitized_repair() -> None:
     module = _module()
     extract = getattr(module, "extract_candidate_skills_from_document", None)
@@ -307,6 +439,14 @@ def test_invalid_heading_only_batch_gets_one_sanitized_repair() -> None:
     assert "HEADING_ONLY_SKILL" in diagnostics
     assert "Core Competencies" not in diagnostics
     assert "SEO and content planning" not in diagnostics
+    lowered_repair = repair.lower()
+    for required_instruction in (
+        "complete replacement",
+        "semantic skill label supported by its evidence",
+        "copy each evidence snippet exactly",
+        "omit any assertion whose evidence cannot be grounded",
+    ):
+        assert required_instruction in lowered_repair
 
 
 def test_second_invalid_batch_fails_without_partial_skills() -> None:
@@ -337,6 +477,7 @@ def test_second_invalid_batch_fails_without_partial_skills() -> None:
     assert exc_info.value.code == "INVALID_STRUCTURED_OUTPUT"
     assert "Invented Capability" not in str(exc_info.value)
     assert "not in source" not in str(exc_info.value)
+    assert [call["is_repair"] for call in invoker.calls] == [False, True]
 
 
 def test_cross_batch_duplicates_merge_evidence_and_conflicts_safely() -> None:
@@ -616,6 +757,28 @@ def test_prompt_uses_the_bounded_structured_entry_projection() -> None:
         }
     ]
     assert _ATTACHMENT not in joined
+
+
+def test_candidate_schema_requires_semantic_labels_with_source_evidence() -> None:
+    import app.services.cv_skill_contracts as contracts
+    import app.services.cv_skill_provider as provider
+
+    prompt = provider._SYSTEM_PROMPT.lower()
+    assert "concise semantic skill label" in prompt
+    assert "supported by" in prompt
+    assert "verbatim evidence" in prompt
+    assert "one assertion per distinct capability" in prompt
+
+    fields = contracts.ExtractedCandidateSkillAssertion.model_fields
+    name_description = (fields["name"].description or "").lower()
+    evidence_description = (fields["evidence"].description or "").lower()
+    source_ids_description = (fields["source_entry_ids"].description or "").lower()
+    assert "concise semantic" in name_description
+    assert "supported by" in name_description
+    assert "exact contiguous" not in name_description
+    assert "verbatim" in evidence_description
+    assert "never paraphrase" in evidence_description
+    assert "every evidence snippet" in source_ids_description
 
 
 def test_profile_extraction_exposes_no_profile_first_skill_producer() -> None:

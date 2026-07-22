@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.cv_document import CVSection
 
@@ -37,12 +37,27 @@ class ExtractedCandidateSkillAssertion(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
+    name: str = Field(
+        description=(
+            "Concise semantic label for one atomic professional capability, supported "
+            "by the assertion's verbatim evidence; never invent an unsupported skill."
+        )
+    )
     confidence: float
     proficiency: SkillProficiency
     years: float | None
-    evidence: list[str]
-    source_entry_ids: list[str]
+    evidence: list[str] = Field(
+        description=(
+            "Short verbatim snippets copied from the referenced source records; "
+            "never paraphrase."
+        )
+    )
+    source_entry_ids: list[str] = Field(
+        description=(
+            "Existing entry_id values selecting records that collectively contain "
+            "every evidence snippet."
+        )
+    )
 
     @model_validator(mode="after")
     def _bounded_shape(self) -> ExtractedCandidateSkillAssertion:
@@ -71,7 +86,12 @@ class ExtractedCandidateSkillBatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    assertions: list[ExtractedCandidateSkillAssertion]
+    assertions: list[ExtractedCandidateSkillAssertion] = Field(
+        description=(
+            "Complete replacement list with one assertion per distinct capability; "
+            "merge repeated occurrences and omit rows without grounded evidence."
+        )
+    )
 
     @model_validator(mode="after")
     def _bounded_assertions(self) -> ExtractedCandidateSkillBatch:

@@ -26,7 +26,6 @@ from app.services.cv_skill_source import build_source_batches
 from app.services.skill_assertion_guard import (
     StructuralSkillIssue,
     is_group_label_in_source,
-    is_label_grounded,
     is_source_grounded,
     matches_heading,
     normalize_assertion_text,
@@ -83,12 +82,6 @@ def _guard_batch(
         except ValueError:
             issues.append(structural_issue("INVALID_SKILL_NAME", name_path))
             continue
-        if not is_label_grounded(
-            assertion.name,
-            assertion.evidence,
-            approved_aliases=(ref.display_name, *ref.aliases),
-        ):
-            issues.append(structural_issue("SKILL_NAME_NOT_IN_SOURCE", name_path))
         if matches_heading(assertion.name, headings):
             issues.append(structural_issue("HEADING_ONLY_SKILL", name_path))
         if is_group_label_in_source(assertion.name, source):
