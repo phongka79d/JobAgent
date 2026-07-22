@@ -46,6 +46,9 @@ ERROR_INVALID_INPUT: str = "INVALID_READ_ACTIVE_CV_INPUT"
 ERROR_MALFORMED_CURSOR: str = "MALFORMED_CURSOR"
 ERROR_SECTION_NOT_FOUND: str = "SECTION_NOT_FOUND"
 ERROR_CHUNK_NOT_FOUND: str = "CHUNK_NOT_FOUND"
+ACTIVE_CV_CHANGED_SUMMARY: str = (
+    "Active CV selection or revision changed; request a new page"
+)
 
 _CURSOR_KEYS: frozenset[str] = frozenset(
     {"v", "attachment_id", "source_hash", "mode", "selector", "after"}
@@ -63,6 +66,12 @@ class _ActiveTarget:
     source_hash: str
     reprocess_required: bool
     document_json: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveCvIdentity:
+    attachment_id: str
+    source_hash: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +228,18 @@ async def _resolve_active_target(session: AsyncSession) -> _ActiveTarget | ToolR
     )
 
 
+async def resolve_active_cv_identity(
+    session: AsyncSession,
+) -> ActiveCvIdentity | ToolResult:
+    resolved = await _resolve_active_target(session)
+    if isinstance(resolved, ToolResult):
+        return resolved
+    return ActiveCvIdentity(
+        attachment_id=resolved.attachment_id,
+        source_hash=resolved.source_hash,
+    )
+
+
 def _bind_cursor(
     *,
     cursor: str | None,
@@ -243,7 +264,7 @@ def _bind_cursor(
     ):
         return None, _fail(
             ERROR_ACTIVE_CV_CHANGED,
-            "Active CV selection or revision changed; request a new page",
+            ACTIVE_CV_CHANGED_SUMMARY,
         )
     if payload["mode"] != mode or payload["selector"] != selector:
         return None, _fail(
@@ -558,6 +579,7 @@ async def read_active_cv(
     cursor: str | None = None,
     max_results: int = DEFAULT_MAX_RESULTS,
     max_chars: int = DEFAULT_MAX_CHARS,
+    expected_identity: ActiveCvIdentity | None = None,
 ) -> ToolResult:
     """Read one bounded page of active-CV evidence.
 
@@ -615,6 +637,12 @@ async def read_active_cv(
     if isinstance(resolved, ToolResult):
         return resolved
     target = resolved
+    actual_identity = ActiveCvIdentity(
+        attachment_id=target.attachment_id,
+        source_hash=target.source_hash,
+    )
+    if expected_identity is not None and actual_identity != expected_identity:
+        return _fail(ERROR_ACTIVE_CV_CHANGED, ACTIVE_CV_CHANGED_SUMMARY)
 
     selector = _selector_for(
         mode,
@@ -693,6 +721,8 @@ __all__ = [
     "DEFAULT_MAX_CHARS",
     "DEFAULT_MAX_RESULTS",
     "ERROR_ACTIVE_CV_CHANGED",
+    "ACTIVE_CV_CHANGED_SUMMARY",
+    "ActiveCvIdentity",
     "ERROR_CHUNK_NOT_FOUND",
     "ERROR_CV_DOCUMENT_REPROCESS_REQUIRED",
     "ERROR_INVALID_INPUT",
@@ -706,4 +736,5 @@ __all__ = [
     "decode_active_cv_cursor",
     "encode_active_cv_cursor",
     "read_active_cv",
+    "resolve_active_cv_identity",
 ]

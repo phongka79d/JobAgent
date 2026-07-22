@@ -12,7 +12,6 @@ truth and returns partial-success sync fields.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,30 +30,23 @@ from app.db.models.jobs import (
     JobPost,
 )
 from app.db.session import session_scope
-from app.graph.sync_job import (
-    NEO4J_REBUILD_INSTRUCTION,
-    NEO4J_SYNC_FAILED,
-    AsyncGraphDriver,
-    JobSyncError,
-    sync_job,
-)
+from app.graph.sync_job import AsyncGraphDriver
 from app.repositories import jobs as jobs_repo
 from app.repositories.jobs import JobNotFoundError, JobReextractConflictError
-from app.schemas.embeddings import (
-    LOCKED_EMBEDDING_DIMENSIONS,
-    LOCKED_EMBEDDING_MODEL,
-    EmbeddingVectorError,
-    validate_finite_vector,
-)
-from app.schemas.jobs import JobPostExtraction, parse_job_post_extraction
-from app.services.embedding_text import build_job_embedding_text_v1
+from app.schemas.embeddings import EmbeddingVectorError
+from app.schemas.jobs import JobPostExtraction
 from app.services.jd_extraction import (
     JdExtractionError,
     StructuredJdInvoker,
     extract_job_post_from_text,
 )
-from app.services.jd_ingestion import EmbeddingClient
 from app.services.jd_quality import classify_jd_quality
+from app.services.job_projection import (
+    EmbeddingClient,
+    JobSyncFn,
+    embed_job_extraction,
+    sync_persisted_job,
+)
 from app.services.skill_normalization import SkillNormalizer
 
 logger = logging.getLogger(__name__)
@@ -78,9 +70,6 @@ JOB_REEXTRACT_CONFLICT_MESSAGE: Final[str] = (
 _SCORABLE_QUALITIES: Final[frozenset[str]] = frozenset(
     {JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL}
 )
-
-JobSyncFn = Callable[..., Awaitable[None]]
-
 
 class JobReextractError(Exception):
     """Stable-coded re-extraction failure for service/API mapping."""
@@ -202,16 +191,6 @@ async def _load_snapshot(
         return _snapshot_from_row(row)
 
 
-def _embed_scorable(
-    extraction: JobPostExtraction,
-    embedding_client: EmbeddingClient,
-) -> tuple[list[float], str, int]:
-    text = build_job_embedding_text_v1(extraction)
-    vector = embedding_client.embed_text(text)
-    validated = validate_finite_vector(vector)
-    return validated, LOCKED_EMBEDDING_MODEL, LOCKED_EMBEDDING_DIMENSIONS
-
-
 async def _commit_replacement(
     snapshot: _JobWorkingSnapshot,
     *,
@@ -285,44 +264,14 @@ async def _sync_committed(
     job_sync_fn: JobSyncFn | None,
 ) -> tuple[bool, str | None, str | None]:
     """Run same-ID graph sync after SQLite commit. Never mutates SQLite."""
-    if job_sync_fn is None and graph_driver is None:
-        # SQLite-only tests: no graph seam configured.
-        return True, None, None
-
-    if row.extraction_json is None or row.embedding_json is None:
-        return False, NEO4J_SYNC_FAILED, NEO4J_REBUILD_INSTRUCTION
-
-    extraction = parse_job_post_extraction(row.extraction_json)
-    embedding = list(row.embedding_json)
-    source_updated_at = row.updated_at
-
-    async def _default_sync() -> None:
-        if graph_driver is None:
-            raise JobSyncError("Neo4j driver not configured for Job re-extraction sync")
-        await sync_job(
-            graph_driver,
-            job_id=row.id,
-            extraction=extraction,
-            jd_quality=str(row.jd_quality),
-            embedding=embedding,
-            source_updated_at=source_updated_at,
-            normalizer=normalizer,
-        )
-
-    do_sync = job_sync_fn if job_sync_fn is not None else _default_sync
-    try:
-        await do_sync()
-    except JobSyncError as exc:
-        logger.info(
-            "job reextraction neo4j sync failed job_id=%s code=%s",
-            row.id,
-            exc.code,
-        )
-        return False, exc.code, exc.rebuild_instruction
-    except Exception:
-        logger.info("job reextraction neo4j sync failed job_id=%s", row.id)
-        return False, NEO4J_SYNC_FAILED, NEO4J_REBUILD_INSTRUCTION
-    return True, None, None
+    projection = await sync_persisted_job(
+        row,
+        normalizer=normalizer,
+        graph_driver=graph_driver,
+        job_sync_fn=job_sync_fn,
+        log_context="job reextraction",
+    )
+    return projection.ok, projection.code, projection.rebuild_instruction
 
 
 async def reextract_job(
@@ -384,7 +333,7 @@ async def reextract_job(
         )
 
     try:
-        embedding_json, embedding_model, embedding_dimensions = _embed_scorable(
+        embedding_json, embedding_model, embedding_dimensions = embed_job_extraction(
             extraction, embedder
         )
     except EmbeddingAdapterError as exc:
@@ -452,6 +401,5 @@ __all__ = [
     "JOB_REEXTRACT_CONFLICT_MESSAGE",
     "JobReextractError",
     "JobReextractResult",
-    "JobSyncFn",
     "reextract_job",
 ]

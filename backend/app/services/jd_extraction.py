@@ -11,15 +11,19 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal, Protocol
+from typing import Any, Final, Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.adapters.shopaikey_chat import LOCKED_CHAT_MODEL, build_shopaikey_chat
 from app.schemas.jobs import JobPostExtraction, JobSkill, parse_job_post_extraction
 from app.schemas.skills import SkillRef
+from app.services.jd_extraction_contracts import (
+    ExtractedJobPost,
+    ExtractedJobSkillItem,
+)
 from app.services.provider_retry import (
     FAILURE_PROVIDER_ERROR,
     FAILURE_PROVIDER_RATE_LIMIT,
@@ -110,48 +114,6 @@ class JdExtractionError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-# --- LLM-facing extraction schema (no SkillRef; strict JSON schema safe) ---
-
-
-class ExtractedJobSkillItem(BaseModel):
-    """LLM skill row before deterministic SkillRef normalization."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(
-        description=(
-            "Concise semantic label for one atomic professional capability, supported "
-            "by verbatim evidence; never invent an unsupported skill."
-        )
-    )
-    confidence: float
-    evidence: list[str] = Field(
-        description=(
-            "Short verbatim snippets copied from the retained JD source; never "
-            "paraphrase."
-        )
-    )
-
-
-class ExtractedJobPost(BaseModel):
-    """LLM structured output for JD facts (validated again as JobPostExtraction)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str | None
-    company: str | None
-    summary: str
-    responsibilities: list[str]
-    required_skills: list[ExtractedJobSkillItem]
-    preferred_skills: list[ExtractedJobSkillItem]
-    seniority: Literal["intern", "junior", "mid", "senior", "lead", "unknown"]
-    min_experience_years: float | None
-    max_experience_years: float | None
-    location: str | None
-    work_mode: Literal["remote", "hybrid", "onsite", "unknown"]
-    extraction_confidence: float
 
 
 class StructuredJdInvoker(Protocol):

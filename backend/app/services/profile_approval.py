@@ -13,8 +13,9 @@ Owns ``commit_approved_draft`` / SQLite-first approval:
    Candidate/Skill and the active CV branch graph data. Former active
    PDF/chunks stay retained under ``archived`` state (no previous-file cleanup).
 
-Transaction failure rolls back to the prior active profile/CV. Neo4j failure
-never rolls SQLite back; sync failure returns ``NEO4J_SYNC_FAILED`` plus
+Transaction failure triggers ``session_scope`` rollback to the prior active
+profile/CV. Neo4j failure never rolls SQLite back; sync failure returns
+``NEO4J_SYNC_FAILED`` plus
 rebuild guidance while accurately reporting committed SQLite truth.
 
 Archived → active is allowed only inside this approval path for a reprocessed
@@ -25,7 +26,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -42,6 +42,7 @@ from app.db.models.profiles import (
     CANDIDATE_PROFILE_ID,
     PROFILE_DRAFT_ID,
 )
+from app.db.session import session_scope
 from app.graph.sync_candidate import (
     NEO4J_REBUILD_INSTRUCTION,
     NEO4J_SYNC_FAILED,
@@ -126,20 +127,6 @@ class ApprovalCommitResult:
     previous_attachment_id: str | None
     preferences_updated: bool
     data: dict[str, Any]
-
-
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> Any:
-    """Commit on success; roll back on any error. No external I/O inside."""
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
 
 
 def _prefs_equal(a: JobPreferences, b: JobPreferences) -> bool:
@@ -497,7 +484,7 @@ async def commit_approved_draft(
 
     # ---- SQLite transaction (DB only — no filesystem / Neo4j) ----
     try:
-        async with _short_transaction(session_factory) as session:
+        async with session_scope(session_factory) as session:
             # Re-validate DB rows only inside the transaction (no storage I/O).
             live = await _load_preflight(
                 session, storage=None, check_files=False

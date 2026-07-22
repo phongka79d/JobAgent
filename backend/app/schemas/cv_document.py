@@ -174,16 +174,6 @@ def parse_cv_document(payload: Any) -> CVDocument:
     return CVDocument.model_validate(payload)
 
 
-def parse_cv_section(payload: Any) -> CVSection:
-    """Parse and validate one ``CVSection``."""
-    return CVSection.model_validate(payload)
-
-
-def parse_cv_entry(payload: Any) -> CVEntry:
-    """Parse and validate one ``CVEntry``."""
-    return CVEntry.model_validate(payload)
-
-
 __all__ = [
     "AttributeValue",
     "CV_SECTION_KINDS",
@@ -192,6 +182,4 @@ __all__ = [
     "CVSection",
     "CVSectionKind",
     "parse_cv_document",
-    "parse_cv_entry",
-    "parse_cv_section",
 ]

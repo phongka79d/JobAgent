@@ -9,8 +9,7 @@ rows/files. Returns success only when every owned resource is gone.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -30,7 +29,7 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.graph.delete_cv import CvGraphDeleteError, delete_cv_branch
 from app.graph.sync_shared import AsyncGraphDriver
 from app.repositories import agent_runs as runs_repo
@@ -90,19 +89,6 @@ class CvDeleteResult:
     """Successful complete deletion (row and owned resources absent)."""
 
     attachment_id: str
-
-
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> AsyncIterator[AsyncSession]:
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
 
 
 async def _resolve_owned_message_ids(
@@ -363,7 +349,7 @@ async def delete_cv(
                 f"attachment {aid!r} is not eligible for deletion",
             )
 
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         _row, run_ids = await _phase_mark_and_redact(session, aid)
         storage_path = _row.storage_path
         if failpoint == "after_mark":
@@ -399,7 +385,7 @@ async def delete_cv(
     )
 
     try:
-        async with _short_transaction(factory) as session:
+        async with session_scope(factory) as session:
             if failpoint == "finalize":
                 raise RuntimeError("test failpoint finalize")
             await _phase_finalize(session, aid)

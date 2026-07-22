@@ -25,7 +25,7 @@ from app.db.session import get_session_factory
 from app.graph.consistency import NEO4J_UNAVAILABLE, AsyncGraphReadDriver
 from app.graph.sync_shared import AsyncGraphDriver
 from app.schemas.tools import ToolResult
-from app.services.jd_ingestion import EmbeddingClient
+from app.services.job_projection import EmbeddingClient
 from app.services.matching import (
     DEFAULT_MATCH_LIMIT,
     MATCH_LIMIT_MAX,

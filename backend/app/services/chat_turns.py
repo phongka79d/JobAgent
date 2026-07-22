@@ -9,7 +9,6 @@ application transaction.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,8 +27,6 @@ from app.agent.context import (
 )
 from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
-from app.core.ids import new_uuid
-from app.core.time import utc_now
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
@@ -44,11 +41,11 @@ from app.db.models.chat import (
     AgentRun,
     ChatMessage,
 )
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
-from app.schemas.sse import SseEvent, parse_sse_event
+from app.schemas.sse import SseEvent, build_sse_event
 from app.storage.attachments import AttachmentStorage
 from app.tools.registry import ToolRegistry
 
@@ -83,32 +80,6 @@ class CreatedTurn:
     user_message_id: str
     run_id: str
     content: str
-
-
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> AsyncIterator[AsyncSession]:
-    """Yield a session; commit on success, roll back on error."""
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
-def _sse(event: str, run_id: str, payload: dict[str, Any]) -> SseEvent:
-    return parse_sse_event(
-        {
-            "event": event,
-            "event_id": new_uuid(),
-            "run_id": run_id,
-            "timestamp": utc_now(),
-            "payload": payload,
-        }
-    )
 
 
 def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
@@ -203,7 +174,7 @@ async def create_user_turn(
         owner = source_attachment_id.strip()
 
     factory = session_factory or get_session_factory()
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         interrupted = await get_interrupted_run(session)
         if interrupted is not None:
             raise ChatTurnError(
@@ -280,7 +251,7 @@ async def persist_terminal_success(
     """Atomically insert assistant message and mark run completed."""
     factory = session_factory or get_session_factory()
     content = assistant_text if assistant_text and assistant_text.strip() else ""
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         if content == "":
             content = "(no assistant text)"
         await messages_repo.insert_message(
@@ -302,7 +273,7 @@ async def persist_terminal_failure(
     if code == "":
         code = "AGENT_EXECUTION_FAILED"
     factory = session_factory or get_session_factory()
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         await runs_repo.fail_run(session, run_id, error_code=code)
 
 
@@ -315,7 +286,7 @@ async def persist_interrupt(
     """Store compact approval projection and set run to interrupted."""
     projection = _normalize_projection(pending_approval)
     factory = session_factory or get_session_factory()
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         await runs_repo.interrupt_run(
             session,
             run_id,
@@ -342,7 +313,7 @@ async def claim_resume(
         )
 
     factory = session_factory or get_session_factory()
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         run = await runs_repo.get_run(session, run_id)
         if run is None:
             raise ChatTurnError(ERROR_RUN_NOT_FOUND, f"run {run_id!r} not found")
@@ -371,7 +342,7 @@ async def claim_resume(
 
 
 def _approval_required_event(run_id: str, projection: dict[str, Any]) -> SseEvent:
-    return _sse(
+    return build_sse_event(
         "approval_required",
         run_id,
         {
@@ -387,17 +358,19 @@ def _terminal_noop_events(run: AgentRun) -> list[SseEvent]:
     """Persisted terminal state only — no graph, deltas, or tool replay."""
     run_id = run.id
     events = [
-        _sse(
+        build_sse_event(
             "run_started",
             run_id,
             {"state": "running", "resumed": True},
         )
     ]
     if run.state == AGENT_RUN_STATE_COMPLETED:
-        events.append(_sse("run_completed", run_id, {"state": "completed"}))
+        events.append(
+            build_sse_event("run_completed", run_id, {"state": "completed"})
+        )
     elif run.state == AGENT_RUN_STATE_FAILED:
         events.append(
-            _sse(
+            build_sse_event(
                 "run_failed",
                 run_id,
                 {

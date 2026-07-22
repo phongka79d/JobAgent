@@ -20,7 +20,7 @@ import type {
   ClientMessage,
   ClientRun,
   ClientToolActivity,
-} from './reducer';
+} from './model';
 
 /**
  * Durable ToolResult.data projection: save_job, match_jobs, then read_active_cv.

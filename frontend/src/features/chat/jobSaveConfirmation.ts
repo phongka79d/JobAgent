@@ -8,7 +8,7 @@ import {isSaveJobToolName, parseSaveJobResultData} from '../jobs/types';
 import type {
   ClientMessage,
   ClientRun,
-} from './reducer';
+} from './model';
 import type {HistoryPage, JsonObject, JsonValue} from './types';
 
 export const JOB_SAVE_CONFIRMATION_KIND = 'job_save_confirmation' as const;
@@ -34,9 +34,6 @@ export const PREVIEW_SKILL_MAX = 80;
 export const PREVIEW_SKILLS_MAX = 5;
 
 /** Exact resume actions required for a valid JD confirmation. */
-export const JOB_SAVE_CONFIRMATION_ACTIONS: readonly JobSaveConfirmationAction[] =
-  [SAVE_JOB_ACTION, CANCEL_SAVE_JOB_ACTION];
-
 const TOP_LEVEL_ALLOWED = new Set(['kind', 'allowed_actions', 'card']);
 const CARD_ALLOWED = new Set([
   'tool_name',

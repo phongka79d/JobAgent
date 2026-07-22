@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Source and config only (host node_modules/dist not required in context).
-COPY index.html tsconfig.json vite.config.ts eslint.config.js ./
+COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 
 ARG VITE_API_BASE_URL

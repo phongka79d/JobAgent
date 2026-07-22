@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -40,6 +39,7 @@ from app.db.models.profiles import (
     JOB_PREFERENCE_KEYS,
     PROFILE_DRAFT_ID,
 )
+from app.db.session import session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
@@ -106,19 +106,6 @@ class ProposeFromCvResult:
     provider_retries_used: int = 0
 
 
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> Any:
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
 def _tool_ok(summary: str, data: dict[str, Any]) -> ToolResult:
     return ToolResult(ok=True, code=None, summary=summary, data=data)
 
@@ -145,7 +132,7 @@ async def _mark_failed(
     attachment_id: str,
     failure_code: str,
 ) -> None:
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         row = await att_repo.get_by_id(session, attachment_id)
         if row is None:
             return
@@ -371,7 +358,7 @@ async def propose_profile_from_cv(
     )
 
     try:
-        async with _short_transaction(session_factory) as session:
+        async with session_scope(session_factory) as session:
             row = await att_repo.get_by_id(session, attachment_id)
             if row is None or row.state not in allowed_states:
                 return ProposeFromCvResult(
@@ -885,7 +872,7 @@ async def propose_profile_update(
     parse_profile_draft_payload(draft_json)
 
     try:
-        async with _short_transaction(session_factory) as session:
+        async with session_scope(session_factory) as session:
             await profile_repo.upsert_current_draft(
                 session,
                 draft_json=draft_json,

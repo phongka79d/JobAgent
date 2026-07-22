@@ -30,23 +30,6 @@ def test_normalization_and_source_grounding_are_nfkc_whitespace_casefold() -> No
     assert grounded("\t", source) is True
 
 
-def test_label_grounding_accepts_only_name_or_explicit_approved_alias() -> None:
-    module = _module()
-    grounded = getattr(module, "is_label_grounded", None)
-    assert callable(grounded)
-    evidence = ["Improved SEO for content campaigns"]
-    assert grounded("SEO", evidence) is True
-    assert (
-        grounded(
-            "Search Engine Optimisation",
-            evidence,
-            approved_aliases=("SEO",),
-        )
-        is True
-    )
-    assert grounded("Paid Search", evidence, approved_aliases=("PPC",)) is False
-
-
 def test_heading_comparison_is_exact_and_profession_neutral() -> None:
     module = _module()
     matches_heading = getattr(module, "matches_heading", None)

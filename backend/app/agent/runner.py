@@ -43,10 +43,8 @@ from app.agent.graph import (
     build_agent_graph,
     initial_graph_state,
 )
-from app.core.ids import new_uuid
 from app.core.settings import Settings
-from app.core.time import utc_now
-from app.schemas.sse import SseEvent, parse_sse_event
+from app.schemas.sse import SseEvent, build_sse_event
 from app.services.tool_execution import (
     ToolStatusPublication,
     tool_status_publication_scope,
@@ -90,19 +88,6 @@ def _safe_summary(error_code: str) -> str:
     return _SAFE_ERROR_SUMMARIES.get(error_code, "Agent run failed")
 
 
-def _envelope(event: str, run_id: str, payload: dict[str, Any]) -> SseEvent:
-    """Build and validate a typed SSE event envelope."""
-    return parse_sse_event(
-        {
-            "event": event,
-            "event_id": new_uuid(),
-            "run_id": run_id,
-            "timestamp": utc_now(),
-            "payload": payload,
-        }
-    )
-
-
 def _tool_status_envelope(run_id: str, pub: ToolStatusPublication) -> SseEvent:
     """Frame one compact durable tool_status event (no raw args/result data)."""
     payload: dict[str, Any] = {
@@ -117,7 +102,7 @@ def _tool_status_envelope(run_id: str, pub: ToolStatusPublication) -> SseEvent:
         payload["summary"] = pub.summary
     if pub.error_code is not None:
         payload["error_code"] = pub.error_code
-    return _envelope("tool_status", run_id, payload)
+    return build_sse_event("tool_status", run_id, payload)
 
 
 def _message_text(message: BaseMessage | Any) -> str:
@@ -272,14 +257,14 @@ async def stream_agent_run(
     async with open_cm(sqlite_path, settings=settings) as saver:
         compiled = _compile_with_checkpointer(bundle, saver)
 
-        yield _envelope(
+        yield build_sse_event(
             "run_started",
             run_id,
             {"state": "running", "resumed": resumed},
         )
 
         if include_assistant_status and assistant_status_message.strip():
-            yield _envelope(
+            yield build_sse_event(
                 "assistant_status",
                 run_id,
                 {"message": assistant_status_message.strip()},
@@ -360,7 +345,7 @@ async def stream_agent_run(
                         graph_error = err
                     for delta in _extract_text_deltas_from_update(item):
                         assistant_parts.append(delta)
-                        yield _envelope(
+                        yield build_sse_event(
                             "text_delta",
                             run_id,
                             {"delta": delta},
@@ -436,7 +421,7 @@ async def stream_agent_run(
 
         if kind == "failed":
             assert error_code is not None and error_summary is not None
-            yield _envelope(
+            yield build_sse_event(
                 "run_failed",
                 run_id,
                 {
@@ -449,7 +434,7 @@ async def stream_agent_run(
             # Interrupt framing is owned by chat services (03B); retain checkpoint.
             return
         else:
-            yield _envelope(
+            yield build_sse_event(
                 "run_completed",
                 run_id,
                 {"state": "completed"},

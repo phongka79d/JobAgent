@@ -7,7 +7,7 @@
  * Stream tool_status keeps resultData=null; only terminal history supplies evidence.
  */
 
-import type {ClientToolActivity} from './reducer';
+import type {ClientToolActivity} from './model';
 import type {JsonObject} from './types';
 import {isUuidV4} from './types';
 
@@ -22,7 +22,6 @@ export type ActiveCvEntryKind = (typeof ACTIVE_CV_ENTRY_KINDS)[number];
 export const ACTIVE_CV_CHUNK_KINDS = ['chunk', 'chunk_match'] as const;
 export type ActiveCvChunkKind = (typeof ACTIVE_CV_CHUNK_KINDS)[number];
 
-export type ActiveCvRecordKind = ActiveCvEntryKind | ActiveCvChunkKind;
 
 /** Per-page result and character ceilings (backend / Master §13.7). */
 export const ACTIVE_CV_MAX_RECORDS = 10;
@@ -467,10 +466,6 @@ export function projectActiveCvResultData(
     }
   }
   return slim;
-}
-
-export function isReadActiveCvToolName(toolName: string): boolean {
-  return toolName === READ_ACTIVE_CV_TOOL_NAME;
 }
 
 /**

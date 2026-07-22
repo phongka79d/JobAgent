@@ -43,7 +43,7 @@ from app.schemas.profile import (
     parse_job_preferences,
 )
 from app.services.embedding_text import build_candidate_embedding_text_v1
-from app.services.jd_ingestion import EmbeddingClient
+from app.services.job_projection import EmbeddingClient
 from app.services.match_scoring import score_retrieved_candidates
 from app.services.profile_drafts import ERROR_ACTIVE_PROFILE_MISSING
 from app.services.skill_normalization import SkillNormalizer

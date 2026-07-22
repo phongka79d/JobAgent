@@ -43,6 +43,7 @@ from app.graph.observability import (
 from app.graph.selected_skill_projection import (
     check_selected_skill_relationship_integrity,
 )
+from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import jobs as jobs_repo
 from app.repositories import observability as obs_repo
 from app.repositories import profiles as profile_repo
@@ -368,7 +369,7 @@ async def get_chunk_list_page(
             "CV attachment not found",
         )
 
-    total = await obs_repo.count_chunks_for_attachment(session, attachment_id)
+    total = await chunk_repo.count_for_attachment(session, attachment_id)
     if total == 0:
         raise ObservabilityServiceError(
             ERROR_CHUNKS_UNAVAILABLE,
@@ -426,14 +427,18 @@ async def get_chunk_detail(
             "CV attachment not found",
         )
 
-    total = await obs_repo.count_chunks_for_attachment(session, attachment_id)
+    total = await chunk_repo.count_for_attachment(session, attachment_id)
     if total == 0:
         raise ObservabilityServiceError(
             ERROR_CHUNKS_UNAVAILABLE,
             "chunk rows are unavailable for this attachment",
         )
 
-    row = await obs_repo.get_chunk_by_ordinal(session, attachment_id, ordinal)
+    row = await chunk_repo.get_by_attachment_ordinal(
+        session,
+        attachment_id,
+        ordinal,
+    )
     if row is None:
         raise ObservabilityServiceError(
             ERROR_CHUNK_NOT_FOUND,

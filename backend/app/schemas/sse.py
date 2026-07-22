@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, get_args
 
+from app.core.ids import new_uuid
+from app.core.time import utc_now
 from app.schemas.common import (
     TOOL_STATUS_COMPLETED,
     TOOL_STATUS_FAILED,
@@ -224,6 +226,23 @@ _sse_adapter: TypeAdapter[SseEvent] = TypeAdapter(SseEvent)
 def parse_sse_event(data: Any) -> SseEvent:
     """Validate and return a typed SSE event envelope."""
     return _sse_adapter.validate_python(data)
+
+
+def build_sse_event(
+    event: str,
+    run_id: str,
+    payload: dict[str, Any],
+) -> SseEvent:
+    """Build and validate one typed SSE event envelope."""
+    return parse_sse_event(
+        {
+            "event": event,
+            "event_id": new_uuid(),
+            "run_id": run_id,
+            "timestamp": utc_now(),
+            "payload": payload,
+        }
+    )
 
 
 def sse_event_to_dict(event: SseEvent) -> dict[str, Any]:

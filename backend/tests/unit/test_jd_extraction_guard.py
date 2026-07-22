@@ -448,3 +448,11 @@ def test_guard_import_hygiene() -> None:
     assert "_contains_token_sequence" not in source
     assert "token_labels" not in source
     assert "from app.services.skill_assertion_guard import" in source
+
+
+def test_guard_depends_on_contracts_not_extractor_runtime() -> None:
+    source = Path("app/services/jd_extraction_guard.py").read_text(
+        encoding="utf-8"
+    )
+    assert "app.services.jd_extraction_contracts" in source
+    assert "from app.services.jd_extraction import" not in source

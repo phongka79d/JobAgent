@@ -9,8 +9,8 @@ import {
   apiUrl,
   ChatApiError,
   parseErrorBody,
-  streamCvReprocess,
 } from '../../lib/api/chat';
+import {buildCursorQuery} from '../../lib/api/cursorQuery';
 import {
   asCvDeleteErrorCode,
   asCvReprocessErrorCode,
@@ -33,7 +33,7 @@ import {
   type RunHistoryPage,
 } from './types';
 
-export {ChatApiError, streamCvReprocess};
+export {ChatApiError};
 export {
   asCvDeleteErrorCode,
   asCvReprocessErrorCode,
@@ -48,18 +48,6 @@ export type ObservabilityPageQuery = {
   limit?: number;
   before?: string | null;
 };
-
-function buildQuery(query: ObservabilityPageQuery = {}): string {
-  const params = new URLSearchParams();
-  if (query.limit !== undefined) {
-    params.set('limit', String(query.limit));
-  }
-  if (query.before) {
-    params.set('before', query.before);
-  }
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
-}
 
 async function getJson(
   path: string,
@@ -90,7 +78,10 @@ export async function fetchCvHistory(
   query: ObservabilityPageQuery = {},
   signal?: AbortSignal,
 ): Promise<CvHistoryPage> {
-  const json = await getJson(`/api/observability/cvs${buildQuery(query)}`, signal);
+  const json = await getJson(
+    `/api/observability/cvs${buildCursorQuery(query)}`,
+    signal,
+  );
   try {
     return parseCvHistoryPage(json);
   } catch (err) {
@@ -115,7 +106,7 @@ export async function fetchChunkList(
 ): Promise<ChunkListPage> {
   const path =
     `/api/observability/cvs/${encodeURIComponent(attachmentId)}/chunks` +
-    buildQuery(query);
+    buildCursorQuery(query);
   const json = await getJson(path, signal);
   try {
     return parseChunkListPage(json);
@@ -155,7 +146,7 @@ export async function fetchRunHistory(
   signal?: AbortSignal,
 ): Promise<RunHistoryPage> {
   const json = await getJson(
-    `/api/observability/runs${buildQuery(query)}`,
+    `/api/observability/runs${buildCursorQuery(query)}`,
     signal,
   );
   try {
@@ -281,7 +272,6 @@ export type ObservabilityApi = {
   fetchGraphSnapshot: typeof fetchGraphSnapshot;
   getRetainedCvUrl: typeof getRetainedCvUrl;
   deleteCv: typeof deleteCv;
-  streamCvReprocess: typeof streamCvReprocess;
 };
 
 export const defaultObservabilityApi: ObservabilityApi = {
@@ -292,5 +282,4 @@ export const defaultObservabilityApi: ObservabilityApi = {
   fetchGraphSnapshot,
   getRetainedCvUrl,
   deleteCv,
-  streamCvReprocess,
 };

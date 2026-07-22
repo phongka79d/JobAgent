@@ -318,16 +318,6 @@ def cypher_statement_templates() -> Sequence[str]:
     )
 
 
-def allowed_sync_labels() -> frozenset[str]:
-    """Labels written by CV graph sync."""
-    return _ALLOWED_LABELS
-
-
-def allowed_sync_relationships() -> frozenset[str]:
-    """Relationship types written by CV graph sync."""
-    return _ALLOWED_RELS
-
-
 __all__ = [
     "CLEAR_ALL_PROJECTS_TO_CYPHER",
     "CLEAR_CV_OWNED_CYPHER",
@@ -341,8 +331,6 @@ __all__ = [
     "CvSyncError",
     "NEO4J_REBUILD_INSTRUCTION",
     "NEO4J_SYNC_FAILED",
-    "allowed_sync_labels",
-    "allowed_sync_relationships",
     "assert_payload_safe",
     "bounded_entry_preview",
     "build_cv_graph_payload",

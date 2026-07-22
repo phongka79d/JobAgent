@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,7 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.attachments import (
@@ -70,20 +69,6 @@ class CvUploadError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> Any:
-    """Yield a session; commit on success, roll back on error."""
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
 
 
 def sanitize_original_name(filename: str | None) -> str:
@@ -380,7 +365,7 @@ async def upload_cv(
             ) from exc
 
         try:
-            async with _short_transaction(factory) as session:
+            async with session_scope(factory) as session:
                 row = await att_repo.create_staged(
                     session,
                     file_hash=file_hash,
@@ -430,16 +415,6 @@ async def upload_cv_from_upload_file(
         settings=settings,
         session_factory=session_factory,
     )
-
-
-async def iter_bytes_as_chunks(
-    data: bytes, chunk_size: int = _READ_CHUNK
-) -> AsyncIterator[bytes]:
-    """Test helper: yield ``data`` in chunks."""
-    if not data:
-        return
-    for i in range(0, len(data), chunk_size):
-        yield data[i : i + chunk_size]
 
 
 __all__ = [

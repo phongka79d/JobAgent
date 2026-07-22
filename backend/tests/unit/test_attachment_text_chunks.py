@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from app.repositories.attachment_text_chunks import (
     preview_for_text,
     token_estimate_for_chars,
 )
+from app.services import cv_document_extraction
 from app.services.profile_extraction import (
     CHUNK_JOIN,
     CHUNK_OVERLAP,
@@ -27,6 +29,15 @@ from app.services.profile_extraction import (
 )
 
 from tests.support.db_migration import run_async, session_factory
+
+
+def test_chunk_count_uses_sql_count_and_document_extraction_uses_contracts() -> None:
+    count_source = inspect.getsource(chunk_repo.count_for_attachment)
+    document_source = inspect.getsource(cv_document_extraction)
+    assert "func.count" in count_source
+    assert "list_for_attachment" not in count_source
+    assert "app.services.cv_chunk_contracts" in document_source
+    assert "app.services.profile_extraction" not in document_source
 
 
 def test_chunker_constants_and_empty_rejection() -> None:

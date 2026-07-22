@@ -12,6 +12,7 @@ import {
   type JobWorkMode,
   JOB_WORK_MODES,
 } from './matchResult';
+import {safeHttpUrl} from '../../lib/url';
 
 /** Exact job_posts.processing_status vocabulary. */
 export type JobProcessingStatus =
@@ -46,7 +47,6 @@ export const JOB_INGEST_OUTCOMES: readonly JobIngestOutcome[] = [
 ] as const;
 
 export const SAVE_JOB_TOOL_NAME = 'save_job' as const;
-export const QUERY_JOBS_TOOL_NAME = 'query_jobs' as const;
 
 export const NEO4J_SYNC_FAILED_CODE = 'NEO4J_SYNC_FAILED' as const;
 
@@ -118,28 +118,6 @@ function asNullableBoolean(value: unknown): boolean | null | undefined {
     return undefined;
   }
   return typeof value === 'boolean' ? value : undefined;
-}
-
-/**
- * Accept only http(s) absolute URLs for display; reject javascript: and relatives.
- */
-export function safeHttpUrl(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (trimmed === '') {
-    return null;
-  }
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    return parsed.toString();
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -399,10 +377,6 @@ export const REEXTRACT_OUTCOMES: readonly ReextractOutcome[] = [
 
 /** Coupled graph-failure code on re-extract success when sync_ok=false. */
 export const REEXTRACT_GRAPH_FAILURE_CODE = 'NEO4J_SYNC_FAILED' as const;
-
-export const SAVED_JOBS_LIMIT_MIN = 1;
-export const SAVED_JOBS_LIMIT_MAX = 50;
-export const SAVED_JOBS_DEFAULT_LIMIT = 50;
 
 /** Keys never allowed on compact list rows (Master §7.7 redaction). */
 export const SAVED_JOB_LIST_FORBIDDEN_KEYS: readonly string[] = [

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.attachment_text_chunks import (
@@ -102,8 +102,13 @@ async def count_for_attachment(
     attachment_id: str,
 ) -> int:
     """Return the number of chunk rows for *attachment_id*."""
-    rows = await list_for_attachment(session, attachment_id)
-    return len(rows)
+    stmt = (
+        select(func.count())
+        .select_from(AttachmentTextChunk)
+        .where(AttachmentTextChunk.attachment_id == attachment_id)
+    )
+    result = await session.execute(stmt)
+    return int(result.scalar_one())
 
 
 async def delete_for_attachment(

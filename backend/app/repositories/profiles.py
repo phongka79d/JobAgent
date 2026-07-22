@@ -29,10 +29,6 @@ class ProfileRepositoryError(Exception):
     """Base error for profile-family repository invariant violations."""
 
 
-class ProfileNotFoundError(ProfileRepositoryError):
-    """Raised when a required singleton row is missing for a hard update."""
-
-
 async def get_active_profile(
     session: AsyncSession,
 ) -> CandidateProfile | None:

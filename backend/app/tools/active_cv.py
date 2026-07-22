@@ -20,7 +20,6 @@ from langgraph.prebuilt import InjectedState
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import get_session_factory
-from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
 from app.services import active_cv_reader as active_cv_reader_service
 from app.services.tool_execution import execute_tool
@@ -57,20 +56,6 @@ def arguments_summary_for_read_active_cv(
     if chunk_ordinal is not None:
         summary["chunk_ordinal"] = chunk_ordinal
     return summary
-
-
-async def _resolve_active_attachment_id(
-    factory: async_sessionmaker[AsyncSession],
-) -> str | None:
-    """Return the approved active attachment id, or ``None`` when absent."""
-    async with factory() as session:
-        profile = await profile_repo.get_active_profile(session)
-        if profile is None:
-            return None
-        attachment_id = profile.active_attachment_id
-        if not isinstance(attachment_id, str) or attachment_id.strip() == "":
-            return None
-        return attachment_id.strip()
 
 
 def build_read_active_cv_tool(
@@ -140,13 +125,25 @@ def build_read_active_cv_tool(
             cursor=cursor,
         )
 
-        # Stamp CV ownership before durable result storage (deletion cascade).
-        owner = await _resolve_active_attachment_id(factory)
+        async with factory() as session:
+            identity_or_error = (
+                await active_cv_reader_service.resolve_active_cv_identity(session)
+            )
+        if isinstance(identity_or_error, ToolResult):
+            identity = None
+            preflight_error = identity_or_error
+        else:
+            identity = identity_or_error
+            preflight_error = None
+        owner = identity.attachment_id if identity is not None else None
 
         async def _invoke() -> ToolResult:
+            if preflight_error is not None:
+                return preflight_error
+            assert identity is not None
             try:
                 async with factory() as session:
-                    return await active_cv_reader_service.read_active_cv(
+                    result = await active_cv_reader_service.read_active_cv(
                         session,
                         mode=effective_mode,
                         section_id=section_id,
@@ -155,7 +152,24 @@ def build_read_active_cv_tool(
                         cursor=cursor,
                         max_results=max_results,
                         max_chars=max_chars,
+                        expected_identity=identity,
                     )
+                if not result.ok:
+                    return result
+                async with factory() as session:
+                    current = (
+                        await active_cv_reader_service.resolve_active_cv_identity(
+                            session
+                        )
+                    )
+                if isinstance(current, ToolResult) or current != identity:
+                    return ToolResult(
+                        ok=False,
+                        code=active_cv_reader_service.ERROR_ACTIVE_CV_CHANGED,
+                        summary=active_cv_reader_service.ACTIVE_CV_CHANGED_SUMMARY,
+                        data=None,
+                    )
+                return result
             except Exception as exc:
                 logger.info(
                     "read_active_cv unexpected failure type=%s",

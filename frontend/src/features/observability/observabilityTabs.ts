@@ -32,5 +32,3 @@ export const OBSERVABILITY_TABS: ReadonlyArray<ObservabilityTabDefinition> = [
   {id: 'saved-jobs', label: 'JD đã lưu', icon: 'copy'},
 ] as const;
 
-export const SAVED_JOBS_TAB_ID: ObservabilityTabId = 'saved-jobs';
-export const SAVED_JOBS_TAB_LABEL = 'JD đã lưu' as const;

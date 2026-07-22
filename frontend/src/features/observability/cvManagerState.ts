@@ -59,15 +59,6 @@ export function isCvActionPending(
   return slice.pendingByAttachment[attachmentId] !== undefined;
 }
 
-/** True when this attachment already has the same kind pending. */
-export function isCvActionKindPending(
-  slice: CvManagerActionSlice,
-  attachmentId: string,
-  kind: CvManagerActionKind,
-): boolean {
-  return slice.pendingByAttachment[attachmentId] === kind;
-}
-
 export function dropPendingAttachment(
   pending: Readonly<Record<string, CvManagerActionKind>>,
   attachmentId: string,

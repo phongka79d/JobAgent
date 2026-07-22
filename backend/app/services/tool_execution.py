@@ -18,8 +18,8 @@ store exists.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from time import perf_counter
@@ -33,7 +33,7 @@ from app.db.models.chat import (
     TOOL_EXECUTION_STATUS_PENDING,
     TOOL_EXECUTION_STATUS_RUNNING,
 )
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.repositories import tool_executions as tool_repo
 from app.repositories.tool_executions import (
     ToolExecutionRepositoryError,
@@ -132,23 +132,6 @@ def _publication(
     )
 
 
-@asynccontextmanager
-async def _short_transaction(
-    factory: async_sessionmaker[AsyncSession],
-) -> AsyncIterator[AsyncSession]:
-    """Yield a session; commit on success, roll back on error.
-
-    Must not wrap provider/graph/side-effect work — only durable transitions.
-    """
-    async with factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
 async def execute_tool(
     *,
     run_id: str,
@@ -204,7 +187,7 @@ async def execute_tool(
     replay_result: ToolResult | None = None
     replay_pub: ToolStatusPublication | None = None
 
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         row, _created = await tool_repo.get_or_create_pending(
             session,
             run_id=run_id,
@@ -257,7 +240,7 @@ async def execute_tool(
                 status=TOOL_EXECUTION_STATUS_PENDING,
             )
         )
-        async with _short_transaction(factory) as session:
+        async with session_scope(factory) as session:
             row = await tool_repo.mark_running(session, execution_id)
             execution_id = row.id
             stored_tool_call_id = row.tool_call_id
@@ -285,7 +268,7 @@ async def execute_tool(
     terminal_summary: str
     terminal_duration: int | None
 
-    async with _short_transaction(factory) as session:
+    async with session_scope(factory) as session:
         # Re-check identity for exact terminal replay if another path finished.
         live = await tool_repo.get_by_id(session, execution_id)
         if live is not None and live.status in _TERMINAL:

@@ -32,11 +32,6 @@ class CvGraphDeleteError(Exception):
         self.message = message
 
 
-def delete_cv_branch_cypher() -> str:
-    """Return the fixed exact-branch Cypher template (for static review/tests)."""
-    return DELETE_CV_BRANCH_CYPHER
-
-
 def assert_delete_cv_query_allowlisted(query: str) -> None:
     """Raise ``ValueError`` when *query* is not the exact CV-branch template.
 
@@ -103,5 +98,4 @@ __all__ = [
     "allowed_delete_relationships",
     "assert_delete_cv_query_allowlisted",
     "delete_cv_branch",
-    "delete_cv_branch_cypher",
 ]
