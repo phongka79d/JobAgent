@@ -19,7 +19,6 @@ import {
   selectSafeRemainingJobId,
   type EvaluateJobResponse,
   type ReextractJobResponse,
-  type SaveAndEvaluateResponse,
   type SavedJobDetail,
   type SavedJobListItem,
   type SavedJobListPage,
@@ -52,9 +51,6 @@ export type SavedJobActionKind = 'evaluate' | 'delete' | 'reextract';
 export type SavedJobsActionSlice = {
   pendingByJob: Readonly<Record<string, SavedJobActionKind>>;
   errorsByJob: Readonly<Record<string, SavedJobsSafeError>>;
-  /** source_message_id → save-and-evaluate in flight. */
-  pendingSaveByMessage: Readonly<Record<string, true>>;
-  saveErrorsByMessage: Readonly<Record<string, SavedJobsSafeError>>;
 };
 
 /**
@@ -87,8 +83,6 @@ const emptyResource = <T,>(): CachedResource<T> => ({
 export const initialSavedJobsActionSlice: SavedJobsActionSlice = {
   pendingByJob: {},
   errorsByJob: {},
-  pendingSaveByMessage: {},
-  saveErrorsByMessage: {},
 };
 
 export const initialSavedJobsState: SavedJobsState = {
@@ -318,24 +312,6 @@ type Action =
       type: 'reextract_success';
       jobId: string;
       response: ReextractJobResponse;
-    }
-  | {
-      type: 'save_begin';
-      sourceMessageId: string;
-    }
-  | {
-      type: 'save_end';
-      sourceMessageId: string;
-    }
-  | {
-      type: 'save_error';
-      sourceMessageId: string;
-      error: SavedJobsSafeError;
-    }
-  | {
-      type: 'save_success';
-      sourceMessageId: string;
-      response: SaveAndEvaluateResponse;
     }
   | {
       /**
@@ -615,108 +591,6 @@ export function savedJobsReducer(
         externalInvalidation: bumpExternal(state.externalInvalidation),
       };
     }
-    case 'save_begin': {
-      if (state.actions.pendingSaveByMessage[action.sourceMessageId]) {
-        return state;
-      }
-      const nextErrors = {...state.actions.saveErrorsByMessage};
-      delete nextErrors[action.sourceMessageId];
-      return {
-        ...state,
-        actions: {
-          ...state.actions,
-          pendingSaveByMessage: {
-            ...state.actions.pendingSaveByMessage,
-            [action.sourceMessageId]: true,
-          },
-          saveErrorsByMessage: nextErrors,
-        },
-      };
-    }
-    case 'save_end': {
-      const nextPending = {...state.actions.pendingSaveByMessage};
-      delete nextPending[action.sourceMessageId];
-      return {
-        ...state,
-        actions: {
-          ...state.actions,
-          pendingSaveByMessage: nextPending,
-        },
-      };
-    }
-    case 'save_error': {
-      const nextPending = {...state.actions.pendingSaveByMessage};
-      delete nextPending[action.sourceMessageId];
-      return {
-        ...state,
-        actions: {
-          ...state.actions,
-          pendingSaveByMessage: nextPending,
-          saveErrorsByMessage: {
-            ...state.actions.saveErrorsByMessage,
-            [action.sourceMessageId]: action.error,
-          },
-        },
-      };
-    }
-    case 'save_success': {
-      const nextPending = {...state.actions.pendingSaveByMessage};
-      delete nextPending[action.sourceMessageId];
-      const nextErrors = {...state.actions.saveErrorsByMessage};
-      delete nextErrors[action.sourceMessageId];
-      const listData = patchListItem(state.list.data, action.response.job);
-      const jobId = action.response.job.id;
-      const nextDetails = {...state.details};
-      if (action.response.evaluation) {
-        const prior = nextDetails[jobId];
-        nextDetails[jobId] = {
-          phase: 'ready',
-          data: {
-            compact: action.response.job,
-            extraction: prior?.data?.extraction ?? null,
-            raw_content: prior?.data?.raw_content ?? null,
-            latest_evaluation: action.response.evaluation,
-          },
-          error: null,
-          loaded: true,
-        };
-      } else if (listData) {
-        // Unavailable: keep prior detail extraction if any; patch compact only.
-        const prior = nextDetails[jobId];
-        if (prior?.data) {
-          nextDetails[jobId] = {
-            ...prior,
-            data: {
-              ...prior.data,
-              compact: action.response.job,
-            },
-            error: null,
-          };
-        }
-      }
-      return {
-        ...state,
-        list: listData
-          ? {
-              phase: phaseForPage(listData.items.length),
-              data: listData,
-              error: null,
-              loaded: true,
-            }
-          : {
-              // First list load not yet done — force reload via unloaded list.
-              ...state.list,
-              loaded: false,
-            },
-        details: nextDetails,
-        actions: {
-          ...state.actions,
-          pendingSaveByMessage: nextPending,
-          saveErrorsByMessage: nextErrors,
-        },
-        externalInvalidation: bumpExternal(state.externalInvalidation),
-      };
-    }
     case 'invalidate_currentness': {
       // Preserve selection and last safe list/selected-detail data; server GET
       // remains authoritative for none|current|stale (no client rewrite).
@@ -764,7 +638,6 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
   const beginLatestRequest = useLatestRequest();
   /** Synchronous pending guard so rapid double-clicks cannot race re-render. */
   const actionInFlightRef = useRef<Set<string>>(new Set());
-  const saveInFlightRef = useRef<Set<string>>(new Set());
   const skillMapInvalidationRef = useRef({
     all: 0,
     byJob: new Map<string, number>(),
@@ -1007,47 +880,6 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     [api, invalidateSkillMapRequests, loadDetail],
   );
 
-  const saveAndEvaluate = useCallback(
-    async (
-      sourceMessageId: string,
-      opts?: {signal?: AbortSignal},
-    ): Promise<'success' | 'duplicate' | 'error'> => {
-      if (saveInFlightRef.current.has(sourceMessageId)) {
-        return 'duplicate';
-      }
-      saveInFlightRef.current.add(sourceMessageId);
-      dispatch({type: 'save_begin', sourceMessageId});
-      try {
-        const response = await api.saveAndEvaluateJob(
-          sourceMessageId,
-          opts?.signal,
-        );
-        if (opts?.signal?.aborted) {
-          saveInFlightRef.current.delete(sourceMessageId);
-          dispatch({type: 'save_end', sourceMessageId});
-          return 'error';
-        }
-        saveInFlightRef.current.delete(sourceMessageId);
-        dispatch({type: 'save_success', sourceMessageId, response});
-        return 'success';
-      } catch (err) {
-        saveInFlightRef.current.delete(sourceMessageId);
-        if (opts?.signal?.aborted) {
-          dispatch({type: 'save_end', sourceMessageId});
-          return 'error';
-        }
-        const safe = toSavedJobActionError(err);
-        dispatch({
-          type: 'save_error',
-          sourceMessageId,
-          error: {code: safe.code, summary: safe.summary},
-        });
-        return 'error';
-      }
-    },
-    [api],
-  );
-
   /** Mark list + selected detail non-current after activation / zero-result. */
   const invalidateCurrentness = useCallback(() => {
     invalidateAllSkillMapRequests();
@@ -1064,7 +896,6 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     evaluateJob,
     confirmDelete,
     confirmReextract,
-    saveAndEvaluate,
     invalidateCurrentness,
     isJobActionPending: (jobId: string) =>
       isJobActionPending(state.actions, jobId),

@@ -10,6 +10,7 @@ import {
   SAVED_JOB_ERROR_CODES,
 } from '../features/jobs/api';
 import {
+  initialSavedJobsActionSlice,
   initialSavedJobsState,
   savedJobsReducer,
   useSavedJobsState,
@@ -208,6 +209,15 @@ function skillMapFor(
     checked_at: TS,
   };
 }
+
+describe('saved-JD action slice ownership', () => {
+  it('starts with only per-job pending actions and errors', () => {
+    expect(initialSavedJobsActionSlice).toEqual({
+      pendingByJob: {},
+      errorsByJob: {},
+    });
+  });
+});
 
 describe('selected skill-map cache ownership', () => {
   it('keeps request ordering independent per Job and retains safe cached data', async () => {

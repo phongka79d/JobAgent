@@ -391,7 +391,6 @@ export type SavedJobsApi = {
   fetchSavedJobDetail: typeof fetchSavedJobDetail;
   fetchSelectedJobSkillMap: typeof fetchSelectedJobSkillMap;
   evaluateSavedJob: typeof evaluateSavedJob;
-  saveAndEvaluateJob: typeof saveAndEvaluateJob;
   reextractSavedJob: typeof reextractSavedJob;
   deleteSavedJob: typeof deleteSavedJob;
 };
@@ -401,7 +400,6 @@ export const defaultSavedJobsApi: SavedJobsApi = {
   fetchSavedJobDetail,
   fetchSelectedJobSkillMap,
   evaluateSavedJob,
-  saveAndEvaluateJob,
   reextractSavedJob,
   deleteSavedJob,
 };
