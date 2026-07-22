@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
-from app.services.jd_extraction import ExtractedJobPost, ExtractedJobSkillItem
+from app.services.jd_extraction_contracts import (
+    ExtractedJobPost,
+    ExtractedJobSkillItem,
+)
 from app.services.skill_assertion_guard import (
     StructuralSkillIssue,
     is_source_grounded,
