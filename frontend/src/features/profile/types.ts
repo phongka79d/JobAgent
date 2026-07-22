@@ -76,11 +76,6 @@ export type PendingPdfAttachment = {
   displayName: string;
 };
 
-export type ProfileApiParseError = {
-  code: string;
-  summary: string;
-};
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

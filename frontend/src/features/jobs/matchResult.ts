@@ -84,17 +84,6 @@ const SKILL_EVIDENCE_KEY_SET: ReadonlySet<string> = new Set(SKILL_EVIDENCE_KEYS)
 const MISSING_SKILL_KEY_SET: ReadonlySet<string> = new Set(MISSING_SKILL_KEYS);
 
 /** Ordered component display labels (backend key → UI label). */
-export const MATCH_COMPONENT_LABELS: Readonly<
-  Record<(typeof COMPONENT_KEYS)[number], string>
-> = {
-  semantic_similarity: 'Semantic similarity',
-  skill_score: 'Skill coverage',
-  seniority_score: 'Seniority',
-  experience_score: 'Experience',
-  location_score: 'Location',
-  work_mode_score: 'Work mode',
-};
-
 export type MatchComponentKey = (typeof COMPONENT_KEYS)[number];
 
 export interface CompactMatchSkillEvidence {
