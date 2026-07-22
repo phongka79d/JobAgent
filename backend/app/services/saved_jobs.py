@@ -81,7 +81,6 @@ from app.services.evaluation_context import (
 )
 from app.services.jd_extraction import StructuredJdInvoker
 from app.services.jd_ingestion import (
-    EmbeddingClient,
     JdIngestionError,
     JobSyncFn,
     UrlFetcher,
@@ -101,6 +100,7 @@ from app.services.job_evaluation import (
     ERROR_JOB_NOT_SCORABLE,
     evaluate_job,
 )
+from app.services.job_projection import EmbeddingClient
 from app.services.job_reextraction import (
     ERROR_JOB_REEXTRACT_CONFLICT,
     JobReextractError,

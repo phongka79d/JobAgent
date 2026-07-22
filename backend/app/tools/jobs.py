@@ -45,7 +45,6 @@ from app.schemas.jobs import (
 from app.schemas.tools import ToolResult
 from app.services.jd_extraction import StructuredJdInvoker
 from app.services.jd_ingestion import (
-    EmbeddingClient,
     JdIngestionError,
     JdIngestResult,
     JobSyncFn,
@@ -53,6 +52,7 @@ from app.services.jd_ingestion import (
     ingest_raw_text,
     ingest_url,
 )
+from app.services.job_projection import EmbeddingClient
 from app.services.job_save_confirmation import (
     InitiatingMessage,
     SourceLookupFailure,

@@ -66,7 +66,7 @@ from app.services.evaluation_context import (
     EvaluationContextFacts,
     evaluation_context_hash,
 )
-from app.services.jd_ingestion import EmbeddingClient
+from app.services.job_projection import EmbeddingClient
 from app.services.match_scoring import project_single_job_match
 from app.services.skill_normalization import SkillNormalizer
 

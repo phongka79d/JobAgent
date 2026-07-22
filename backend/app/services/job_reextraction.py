@@ -40,21 +40,15 @@ from app.graph.sync_job import (
 )
 from app.repositories import jobs as jobs_repo
 from app.repositories.jobs import JobNotFoundError, JobReextractConflictError
-from app.schemas.embeddings import (
-    LOCKED_EMBEDDING_DIMENSIONS,
-    LOCKED_EMBEDDING_MODEL,
-    EmbeddingVectorError,
-    validate_finite_vector,
-)
+from app.schemas.embeddings import EmbeddingVectorError
 from app.schemas.jobs import JobPostExtraction, parse_job_post_extraction
-from app.services.embedding_text import build_job_embedding_text_v1
 from app.services.jd_extraction import (
     JdExtractionError,
     StructuredJdInvoker,
     extract_job_post_from_text,
 )
-from app.services.jd_ingestion import EmbeddingClient
 from app.services.jd_quality import classify_jd_quality
+from app.services.job_projection import EmbeddingClient, embed_job_extraction
 from app.services.skill_normalization import SkillNormalizer
 
 logger = logging.getLogger(__name__)
@@ -200,16 +194,6 @@ async def _load_snapshot(
             row.embedding_dimensions,
         )
         return _snapshot_from_row(row)
-
-
-def _embed_scorable(
-    extraction: JobPostExtraction,
-    embedding_client: EmbeddingClient,
-) -> tuple[list[float], str, int]:
-    text = build_job_embedding_text_v1(extraction)
-    vector = embedding_client.embed_text(text)
-    validated = validate_finite_vector(vector)
-    return validated, LOCKED_EMBEDDING_MODEL, LOCKED_EMBEDDING_DIMENSIONS
 
 
 async def _commit_replacement(
@@ -384,7 +368,7 @@ async def reextract_job(
         )
 
     try:
-        embedding_json, embedding_model, embedding_dimensions = _embed_scorable(
+        embedding_json, embedding_model, embedding_dimensions = embed_job_extraction(
             extraction, embedder
         )
     except EmbeddingAdapterError as exc:

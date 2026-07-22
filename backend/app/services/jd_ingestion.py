@@ -21,7 +21,7 @@ import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -46,12 +46,7 @@ from app.graph.sync_job import (
     sync_job,
 )
 from app.repositories import jobs as jobs_repo
-from app.schemas.embeddings import (
-    LOCKED_EMBEDDING_DIMENSIONS,
-    LOCKED_EMBEDDING_MODEL,
-    EmbeddingVectorError,
-    validate_finite_vector,
-)
+from app.schemas.embeddings import EmbeddingVectorError
 from app.schemas.jobs import (
     JOB_INGEST_OUTCOME_CREATED,
     JOB_INGEST_OUTCOME_RETRIED,
@@ -60,13 +55,13 @@ from app.schemas.jobs import (
     JobPostExtraction,
     parse_job_post_extraction,
 )
-from app.services.embedding_text import build_job_embedding_text_v1
 from app.services.jd_extraction import (
     JdExtractionError,
     StructuredJdInvoker,
     extract_job_post_from_text,
 )
 from app.services.jd_quality import classify_jd_quality
+from app.services.job_projection import EmbeddingClient, embed_job_extraction
 from app.services.skill_normalization import SkillNormalizer
 from app.services.url_fetch import (
     PASTE_JD_FALLBACK_MESSAGE,
@@ -97,14 +92,6 @@ class JdIngestionError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-class EmbeddingClient(Protocol):
-    """Minimal embedding surface used by ingestion (adapter or fake)."""
-
-    def embed_text(self, text: str) -> list[float]:
-        """Return one locked finite embedding vector."""
-        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,11 +395,7 @@ def _embed_if_scorable(
     if jd_quality not in _SCORABLE_QUALITIES:
         return None, None, None
 
-    text = build_job_embedding_text_v1(extraction)
-    vector = embedding_client.embed_text(text)
-    # Service-owned re-check before the terminal SQLite write.
-    validated = validate_finite_vector(vector)
-    return validated, LOCKED_EMBEDDING_MODEL, LOCKED_EMBEDDING_DIMENSIONS
+    return embed_job_extraction(extraction, embedding_client)
 
 
 async def _run_processing(
@@ -679,7 +662,6 @@ __all__ = [
     "FAILURE_EMPTY_URL",
     "NEO4J_REBUILD_INSTRUCTION",
     "NEO4J_SYNC_FAILED",
-    "EmbeddingClient",
     "IngestOutcome",
     "JdIngestResult",
     "JdIngestionError",
