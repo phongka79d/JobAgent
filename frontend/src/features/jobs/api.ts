@@ -9,6 +9,7 @@ import {
   ChatApiError,
   parseErrorBody,
 } from '../../lib/api/chat';
+import {buildCursorQuery} from '../../lib/api/cursorQuery';
 import {
   parseEvaluateJobResponse,
   parseReextractJobResponse,
@@ -113,18 +114,6 @@ export function toSavedJobActionError(
     return {code, summary: SAVED_JOB_DELETE_RETRY_SUMMARY, retryable: true};
   }
   return {code, summary, retryable: false};
-}
-
-function buildQuery(query: SavedJobsPageQuery = {}): string {
-  const params = new URLSearchParams();
-  if (query.limit !== undefined) {
-    params.set('limit', String(query.limit));
-  }
-  if (query.before) {
-    params.set('before', query.before);
-  }
-  const qs = params.toString();
-  return qs ? `?${qs}` : '';
 }
 
 function rejectForbiddenErrorFields(
@@ -246,7 +235,7 @@ export async function fetchSavedJobs(
   query: SavedJobsPageQuery = {},
   signal?: AbortSignal,
 ): Promise<SavedJobListPage> {
-  const json = await getJson(`/api/jobs${buildQuery(query)}`, signal);
+  const json = await getJson(`/api/jobs${buildCursorQuery(query)}`, signal);
   try {
     return parseSavedJobListPage(json);
   } catch (err) {
