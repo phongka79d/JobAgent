@@ -42,8 +42,6 @@ from app.graph.sync_job import (
     NEO4J_REBUILD_INSTRUCTION,
     NEO4J_SYNC_FAILED,
     AsyncGraphDriver,
-    JobSyncError,
-    sync_job,
 )
 from app.repositories import jobs as jobs_repo
 from app.schemas.embeddings import EmbeddingVectorError
@@ -53,7 +51,6 @@ from app.schemas.jobs import (
     JOB_INGEST_OUTCOME_RETURNED,
     JobIngestOutcome,
     JobPostExtraction,
-    parse_job_post_extraction,
 )
 from app.services.jd_extraction import (
     JdExtractionError,
@@ -61,7 +58,11 @@ from app.services.jd_extraction import (
     extract_job_post_from_text,
 )
 from app.services.jd_quality import classify_jd_quality
-from app.services.job_projection import EmbeddingClient, embed_job_extraction
+from app.services.job_projection import (
+    EmbeddingClient,
+    embed_job_extraction,
+    sync_persisted_job,
+)
 from app.services.skill_normalization import SkillNormalizer
 from app.services.url_fetch import (
     PASTE_JD_FALLBACK_MESSAGE,
@@ -191,50 +192,16 @@ async def _maybe_sync_scorable_job(
     (tests that only exercise SQLite paths). Exact-duplicate and unscorable
     callers must not invoke this helper.
     """
-    if not _is_scorable_processed(row):
+    result = await sync_persisted_job(
+        row,
+        normalizer=normalizer,
+        graph_driver=graph_driver,
+        job_sync_fn=job_sync_fn,
+        log_context="jd ingestion",
+    )
+    if not result.attempted:
         return None, None, None
-    if job_sync_fn is None and graph_driver is None:
-        return None, None, None
-
-    if row.extraction_json is None or row.embedding_json is None:
-        # Scorable processed rows always carry both under repository constraints.
-        return (
-            False,
-            NEO4J_SYNC_FAILED,
-            NEO4J_REBUILD_INSTRUCTION,
-        )
-
-    extraction = parse_job_post_extraction(row.extraction_json)
-    embedding = list(row.embedding_json)
-    source_updated_at = row.updated_at
-
-    async def _default_sync() -> None:
-        if graph_driver is None:
-            raise JobSyncError("Neo4j driver not configured for Job sync")
-        await sync_job(
-            graph_driver,
-            job_id=row.id,
-            extraction=extraction,
-            jd_quality=str(row.jd_quality),
-            embedding=embedding,
-            source_updated_at=source_updated_at,
-            normalizer=normalizer,
-        )
-
-    do_sync = job_sync_fn if job_sync_fn is not None else _default_sync
-    try:
-        await do_sync()
-    except JobSyncError as exc:
-        logger.info(
-            "jd ingestion neo4j sync failed job_id=%s code=%s",
-            row.id,
-            exc.code,
-        )
-        return False, exc.code, exc.rebuild_instruction
-    except Exception:
-        logger.info("jd ingestion neo4j sync failed job_id=%s", row.id)
-        return False, NEO4J_SYNC_FAILED, NEO4J_REBUILD_INSTRUCTION
-    return True, None, None
+    return result.ok, result.code, result.rebuild_instruction
 
 
 def _default_url_fetcher(url: str) -> Awaitable[UrlFetchResult]:
