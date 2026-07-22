@@ -60,6 +60,7 @@ from app.services.jd_extraction import (
 from app.services.jd_quality import classify_jd_quality
 from app.services.job_projection import (
     EmbeddingClient,
+    JobSyncFn,
     embed_job_extraction,
     sync_persisted_job,
 )
@@ -83,8 +84,6 @@ _SCORABLE_QUALITIES: Final[frozenset[str]] = frozenset(
 # Re-export schema-owned outcome type for existing ingestion callers.
 IngestOutcome = JobIngestOutcome
 UrlFetcher = Callable[[str], Awaitable[UrlFetchResult]]
-JobSyncFn = Callable[..., Awaitable[None]]
-
 
 class JdIngestionError(Exception):
     """Ingestion rejected input before any durable Job write."""

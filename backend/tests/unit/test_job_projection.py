@@ -48,3 +48,11 @@ def test_embed_job_extraction_rejects_non_finite_vectors() -> None:
 @pytest.mark.parametrize("module", (jd_ingestion, job_reextraction))
 def test_embedding_protocol_has_one_owner(module: object) -> None:
     assert "class EmbeddingClient" not in inspect.getsource(module)
+
+
+@pytest.mark.parametrize("module", (jd_ingestion, job_reextraction))
+def test_orchestrators_delegate_post_commit_sync(module: object) -> None:
+    source = inspect.getsource(module)
+    assert "sync_persisted_job" in source
+    assert "await sync_job(" not in source
+    assert "JobSyncFn = Callable" not in source

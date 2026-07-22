@@ -25,6 +25,7 @@ from app.services.embedding_text import build_job_embedding_text_v1
 from app.services.skill_normalization import SkillNormalizer
 
 logger = logging.getLogger(__name__)
+JobSyncFn = Callable[[], Awaitable[None]]
 
 
 class EmbeddingClient(Protocol):
@@ -59,7 +60,7 @@ async def sync_persisted_job(
     *,
     normalizer: SkillNormalizer,
     graph_driver: AsyncGraphDriver | None,
-    job_sync_fn: Callable[[], Awaitable[None]] | None,
+    job_sync_fn: JobSyncFn | None,
     log_context: str,
 ) -> JobSyncResult:
     """Sync one committed scorable Job row without opening a DB transaction."""
@@ -111,6 +112,7 @@ async def sync_persisted_job(
 
 __all__ = [
     "EmbeddingClient",
+    "JobSyncFn",
     "JobSyncResult",
     "embed_job_extraction",
     "sync_persisted_job",
