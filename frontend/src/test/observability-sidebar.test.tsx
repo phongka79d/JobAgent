@@ -386,6 +386,9 @@ describe('ObservabilitySidebar composition', () => {
       await userEvent.click(
         screen.getByTestId(`jobagent-saved-job-select-${JOB_ID}`),
       );
+      await userEvent.click(
+        await screen.findByRole('tab', {name: 'Tổng quan JD'}),
+      );
       expect(
         await screen.findByTestId('jobagent-saved-job-extraction'),
       ).toHaveTextContent('Build services.');

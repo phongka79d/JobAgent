@@ -215,8 +215,12 @@ export function ObservabilitySidebar({
     <div
       className="jobagent-obs-root"
       data-collapsed="false"
+      data-active-tab={state.selectedTab}
       data-testid="jobagent-obs-root"
-      style={{gridTemplateColumns: '13fr 47fr'}}
+      style={{
+        gridTemplateColumns:
+          state.selectedTab === 'saved-jobs' ? '1fr 5fr' : '13fr 47fr',
+      }}
     >
       <div data-testid="jobagent-obs-tabs">
         <ObservabilityTabList

@@ -19,6 +19,7 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import {
   formatDisplayScore,
+  formatQualityMultiplier,
   type CompactMatchResult,
   type CompactMatchSkillEvidence,
   type CompactMissingRequiredSkill,
@@ -27,6 +28,8 @@ import {ScoreBreakdown} from './ScoreBreakdown';
 
 export type MatchCardProps = {
   data: CompactMatchResult;
+  /** Saved-JD detail already owns identity metadata in its header. */
+  showJobMetadata?: boolean;
 };
 
 function SkillTokens({
@@ -48,7 +51,13 @@ function SkillTokens({
     );
   }
   return (
-    <HStack gap={1} data-testid={testId}>
+    <HStack
+      gap={1}
+      wrap="wrap"
+      width="100%"
+      className="jobagent-match-skill-tokens"
+      data-testid={testId}
+    >
       {skills.map((skill) => (
         <Token
           key={skill.jobSkillKey}
@@ -61,11 +70,25 @@ function SkillTokens({
   );
 }
 
-export function MatchCard({data}: MatchCardProps) {
+function workModeLabel(mode: CompactMatchResult['workMode']): string {
+  switch (mode) {
+    case 'remote':
+      return 'Từ xa';
+    case 'hybrid':
+      return 'Kết hợp';
+    case 'onsite':
+      return 'Tại văn phòng';
+    case 'unknown':
+    default:
+      return 'Chưa xác định';
+  }
+}
+
+export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
   const heading =
     data.title?.trim() ||
     data.company?.trim() ||
-    'Match result';
+    'Kết quả đối chiếu';
 
   return (
     <Card
@@ -77,48 +100,89 @@ export function MatchCard({data}: MatchCardProps) {
       data-final-score={String(data.finalScore)}
     >
       <VStack gap={2} width="100%">
-        <Heading level={4}>{heading}</Heading>
-        <MetadataList
-          columns="single"
-          label={{position: 'start'}}
-          data-testid="jobagent-match-metadata"
+        {showJobMetadata ? <Heading level={4}>{heading}</Heading> : null}
+        <HStack
+          gap={2}
+          wrap="wrap"
+          width="100%"
+          className="jobagent-match-score-summary"
+          data-testid="jobagent-match-score-summary"
         >
-          <MetadataListItem label="Job ID">{data.jobId}</MetadataListItem>
-          {data.company ? (
-            <MetadataListItem label="Company">{data.company}</MetadataListItem>
-          ) : null}
-          {data.title ? (
-            <MetadataListItem label="Title">{data.title}</MetadataListItem>
-          ) : null}
-          {data.location ? (
-            <MetadataListItem label="Location">{data.location}</MetadataListItem>
-          ) : null}
-          <MetadataListItem label="Work mode">{data.workMode}</MetadataListItem>
-          <MetadataListItem label="Final score">
+          <VStack gap={0} className="jobagent-match-score-primary">
+            <Text type="supporting" color="secondary" as="span">
+              Điểm phù hợp
+            </Text>
             <Text
-              type="body"
+              type="large"
               as="span"
               data-testid="jobagent-match-final-score"
             >
               {formatDisplayScore(data.finalScore)}
             </Text>
-          </MetadataListItem>
-          {data.sourceUrl ? (
-            <MetadataListItem label="Source">
-              <Link href={data.sourceUrl} isExternalLink hasUnderline>
-                {data.sourceUrl}
-              </Link>
+          </VStack>
+          <VStack gap={0} className="jobagent-match-score-metric">
+            <Text type="supporting" color="secondary" as="span">
+              Độ tương đồng
+            </Text>
+            <Text type="label" as="span">
+              {formatDisplayScore(data.components.semanticSimilarity)}
+            </Text>
+          </VStack>
+          <VStack gap={0} className="jobagent-match-score-metric">
+            <Text type="supporting" color="secondary" as="span">
+              Độ phủ kỹ năng
+            </Text>
+            <Text type="label" as="span">
+              {data.components.skillScore === null
+                ? 'Chưa có'
+                : formatDisplayScore(data.components.skillScore)}
+            </Text>
+          </VStack>
+          <VStack gap={0} className="jobagent-match-score-metric">
+            <Text type="supporting" color="secondary" as="span">
+              Hệ số chất lượng
+            </Text>
+            <Text type="label" as="span">
+              {formatQualityMultiplier(data.qualityMultiplier)}
+            </Text>
+          </VStack>
+        </HStack>
+        {showJobMetadata ? (
+          <MetadataList
+            columns="single"
+            label={{position: 'start'}}
+            data-testid="jobagent-match-metadata"
+          >
+            <MetadataListItem label="Mã JD">{data.jobId}</MetadataListItem>
+            {data.company ? (
+              <MetadataListItem label="Công ty">{data.company}</MetadataListItem>
+            ) : null}
+            {data.title ? (
+              <MetadataListItem label="Vị trí">{data.title}</MetadataListItem>
+            ) : null}
+            {data.location ? (
+              <MetadataListItem label="Địa điểm">{data.location}</MetadataListItem>
+            ) : null}
+            <MetadataListItem label="Hình thức làm việc">
+              {workModeLabel(data.workMode)}
             </MetadataListItem>
-          ) : null}
-        </MetadataList>
+            {data.sourceUrl ? (
+              <MetadataListItem label="Nguồn">
+                <Link href={data.sourceUrl} isExternalLink hasUnderline>
+                  {data.sourceUrl}
+                </Link>
+              </MetadataListItem>
+            ) : null}
+          </MetadataList>
+        ) : null}
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Matched required skills
+            Kỹ năng đã khớp
           </Text>
           <SkillTokens
             skills={data.matchedRequiredSkills}
-            emptyLabel="None"
+            emptyLabel="Không có"
             color="green"
             testId="jobagent-match-matched-required"
           />
@@ -126,11 +190,11 @@ export function MatchCard({data}: MatchCardProps) {
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Seed-related skills
+            Kỹ năng liên quan
           </Text>
           <SkillTokens
             skills={data.relatedSkills}
-            emptyLabel="None"
+            emptyLabel="Không có"
             color="blue"
             testId="jobagent-match-related-skills"
           />
@@ -138,11 +202,11 @@ export function MatchCard({data}: MatchCardProps) {
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Missing required skills
+            Kỹ năng còn thiếu
           </Text>
           <SkillTokens
             skills={data.missingRequiredSkills}
-            emptyLabel="None"
+            emptyLabel="Không có"
             color="red"
             testId="jobagent-match-missing-required"
           />

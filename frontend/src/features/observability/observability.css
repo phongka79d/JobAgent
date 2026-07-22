@@ -41,6 +41,68 @@
   overflow-y: auto;
 }
 
+/* Saved-JD is a tool workspace: one scroll owner per master/detail pane. */
+.jobagent-saved-jobs-workspace {
+  display: grid;
+  grid-template-columns: minmax(10rem, 3fr) minmax(0, 5fr);
+  gap: 0;
+  height: calc(100vh - (var(--spacing-12) * 2));
+  max-height: none;
+  overflow: hidden;
+}
+
+.jobagent-saved-jobs-master-pane,
+.jobagent-saved-jobs-detail-pane {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.jobagent-saved-jobs-master-pane {
+  padding-inline-end: var(--spacing-2);
+}
+
+.jobagent-saved-jobs-detail-pane {
+  padding-inline-start: var(--spacing-3);
+  border-inline-start: var(--border-width) solid var(--color-border);
+}
+
+.jobagent-saved-jobs-detail-pane .jobagent-obs-detail {
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
+.jobagent-match-score-summary {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(7.5rem, 100%), 1fr)
+  );
+  align-items: stretch;
+  padding: var(--spacing-3);
+  border-radius: var(--radius-container);
+  background: var(--color-background-muted);
+}
+
+.jobagent-match-score-primary,
+.jobagent-match-score-metric {
+  min-width: 0;
+}
+
+.jobagent-match-score-primary {
+  padding-inline-end: var(--spacing-2);
+}
+
+.jobagent-match-skill-tokens {
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.jobagent-match-skill-tokens .astryx-token {
+  max-width: 100%;
+}
+
 .jobagent-obs-row {
   display: flex;
   flex-direction: column;
@@ -298,6 +360,11 @@
   min-width: 0;
 }
 
+/* The resize handle extends two pixels beyond Astryx's sidenav scroll box. */
+.astryx-app-shell-sidenav {
+  overflow-x: hidden;
+}
+
 @media (max-width: 767px) {
   .jobagent-obs-root {
     display: flex;
@@ -312,5 +379,24 @@
   /* Mobile drawer must not trap the chat composer under fixed chrome. */
   .jobagent-obs-panel {
     max-height: min(50vh, 22rem);
+  }
+
+  .jobagent-saved-jobs-workspace {
+    display: flex;
+    height: auto;
+    max-height: min(70vh, calc(100vh - var(--spacing-12)));
+    overflow-y: auto;
+  }
+
+  .jobagent-saved-jobs-master-pane,
+  .jobagent-saved-jobs-detail-pane {
+    overflow: visible;
+  }
+
+  .jobagent-saved-jobs-detail-pane {
+    padding-block-start: var(--spacing-3);
+    padding-inline-start: 0;
+    border-block-start: var(--border-width) solid var(--color-border);
+    border-inline-start: 0;
   }
 }

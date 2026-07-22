@@ -14,7 +14,6 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {
-  MATCH_COMPONENT_LABELS,
   componentScoreForKey,
   formatComponentProgressValue,
   formatDisplayWeight,
@@ -32,6 +31,15 @@ const COMPONENT_ROW_ORDER: readonly MatchComponentKey[] = [
   'location_score',
   'work_mode_score',
 ] as const;
+
+const COMPONENT_LABELS_VI: Readonly<Record<MatchComponentKey, string>> = {
+  semantic_similarity: 'Độ tương đồng',
+  skill_score: 'Độ phủ kỹ năng',
+  seniority_score: 'Cấp bậc',
+  experience_score: 'Kinh nghiệm',
+  location_score: 'Địa điểm',
+  work_mode_score: 'Hình thức làm việc',
+};
 
 export type ScoreBreakdownProps = {
   data: CompactMatchResult;
@@ -56,7 +64,7 @@ function ComponentRow({
   data: CompactMatchResult;
   componentKey: MatchComponentKey;
 }) {
-  const label = MATCH_COMPONENT_LABELS[componentKey];
+  const label = COMPONENT_LABELS_VI[componentKey];
   const score = componentScoreForKey(data.components, componentKey);
   const weight = weightForKey(data, componentKey);
   const testId = `jobagent-match-component-${componentKey}`;
@@ -68,10 +76,10 @@ function ComponentRow({
           {label}
         </Text>
         <Text type="supporting" color="secondary" as="p">
-          Unavailable
+          Không có dữ liệu
         </Text>
         <Text type="supporting" color="secondary" as="p">
-          Effective weight: n/a
+          Trọng số thực tế: n/a
         </Text>
       </VStack>
     );
@@ -89,7 +97,7 @@ function ComponentRow({
         variant="accent"
       />
       <Text type="supporting" color="secondary" as="p">
-        Effective weight:{' '}
+        Trọng số thực tế:{' '}
         {weight === null ? 'n/a' : formatDisplayWeight(weight)}
       </Text>
     </VStack>
@@ -99,7 +107,7 @@ function ComponentRow({
 export function ScoreBreakdown({data}: ScoreBreakdownProps) {
   return (
     <Collapsible
-      trigger="Score breakdown"
+      trigger="Chi tiết cách tính điểm"
       defaultIsOpen={false}
       data-testid="jobagent-match-score-breakdown"
     >
@@ -109,7 +117,7 @@ export function ScoreBreakdown({data}: ScoreBreakdownProps) {
           label={{position: 'start'}}
           data-testid="jobagent-match-quality-meta"
         >
-          <MetadataListItem label="Quality multiplier">
+          <MetadataListItem label="Hệ số chất lượng">
             {formatQualityMultiplier(data.qualityMultiplier)}
           </MetadataListItem>
         </MetadataList>

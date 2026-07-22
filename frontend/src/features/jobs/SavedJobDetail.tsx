@@ -4,6 +4,7 @@
  * Reuses MatchCard / ScoreBreakdown; does not duplicate score formatting maps.
  */
 
+import {useState} from 'react';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
@@ -13,6 +14,7 @@ import {
   MetadataListItem,
 } from '@astryxdesign/core/MetadataList';
 import {Text} from '@astryxdesign/core/Text';
+import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CachedResource, SavedJobActionKind} from './savedJobsState';
@@ -39,6 +41,8 @@ export type SavedJobDetailProps = {
   onRefreshDetail: (jobId: string) => void;
 };
 
+type SavedJobDetailTab = 'comparison' | 'overview' | 'source';
+
 /** Concise Job display name for labels, confirmation, and a11y. */
 export function formatSavedJobLabel(job: SavedJobListItem): string {
   const title = job.title?.trim() || '';
@@ -53,6 +57,51 @@ export function formatSavedJobLabel(job: SavedJobListItem): string {
     return company;
   }
   return `Job ${job.id.slice(0, 8)}`;
+}
+
+function processingStatusLabel(
+  status: SavedJobListItem['processing_status'],
+): string {
+  switch (status) {
+    case 'processed':
+      return 'Đã xử lý';
+    case 'processing':
+      return 'Đang xử lý';
+    case 'failed':
+      return 'Xử lý lỗi';
+    case 'received':
+    default:
+      return 'Đã tiếp nhận';
+  }
+}
+
+function qualityStatusLabel(quality: SavedJobListItem['jd_quality']): string {
+  switch (quality) {
+    case 'full':
+      return 'Đầy đủ';
+    case 'partial':
+      return 'Một phần';
+    case 'unscorable':
+      return 'Chưa thể chấm';
+    default:
+      return 'Chưa có';
+  }
+}
+
+function sourceTypeLabel(sourceType: SavedJobListItem['source_type']): string {
+  return sourceType === 'url' ? 'Đường dẫn' : 'Văn bản';
+}
+
+function evaluationStatusLabel(state: EvaluationCurrentness): string {
+  switch (state) {
+    case 'current':
+      return 'Hiện tại';
+    case 'stale':
+      return 'Cần đánh giá lại';
+    case 'none':
+    default:
+      return 'Chưa đánh giá';
+  }
 }
 
 /**
@@ -75,15 +124,15 @@ function formatExperienceRange(
   maxYears: number | null,
 ): string {
   if (minYears === null && maxYears === null) {
-    return 'Not specified';
+    return 'Chưa xác định';
   }
   if (minYears !== null && maxYears !== null) {
-    return `${minYears}–${maxYears} years`;
+    return `${minYears}–${maxYears} năm`;
   }
   if (minYears !== null) {
-    return `${minYears}+ years`;
+    return `${minYears}+ năm`;
   }
-  return `Up to ${maxYears} years`;
+  return `Tối đa ${maxYears} năm`;
 }
 
 function formatSkillConfidence(confidence: number): string {
@@ -166,7 +215,7 @@ function ExtractionEvidenceSection({
         defaultIsOpen={false}
         trigger={
           <Text type="label" as="span">
-            Evidence ({entries.length})
+            Bằng chứng ({entries.length})
           </Text>
         }
       >
@@ -177,7 +226,7 @@ function ExtractionEvidenceSection({
             as="p"
             data-testid="jobagent-saved-job-evidence-empty"
           >
-            No evidence available
+            Không có bằng chứng
           </Text>
         ) : (
           <VStack gap={1} width="100%" data-testid="jobagent-saved-job-evidence-list">
@@ -206,7 +255,7 @@ function ExtractionEvidenceSection({
 function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
   const summaryText =
     extraction.summary.trim() === ''
-      ? 'No summary available'
+      ? 'Không có bản tóm tắt'
       : extraction.summary;
 
   return (
@@ -216,7 +265,7 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
       data-testid="jobagent-saved-job-extraction"
     >
       <Text type="label" as="p">
-        Extraction
+        Thông tin JD
       </Text>
 
       <VStack
@@ -225,35 +274,39 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
         data-testid="jobagent-saved-job-extraction-metadata"
       >
         <MetadataList columns="single" label={{position: 'start'}}>
-          <MetadataListItem label="Title">
+          <MetadataListItem label="Vị trí">
             <Text type="body" maxLines={2} hasTruncateTooltip as="span">
-              {extraction.title?.trim() || 'Not specified'}
+              {extraction.title?.trim() || 'Chưa xác định'}
             </Text>
           </MetadataListItem>
-          <MetadataListItem label="Company">
-            {extraction.company?.trim() || 'Not specified'}
+          <MetadataListItem label="Công ty">
+            {extraction.company?.trim() || 'Chưa xác định'}
           </MetadataListItem>
-          <MetadataListItem label="Summary">
+          <MetadataListItem label="Tóm tắt">
             <Text type="body" maxLines={4} hasTruncateTooltip as="span">
               {summaryText}
             </Text>
           </MetadataListItem>
-          <MetadataListItem label="Seniority">
-            {extraction.seniority}
+          <MetadataListItem label="Cấp bậc">
+            {extraction.seniority === 'unknown'
+              ? 'Chưa xác định'
+              : extraction.seniority}
           </MetadataListItem>
-          <MetadataListItem label="Experience">
+          <MetadataListItem label="Kinh nghiệm">
             {formatExperienceRange(
               extraction.min_experience_years,
               extraction.max_experience_years,
             )}
           </MetadataListItem>
-          <MetadataListItem label="Location">
-            {extraction.location?.trim() || 'Not specified'}
+          <MetadataListItem label="Địa điểm">
+            {extraction.location?.trim() || 'Chưa xác định'}
           </MetadataListItem>
-          <MetadataListItem label="Work mode">
-            {extraction.work_mode}
+          <MetadataListItem label="Hình thức làm việc">
+            {extraction.work_mode === 'unknown'
+              ? 'Chưa xác định'
+              : extraction.work_mode}
           </MetadataListItem>
-          <MetadataListItem label="Extraction confidence">
+          <MetadataListItem label="Độ tin cậy trích xuất">
             {formatSkillConfidence(extraction.extraction_confidence)}
           </MetadataListItem>
         </MetadataList>
@@ -265,7 +318,7 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
         data-testid="jobagent-saved-job-responsibilities"
       >
         <Text type="label" as="p">
-          Responsibilities
+          Trách nhiệm
         </Text>
         {extraction.responsibilities.length === 0 ? (
           <Text
@@ -274,7 +327,7 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
             as="p"
             data-testid="jobagent-saved-job-responsibilities-empty"
           >
-            No responsibilities extracted
+            Không trích xuất được trách nhiệm
           </Text>
         ) : (
           <VStack gap={1} width="100%">
@@ -293,16 +346,16 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
       </VStack>
 
       <SkillListSection
-        title="Required skills"
+        title="Kỹ năng bắt buộc"
         skills={extraction.required_skills}
-        emptyLabel="No required skills extracted"
+        emptyLabel="Không trích xuất được kỹ năng bắt buộc"
         testId="jobagent-saved-job-required-skills"
       />
 
       <SkillListSection
-        title="Preferred skills"
+        title="Kỹ năng ưu tiên"
         skills={extraction.preferred_skills}
-        emptyLabel="No preferred skills extracted"
+        emptyLabel="Không trích xuất được kỹ năng ưu tiên"
         testId="jobagent-saved-job-preferred-skills"
       />
 
@@ -333,6 +386,8 @@ export function SavedJobDetailView({
   const jobLabel = formatSavedJobLabel(job);
   const isGraphWarning =
     actionError?.code === REEXTRACT_GRAPH_FAILURE_CODE;
+  const [activeTab, setActiveTab] =
+    useState<SavedJobDetailTab>('comparison');
 
   return (
     <VStack
@@ -343,7 +398,7 @@ export function SavedJobDetailView({
       data-evaluation-state={job.evaluation_state}
     >
       <Text type="label" color="secondary" display="block">
-        Selected JD
+        JD đã chọn
       </Text>
       <Text
         type="large"
@@ -360,112 +415,30 @@ export function SavedJobDetailView({
         label={{position: 'top'}}
         data-testid="jobagent-saved-job-detail-meta"
       >
-        <MetadataListItem label="Processing">
-          {job.processing_status}
+        <MetadataListItem label="Xử lý">
+          {processingStatusLabel(job.processing_status)}
         </MetadataListItem>
-        <MetadataListItem label="JD quality">
-          {job.jd_quality ?? 'Unavailable'}
+        <MetadataListItem label="Chất lượng JD">
+          {qualityStatusLabel(job.jd_quality)}
         </MetadataListItem>
-        <MetadataListItem label="Source type">{job.source_type}</MetadataListItem>
+        <MetadataListItem label="Loại nguồn">
+          {sourceTypeLabel(job.source_type)}
+        </MetadataListItem>
         {job.source_url ? (
-          <MetadataListItem label="Source URL">{job.source_url}</MetadataListItem>
+          <MetadataListItem label="URL nguồn">{job.source_url}</MetadataListItem>
         ) : null}
-        <MetadataListItem label="Evaluation">
-          {job.evaluation_state}
+        <MetadataListItem label="Đánh giá">
+          {evaluationStatusLabel(job.evaluation_state)}
         </MetadataListItem>
       </MetadataList>
-
-      {detail?.phase === 'loading' && !data ? (
-        <Text
-          type="supporting"
-          color="secondary"
-          as="p"
-          data-testid="jobagent-saved-job-detail-loading"
-        >
-          Loading detail…
-        </Text>
-      ) : null}
-
-      {detail?.phase === 'error' && detail.error ? (
-        <Banner
-          status="error"
-          title="Detail unavailable"
-          description={`${detail.error.summary} (${detail.error.code})`}
-          container="section"
-          data-testid="jobagent-saved-job-detail-error"
-        />
-      ) : null}
-
-      {extraction ? (
-        <ExtractionGroups extraction={extraction} />
-      ) : data && detail?.phase !== 'loading' ? (
-        <Text
-          type="supporting"
-          color="secondary"
-          as="p"
-          data-testid="jobagent-saved-job-extraction-empty"
-        >
-          No structured extraction available
-        </Text>
-      ) : null}
-
-      {data?.raw_content ? (
-        <VStack gap={1} width="100%" data-testid="jobagent-saved-job-source">
-          <Text type="label" as="p">
-            Source text
-          </Text>
-          <pre className="jobagent-obs-fulltext">{data.raw_content}</pre>
-        </VStack>
-      ) : null}
-
-      {evaluation ? (
-        <VStack
-          gap={1}
-          width="100%"
-          data-testid="jobagent-saved-job-evaluation"
-          data-evaluation-row-state={evaluation.evaluation_state}
-        >
-          {job.evaluation_state === 'stale' ? (
-            <Banner
-              status="warning"
-              title="Cần đánh giá lại"
-              description="Latest stored result is visible but not current for the active CV/profile context."
-              container="section"
-              data-testid="jobagent-saved-job-stale-banner"
-            />
-          ) : null}
-          <MatchCard data={evaluation.result} />
-        </VStack>
-      ) : job.evaluation_state === 'none' ? (
-        <Text
-          type="supporting"
-          color="secondary"
-          as="p"
-          data-testid="jobagent-saved-job-no-evaluation"
-        >
-          Chưa có kết quả đánh giá cho JD này.
-        </Text>
-      ) : null}
-
-      {actionError ? (
-        <Banner
-          status={isGraphWarning ? 'warning' : 'error'}
-          title={
-            isGraphWarning
-              ? 'Graph rebuild required'
-              : 'Action failed'
-          }
-          description={`${actionError.summary} (${actionError.code})`}
-          container="section"
-          data-testid={`jobagent-saved-job-action-error-${job.id}`}
-        />
-      ) : null}
 
       <HStack
         gap={1}
         wrap="wrap"
         vAlign="center"
         className="jobagent-obs-row-actions"
+        role="group"
+        aria-label="Thao tác JD"
         data-testid={`jobagent-saved-job-actions-${job.id}`}
       >
         {evaluateLabel ? (
@@ -481,13 +454,22 @@ export function SavedJobDetailView({
         ) : null}
 
         <Button
-          label="Re-extract JD"
+          label="Trích xuất lại"
           variant="secondary"
           size="sm"
           isDisabled={isPending}
           isLoading={isReextractPending}
           onClick={() => onRequestReextract(job)}
           data-testid={`jobagent-saved-job-reextract-${job.id}`}
+        />
+
+        <Button
+          label="Làm mới"
+          variant="ghost"
+          size="sm"
+          isDisabled={isPending}
+          onClick={() => onRefreshDetail(job.id)}
+          data-testid={`jobagent-saved-job-refresh-detail-${job.id}`}
         />
 
         <Button
@@ -500,18 +482,9 @@ export function SavedJobDetailView({
           data-testid={`jobagent-saved-job-delete-${job.id}`}
         />
 
-        <Button
-          label="Refresh detail"
-          variant="ghost"
-          size="sm"
-          isDisabled={isPending}
-          onClick={() => onRefreshDetail(job.id)}
-          data-testid={`jobagent-saved-job-refresh-detail-${job.id}`}
-        />
-
         {actionError ? (
           <Button
-            label="Dismiss error"
+            label="Đóng thông báo"
             variant="ghost"
             size="sm"
             isDisabled={isPending}
@@ -520,6 +493,128 @@ export function SavedJobDetailView({
           />
         ) : null}
       </HStack>
+
+      <TabList
+        role="tablist"
+        aria-label="Chi tiết JD"
+        value={activeTab}
+        onChange={(value) => setActiveTab(value as SavedJobDetailTab)}
+        size="sm"
+        layout="fill"
+        hasDivider
+      >
+        <Tab
+          value="comparison"
+          label="Đối chiếu CV"
+          role="tab"
+          aria-selected={activeTab === 'comparison'}
+        />
+        <Tab
+          value="overview"
+          label="Tổng quan JD"
+          role="tab"
+          aria-selected={activeTab === 'overview'}
+        />
+        <Tab
+          value="source"
+          label="Nội dung gốc"
+          role="tab"
+          aria-selected={activeTab === 'source'}
+        />
+      </TabList>
+
+      {detail?.phase === 'loading' && !data ? (
+        <Text
+          type="supporting"
+          color="secondary"
+          as="p"
+          data-testid="jobagent-saved-job-detail-loading"
+        >
+          Đang tải chi tiết…
+        </Text>
+      ) : null}
+
+      {detail?.phase === 'error' && detail.error ? (
+        <Banner
+          status="error"
+          title="Không thể tải chi tiết"
+          description={`${detail.error.summary} (${detail.error.code})`}
+          container="section"
+          data-testid="jobagent-saved-job-detail-error"
+        />
+      ) : null}
+
+      {activeTab === 'overview' && extraction ? (
+        <ExtractionGroups extraction={extraction} />
+      ) : activeTab === 'overview' && data && detail?.phase !== 'loading' ? (
+        <Text
+          type="supporting"
+          color="secondary"
+          as="p"
+          data-testid="jobagent-saved-job-extraction-empty"
+        >
+          Không có dữ liệu trích xuất có cấu trúc
+        </Text>
+      ) : null}
+
+      {activeTab === 'source' && data?.raw_content ? (
+        <VStack gap={1} width="100%" data-testid="jobagent-saved-job-source">
+          <Text type="label" as="p">
+            Nội dung gốc
+          </Text>
+          <pre className="jobagent-obs-fulltext">{data.raw_content}</pre>
+        </VStack>
+      ) : null}
+
+      {activeTab === 'source' && data && !data.raw_content ? (
+        <Text type="supporting" color="secondary" as="p">
+          Không có nội dung nguồn.
+        </Text>
+      ) : null}
+
+      {activeTab === 'comparison' && evaluation ? (
+        <VStack
+          gap={1}
+          width="100%"
+          data-testid="jobagent-saved-job-evaluation"
+          data-evaluation-row-state={evaluation.evaluation_state}
+        >
+          {job.evaluation_state === 'stale' ? (
+            <Banner
+              status="warning"
+              title="Cần đánh giá lại"
+              description="Kết quả đã lưu vẫn được hiển thị nhưng không còn khớp với CV hoặc hồ sơ hiện tại."
+              container="section"
+              data-testid="jobagent-saved-job-stale-banner"
+            />
+          ) : null}
+          <MatchCard data={evaluation.result} showJobMetadata={false} />
+        </VStack>
+      ) : activeTab === 'comparison' && job.evaluation_state === 'none' ? (
+        <Text
+          type="supporting"
+          color="secondary"
+          as="p"
+          data-testid="jobagent-saved-job-no-evaluation"
+        >
+          Chưa có kết quả đối chiếu CV cho JD này.
+        </Text>
+      ) : null}
+
+      {actionError ? (
+        <Banner
+          status={isGraphWarning ? 'warning' : 'error'}
+          title={
+            isGraphWarning
+              ? 'Cần dựng lại đồ thị'
+              : 'Thao tác thất bại'
+          }
+          description={`${actionError.summary} (${actionError.code})`}
+          container="section"
+          data-testid={`jobagent-saved-job-action-error-${job.id}`}
+        />
+      ) : null}
+
     </VStack>
   );
 }

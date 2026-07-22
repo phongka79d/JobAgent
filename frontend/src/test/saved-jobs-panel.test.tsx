@@ -297,6 +297,35 @@ describe('observability tab order for JD đã lưu', () => {
 });
 
 describe('SavedJobsPanel list, detail, and actions', () => {
+  it('uses a master-detail workspace and opens the CV comparison first', () => {
+    const current = listItem(JOB_CURRENT, {
+      evaluation_state: 'current',
+      latest_score: 0.536,
+    });
+
+    renderPanel({items: [current], selectedJobId: JOB_CURRENT});
+
+    expect(
+      screen.getByTestId('jobagent-saved-jobs-master-pane'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-saved-jobs-detail-pane'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('tab', {name: 'Đối chiếu CV'}),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('jobagent-match-card')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-saved-job-extraction'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-saved-job-source'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('jobagent-match-metadata'),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders compact rows with processing badge, stale badge, and current score', () => {
     const none = listItem(JOB_NONE, {evaluation_state: 'none'});
     const stale = listItem(JOB_STALE, {
@@ -332,6 +361,47 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(longRow.textContent).toContain('Acme Corp');
   });
 
+  it('keeps each list row concise with one company label and Vietnamese status', () => {
+    const current = listItem(JOB_CURRENT, {
+      title: 'AI Engineer',
+      company: 'MISA',
+      jd_quality: 'partial',
+      evaluation_state: 'current',
+      latest_score: 0.536,
+    });
+
+    renderPanel({items: [current], selectedJobId: null});
+
+    const row = screen.getByTestId(
+      `jobagent-saved-job-select-${JOB_CURRENT}`,
+    );
+    expect(row).toHaveTextContent('Đã xử lý · Một phần');
+    expect(row.textContent?.match(/MISA/g)).toHaveLength(1);
+    expect(row).not.toHaveTextContent('processed');
+    expect(row).not.toHaveTextContent('partial');
+    expect(row).not.toHaveTextContent('current');
+  });
+
+  it('presents selected JD metadata consistently in Vietnamese', () => {
+    const current = listItem(JOB_CURRENT, {
+      jd_quality: 'partial',
+      source_type: 'text',
+      evaluation_state: 'current',
+      latest_score: 0.536,
+    });
+
+    renderPanel({items: [current], selectedJobId: JOB_CURRENT});
+
+    const metadata = screen.getByTestId('jobagent-saved-job-detail-meta');
+    expect(metadata).toHaveTextContent('Đã xử lý');
+    expect(metadata).toHaveTextContent('Một phần');
+    expect(metadata).toHaveTextContent('Văn bản');
+    expect(metadata).toHaveTextContent('Hiện tại');
+    expect(metadata).not.toHaveTextContent('processed');
+    expect(metadata).not.toHaveTextContent('partial');
+    expect(metadata).not.toHaveTextContent('current');
+  });
+
   it('shows one selected detail with extraction and MatchCard for persisted result', async () => {
     const stale = listItem(JOB_STALE, {
       evaluation_state: 'stale',
@@ -340,12 +410,6 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     renderPanel({items: [stale], selectedJobId: JOB_STALE});
 
     expect(screen.getByTestId('jobagent-saved-job-detail')).toBeInTheDocument();
-    expect(
-      screen.getByTestId('jobagent-saved-job-extraction'),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
-      'raw jd text',
-    );
     expect(screen.getByTestId('jobagent-match-card')).toBeInTheDocument();
     expect(
       screen.getByTestId('jobagent-saved-job-stale-banner'),
@@ -353,9 +417,20 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(screen.getByTestId('jobagent-match-final-score')).toHaveTextContent(
       formatDisplayScore(0.41),
     );
+
+    await userEvent.click(screen.getByRole('tab', {name: 'Tổng quan JD'}));
+    expect(
+      screen.getByTestId('jobagent-saved-job-extraction'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('jobagent-match-card')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', {name: 'Nội dung gốc'}));
+    expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
+      'raw jd text',
+    );
   });
 
-  it('renders No summary available for empty extraction summary with metadata retained', () => {
+  it('renders an explicit Vietnamese empty summary with metadata retained', async () => {
     const unscorable = listItem(JOB_NONE, {
       title: 'Contact form role',
       company: 'Sparse Co',
@@ -386,23 +461,25 @@ describe('SavedJobsPanel list, detail, and actions', () => {
       details: {[JOB_NONE]: detail},
     });
 
+    await userEvent.click(screen.getByRole('tab', {name: 'Tổng quan JD'}));
     const extraction = screen.getByTestId('jobagent-saved-job-extraction');
-    expect(extraction).toHaveTextContent('No summary available');
+    expect(extraction).toHaveTextContent('Không có bản tóm tắt');
     expect(extraction).toHaveTextContent('Contact form role');
     expect(extraction).toHaveTextContent('Sparse Co');
-    expect(extraction).toHaveTextContent('unknown');
+    expect(extraction).toHaveTextContent('Chưa xác định');
+    await userEvent.click(screen.getByRole('tab', {name: 'Nội dung gốc'}));
     expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
       'Please email careers@example.com',
     );
     expect(screen.getByTestId('jobagent-saved-job-detail-meta')).toHaveTextContent(
-      'unscorable',
+      'Chưa thể chấm',
     );
     expect(
       screen.queryByText(/INVALID_SAVED_JOB_DETAIL_PAYLOAD/),
     ).not.toBeInTheDocument();
   });
 
-  it('renders No summary available for whitespace-only extraction summary', () => {
+  it('renders an explicit empty summary for whitespace-only extraction summary', async () => {
     const job = listItem(JOB_NONE, {
       evaluation_state: 'none',
       jd_quality: 'unscorable',
@@ -419,9 +496,11 @@ describe('SavedJobsPanel list, detail, and actions', () => {
       details: {[JOB_NONE]: detail},
     });
 
+    await userEvent.click(screen.getByRole('tab', {name: 'Tổng quan JD'}));
     expect(
       screen.getByTestId('jobagent-saved-job-extraction'),
-    ).toHaveTextContent('No summary available');
+    ).toHaveTextContent('Không có bản tóm tắt');
+    await userEvent.click(screen.getByRole('tab', {name: 'Nội dung gốc'}));
     expect(screen.getByTestId('jobagent-saved-job-source')).toHaveTextContent(
       'raw jd text',
     );
@@ -612,18 +691,20 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(onClearError).toHaveBeenCalledWith(JOB_NONE);
   });
 
-  it('renders every extraction group with experience, skills, and confidence', () => {
+  it('renders every extraction group with experience, skills, and confidence', async () => {
     const job = listItem(JOB_CURRENT, {
       evaluation_state: 'current',
       latest_score: 0.88,
     });
     renderPanel({items: [job], selectedJobId: JOB_CURRENT});
 
+    await userEvent.click(screen.getByRole('tab', {name: 'Tổng quan JD'}));
     const extraction = screen.getByTestId('jobagent-saved-job-extraction');
     expect(
       screen.getByTestId('jobagent-saved-job-extraction-metadata'),
     ).toBeInTheDocument();
-    expect(extraction).toHaveTextContent('5–8 years');
+    expect(extraction).toHaveTextContent('Thông tin JD');
+    expect(extraction).toHaveTextContent('5–8 năm');
     expect(extraction).toHaveTextContent('0.90');
     expect(
       screen.getByTestId('jobagent-saved-job-responsibilities'),
@@ -635,7 +716,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
       screen.getByTestId('jobagent-saved-job-preferred-skills'),
     ).toHaveTextContent('Kubernetes');
     expect(screen.getByTestId('jobagent-saved-job-evidence')).toHaveTextContent(
-      'Evidence (2)',
+      'Bằng chứng (2)',
     );
   });
 
@@ -660,22 +741,23 @@ describe('SavedJobsPanel list, detail, and actions', () => {
       details: {[JOB_NONE]: detail},
     });
 
+    await userEvent.click(screen.getByRole('tab', {name: 'Tổng quan JD'}));
     expect(
       screen.getByTestId('jobagent-saved-job-responsibilities-empty'),
-    ).toHaveTextContent('No responsibilities extracted');
+    ).toHaveTextContent('Không trích xuất được trách nhiệm');
     expect(
       screen.getByTestId('jobagent-saved-job-required-skills'),
-    ).toHaveTextContent('No required skills extracted');
+    ).toHaveTextContent('Không trích xuất được kỹ năng bắt buộc');
     expect(
       screen.getByTestId('jobagent-saved-job-preferred-skills'),
-    ).toHaveTextContent('No preferred skills extracted');
+    ).toHaveTextContent('Không trích xuất được kỹ năng ưu tiên');
     expect(
       screen.getByTestId('jobagent-saved-job-extraction-metadata'),
-    ).toHaveTextContent('Not specified');
+    ).toHaveTextContent('Chưa xác định');
 
     // Collapsible starts closed: trigger is aria-expanded=false; content is not shown.
     const evidenceTrigger = screen.getByRole('button', {
-      name: /Evidence \(0\)/,
+      name: /Bằng chứng \(0\)/,
     });
     expect(evidenceTrigger).toHaveAttribute('aria-expanded', 'false');
 
@@ -683,7 +765,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(evidenceTrigger).toHaveAttribute('aria-expanded', 'true');
     expect(
       await screen.findByTestId('jobagent-saved-job-evidence-empty'),
-    ).toHaveTextContent('No evidence available');
+    ).toHaveTextContent('Không có bằng chứng');
   });
 
   it('names the Job in re-extract dialog, states consequences, and confirms', async () => {
@@ -756,7 +838,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(
       screen.getByTestId(`jobagent-saved-job-delete-${JOB_STALE}`),
     ).toBeDisabled();
-    expect(screen.getByText('Re-extracting…')).toBeInTheDocument();
+    expect(screen.getByText('Đang trích xuất…')).toBeInTheDocument();
   });
 
   it('shows graph rebuild guidance banner for NEO4J_SYNC_FAILED after reextract', () => {
@@ -774,7 +856,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     const banner = screen.getByTestId(
       `jobagent-saved-job-action-error-${JOB_NONE}`,
     );
-    expect(banner).toHaveTextContent('Graph rebuild required');
+    expect(banner).toHaveTextContent('Cần dựng lại đồ thị');
     expect(banner).toHaveTextContent('local graph rebuild');
   });
 });

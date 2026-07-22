@@ -430,6 +430,23 @@ describe('strict compact match_jobs parsing', () => {
 });
 
 describe('MatchCard rendering', () => {
+  it('surfaces the final score and decisive components in a compact summary', () => {
+    const parsed = parseMatchJobsResultData(
+      compactMatchData([matchResultHigh()]),
+    )!;
+
+    renderWithTheme(<MatchCard data={parsed.results[0]} />);
+
+    const summary = screen.getByTestId('jobagent-match-score-summary');
+    expect(summary).toHaveTextContent('81.2%');
+    expect(summary).toHaveTextContent('Độ tương đồng');
+    expect(summary).toHaveTextContent('90.0%');
+    expect(summary).toHaveTextContent('Độ phủ kỹ năng');
+    expect(summary).toHaveTextContent('80.0%');
+    expect(summary).toHaveTextContent('Hệ số chất lượng');
+    expect(summary).toHaveTextContent('1.00');
+  });
+
   it('renders title, company, location, work mode, rounded score, skills, and source', async () => {
     const parsed = parseMatchJobsResultData(
       compactMatchData([matchResultHigh()]),
@@ -441,7 +458,7 @@ describe('MatchCard rendering', () => {
     ).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('Berlin')).toBeInTheDocument();
-    expect(screen.getByText('remote')).toBeInTheDocument();
+    expect(screen.getByText('Từ xa')).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-match-final-score')).toHaveTextContent(
       '81.2%',
     );
@@ -460,6 +477,9 @@ describe('MatchCard rendering', () => {
         'Kubernetes',
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText('Kỹ năng đã khớp')).toBeInTheDocument();
+    expect(screen.getByText('Kỹ năng liên quan')).toBeInTheDocument();
+    expect(screen.getByText('Kỹ năng còn thiếu')).toBeInTheDocument();
     expect(screen.getByRole('link', {name: /example.com/})).toHaveAttribute(
       'href',
       'https://example.com/jobs/1',
@@ -482,7 +502,7 @@ describe('MatchCard rendering', () => {
     );
 
     // Expand collapsible score breakdown.
-    const trigger = screen.getByText('Score breakdown');
+    const trigger = screen.getByText('Chi tiết cách tính điểm');
     await user.click(trigger);
 
     await waitFor(() => {
@@ -493,11 +513,12 @@ describe('MatchCard rendering', () => {
     expect(
       screen.getByTestId('jobagent-match-component-skill_score'),
     ).toHaveAttribute('data-available', 'false');
-    expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Quality multiplier/i)).toBeInTheDocument();
-    expect(screen.getByText('0.85')).toBeInTheDocument();
+    expect(screen.getAllByText('Không có dữ liệu').length).toBeGreaterThanOrEqual(1);
+    const breakdown = screen.getByTestId('jobagent-match-score-breakdown');
+    expect(within(breakdown).getByText(/Hệ số chất lượng/i)).toBeInTheDocument();
+    expect(within(breakdown).getByText('0.85')).toBeInTheDocument();
     // Effective weights present for available components.
-    expect(screen.getAllByText(/Effective weight:/i).length).toBeGreaterThanOrEqual(
+    expect(screen.getAllByText(/Trọng số thực tế:/i).length).toBeGreaterThanOrEqual(
       1,
     );
   });
@@ -508,16 +529,20 @@ describe('MatchCard rendering', () => {
     )!;
     const user = userEvent.setup();
     renderWithTheme(<MatchCard data={parsed.results[0]} />);
-    await user.click(screen.getByText('Score breakdown'));
+    await user.click(screen.getByText('Chi tiết cách tính điểm'));
     await waitFor(() => {
       expect(
         screen.getByTestId('jobagent-match-component-location_score'),
-      ).toHaveTextContent('Unavailable');
+      ).toHaveTextContent('Không có dữ liệu');
     });
     expect(
       screen.getByTestId('jobagent-match-component-semantic_similarity'),
     ).toHaveAttribute('data-available', 'true');
-    expect(screen.getByText('1.00')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('jobagent-match-score-breakdown')).getByText(
+        '1.00',
+      ),
+    ).toBeInTheDocument();
   });
 });
 

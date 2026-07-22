@@ -73,7 +73,38 @@ function processingVariant(
 }
 
 function qualityLabel(quality: JobJdQuality | null): string | null {
-  return quality;
+  switch (quality) {
+    case 'full':
+      return 'Đầy đủ';
+    case 'partial':
+      return 'Một phần';
+    case 'unscorable':
+      return 'Chưa thể chấm';
+    default:
+      return null;
+  }
+}
+
+function processingLabel(status: JobProcessingStatus): string {
+  switch (status) {
+    case 'processed':
+      return 'Đã xử lý';
+    case 'processing':
+      return 'Đang xử lý';
+    case 'failed':
+      return 'Xử lý lỗi';
+    case 'received':
+    default:
+      return 'Đã tiếp nhận';
+  }
+}
+
+function listRowLabel(item: SavedJobListItem): string {
+  return (
+    item.title?.trim() ||
+    item.company?.trim() ||
+    `JD ${item.id.slice(0, 8)}`
+  );
 }
 
 function evaluationEndContent(item: SavedJobListItem) {
@@ -126,11 +157,11 @@ function evaluationEndContent(item: SavedJobListItem) {
 function rowDescription(item: SavedJobListItem): string {
   const company = item.company?.trim() || 'Unknown company';
   const quality = qualityLabel(item.jd_quality);
-  const parts = [company, item.processing_status];
+  const parts = item.title?.trim() ? [company] : [];
+  parts.push(processingLabel(item.processing_status));
   if (quality) {
     parts.push(quality);
   }
-  parts.push(item.evaluation_state);
   return parts.join(' · ');
 }
 
@@ -175,110 +206,128 @@ export function SavedJobsPanel({
   return (
     <VStack
       gap={2}
-      className="jobagent-obs-panel"
+      className="jobagent-obs-panel jobagent-saved-jobs-workspace"
       data-testid="jobagent-obs-saved-jobs"
       role="tabpanel"
       id="jobagent-obs-panel-saved-jobs"
       aria-labelledby="jobagent-obs-tab-saved-jobs"
     >
-      <ObservabilityPanelHeader
-        eyebrow="Saved jobs"
-        title="JD đã lưu"
-        onRefresh={onRefresh}
-        isRefreshing={list.phase === 'loading'}
-        refreshTestId="jobagent-obs-saved-jobs-refresh"
-      />
-
-      {list.phase === 'loading' && !list.data ? (
-        <ObservabilityListSkeleton
-          rows={3}
-          testId="jobagent-obs-saved-jobs-loading"
+      <VStack
+        gap={2}
+        className="jobagent-saved-jobs-master-pane"
+        data-testid="jobagent-saved-jobs-master-pane"
+      >
+        <ObservabilityPanelHeader
+          eyebrow="Danh sách"
+          title="JD đã lưu"
+          onRefresh={onRefresh}
+          isRefreshing={list.phase === 'loading'}
+          refreshTestId="jobagent-obs-saved-jobs-refresh"
         />
-      ) : null}
 
-      {list.phase === 'error' && list.error ? (
-        <Banner
-          status="error"
-          title="Saved JDs unavailable"
-          description={`${list.error.summary} (${list.error.code})`}
-          container="section"
-          data-testid="jobagent-obs-saved-jobs-error"
-        />
-      ) : null}
+        {list.phase === 'loading' && !list.data ? (
+          <ObservabilityListSkeleton
+            rows={3}
+            testId="jobagent-obs-saved-jobs-loading"
+          />
+        ) : null}
 
-      {list.phase === 'empty' ||
-      (list.loaded && items.length === 0 && list.phase !== 'error') ? (
-        <EmptyState
-          title="Chưa có JD đã lưu"
-          description="Save a job description from chat or match results to evaluate it here."
-          isCompact
-          data-testid="jobagent-obs-saved-jobs-empty"
-        />
-      ) : null}
+        {list.phase === 'error' && list.error ? (
+          <Banner
+            status="error"
+            title="Không thể tải JD đã lưu"
+            description={`${list.error.summary} (${list.error.code})`}
+            container="section"
+            data-testid="jobagent-obs-saved-jobs-error"
+          />
+        ) : null}
 
-      {items.length > 0 ? (
-        <List
-          density="compact"
-          hasDividers
-          header="JD đã lưu"
-          data-testid="jobagent-obs-saved-jobs-list"
-        >
-          {items.map((item) => {
-            const label = formatSavedJobLabel(item);
-            const pending = actions.pendingByJob[item.id];
-            return (
-              <ListItem
-                key={item.id}
-                label={label}
-                description={rowDescription(item)}
-                startContent={
-                  <StatusDot
-                    variant={processingVariant(item.processing_status)}
-                    label={item.processing_status}
-                  />
-                }
-                endContent={
-                  <HStack gap={1} vAlign="center">
-                    {pending ? (
-                      <Text type="supporting" color="secondary" as="span">
-                        {pending === 'evaluate'
-                          ? 'Evaluating…'
-                          : pending === 'reextract'
-                            ? 'Re-extracting…'
-                            : 'Deleting…'}
-                      </Text>
-                    ) : null}
-                    {evaluationEndContent(item)}
-                  </HStack>
-                }
-                isSelected={item.id === selectedJobId}
-                isDisabled={pending === 'delete'}
-                onClick={() => onSelect(item.id)}
-                data-testid={`jobagent-saved-job-select-${item.id}`}
-                data-evaluation-state={item.evaluation_state}
-                data-job-id={item.id}
-                data-full-label={label}
-              />
-            );
-          })}
-        </List>
-      ) : null}
+        {list.phase === 'empty' ||
+        (list.loaded && items.length === 0 && list.phase !== 'error') ? (
+          <EmptyState
+            title="Chưa có JD đã lưu"
+            description="Hãy lưu một mô tả công việc từ khung chat để đánh giá tại đây."
+            isCompact
+            data-testid="jobagent-obs-saved-jobs-empty"
+          />
+        ) : null}
 
-      {selectedItem ? (
-        <SavedJobDetailView
-          job={selectedItem}
-          detail={selectedDetail}
-          pendingKind={selectedPending}
-          actionError={selectedError}
-          onEvaluate={(jobId) => {
-            void onEvaluate(jobId);
-          }}
-          onRequestDelete={(job) => setDeleteTarget(job)}
-          onRequestReextract={(job) => setReextractTarget(job)}
-          onClearError={onClearError}
-          onRefreshDetail={onRefreshDetail}
-        />
-      ) : null}
+        {items.length > 0 ? (
+          <List
+            density="compact"
+            hasDividers
+            header={`${items.length} JD`}
+            data-testid="jobagent-obs-saved-jobs-list"
+          >
+            {items.map((item) => {
+              const label = listRowLabel(item);
+              const pending = actions.pendingByJob[item.id];
+              return (
+                <ListItem
+                  key={item.id}
+                  label={label}
+                  description={rowDescription(item)}
+                  startContent={
+                    <StatusDot
+                      variant={processingVariant(item.processing_status)}
+                      label={processingLabel(item.processing_status)}
+                    />
+                  }
+                  endContent={
+                    <HStack gap={1} vAlign="center">
+                      {pending ? (
+                        <Text type="supporting" color="secondary" as="span">
+                          {pending === 'evaluate'
+                            ? 'Đang đánh giá…'
+                            : pending === 'reextract'
+                              ? 'Đang trích xuất…'
+                              : 'Đang xoá…'}
+                        </Text>
+                      ) : null}
+                      {evaluationEndContent(item)}
+                    </HStack>
+                  }
+                  isSelected={item.id === selectedJobId}
+                  isDisabled={pending === 'delete'}
+                  onClick={() => onSelect(item.id)}
+                  data-testid={`jobagent-saved-job-select-${item.id}`}
+                  data-evaluation-state={item.evaluation_state}
+                  data-job-id={item.id}
+                  data-full-label={formatSavedJobLabel(item)}
+                />
+              );
+            })}
+          </List>
+        ) : null}
+      </VStack>
+
+      <VStack
+        gap={2}
+        className="jobagent-saved-jobs-detail-pane"
+        data-testid="jobagent-saved-jobs-detail-pane"
+      >
+        {selectedItem ? (
+          <SavedJobDetailView
+            job={selectedItem}
+            detail={selectedDetail}
+            pendingKind={selectedPending}
+            actionError={selectedError}
+            onEvaluate={(jobId) => {
+              void onEvaluate(jobId);
+            }}
+            onRequestDelete={(job) => setDeleteTarget(job)}
+            onRequestReextract={(job) => setReextractTarget(job)}
+            onClearError={onClearError}
+            onRefreshDetail={onRefreshDetail}
+          />
+        ) : (
+          <EmptyState
+            title="Chọn một JD"
+            description="Chọn JD trong danh sách để xem nội dung và kết quả đối chiếu CV."
+            isCompact
+          />
+        )}
+      </VStack>
 
       <JobDeleteDialog
         isOpen={deleteTarget !== null}
