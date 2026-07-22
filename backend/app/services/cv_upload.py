@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -430,16 +430,6 @@ async def upload_cv_from_upload_file(
         settings=settings,
         session_factory=session_factory,
     )
-
-
-async def iter_bytes_as_chunks(
-    data: bytes, chunk_size: int = _READ_CHUNK
-) -> AsyncIterator[bytes]:
-    """Test helper: yield ``data`` in chunks."""
-    if not data:
-        return
-    for i in range(0, len(data), chunk_size):
-        yield data[i : i + chunk_size]
 
 
 __all__ = [

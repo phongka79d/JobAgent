@@ -124,7 +124,7 @@ async def _seed_chunk(session: Any, attachment_id: str) -> None:
     )
 
 
-def test_delete_cv_branch_cypher_is_allowlisted() -> None:
+def test_delete_cv_branch_constant_is_allowlisted() -> None:
     assert_delete_cv_query_allowlisted(DELETE_CV_BRANCH_CYPHER)
     with pytest.raises(ValueError):
         assert_delete_cv_query_allowlisted("MATCH (n) DETACH DELETE n")

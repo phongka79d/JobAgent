@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
@@ -42,22 +42,6 @@ def is_source_grounded(value: str, source: str) -> bool:
     if not normalized_value:
         return True
     return normalized_value in normalize_assertion_text(source)
-
-
-def is_label_grounded(
-    name: str,
-    evidence: Sequence[str],
-    *,
-    approved_aliases: Iterable[str] = (),
-) -> bool:
-    """Ground a label by its source spelling or an explicitly approved alias."""
-    normalized_evidence = tuple(normalize_assertion_text(item) for item in evidence)
-    labels = (name, *tuple(approved_aliases))
-    return any(
-        normalized_label
-        and any(normalized_label in item for item in normalized_evidence)
-        for normalized_label in (normalize_assertion_text(label) for label in labels)
-    )
 
 
 def matches_heading(label: str, headings: Iterable[str]) -> bool:
@@ -135,7 +119,6 @@ def structural_issue(
 __all__ = [
     "StructuralSkillIssue",
     "is_group_label_in_source",
-    "is_label_grounded",
     "is_source_grounded",
     "matches_heading",
     "normalize_assertion_text",
