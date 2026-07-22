@@ -564,20 +564,26 @@ def _skills_fixture() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
 
 
-def _fake_valid_extracted() -> Any:
-    from app.services.profile_extraction import ExtractedCandidateProfile
+def _fake_valid_profile() -> Any:
+    from app.schemas.profile import parse_candidate_profile
+    from app.services.skill_normalization import SkillNormalizer
 
-    return ExtractedCandidateProfile.model_validate(
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    return parse_candidate_profile(
         {
             "summary": "Integration-test backend engineer.",
             "current_title": "Backend Engineer",
             "total_experience_years": 4.0,
             "skills": [
                 {
-                    "name": "Python",
+                    "skill": normalizer.normalize_name("Python").model_dump(
+                        mode="json"
+                    ),
                     "confidence": 0.91,
                     "proficiency": "advanced",
                     "years": 4.0,
+                    "source": "cv",
+                    "excluded": False,
                     "evidence": ["Python on backend"],
                 }
             ],
@@ -631,6 +637,25 @@ class _CoveringDocumentInvoker:
             for m in list(messages)
             if isinstance(getattr(m, "content", None), str)
         )
+        if schema_name == "candidate_skills":
+            entry_match = re.search(
+                r'"entry_id":"([^"]+)"[^}]*Python',
+                joined,
+                re.DOTALL,
+            )
+            assert entry_match is not None
+            return {
+                "assertions": [
+                    {
+                        "name": "Python",
+                        "confidence": 0.9,
+                        "proficiency": "advanced",
+                        "years": None,
+                        "evidence": ["Python"],
+                        "source_entry_ids": [entry_match.group(1)],
+                    }
+                ]
+            }
         ordinals = sorted(
             {int(m) for m in re.findall(r"\[ordinal=(\d+)\]", joined)}
         ) or [0]
@@ -694,7 +719,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
     from app.repositories import attachment_text_chunks as chunk_repo
     from app.repositories import cv_documents as cv_doc_repo
     from app.services.profile_drafts import propose_profile_from_cv
-    from app.services.profile_extraction import build_draft_from_extracted
+    from app.services.profile_extraction import build_draft_from_candidate_profile
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
 
@@ -703,9 +728,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
     normalizer = SkillNormalizer.from_path(_skills_fixture())
     invoker = _CoveringDocumentInvoker()
     pdf = _cv_fixture("digital_cv_01.pdf")
-    old_draft = build_draft_from_extracted(
-        _fake_valid_extracted(), normalizer
-    )
+    old_draft = build_draft_from_candidate_profile(_fake_valid_profile())
 
     async def _body() -> None:
         engine = build_async_engine(db_path)

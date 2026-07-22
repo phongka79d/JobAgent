@@ -1,0 +1,140 @@
+{
+  "provenance": "repository-authored synthetic",
+  "description": "Finite profession-neutral CVDocument and JD cases for the explicit live skill diagnostic. No real person, employer, identifier, provider payload, or credential is present.",
+  "cases": [
+    {
+      "id": "cv_software",
+      "kind": "cv",
+      "document": {
+        "attachment_id": "10000000-0000-4000-8000-000000000016",
+        "detected_languages": ["en"],
+        "sections": [
+          {
+            "id": "software-summary",
+            "ordinal": 0,
+            "heading": "Professional Summary",
+            "kind": "summary",
+            "entries": [
+              {
+                "id": "software-summary-entry",
+                "ordinal": 0,
+                "title": null,
+                "subtitle": null,
+                "date_text": null,
+                "location": null,
+                "body": "Professional capability: Python. Professional capability: API Design.",
+                "bullets": [],
+                "attributes": {},
+                "source_chunk_ordinals": [0]
+              }
+            ],
+            "source_chunk_ordinals": [0]
+          }
+        ],
+        "extraction_warnings": [],
+        "extraction_confidence": 0.95
+      },
+      "expected_skill_names": ["Python", "API Design"]
+    },
+    {
+      "id": "cv_marketing",
+      "kind": "cv",
+      "document": {
+        "attachment_id": "20000000-0000-4000-8000-000000000016",
+        "detected_languages": ["en"],
+        "sections": [
+          {
+            "id": "marketing-experience",
+            "ordinal": 0,
+            "heading": "Campaign Experience",
+            "kind": "experience",
+            "entries": [
+              {
+                "id": "marketing-experience-entry",
+                "ordinal": 0,
+                "title": "Campaign Lead",
+                "subtitle": null,
+                "date_text": null,
+                "location": null,
+                "body": "Applied explicit professional capabilities across regional campaigns.",
+                "bullets": [
+                  "Capability used: Audience Research.",
+                  "Capability used: Campaign Strategy.",
+                  "Capability used: Conversion Rate Optimization."
+                ],
+                "attributes": {},
+                "source_chunk_ordinals": [0]
+              }
+            ],
+            "source_chunk_ordinals": [0]
+          }
+        ],
+        "extraction_warnings": [],
+        "extraction_confidence": 0.94
+      },
+      "expected_skill_names": [
+        "Audience Research",
+        "Campaign Strategy",
+        "Conversion Rate Optimization"
+      ]
+    },
+    {
+      "id": "cv_healthcare_bilingual",
+      "kind": "cv",
+      "document": {
+        "attachment_id": "30000000-0000-4000-8000-000000000016",
+        "detected_languages": ["vi", "en"],
+        "sections": [
+          {
+            "id": "healthcare-practice",
+            "ordinal": 0,
+            "heading": "Kinh nghiệm chăm sóc / Care Experience",
+            "kind": "experience",
+            "entries": [
+              {
+                "id": "healthcare-practice-entry",
+                "ordinal": 0,
+                "title": "Điều phối viên / Coordinator",
+                "subtitle": null,
+                "date_text": null,
+                "location": null,
+                "body": "Các năng lực chuyên môn được sử dụng trong môi trường song ngữ.",
+                "bullets": [
+                  "Năng lực chuyên môn: Patient Care Coordination.",
+                  "Năng lực chuyên môn: Community Health Education."
+                ],
+                "attributes": {},
+                "source_chunk_ordinals": [0]
+              }
+            ],
+            "source_chunk_ordinals": [0]
+          }
+        ],
+        "extraction_warnings": [],
+        "extraction_confidence": 0.93
+      },
+      "expected_skill_names": [
+        "Patient Care Coordination",
+        "Community Health Education"
+      ]
+    },
+    {
+      "id": "jd_sales_operations",
+      "kind": "jd",
+      "raw_jd": "Title: Sales Operations Coordinator\nCompany: Synthetic North\nResponsibilities:\n- Maintain weekly pipeline reviews.\n- Prepare regional sales plans.\nRequired professional capabilities:\n- Sales Forecasting. Evidence: Sales Forecasting supports regional plans.\n- Pipeline Management. Evidence: Pipeline Management supports weekly reviews.",
+      "expected_skill_names": ["Sales Forecasting", "Pipeline Management"]
+    },
+    {
+      "id": "jd_finance",
+      "kind": "jd",
+      "raw_jd": "Title: Finance Planning Analyst\nCompany: Synthetic South\nResponsibilities:\n- Explain monthly performance movements.\n- Prepare management reports.\nRequired professional capabilities:\n- Variance Analysis. Evidence: Variance Analysis explains monthly movements.\n- Financial Reporting. Evidence: Financial Reporting supports management reports.",
+      "expected_skill_names": ["Variance Analysis", "Financial Reporting"]
+    },
+    {
+      "id": "jd_unknown_punctuation",
+      "kind": "jd",
+      "raw_jd": "Title: Service Practice Coordinator\nCompany: Synthetic East\nResponsibility: Facilitate a combined discovery practice.\nRequired professional capability: Service Design/Research. Evidence: Service Design/Research guides the combined discovery practice.",
+      "expected_skill_names": ["Service Design/Research"]
+    }
+  ]
+}

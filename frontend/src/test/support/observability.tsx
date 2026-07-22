@@ -181,7 +181,14 @@ export function graphReady(): GraphSnapshot {
     rebuild_instruction: null,
     candidate: {id: 'cand-1', revision: 'r1'},
     jobs: [{id: 'job-1', title: 'Engineer', company: 'Acme', revision: 'j1'}],
-    skills: [{canonical_name: 'python'}],
+    skills: [
+      {
+        canonical_name: 'python',
+        canonical_key: 'python',
+        display_name: 'Python',
+        category: 'language',
+      },
+    ],
     edges: [
       {source_id: 'cand-1', target_id: 'python', type: 'HAS_SKILL'},
     ],

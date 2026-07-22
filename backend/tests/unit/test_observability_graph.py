@@ -244,7 +244,12 @@ def _job(node_id: str, title: str = "Role", company: str = "Co") -> dict[str, An
 
 
 def _skill(name: str) -> dict[str, Any]:
-    return {"canonical_name": name}
+    return {
+        "canonical_name": name,
+        "canonical_key": name,
+        "display_name": f"Display {name}",
+        "category": "synthetic",
+    }
 
 
 def _edge(src: str, tgt: str, etype: str) -> dict[str, Any]:
@@ -467,7 +472,14 @@ def test_ready_snapshot_maps_projection() -> None:
                 id="j1", title="SRE", company="Acme", revision=REV
             ),
         ),
-        skills=(ProjectedSkill(canonical_name="python"),),
+        skills=(
+            ProjectedSkill(
+                canonical_name="python",
+                canonical_key="python",
+                display_name="Python source label",
+                category="synthetic",
+            ),
+        ),
         edges=(
             ProjectedEdge(
                 source_id="active", target_id="python", type="HAS_SKILL"
@@ -493,6 +505,9 @@ def test_ready_snapshot_maps_projection() -> None:
     assert len(snap.jobs) == 1
     assert snap.jobs[0].title == "SRE"
     assert snap.skills[0].canonical_name == "python"
+    assert snap.skills[0].canonical_key == "python"
+    assert snap.skills[0].display_name == "Python source label"
+    assert snap.skills[0].category == "synthetic"
     assert any(e.type == "HAS_SKILL" for e in snap.edges)
     # Forbid extras via schema
     body = snap.model_dump(mode="json")

@@ -167,23 +167,13 @@
       },
       "expected_issues": [
         {
-          "code": "COMPOUND_SKILL_LABEL",
-          "field_path": "required_skills[0].name",
-          "count": 2
-        },
-        {
-          "code": "COMPOUND_SKILL_LABEL",
-          "field_path": "required_skills[1].name",
-          "count": 2
+          "code": "SKILL_NAME_NOT_IN_SOURCE",
+          "field_path": "required_skills[2].name",
+          "count": 1
         },
         {
           "code": "COMPOUND_SKILL_LABEL",
           "field_path": "required_skills[2].name",
-          "count": 2
-        },
-        {
-          "code": "COMPOUND_SKILL_LABEL",
-          "field_path": "required_skills[3].name",
           "count": 2
         }
       ]

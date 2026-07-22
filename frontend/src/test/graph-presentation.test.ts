@@ -3,7 +3,43 @@ import {describe, expect, it} from 'vitest';
 import {toGraphModel} from '../features/observability/graphPresentation';
 import {graphReady} from './support/observability';
 
+function skill(canonicalKey: string, displayName = canonicalKey) {
+  return {
+    canonical_name: canonicalKey,
+    canonical_key: canonicalKey,
+    display_name: displayName,
+    category: null,
+  };
+}
+
 describe('graph presentation mapping', () => {
+  it('uses the server display label and keeps the opaque key as metadata', () => {
+    const snapshot = graphReady();
+    snapshot.skills = [
+      {
+        canonical_name: 'audience_research',
+        canonical_key: 'audience_research',
+        display_name: 'Nghiên cứu đối tượng',
+        category: 'research',
+      },
+    ];
+    snapshot.edges = [];
+
+    const skill = toGraphModel(snapshot).nodes.find(
+      (node) => node.kind === 'skill',
+    );
+
+    expect(skill).toMatchObject({
+      key: 'skill:audience_research',
+      rawId: 'audience_research',
+      label: 'Nghiên cứu đối tượng',
+      metadata: [
+        ['Canonical key', 'audience_research'],
+        ['Category', 'research'],
+      ],
+    });
+  });
+
   it('namespaces and sorts bounded nodes and resolves directed edges', () => {
     const model = toGraphModel(graphReady());
     expect(model.nodes.map((node) => node.key)).toEqual([
@@ -33,7 +69,7 @@ describe('graph presentation mapping', () => {
 
   it('resolves every supported directed edge type', () => {
     const snapshot = graphReady();
-    snapshot.skills.push({canonical_name: 'sql'});
+    snapshot.skills.push(skill('sql'));
     snapshot.edges.push(
       {source_id: 'job-1', target_id: 'python', type: 'REQUIRES'},
       {source_id: 'job-1', target_id: 'sql', type: 'PREFERS'},
@@ -72,10 +108,10 @@ describe('graph presentation mapping', () => {
     const combined = graphReady();
     combined.candidate = null;
     combined.jobs = [];
-    combined.skills = [{canonical_name: 'python|skill:sql'}];
+    combined.skills = [skill('python|skill:sql')];
     combined.edges = [];
     const split = structuredClone(combined);
-    split.skills = [{canonical_name: 'python'}, {canonical_name: 'sql'}];
+    split.skills = [skill('python'), skill('sql')];
 
     expect(toGraphModel(combined).identity).not.toBe(
       toGraphModel(split).identity,
@@ -87,10 +123,10 @@ describe('graph presentation mapping', () => {
     snapshot.candidate = null;
     snapshot.jobs = [];
     snapshot.skills = [
-      {canonical_name: 'a'},
-      {canonical_name: 'b->skill:c'},
-      {canonical_name: 'a->skill:b'},
-      {canonical_name: 'c'},
+      skill('a'),
+      skill('b->skill:c'),
+      skill('a->skill:b'),
+      skill('c'),
     ];
     snapshot.edges = [
       {source_id: 'a', target_id: 'b->skill:c', type: 'RELATED_TO'},
@@ -157,8 +193,11 @@ describe('graph presentation mapping', () => {
         key: 'skill:python',
         rawId: 'python',
         kind: 'skill',
-        label: 'python',
-        metadata: [['Canonical name', 'python']],
+        label: 'Python',
+        metadata: [
+          ['Canonical key', 'python'],
+          ['Category', 'language'],
+        ],
       }),
     ]);
   });
@@ -171,7 +210,7 @@ describe('graph presentation mapping', () => {
       company: 'Beta',
       revision: 'j2',
     });
-    snapshot.skills.push({canonical_name: 'sql'});
+    snapshot.skills.push(skill('sql'));
     snapshot.edges.push(
       {source_id: 'job-1', target_id: 'python', type: 'REQUIRES'},
       {source_id: 'job-2', target_id: 'sql', type: 'PREFERS'},

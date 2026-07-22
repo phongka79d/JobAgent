@@ -142,7 +142,11 @@ export type GraphJobNode = {
 };
 
 export type GraphSkillNode = {
+  /** Retained additive compatibility field from the backend graph DTO. */
   canonical_name: string;
+  canonical_key: string;
+  display_name: string;
+  category: string | null;
 };
 
 export type GraphEdge = {
@@ -606,6 +610,17 @@ export function parseGraphSnapshot(raw: unknown): GraphSnapshot {
         'canonical_name',
         `graph skill[${index}]`,
       ),
+      canonical_key: requireString(
+        item,
+        'canonical_key',
+        `graph skill[${index}]`,
+      ),
+      display_name: requireString(
+        item,
+        'display_name',
+        `graph skill[${index}]`,
+      ),
+      category: optionalString(item, 'category', `graph skill[${index}]`),
     };
   });
   const edges = raw.edges.map((item, index) => {

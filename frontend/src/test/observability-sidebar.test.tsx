@@ -187,6 +187,7 @@ describe('ObservabilitySidebar composition', () => {
     await waitFor(() => {
       expect(api.fetchGraphSnapshot).toHaveBeenCalledTimes(1);
     });
+    await userEvent.click(screen.getByRole('radio', {name: 'Kỹ thuật'}));
     expect(
       await screen.findByRole('group', {
         name: 'Candidate, jobs and skills network',
@@ -322,6 +323,33 @@ describe('ObservabilitySidebar composition', () => {
         evaluation_state: 'stale',
       },
     };
+    const skillMapBody = {
+      status: 'ready',
+      code: null,
+      summary: 'Selected map is ready.',
+      rebuild_instruction: null,
+      candidate: {
+        id: 'active',
+        attachment_id: '11111111-2222-4333-8444-555555555555',
+        current_title: 'Coordinator',
+        revision: TS,
+      },
+      job: {
+        id: JOB_ID,
+        title: 'Sidebar Reextract Job',
+        company: 'Acme',
+        revision: TS,
+      },
+      items: [],
+      counts: {
+        direct: 0,
+        related: 0,
+        missing_required: 0,
+        missing_preferred: 0,
+        candidate_only: 0,
+      },
+      checked_at: TS,
+    };
 
     let detailGets = 0;
     const fetchMock = vi
@@ -338,6 +366,12 @@ describe('ObservabilitySidebar composition', () => {
         if (url.includes(`/api/jobs/${JOB_ID}/reextract`) && method === 'POST') {
           expect(JSON.parse(String(init?.body ?? '{}'))).toEqual({});
           return new Response(JSON.stringify(reextractBody), {
+            status: 200,
+            headers: {'Content-Type': 'application/json'},
+          });
+        }
+        if (url.includes('/api/observability/skill-map') && method === 'GET') {
+          return new Response(JSON.stringify(skillMapBody), {
             status: 200,
             headers: {'Content-Type': 'application/json'},
           });
@@ -432,6 +466,17 @@ describe('ObservabilitySidebar composition', () => {
       await userEvent.click(screen.getByTestId('jobagent-obs-tab-graph'));
       await waitFor(() => {
         expect(api.fetchGraphSnapshot).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(([input, init]) => {
+            const url = String(input);
+            return (
+              url.includes(`/api/observability/skill-map?job_id=${JOB_ID}`) &&
+              (init?.method ?? 'GET').toUpperCase() === 'GET'
+            );
+          }),
+        ).toBe(true);
       });
     } finally {
       fetchMock.mockRestore();

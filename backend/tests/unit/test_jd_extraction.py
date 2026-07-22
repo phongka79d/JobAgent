@@ -45,7 +45,7 @@ from app.services.provider_retry import (
     ProviderRetryError,
     invoke_with_provider_retry,
 )
-from app.services.skill_normalization import SkillNormalizer
+from app.services.skill_normalization import SkillNormalizer, load_skill_taxonomy
 from pydantic import ValidationError
 
 from tests.fakes.structured_output import FakeJdInvoker
@@ -730,7 +730,7 @@ def test_jd_timeout_exhaustion_never_exceeds_two_provider_calls() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_system_prompt_includes_approved_grounding_and_atomicity_rules() -> None:
+def test_system_and_repair_prompts_are_profession_neutral_and_grounded() -> None:
     import app.services.jd_extraction as mod
 
     prompt = mod._SYSTEM_PROMPT
@@ -738,8 +738,9 @@ def test_system_prompt_includes_approved_grounding_and_atomicity_rules() -> None
     assert "location" in prompt.lower()
     assert "verbatim" in prompt.lower()
     assert "atomic" in prompt.lower()
-    assert "C/C++" in prompt and ".NET" in prompt
-    assert "Node.js" in prompt and "CI/CD" in prompt
+    assert "professional capabilities" in prompt.lower()
+    assert "any occupation" in prompt.lower()
+    assert "skill name" in prompt.lower()
     assert "preferred" in prompt.lower()
     assert "required" in prompt.lower()
     assert "jd_quality" in prompt
@@ -747,15 +748,190 @@ def test_system_prompt_includes_approved_grounding_and_atomicity_rules() -> None
     assert "canonical" in prompt.lower()
     source = inspect.getsource(mod.ExtractedJobPost)
     assert "jd_quality" not in source
+    combined = "\n".join(
+        (
+            mod._SYSTEM_PROMPT,
+            mod._SCHEMA_REPAIR_INSTRUCTION,
+            mod._GUARD_REPAIR_TRAILER,
+        )
+    ).lower()
+    for forbidden in (
+        "technical skill",
+        "c/c++",
+        ".net",
+        "node.js",
+        "ci/cd",
+        "python",
+        "docker",
+    ):
+        assert forbidden not in combined
 
 
 def test_system_prompt_requires_complete_atomic_skill_recall() -> None:
     import app.services.jd_extraction as mod
 
     prompt = mod._SYSTEM_PROMPT.lower()
-    assert "every source-supported technical skill" in prompt
+    assert "every source-supported professional capability" in prompt
     assert "do not omit" in prompt
-    assert "methods listed in qualification" in prompt
+    assert "tools, methods, platforms, and domain practices" in prompt
+
+
+def test_ungrounded_skill_name_triggers_one_sanitized_repair() -> None:
+    bad = _valid_extracted(
+        required_skills=[
+            {
+                "name": "Invented capability marker",
+                "confidence": 0.8,
+                "evidence": ["Design REST services"],
+            }
+        ],
+        preferred_skills=[],
+    )
+    invoker = _RecordingInvoker([bad, _valid_extracted()])
+
+    outcome = extract_job_post_from_text(
+        _GROUNDED_JD,
+        invoker=invoker,
+        normalizer=_normalizer(),
+    )
+
+    assert outcome.schema_repairs_used == 1
+    repair_msg = invoker.calls[1]["texts"][-1]
+    assert "SKILL_NAME_NOT_IN_SOURCE" in repair_msg
+    assert "required_skills[0].name" in repair_msg
+    assert "Invented capability marker" not in repair_msg
+
+
+@pytest.mark.parametrize(
+    ("case_id", "raw_jd", "responsibility", "required_name", "preferred_name"),
+    [
+        (
+            "marketing",
+            "Responsibilities: Plan audience research. Required: Audience research. "
+            "Preferred: Campaign measurement.",
+            "Plan audience research",
+            "Audience research",
+            "Campaign measurement",
+        ),
+        (
+            "sales_operations",
+            "Responsibilities: Maintain revenue workflows. Required: Pipeline "
+            "forecasting. Preferred: Process mapping.",
+            "Maintain revenue workflows",
+            "Pipeline forecasting",
+            "Process mapping",
+        ),
+        (
+            "finance",
+            "Responsibilities: Prepare monthly controls. Required: Financial "
+            "reporting. Preferred: Variance analysis.",
+            "Prepare monthly controls",
+            "Financial reporting",
+            "Variance analysis",
+        ),
+        (
+            "healthcare_bilingual",
+            "Trách nhiệm: Hướng dẫn xuất viện. Yêu cầu: Điều phối chăm sóc. "
+            "Ưu tiên: Tư vấn xuất viện.",
+            "Hướng dẫn xuất viện",
+            "Điều phối chăm sóc",
+            "Tư vấn xuất viện",
+        ),
+    ],
+)
+def test_cross_profession_jds_use_one_guarded_extractor_without_seed_terms(
+    case_id: str,
+    raw_jd: str,
+    responsibility: str,
+    required_name: str,
+    preferred_name: str,
+) -> None:
+    empty = SkillNormalizer(
+        load_skill_taxonomy({"skills": [], "relationships": []})
+    )
+    extracted = _valid_extracted(
+        title=None,
+        company=None,
+        location=None,
+        responsibilities=[responsibility],
+        required_skills=[
+            {
+                "name": required_name,
+                "confidence": 0.9,
+                "evidence": [required_name],
+            }
+        ],
+        preferred_skills=[
+            {
+                "name": preferred_name,
+                "confidence": 0.7,
+                "evidence": [preferred_name],
+            }
+        ],
+    )
+    invoker = FakeJdInvoker([extracted])
+
+    outcome = extract_job_post_from_text(
+        raw_jd,
+        invoker=invoker,
+        normalizer=empty,
+    )
+
+    assert case_id
+    assert outcome.schema_repairs_used == 0
+    assert len(invoker.calls) == 1
+    assert outcome.extraction.required_skills[0].skill.display_name == required_name
+    assert outcome.extraction.preferred_skills[0].skill.display_name == preferred_name
+    assert outcome.extraction.required_skills[0].skill.aliases == []
+
+
+def test_bilingual_healthcare_jd_repairs_ungrounded_name_once() -> None:
+    raw_jd = (
+        "Trách nhiệm: Hướng dẫn xuất viện. "
+        "Yêu cầu: Điều phối chăm sóc."
+    )
+    bad = _valid_extracted(
+        title=None,
+        company=None,
+        location=None,
+        responsibilities=["Hướng dẫn xuất viện"],
+        required_skills=[
+            {
+                "name": "Nhãn không có trong nguồn",
+                "confidence": 0.8,
+                "evidence": ["Điều phối chăm sóc"],
+            }
+        ],
+        preferred_skills=[],
+    )
+    good = bad.model_copy(
+        update={
+            "required_skills": [
+                ExtractedJobSkillItem(
+                    name="Điều phối chăm sóc",
+                    confidence=0.8,
+                    evidence=["Điều phối chăm sóc"],
+                )
+            ]
+        }
+    )
+    empty = SkillNormalizer(
+        load_skill_taxonomy({"skills": [], "relationships": []})
+    )
+    invoker = FakeJdInvoker([bad, good])
+
+    outcome = extract_job_post_from_text(
+        raw_jd,
+        invoker=invoker,
+        normalizer=empty,
+    )
+
+    assert outcome.schema_repairs_used == 1
+    assert len(invoker.calls) == 2
+    assert (
+        outcome.extraction.required_skills[0].skill.display_name
+        == "Điều phối chăm sóc"
+    )
 
 
 def test_ungrounded_extraction_rejected_before_normalization() -> None:

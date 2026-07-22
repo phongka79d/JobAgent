@@ -204,7 +204,14 @@ describe('observability parsers', () => {
       rebuild_instruction: null,
       candidate: {id: 'cand-1', revision: 'r1'},
       jobs: [{id: 'job-1', title: 'Engineer', company: 'Acme', revision: 'j1'}],
-      skills: [{canonical_name: 'python'}],
+      skills: [
+        {
+          canonical_name: 'audience_research',
+          canonical_key: 'audience_research',
+          display_name: 'Nghiên cứu đối tượng',
+          category: 'research',
+        },
+      ],
       edges: [
         {
           source_id: 'cand-1',
@@ -225,6 +232,14 @@ describe('observability parsers', () => {
     expect(snapshot.cv).toBeNull();
     expect(snapshot.sections).toEqual([]);
     expect(snapshot.entries).toEqual([]);
+    expect(snapshot.skills).toEqual([
+      {
+        canonical_name: 'audience_research',
+        canonical_key: 'audience_research',
+        display_name: 'Nghiên cứu đối tượng',
+        category: 'research',
+      },
+    ]);
 
     const stale = parseGraphSnapshot({
       status: 'stale',

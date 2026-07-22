@@ -5,7 +5,7 @@
  * schemas strictly; reuse parseMatchResult for evaluation.result.
  */
 
-import type {JsonObject, JsonValue} from '../chat/types';
+import {isUuidV4, type JsonObject, type JsonValue} from '../chat/types';
 import {
   parseMatchResult,
   type CompactMatchResult,
@@ -626,6 +626,66 @@ export type ReextractJobResponse = {
   rebuild_instruction: string | null;
 };
 
+export type SkillMapStatus = 'ready' | 'stale' | 'unavailable';
+export type SkillMapMatchType =
+  | 'direct'
+  | 'related'
+  | 'missing_required'
+  | 'missing_preferred'
+  | 'candidate_only';
+export type SkillMapRequirement = 'required' | 'preferred' | 'none';
+
+export type SkillAssertionView = {
+  canonical_key: string;
+  display_name: string;
+  confidence: number;
+  evidence: string[];
+};
+
+export type SkillRelationshipView = {
+  from_key: string;
+  to_key: string;
+  weight: number;
+  source: string;
+};
+
+export type SkillCompatibilityItem = {
+  match_type: SkillMapMatchType;
+  requirement: SkillMapRequirement;
+  strength: 0 | 0.6 | 1;
+  candidate_skill: SkillAssertionView | null;
+  job_skill: SkillAssertionView | null;
+  relationship: SkillRelationshipView | null;
+};
+
+export type SkillCompatibilityCounts = Record<SkillMapMatchType, number>;
+
+export type SkillMapCandidate = {
+  id: 'active';
+  attachment_id: string;
+  current_title: string | null;
+  revision: string;
+};
+
+export type SkillMapJob = {
+  id: string;
+  title: string | null;
+  company: string | null;
+  revision: string;
+};
+
+export type SelectedJobSkillMap = {
+  status: SkillMapStatus;
+  code: string | null;
+  summary: string;
+  rebuild_instruction: string | null;
+  candidate: SkillMapCandidate | null;
+  job: SkillMapJob | null;
+  items: SkillCompatibilityItem[];
+  counts: SkillCompatibilityCounts;
+  checked_at: string;
+};
+
 export type SavedJobsPageQuery = {
   limit?: number;
   before?: string | null;
@@ -671,6 +731,42 @@ function asNonEmptyString(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+}
+
+function asUuidV4(value: unknown, label: string): string {
+  const text = asNonEmptyString(value, label);
+  if (!isUuidV4(text)) {
+    throw new Error(`${label} must be a UUID v4`);
+  }
+  return text.toLowerCase();
+}
+
+const AWARE_UTC_TIMESTAMP_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|\+00:00)$/;
+
+function asAwareUtcTimestamp(value: unknown, label: string): string {
+  const text = asNonEmptyString(value, label);
+  const match = AWARE_UTC_TIMESTAMP_RE.exec(text);
+  if (!match) {
+    throw new Error(`${label} must be a timezone-aware UTC timestamp`);
+  }
+  const [year, month, day, hour, minute, second] = match
+    .slice(1, 7)
+    .map(Number);
+  const parsed = new Date(text);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    year! < 1 ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() + 1 !== month ||
+    parsed.getUTCDate() !== day ||
+    parsed.getUTCHours() !== hour ||
+    parsed.getUTCMinutes() !== minute ||
+    parsed.getUTCSeconds() !== second
+  ) {
+    throw new Error(`${label} must be a valid timezone-aware UTC timestamp`);
+  }
+  return text;
 }
 
 function asNullableDisplayString(
@@ -1166,6 +1262,339 @@ export function parseReextractJobResponse(raw: unknown): ReextractJobResponse {
     sync_ok: syncOk,
     code,
     rebuild_instruction: rebuildInstruction,
+  };
+}
+
+const SKILL_MAP_KEYS = new Set([
+  'status',
+  'code',
+  'summary',
+  'rebuild_instruction',
+  'candidate',
+  'job',
+  'items',
+  'counts',
+  'checked_at',
+]);
+const SKILL_ASSERTION_KEYS = new Set([
+  'canonical_key',
+  'display_name',
+  'confidence',
+  'evidence',
+]);
+const SKILL_RELATIONSHIP_KEYS = new Set([
+  'from_key',
+  'to_key',
+  'weight',
+  'source',
+]);
+const SKILL_ITEM_KEYS = new Set([
+  'match_type',
+  'requirement',
+  'strength',
+  'candidate_skill',
+  'job_skill',
+  'relationship',
+]);
+const SKILL_COUNTS_KEYS = new Set([
+  'direct',
+  'related',
+  'missing_required',
+  'missing_preferred',
+  'candidate_only',
+]);
+const SKILL_CANDIDATE_KEYS = new Set([
+  'id',
+  'attachment_id',
+  'current_title',
+  'revision',
+]);
+const SKILL_JOB_KEYS = new Set([
+  'id',
+  'title',
+  'company',
+  'revision',
+]);
+
+const SKILL_MAP_STATUSES = new Set<SkillMapStatus>([
+  'ready',
+  'stale',
+  'unavailable',
+]);
+const SKILL_MAP_MATCH_TYPES = new Set<SkillMapMatchType>([
+  'direct',
+  'related',
+  'missing_required',
+  'missing_preferred',
+  'candidate_only',
+]);
+const SKILL_MAP_REQUIREMENTS = new Set<SkillMapRequirement>([
+  'required',
+  'preferred',
+  'none',
+]);
+
+function parseSkillAssertionView(
+  raw: unknown,
+  label: string,
+): SkillAssertionView {
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_ASSERTION_KEYS)) {
+    throw new Error(`${label} has invalid shape or extra keys`);
+  }
+  requireKeys(raw, [...SKILL_ASSERTION_KEYS], label);
+  const confidence = asFiniteNumber(raw.confidence, `${label}.confidence`);
+  if (confidence < 0 || confidence > 1) {
+    throw new Error(`${label}.confidence must be in 0..1`);
+  }
+  return {
+    canonical_key: asNonEmptyString(
+      raw.canonical_key,
+      `${label}.canonical_key`,
+    ),
+    display_name: asNonEmptyString(raw.display_name, `${label}.display_name`),
+    confidence,
+    evidence: asStringList(raw.evidence, `${label}.evidence`),
+  };
+}
+
+function parseNullableSkillAssertion(
+  raw: unknown,
+  label: string,
+): SkillAssertionView | null {
+  return raw === null ? null : parseSkillAssertionView(raw, label);
+}
+
+function parseSkillRelationship(
+  raw: unknown,
+  label: string,
+): SkillRelationshipView | null {
+  if (raw === null) return null;
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_RELATIONSHIP_KEYS)) {
+    throw new Error(`${label} has invalid shape or extra keys`);
+  }
+  requireKeys(raw, [...SKILL_RELATIONSHIP_KEYS], label);
+  const weight = asFiniteNumber(raw.weight, `${label}.weight`);
+  if (weight <= 0 || weight > 1) {
+    throw new Error(`${label}.weight must be in (0, 1]`);
+  }
+  return {
+    from_key: asNonEmptyString(raw.from_key, `${label}.from_key`),
+    to_key: asNonEmptyString(raw.to_key, `${label}.to_key`),
+    weight,
+    source: asNonEmptyString(raw.source, `${label}.source`),
+  };
+}
+
+function parseSkillCompatibilityItem(
+  raw: unknown,
+  index: number,
+): SkillCompatibilityItem {
+  const label = `skill map.items[${index}]`;
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_ITEM_KEYS)) {
+    throw new Error(`${label} has invalid shape or extra keys`);
+  }
+  requireKeys(raw, [...SKILL_ITEM_KEYS], label);
+  if (
+    typeof raw.match_type !== 'string' ||
+    !SKILL_MAP_MATCH_TYPES.has(raw.match_type as SkillMapMatchType)
+  ) {
+    throw new Error(`${label}.match_type is invalid`);
+  }
+  if (
+    typeof raw.requirement !== 'string' ||
+    !SKILL_MAP_REQUIREMENTS.has(raw.requirement as SkillMapRequirement)
+  ) {
+    throw new Error(`${label}.requirement is invalid`);
+  }
+  const strength = asFiniteNumber(raw.strength, `${label}.strength`);
+  if (strength !== 0 && strength !== 0.6 && strength !== 1) {
+    throw new Error(`${label}.strength is invalid`);
+  }
+  const candidate = parseNullableSkillAssertion(
+    raw.candidate_skill,
+    `${label}.candidate_skill`,
+  );
+  const job = parseNullableSkillAssertion(raw.job_skill, `${label}.job_skill`);
+  const relationship = parseSkillRelationship(
+    raw.relationship,
+    `${label}.relationship`,
+  );
+  const matchType = raw.match_type as SkillMapMatchType;
+  const requirement = raw.requirement as SkillMapRequirement;
+  const valid =
+    (matchType === 'direct' &&
+      (requirement === 'required' || requirement === 'preferred') &&
+      strength === 1 &&
+      candidate !== null &&
+      job !== null &&
+      candidate.canonical_key === job.canonical_key &&
+      relationship === null) ||
+    (matchType === 'related' &&
+      (requirement === 'required' || requirement === 'preferred') &&
+      strength === 0.6 &&
+      candidate !== null &&
+      job !== null &&
+      relationship !== null &&
+      relationship.from_key === candidate.canonical_key &&
+      relationship.to_key === job.canonical_key) ||
+    (matchType === 'missing_required' &&
+      requirement === 'required' &&
+      strength === 0 &&
+      candidate === null &&
+      job !== null &&
+      relationship === null) ||
+    (matchType === 'missing_preferred' &&
+      requirement === 'preferred' &&
+      strength === 0 &&
+      candidate === null &&
+      job !== null &&
+      relationship === null) ||
+    (matchType === 'candidate_only' &&
+      requirement === 'none' &&
+      strength === 0 &&
+      candidate !== null &&
+      job === null &&
+      relationship === null);
+  if (!valid) {
+    throw new Error(`${label} has invalid status coupling`);
+  }
+  return {
+    match_type: matchType,
+    requirement,
+    strength: strength as 0 | 0.6 | 1,
+    candidate_skill: candidate,
+    job_skill: job,
+    relationship,
+  };
+}
+
+function parseSkillCounts(raw: unknown): SkillCompatibilityCounts {
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_COUNTS_KEYS)) {
+    throw new Error('skill map.counts has invalid shape or extra keys');
+  }
+  requireKeys(raw, [...SKILL_COUNTS_KEYS], 'skill map.counts');
+  const counts = {} as SkillCompatibilityCounts;
+  for (const key of SKILL_COUNTS_KEYS) {
+    const value = asFiniteNumber(raw[key], `skill map.counts.${key}`);
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`skill map.counts.${key} must be a non-negative integer`);
+    }
+    counts[key as SkillMapMatchType] = value;
+  }
+  return counts;
+}
+
+function parseSkillMapCandidate(raw: unknown): SkillMapCandidate | null {
+  if (raw === null) return null;
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_CANDIDATE_KEYS)) {
+    throw new Error('skill map.candidate has invalid shape or extra keys');
+  }
+  requireKeys(raw, [...SKILL_CANDIDATE_KEYS], 'skill map.candidate');
+  if (raw.id !== 'active') {
+    throw new Error("skill map.candidate.id must be 'active'");
+  }
+  return {
+    id: 'active',
+    attachment_id: asUuidV4(
+      raw.attachment_id,
+      'skill map.candidate.attachment_id',
+    ),
+    current_title: asNullableDisplayString(
+      raw.current_title,
+      'skill map.candidate.current_title',
+    ),
+    revision: asAwareUtcTimestamp(
+      raw.revision,
+      'skill map.candidate.revision',
+    ),
+  };
+}
+
+function parseSkillMapJob(raw: unknown): SkillMapJob | null {
+  if (raw === null) return null;
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_JOB_KEYS)) {
+    throw new Error('skill map.job has invalid shape or extra keys');
+  }
+  requireKeys(raw, [...SKILL_JOB_KEYS], 'skill map.job');
+  return {
+    id: asUuidV4(raw.id, 'skill map.job.id'),
+    title: asNullableDisplayString(raw.title, 'skill map.job.title'),
+    company: asNullableDisplayString(raw.company, 'skill map.job.company'),
+    revision: asAwareUtcTimestamp(raw.revision, 'skill map.job.revision'),
+  };
+}
+
+/** Strict selected-map parser; never derives labels or match classes. */
+export function parseSelectedJobSkillMap(raw: unknown): SelectedJobSkillMap {
+  if (!isObject(raw) || !hasOnlyKeys(raw, SKILL_MAP_KEYS)) {
+    throw new Error('skill map has invalid shape, forbidden, or extra keys');
+  }
+  requireKeys(raw, [...SKILL_MAP_KEYS], 'skill map');
+  if (
+    typeof raw.status !== 'string' ||
+    !SKILL_MAP_STATUSES.has(raw.status as SkillMapStatus)
+  ) {
+    throw new Error('skill map.status is invalid');
+  }
+  if (!Array.isArray(raw.items)) {
+    throw new Error('skill map.items must be an array');
+  }
+  if (raw.items.length > 200) {
+    throw new Error('skill map.items exceeds the 200-item bound');
+  }
+  const items = raw.items.map(parseSkillCompatibilityItem);
+  const counts = parseSkillCounts(raw.counts);
+  const actual: SkillCompatibilityCounts = {
+    direct: 0,
+    related: 0,
+    missing_required: 0,
+    missing_preferred: 0,
+    candidate_only: 0,
+  };
+  for (const item of items) actual[item.match_type] += 1;
+  for (const key of SKILL_COUNTS_KEYS) {
+    if (counts[key as SkillMapMatchType] !== actual[key as SkillMapMatchType]) {
+      throw new Error(`skill map.counts.${key} does not match items`);
+    }
+  }
+  const status = raw.status as SkillMapStatus;
+  const code = asNullableDisplayString(raw.code, 'skill map.code');
+  const rebuildInstruction = asNullableDisplayString(
+    raw.rebuild_instruction,
+    'skill map.rebuild_instruction',
+  );
+  const candidate = parseSkillMapCandidate(raw.candidate);
+  const job = parseSkillMapJob(raw.job);
+  const nonReadyCounts = Object.values(counts).every((value) => value === 0);
+  const validState =
+    (status === 'ready' &&
+      code === null &&
+      rebuildInstruction === null &&
+      candidate !== null &&
+      job !== null) ||
+    (status === 'stale' &&
+      code === 'NEO4J_REBUILD_REQUIRED' &&
+      rebuildInstruction !== null &&
+      items.length === 0 &&
+      nonReadyCounts) ||
+    (status === 'unavailable' &&
+      code === 'NEO4J_UNAVAILABLE' &&
+      rebuildInstruction === null &&
+      items.length === 0 &&
+      nonReadyCounts);
+  if (!validState) {
+    throw new Error('skill map status/error/item coupling is invalid');
+  }
+  return {
+    status,
+    code,
+    summary: asNonEmptyString(raw.summary, 'skill map.summary'),
+    rebuild_instruction: rebuildInstruction,
+    candidate,
+    job,
+    items,
+    counts,
+    checked_at: asAwareUtcTimestamp(raw.checked_at, 'skill map.checked_at'),
   };
 }
 

@@ -15,7 +15,7 @@ from app.services.skill_matching import (
     compute_skill_coverage,
     match_job_skill,
 )
-from app.services.skill_normalization import SkillNormalizer
+from app.services.skill_normalization import SkillNormalizer, load_skill_taxonomy
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "skills_seed.yaml"
@@ -241,7 +241,7 @@ def test_empty_lists_are_unavailable_but_zero_matches_are_available(
     assert result.skill_score == expected_score
 
 
-def test_coverage_recovers_grouped_legacy_candidate_skill_keys() -> None:
+def test_coverage_does_not_expand_legacy_grouped_candidate_skill_keys() -> None:
     production = SkillNormalizer.production()
     candidates = [
         _candidate(
@@ -269,9 +269,39 @@ def test_coverage_recovers_grouped_legacy_candidate_skill_keys() -> None:
         normalizer=production,
     )
 
-    assert result.required_skill_coverage == 1.0
+    assert result.required_skill_coverage == 0.0
     assert [fact.match_type for fact in result.required_matches] == [
-        "direct",
-        "direct",
-        "direct",
+        "none",
+        "none",
+        "none",
     ]
+
+
+def test_unknown_atomic_skill_direct_matches_with_empty_taxonomy() -> None:
+    empty = SkillNormalizer(
+        load_skill_taxonomy({"skills": [], "relationships": []})
+    )
+    candidate_ref = empty.normalize_name("Service Design/Research")
+    job_ref = empty.normalize_name("Service Design/Research")
+
+    result = compute_skill_coverage(
+        [
+            _candidate(
+                candidate_ref.canonical_key,
+                display_name=candidate_ref.display_name,
+            )
+        ],
+        required_skills=[
+            JobSkill(skill=job_ref, confidence=0.8, evidence=["source"])
+        ],
+        preferred_skills=[],
+        normalizer=empty,
+    )
+
+    assert result.required_skill_coverage == 1.0
+    assert result.required_matches[0].match_type == "direct"
+    assert result.required_matches[0].candidate_skill is not None
+    assert (
+        result.required_matches[0].candidate_skill.skill.display_name
+        == "Service Design/Research"
+    )

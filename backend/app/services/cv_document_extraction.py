@@ -774,6 +774,8 @@ class ShopAIKeyStructuredCVDocumentInvoker:
     """Production invoker: ShopAIKey + strict JSON schema for batch/consolidate."""
 
     def __init__(self, model: BaseChatModel | None = None) -> None:
+        from app.services.cv_skill_contracts import ExtractedCandidateSkillBatch
+
         self._model = model if model is not None else build_shopaikey_chat()
         self._batch = self._model.with_structured_output(
             ExtractedBatchDocument,
@@ -782,6 +784,11 @@ class ShopAIKeyStructuredCVDocumentInvoker:
         )
         self._consolidate = self._model.with_structured_output(
             ExtractedConsolidation,
+            method=STRUCTURED_OUTPUT_METHOD,
+            strict=STRUCTURED_OUTPUT_STRICT,
+        )
+        self._candidate_skills = self._model.with_structured_output(
+            ExtractedCandidateSkillBatch,
             method=STRUCTURED_OUTPUT_METHOD,
             strict=STRUCTURED_OUTPUT_STRICT,
         )
@@ -805,6 +812,8 @@ class ShopAIKeyStructuredCVDocumentInvoker:
             return self._batch.invoke(list(messages))
         if schema_name == "consolidate":
             return self._consolidate.invoke(list(messages))
+        if schema_name == "candidate_skills":
+            return self._candidate_skills.invoke(list(messages))
         raise CVDocumentExtractionError(
             FAILURE_INVALID_STRUCTURED_OUTPUT,
             f"unknown structured schema {schema_name!r}",

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 # Explicit matching/scoring/explanation contract version for context keys.
-MATCHING_CONTRACT_VERSION = "match_v2"
+MATCHING_CONTRACT_VERSION = "match_v3"
 
 EvaluationCurrentness = Literal["none", "current", "stale"]
 

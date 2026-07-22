@@ -90,8 +90,11 @@ export function GraphSemanticList({snapshot}: GraphSemanticListProps) {
             {snapshot.skills.length > 0 ? (
               snapshot.skills.map((skill) => (
                 <ListItem
-                  key={skill.canonical_name}
-                  label={skill.canonical_name}
+                  key={skill.canonical_key}
+                  label={skill.display_name}
+                  description={[skill.canonical_key, skill.category]
+                    .filter(Boolean)
+                    .join(' · ')}
                 />
               ))
             ) : (

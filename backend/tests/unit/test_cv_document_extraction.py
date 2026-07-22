@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.schemas.profile import CandidateSkill
 from app.services.cv_document_extraction import (
     DEFAULT_BATCH_MAX_CHARS,
     EXTRACTION_VERSION,
@@ -51,6 +52,18 @@ _ATTACHMENT = "11111111-1111-4111-8111-111111111111"
 
 def _normalizer() -> SkillNormalizer:
     return SkillNormalizer.from_path(SKILLS_FIXTURE)
+
+
+def _candidate_skill(name: str, evidence: str) -> CandidateSkill:
+    return CandidateSkill(
+        skill=_normalizer().normalize_name(name),
+        confidence=0.8,
+        proficiency="unknown",
+        years=None,
+        source="cv",
+        excluded=False,
+        evidence=[evidence],
+    )
 
 
 def _chunk(ordinal: int, text: str) -> CanonicalChunk:
@@ -103,9 +116,11 @@ class ScriptedCVDocumentInvoker:
         *,
         batch_script: list[Any] | None = None,
         consolidate_script: list[Any] | None = None,
+        skill_script: list[Any] | None = None,
     ) -> None:
         self.batch_script = list(batch_script or [])
         self.consolidate_script = list(consolidate_script or [])
+        self.skill_script = list(skill_script or [])
         self.calls: list[dict[str, Any]] = []
 
     def invoke_structured(
@@ -135,9 +150,16 @@ class ScriptedCVDocumentInvoker:
                 "joined": joined,
             }
         )
-        script = (
-            self.batch_script if schema_name == "batch" else self.consolidate_script
-        )
+        if schema_name == "batch":
+            script = self.batch_script
+        elif schema_name == "consolidate":
+            script = self.consolidate_script
+        elif schema_name == "candidate_skills":
+            if not self.skill_script:
+                return {"assertions": []}
+            script = self.skill_script
+        else:
+            raise RuntimeError(f"unknown schema {schema_name}")
         if not script:
             raise RuntimeError(f"script exhausted for schema {schema_name}")
         item = script.pop(0)
@@ -404,7 +426,10 @@ def test_projection_profile_facts_only_from_document() -> None:
     doc = build_cv_document_from_consolidated(
         consolidated, chunks, attachment_id=_ATTACHMENT
     )
-    profile = project_candidate_profile(doc, _normalizer())
+    profile = project_candidate_profile(
+        doc,
+        skills=[_candidate_skill("Python", "Backend engineer with Python")],
+    )
     assert "Backend engineer" in profile.summary
     assert profile.experiences
     assert profile.experiences[0].title == "Senior Backend Engineer"
@@ -417,7 +442,7 @@ def test_projection_profile_facts_only_from_document() -> None:
     assert any(o["kind"] == "other" and o["heading"] == "Memberships" for o in outline)
 
 
-def test_projection_normalizes_grouped_skill_entries_from_real_cv_shape() -> None:
+def test_projection_never_parses_grouped_skill_entries_locally() -> None:
     chunks = [_chunk(0, "Technical skills")]
     consolidated = ExtractedConsolidation(
         detected_languages=["en"],
@@ -461,35 +486,8 @@ def test_projection_normalizes_grouped_skill_entries_from_real_cv_shape() -> Non
         attachment_id=_ATTACHMENT,
     )
 
-    profile = project_candidate_profile(
-        document,
-        SkillNormalizer.production(),
-    )
-    skill_keys = {item.skill.canonical_key for item in profile.skills}
-
-    assert {
-        "python",
-        "sql",
-        "docker",
-        "machine_learning",
-        "xgboost",
-        "pytorch",
-        "fine_tuning",
-        "generative_ai",
-        "langchain",
-        "langgraph",
-        "rag",
-    }.issubset(skill_keys)
-    assert skill_keys.isdisjoint(
-        {
-            "technical_skills",
-            "programming_tools_python",
-            "machine_learning_cv_xgboost",
-            "generative_ai_langchain",
-            "model_fine_tuning",
-            "rag_frameworks",
-        }
-    )
+    profile = project_candidate_profile(document, skills=[])
+    assert profile.skills == []
 
 
 def test_extract_pipeline_bounded_calls_and_no_raw_pdf() -> None:

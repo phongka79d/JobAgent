@@ -37,7 +37,6 @@ from app.repositories import tool_executions as tool_repo
 from app.schemas.chat import HistoryPage
 from app.schemas.matching import parse_match_jobs_result_data
 from app.services.jd_extraction import ExtractedJobPost
-from app.services.profile_extraction import ExtractedCandidateProfile
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 from app.tools.profile import (
@@ -109,44 +108,6 @@ async def _noop_candidate_sync() -> None:
 
 def _normalizer() -> SkillNormalizer:
     return SkillNormalizer.from_path(SKILLS_FIXTURE)
-
-
-def _extracted_profile() -> ExtractedCandidateProfile:
-    return ExtractedCandidateProfile.model_validate(
-        {
-            "summary": "Backend engineer with strong Python experience.",
-            "current_title": "Backend Engineer",
-            "total_experience_years": 4.0,
-            "skills": [
-                {
-                    "name": "Python",
-                    "confidence": 0.95,
-                    "proficiency": "advanced",
-                    "years": 4.0,
-                    "evidence": ["4 years Python backend"],
-                }
-            ],
-            "experiences": [
-                {
-                    "title": "Backend Engineer",
-                    "company": "Example Co",
-                    "start_date_text": "2020",
-                    "end_date_text": "present",
-                    "summary": "APIs and services",
-                }
-            ],
-            "education": [
-                {
-                    "institution": "State U",
-                    "degree": "BSc",
-                    "field": "CS",
-                    "graduation_year": 2019,
-                }
-            ],
-            "languages": [{"name": "English", "proficiency": "fluent"}],
-            "extraction_confidence": 0.9,
-        }
-    )
 
 
 def _extracted_jd() -> ExtractedJobPost:

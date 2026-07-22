@@ -20,9 +20,9 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.graph.sync_candidate import AsyncGraphDriver
+from app.services.cv_document_extraction import StructuredCVDocumentInvoker
 from app.services.jd_extraction import StructuredJdInvoker
 from app.services.jd_ingestion import EmbeddingClient, JobSyncFn, UrlFetcher
-from app.services.profile_extraction import StructuredProfileInvoker
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 
@@ -64,7 +64,7 @@ def production_registry(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     storage: AttachmentStorage | None = None,
-    invoker: StructuredProfileInvoker | None = None,
+    invoker: StructuredCVDocumentInvoker | None = None,
     normalizer: SkillNormalizer | None = None,
     driver: AsyncGraphDriver | None = None,
     extract_text_fn: Callable[[Any], Any] | None = None,

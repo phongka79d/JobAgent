@@ -360,6 +360,44 @@
   min-width: 0;
 }
 
+.jobagent-skill-map-anchors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.jobagent-skill-map-anchor {
+  min-width: 0;
+  padding: var(--spacing-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-muted);
+}
+
+.jobagent-skill-map-filters {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.jobagent-skill-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: var(--spacing-3);
+  min-width: 0;
+  align-items: start;
+}
+
+.jobagent-skill-map-items,
+.jobagent-skill-map-evidence {
+  min-width: 0;
+}
+
+.jobagent-skill-map-evidence {
+  padding-inline-start: var(--spacing-3);
+  border-inline-start: var(--border-width) solid var(--color-border);
+}
+
 /* The resize handle extends two pixels beyond Astryx's sidenav scroll box. */
 .astryx-app-shell-sidenav {
   overflow-x: hidden;
@@ -394,6 +432,18 @@
   }
 
   .jobagent-saved-jobs-detail-pane {
+    padding-block-start: var(--spacing-3);
+    padding-inline-start: 0;
+    border-block-start: var(--border-width) solid var(--color-border);
+    border-inline-start: 0;
+  }
+
+  .jobagent-skill-map-anchors,
+  .jobagent-skill-map-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jobagent-skill-map-evidence {
     padding-block-start: var(--spacing-3);
     padding-inline-start: 0;
     border-block-start: var(--border-width) solid var(--color-border);

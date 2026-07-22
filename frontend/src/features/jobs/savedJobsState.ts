@@ -25,6 +25,7 @@ import {
   type SavedJobListPage,
   type SavedJobsPageQuery,
   type SavedJobsSafeError,
+  type SelectedJobSkillMap,
 } from './types';
 
 export type {SavedJobsSafeError};
@@ -70,6 +71,8 @@ export type SavedJobsState = {
   list: CachedResource<SavedJobListPage>;
   /** Cache key: jobId */
   details: Record<string, CachedResource<SavedJobDetail>>;
+  /** Read-only selected CV/JD compatibility cache, keyed by Job ID. */
+  skillMaps: Record<string, CachedResource<SelectedJobSkillMap>>;
   actions: SavedJobsActionSlice;
   externalInvalidation: SavedJobsExternalInvalidation;
 };
@@ -92,6 +95,7 @@ export const initialSavedJobsState: SavedJobsState = {
   selectedJobId: null,
   list: emptyResource(),
   details: {},
+  skillMaps: {},
   actions: initialSavedJobsActionSlice,
   externalInvalidation: {
     graphGeneration: 0,
@@ -182,6 +186,51 @@ function applyLoading<T>(prev: CachedResource<T>): CachedResource<T> {
   };
 }
 
+function applySkillMapSuccess(
+  data: SelectedJobSkillMap,
+): CachedResource<SelectedJobSkillMap> {
+  return {
+    phase:
+      data.status === 'ready' && data.items.length === 0 ? 'empty' : 'ready',
+    data,
+    error: null,
+    loaded: true,
+  };
+}
+
+function invalidateCachedResource<T>(
+  prev: CachedResource<T>,
+): CachedResource<T> {
+  return {
+    phase: 'loading',
+    data: prev.data,
+    error: null,
+    loaded: false,
+  };
+}
+
+function invalidateSkillMap(
+  maps: Record<string, CachedResource<SelectedJobSkillMap>>,
+  jobId: string,
+): Record<string, CachedResource<SelectedJobSkillMap>> {
+  const prev = maps[jobId];
+  if (!prev) {
+    return maps;
+  }
+  return {...maps, [jobId]: invalidateCachedResource(prev)};
+}
+
+function invalidateAllSkillMaps(
+  maps: Record<string, CachedResource<SelectedJobSkillMap>>,
+): Record<string, CachedResource<SelectedJobSkillMap>> {
+  return Object.fromEntries(
+    Object.entries(maps).map(([jobId, resource]) => [
+      jobId,
+      invalidateCachedResource(resource),
+    ]),
+  );
+}
+
 function bumpExternal(
   prev: SavedJobsExternalInvalidation,
 ): SavedJobsExternalInvalidation {
@@ -237,6 +286,9 @@ type Action =
   | {type: 'detail_loading'; jobId: string}
   | {type: 'detail_success'; jobId: string; data: SavedJobDetail}
   | {type: 'detail_error'; jobId: string; error: SavedJobsSafeError}
+  | {type: 'skill_map_loading'; jobId: string}
+  | {type: 'skill_map_success'; jobId: string; data: SelectedJobSkillMap}
+  | {type: 'skill_map_error'; jobId: string; error: SavedJobsSafeError}
   | {
       type: 'action_begin';
       jobId: string;
@@ -344,6 +396,36 @@ export function savedJobsReducer(
         },
       };
     }
+    case 'skill_map_loading': {
+      const prev =
+        state.skillMaps[action.jobId] ?? emptyResource<SelectedJobSkillMap>();
+      return {
+        ...state,
+        skillMaps: {
+          ...state.skillMaps,
+          [action.jobId]: applyLoading(prev),
+        },
+      };
+    }
+    case 'skill_map_success':
+      return {
+        ...state,
+        skillMaps: {
+          ...state.skillMaps,
+          [action.jobId]: applySkillMapSuccess(action.data),
+        },
+      };
+    case 'skill_map_error': {
+      const prev =
+        state.skillMaps[action.jobId] ?? emptyResource<SelectedJobSkillMap>();
+      return {
+        ...state,
+        skillMaps: {
+          ...state.skillMaps,
+          [action.jobId]: applyError(prev, action.error),
+        },
+      };
+    }
     case 'action_begin': {
       if (isJobActionPending(state.actions, action.jobId)) {
         return state;
@@ -437,6 +519,8 @@ export function savedJobsReducer(
       );
       const nextDetails = {...state.details};
       delete nextDetails[action.jobId];
+      const nextSkillMaps = {...state.skillMaps};
+      delete nextSkillMaps[action.jobId];
       const page: SavedJobListPage = {
         items: remainingItems,
         next_cursor: state.list.data?.next_cursor ?? null,
@@ -451,6 +535,7 @@ export function savedJobsReducer(
           loaded: true,
         },
         details: nextDetails,
+        skillMaps: nextSkillMaps,
         actions: {
           ...state.actions,
           pendingByJob: dropPendingJob(
@@ -513,6 +598,7 @@ export function savedJobsReducer(
             }
           : state.list,
         details: nextDetails,
+        skillMaps: invalidateSkillMap(state.skillMaps, action.jobId),
         actions: {
           ...state.actions,
           pendingByJob: dropPendingJob(
@@ -654,6 +740,7 @@ export function savedJobsReducer(
           loaded: false,
         },
         details: nextDetails,
+        skillMaps: invalidateAllSkillMaps(state.skillMaps),
       };
     }
     default:
@@ -678,6 +765,19 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
   /** Synchronous pending guard so rapid double-clicks cannot race re-render. */
   const actionInFlightRef = useRef<Set<string>>(new Set());
   const saveInFlightRef = useRef<Set<string>>(new Set());
+  const skillMapInvalidationRef = useRef({
+    all: 0,
+    byJob: new Map<string, number>(),
+  });
+
+  const invalidateSkillMapRequests = useCallback((jobId: string) => {
+    const generations = skillMapInvalidationRef.current.byJob;
+    generations.set(jobId, (generations.get(jobId) ?? 0) + 1);
+  }, []);
+
+  const invalidateAllSkillMapRequests = useCallback(() => {
+    skillMapInvalidationRef.current.all += 1;
+  }, []);
 
   const selectJob = useCallback((jobId: string | null) => {
     dispatch({type: 'select_job', jobId});
@@ -744,6 +844,44 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     [api, beginLatestRequest, state.details],
   );
 
+  const loadSkillMap = useCallback(
+    async (
+      jobId: string,
+      opts?: {force?: boolean; signal?: AbortSignal},
+    ) => {
+      const cached = state.skillMaps[jobId];
+      if (cached?.loaded && !opts?.force) {
+        return;
+      }
+      const isLatest = beginLatestRequest(`saved-job-skill-map:${jobId}`);
+      const allGeneration = skillMapInvalidationRef.current.all;
+      const jobGeneration =
+        skillMapInvalidationRef.current.byJob.get(jobId) ?? 0;
+      const isStillValid = () =>
+        skillMapInvalidationRef.current.all === allGeneration &&
+        (skillMapInvalidationRef.current.byJob.get(jobId) ?? 0) ===
+          jobGeneration;
+      dispatch({type: 'skill_map_loading', jobId});
+      try {
+        const data = await api.fetchSelectedJobSkillMap(jobId, opts?.signal);
+        if (opts?.signal?.aborted || !isLatest() || !isStillValid()) {
+          return;
+        }
+        dispatch({type: 'skill_map_success', jobId, data});
+      } catch (err) {
+        if (opts?.signal?.aborted || !isLatest() || !isStillValid()) {
+          return;
+        }
+        dispatch({
+          type: 'skill_map_error',
+          jobId,
+          error: toSafeError(err),
+        });
+      }
+    },
+    [api, beginLatestRequest, state.skillMaps],
+  );
+
   const evaluateJob = useCallback(
     async (
       jobId: string,
@@ -800,6 +938,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
           return 'error';
         }
         actionInFlightRef.current.delete(jobId);
+        invalidateSkillMapRequests(jobId);
         dispatch({type: 'delete_success', jobId});
         return 'success';
       } catch (err) {
@@ -817,7 +956,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         return 'error';
       }
     },
-    [api],
+    [api, invalidateSkillMapRequests],
   );
 
   /**
@@ -845,6 +984,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
           return 'error';
         }
         actionInFlightRef.current.delete(jobId);
+        invalidateSkillMapRequests(jobId);
         dispatch({type: 'reextract_success', jobId, response});
         // Server remains authoritative for extraction; force detail refresh.
         await loadDetail(jobId, {force: true, signal: opts?.signal});
@@ -864,7 +1004,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         return 'error';
       }
     },
-    [api, loadDetail],
+    [api, invalidateSkillMapRequests, loadDetail],
   );
 
   const saveAndEvaluate = useCallback(
@@ -910,8 +1050,9 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
 
   /** Mark list + selected detail non-current after activation / zero-result. */
   const invalidateCurrentness = useCallback(() => {
+    invalidateAllSkillMapRequests();
     dispatch({type: 'invalidate_currentness'});
-  }, []);
+  }, [invalidateAllSkillMapRequests]);
 
   return {
     state,
@@ -919,6 +1060,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     clearActionError,
     loadList,
     loadDetail,
+    loadSkillMap,
     evaluateJob,
     confirmDelete,
     confirmReextract,

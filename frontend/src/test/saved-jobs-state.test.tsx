@@ -20,6 +20,7 @@ import type {
   SavedJobDetail,
   SavedJobListItem,
   SavedJobListPage,
+  SelectedJobSkillMap,
 } from '../features/jobs/types';
 import {REEXTRACT_GRAPH_FAILURE_CODE} from '../features/jobs/types';
 
@@ -160,6 +161,238 @@ function reextractResponse(
     ...overrides,
   };
 }
+
+function skillMapFor(
+  jobId: string,
+  displayName = 'Audience Research',
+): SelectedJobSkillMap {
+  return {
+    status: 'ready',
+    code: null,
+    summary: 'Selected map is ready.',
+    rebuild_instruction: null,
+    candidate: {
+      id: 'active',
+      attachment_id: EVAL_ID,
+      current_title: 'Coordinator',
+      revision: TS,
+    },
+    job: {
+      id: jobId,
+      title: `Title ${jobId.slice(0, 4)}`,
+      company: 'Acme',
+      revision: TS,
+    },
+    items: [
+      {
+        match_type: 'candidate_only',
+        requirement: 'none',
+        strength: 0,
+        candidate_skill: {
+          canonical_key: 'audience_research',
+          display_name: displayName,
+          confidence: 0.9,
+          evidence: [`Evidence for ${displayName}`],
+        },
+        job_skill: null,
+        relationship: null,
+      },
+    ],
+    counts: {
+      direct: 0,
+      related: 0,
+      missing_required: 0,
+      missing_preferred: 0,
+      candidate_only: 1,
+    },
+    checked_at: TS,
+  };
+}
+
+describe('selected skill-map cache ownership', () => {
+  it('keeps request ordering independent per Job and retains safe cached data', async () => {
+    const initial = deferred<SelectedJobSkillMap>();
+    const refresh = deferred<SelectedJobSkillMap>();
+    const other = deferred<SelectedJobSkillMap>();
+    const fetchSelectedJobSkillMap = vi
+      .fn()
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(refresh.promise)
+      .mockReturnValueOnce(other.promise)
+      .mockRejectedValueOnce(new ChatApiError(500, 'DOWN', 'map down'));
+    const {result} = renderHook(() =>
+      useSavedJobsState({api: {fetchSelectedJobSkillMap}}),
+    );
+    let initialLoad!: Promise<void>;
+    let forced!: Promise<void>;
+    let otherLoad!: Promise<void>;
+
+    act(() => {
+      initialLoad = result.current.loadSkillMap(JOB_A);
+      forced = result.current.loadSkillMap(JOB_A, {force: true});
+      otherLoad = result.current.loadSkillMap(JOB_B);
+    });
+    await act(async () => {
+      refresh.resolve(skillMapFor(JOB_A, 'Newer label'));
+      other.resolve(skillMapFor(JOB_B, 'Other label'));
+      await Promise.all([forced, otherLoad]);
+    });
+    await act(async () => {
+      initial.resolve(skillMapFor(JOB_A, 'Older label'));
+      await initialLoad;
+    });
+
+    expect(
+      result.current.state.skillMaps[JOB_A]?.data?.items[0]?.candidate_skill
+        ?.display_name,
+    ).toBe('Newer label');
+    expect(
+      result.current.state.skillMaps[JOB_B]?.data?.items[0]?.candidate_skill
+        ?.display_name,
+    ).toBe('Other label');
+
+    await act(async () => {
+      await result.current.loadSkillMap(JOB_A, {force: true});
+    });
+    expect(result.current.state.skillMaps[JOB_A]?.phase).toBe('error');
+    expect(
+      result.current.state.skillMaps[JOB_A]?.data?.items[0]?.candidate_skill
+        ?.display_name,
+    ).toBe('Newer label');
+  });
+
+  it('invalidates map caches for active-CV, re-extract, and delete without evaluating', async () => {
+    const fetchSelectedJobSkillMap = vi
+      .fn()
+      .mockResolvedValue(skillMapFor(JOB_A));
+    const reextractSavedJob = vi.fn().mockResolvedValue(reextractResponse(JOB_A));
+    const fetchSavedJobDetail = vi.fn().mockResolvedValue(detailFor(JOB_A));
+    const deleteSavedJob = vi.fn().mockResolvedValue(undefined);
+    const evaluateSavedJob = vi.fn();
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {
+          fetchSelectedJobSkillMap,
+          reextractSavedJob,
+          fetchSavedJobDetail,
+          deleteSavedJob,
+          evaluateSavedJob,
+        },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadSkillMap(JOB_A);
+    });
+    act(() => {
+      result.current.selectJob(JOB_A);
+      result.current.invalidateCurrentness();
+    });
+    expect(result.current.state.skillMaps[JOB_A]).toMatchObject({
+      phase: 'loading',
+      loaded: false,
+    });
+    expect(result.current.state.skillMaps[JOB_A]?.data).not.toBeNull();
+
+    await act(async () => {
+      await result.current.loadSkillMap(JOB_A, {force: true});
+      await result.current.confirmReextract(JOB_A);
+    });
+    expect(result.current.state.skillMaps[JOB_A]).toMatchObject({
+      phase: 'loading',
+      loaded: false,
+    });
+
+    await act(async () => {
+      await result.current.confirmDelete(JOB_A);
+    });
+    expect(result.current.state.skillMaps[JOB_A]).toBeUndefined();
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
+  it('ignores an in-flight map response after currentness invalidation', async () => {
+    const pending = deferred<SelectedJobSkillMap>();
+    const fetchSelectedJobSkillMap = vi.fn().mockReturnValue(pending.promise);
+    const {result} = renderHook(() =>
+      useSavedJobsState({api: {fetchSelectedJobSkillMap}}),
+    );
+    let load!: Promise<void>;
+
+    act(() => {
+      load = result.current.loadSkillMap(JOB_A);
+    });
+    act(() => {
+      result.current.invalidateCurrentness();
+    });
+    await act(async () => {
+      pending.resolve(skillMapFor(JOB_A, 'Outdated label'));
+      await load;
+    });
+
+    expect(result.current.state.skillMaps[JOB_A]).toMatchObject({
+      phase: 'loading',
+      data: null,
+      loaded: false,
+    });
+  });
+
+  it('ignores an in-flight map response after successful re-extraction', async () => {
+    const pending = deferred<SelectedJobSkillMap>();
+    const fetchSelectedJobSkillMap = vi.fn().mockReturnValue(pending.promise);
+    const reextractSavedJob = vi.fn().mockResolvedValue(reextractResponse(JOB_A));
+    const fetchSavedJobDetail = vi.fn().mockResolvedValue(detailFor(JOB_A));
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {
+          fetchSelectedJobSkillMap,
+          reextractSavedJob,
+          fetchSavedJobDetail,
+        },
+      }),
+    );
+    let load!: Promise<void>;
+
+    act(() => {
+      load = result.current.loadSkillMap(JOB_A);
+    });
+    await act(async () => {
+      await result.current.confirmReextract(JOB_A);
+    });
+    await act(async () => {
+      pending.resolve(skillMapFor(JOB_A, 'Outdated label'));
+      await load;
+    });
+
+    expect(result.current.state.skillMaps[JOB_A]).toMatchObject({
+      phase: 'loading',
+      data: null,
+      loaded: false,
+    });
+  });
+
+  it('does not recreate a deleted Job map from an older in-flight response', async () => {
+    const pending = deferred<SelectedJobSkillMap>();
+    const fetchSelectedJobSkillMap = vi.fn().mockReturnValue(pending.promise);
+    const deleteSavedJob = vi.fn().mockResolvedValue(undefined);
+    const {result} = renderHook(() =>
+      useSavedJobsState({api: {fetchSelectedJobSkillMap, deleteSavedJob}}),
+    );
+    let load!: Promise<void>;
+
+    act(() => {
+      load = result.current.loadSkillMap(JOB_A);
+    });
+    await act(async () => {
+      await result.current.confirmDelete(JOB_A);
+    });
+    await act(async () => {
+      pending.resolve(skillMapFor(JOB_A, 'Deleted Job label'));
+      await load;
+    });
+
+    expect(result.current.state.skillMaps[JOB_A]).toBeUndefined();
+  });
+});
 
 describe('saved-JD request ordering and stale-on-error', () => {
   it('ignores an older list request after a forced refresh succeeds', async () => {

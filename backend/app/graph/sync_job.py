@@ -69,7 +69,7 @@ class JobSyncError(Exception):
         self.message = message
 
 
-def _job_skill_row(skill: JobSkill) -> dict[str, Any]:
+def job_skill_param_row(skill: JobSkill) -> dict[str, Any]:
     """Parameter map for one Job skill edge (Skill node + rel props)."""
     return {
         "skill": skill_ref_node_props(skill.skill),
@@ -128,8 +128,8 @@ async def sync_job(
         )
 
     vector = _locked_embedding_for_graph(embedding)
-    requires = [_job_skill_row(s) for s in extraction.required_skills]
-    prefers = [_job_skill_row(s) for s in extraction.preferred_skills]
+    requires = [job_skill_param_row(skill) for skill in extraction.required_skills]
+    prefers = [job_skill_param_row(skill) for skill in extraction.preferred_skills]
     seed_skills = seed_skill_param_rows(normalizer)
     related = related_to_param_rows(normalizer)
 

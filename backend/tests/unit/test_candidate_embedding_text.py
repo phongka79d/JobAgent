@@ -182,6 +182,26 @@ def test_candidate_excludes_skills_marked_excluded() -> None:
     assert "nodejs" not in skill_section
 
 
+def test_candidate_embedding_uses_persisted_skill_rows_without_expansion() -> None:
+    text = embedding_text.build_candidate_embedding_text_v1(
+        _profile(
+            skills=[
+                _candidate_skill(
+                    "Methods: Discovery/Research",
+                    key="methods_discovery_research",
+                ),
+                _candidate_skill("Quản trị rủi ro", key="quản_trị_rủi_ro"),
+            ]
+        ),
+        _preferences(),
+    )
+
+    skill_section = text.split("skills:")[1].split("experience_titles:")[0]
+    assert skill_section.strip() == (
+        "Methods: Discovery/Research, Quản trị rủi ro"
+    )
+
+
 def test_candidate_empty_lists_keep_stable_sections() -> None:
     text = embedding_text.build_candidate_embedding_text_v1(
         _profile(skills=[], experiences=[], education=[], languages=[]),

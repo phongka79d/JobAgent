@@ -28,6 +28,7 @@ from app.db.models.chat import (
     TOOL_EXECUTION_STATUS_COMPLETED,
     TOOL_EXECUTION_STATUS_FAILED,
 )
+from app.db.models.jobs import JobPost
 from app.db.session import build_async_engine
 from app.graph.consistency import NEO4J_REBUILD_REQUIRED, NEO4J_UNAVAILABLE
 from app.graph.observability import CAP_EDGES, CAP_JOBS, CAP_SKILLS
@@ -46,6 +47,7 @@ from app.schemas.observability import (
     CvHistoryPage,
     GraphSnapshot,
     RunHistoryPage,
+    SelectedJobSkillMap,
     decode_chunk_cursor,
     decode_observability_cursor,
     encode_chunk_cursor,
@@ -63,7 +65,12 @@ from tests.support.db_migration import (
     run_async,
     session_factory,
 )
-from tests.support.graph_rebuild import seed_candidate
+from tests.support.graph_rebuild import (
+    profile_payload,
+    seed_candidate,
+    seed_scorable_job,
+    seed_unscorable_job,
+)
 from tests.support.health import (
     FAKE_SHOPAIKEY,
     FakeDriver,
@@ -262,6 +269,7 @@ def test_observability_routes_registered(
         ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
         ("GET", "/api/observability/runs"),
+        ("GET", "/api/observability/skill-map"),
         ("GET", "/api/observability/graph"),
     }
     for item in expected:
@@ -910,6 +918,9 @@ class GraphApiFakeDriver:
         proj_cvs: Sequence[Mapping[str, Any]] | None = None,
         proj_sections: Sequence[Mapping[str, Any]] | None = None,
         proj_entries: Sequence[Mapping[str, Any]] | None = None,
+        selected_candidate_skills: Sequence[Mapping[str, Any]] | None = None,
+        selected_job_skills: Sequence[Mapping[str, Any]] | None = None,
+        fail_selected: bool = False,
         fail_all: bool = False,
     ) -> None:
         self.revision_candidates = [dict(r) for r in (revision_candidates or ())]
@@ -922,6 +933,13 @@ class GraphApiFakeDriver:
         self.proj_cvs = [dict(r) for r in (proj_cvs or ())]
         self.proj_sections = [dict(r) for r in (proj_sections or ())]
         self.proj_entries = [dict(r) for r in (proj_entries or ())]
+        self.selected_candidate_skills = [
+            dict(r) for r in (selected_candidate_skills or ())
+        ]
+        self.selected_job_skills = [
+            dict(r) for r in (selected_job_skills or ())
+        ]
+        self.fail_selected = fail_selected
         self.fail_all = fail_all
         self.queries: list[str] = []
         self.parameters: list[dict[str, Any]] = []
@@ -949,6 +967,14 @@ class GraphApiFakeDriver:
     def resolve(
         self, query: str, params: Mapping[str, Any]
     ) -> list[dict[str, Any]]:
+        if "r.confidence AS confidence" in query and "HAS_SKILL" in query:
+            if self.fail_selected:
+                raise OSError("simulated selected relationship failure")
+            return list(self.selected_candidate_skills)
+        if "r.confidence AS confidence" in query and "REQUIRES|PREFERS" in query:
+            if self.fail_selected:
+                raise OSError("simulated selected relationship failure")
+            return list(self.selected_job_skills)
         # Active CV consistency revision (PROJECTS_TO branch).
         if (
             "cv.source_updated_at AS source_updated_at" in query
@@ -1045,6 +1071,365 @@ class GraphApiFakeDriver:
 def _iso_z(value: datetime) -> str:
     stamp = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     return stamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+async def _seed_skill_map_context(
+    db_path: Path,
+) -> tuple[str, datetime, str, datetime, str]:
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+    try:
+        await seed_candidate(factory)
+        job_id = await seed_scorable_job(
+            factory,
+            raw_hash="skill-map-job-hash-" + ("a" * 44),
+            raw_content="Synthetic selected JD",
+        )
+        async with factory() as session:
+            profile = await profile_repo.get_active_profile(session)
+            job = await session.get(JobPost, job_id)
+            assert profile is not None and job is not None
+            return (
+                profile.id,
+                profile.updated_at,
+                job.id,
+                job.updated_at,
+                profile.active_attachment_id,
+            )
+    finally:
+        await engine.dispose()
+
+
+def _selected_candidate_rows() -> list[dict[str, Any]]:
+    return [
+        {
+            "relationship_type": "HAS_SKILL",
+            "canonical_key": "python",
+            "confidence": 0.9,
+            "years": 4.0,
+            "proficiency": "advanced",
+            "evidence": ["Python backend"],
+        }
+    ]
+
+
+def _selected_job_rows() -> list[dict[str, Any]]:
+    return [
+        {
+            "relationship_type": "REQUIRES",
+            "canonical_key": "python",
+            "confidence": 0.91,
+            "years": None,
+            "proficiency": None,
+            "evidence": ["Required: Python 3+"],
+        },
+        {
+            "relationship_type": "PREFERS",
+            "canonical_key": "fastapi",
+            "confidence": 0.7,
+            "years": None,
+            "proficiency": None,
+            "evidence": ["Preferred: FastAPI"],
+        },
+    ]
+
+
+def test_skill_map_ready_is_bounded_redacted_and_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    cand_id, cand_updated, job_id, job_updated, attachment_id = run_async(
+        _seed_skill_map_context(db_path)
+    )
+    fake = GraphApiFakeDriver(
+        revision_candidates=[
+            {"id": cand_id, "source_updated_at": _iso_z(cand_updated)}
+        ],
+        revision_jobs=[
+            {"id": job_id, "source_updated_at": _iso_z(job_updated)}
+        ],
+        selected_candidate_skills=_selected_candidate_rows(),
+        selected_job_skills=_selected_job_rows(),
+    )
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        response = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": job_id},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    parsed = SelectedJobSkillMap.model_validate(body)
+    assert parsed.status == "ready"
+    assert parsed.candidate is not None
+    assert parsed.candidate.attachment_id == attachment_id
+    assert parsed.job is not None and parsed.job.id == job_id
+    assert [item.match_type for item in parsed.items] == ["direct", "related"]
+    assert parsed.counts.direct == 1
+    assert parsed.counts.related == 1
+    assert fake.write_queries == []
+    _assert_no_forbidden(body)
+
+    async def _evaluation_count() -> int:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                return int(
+                    (
+                        await session.execute(
+                            text("SELECT COUNT(*) FROM job_evaluations")
+                        )
+                    ).scalar_one()
+                )
+        finally:
+            await engine.dispose()
+
+    assert run_async(_evaluation_count()) == 0
+
+
+@pytest.mark.parametrize(
+    ("selected_rows", "fail_selected", "expected_status", "expected_code"),
+    [
+        ([], False, "stale", NEO4J_REBUILD_REQUIRED),
+        (_selected_candidate_rows(), True, "unavailable", NEO4J_UNAVAILABLE),
+    ],
+)
+def test_skill_map_withholds_items_on_mismatch_or_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    selected_rows: list[dict[str, Any]],
+    fail_selected: bool,
+    expected_status: str,
+    expected_code: str,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    cand_id, cand_updated, job_id, job_updated, _attachment_id = run_async(
+        _seed_skill_map_context(db_path)
+    )
+    fake = GraphApiFakeDriver(
+        revision_candidates=[
+            {"id": cand_id, "source_updated_at": _iso_z(cand_updated)}
+        ],
+        revision_jobs=[
+            {"id": job_id, "source_updated_at": _iso_z(job_updated)}
+        ],
+        selected_candidate_skills=selected_rows,
+        selected_job_skills=_selected_job_rows(),
+        fail_selected=fail_selected,
+    )
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        response = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": job_id},
+        )
+
+    assert response.status_code == 200
+    parsed = SelectedJobSkillMap.model_validate(response.json())
+    assert parsed.status == expected_status
+    assert parsed.code == expected_code
+    assert parsed.items == []
+    assert sum(parsed.counts.as_dict().values()) == 0
+    assert fake.write_queries == []
+
+
+def test_skill_map_validates_job_and_query_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+    try:
+        run_async(seed_candidate(factory))
+        unscorable_id = run_async(
+            seed_unscorable_job(factory, raw_hash="unscorable-map-" + ("b" * 48))
+        )
+    finally:
+        run_async(engine.dispose())
+    fake = GraphApiFakeDriver()
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        invalid = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": "not-a-uuid"},
+        )
+        missing = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": new_uuid()},
+        )
+        unscorable = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": unscorable_id},
+        )
+
+    assert invalid.status_code == 422
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "JOB_NOT_FOUND"
+    assert unscorable.status_code == 409
+    assert unscorable.json()["detail"]["code"] == "JOB_NOT_SCORABLE"
+
+
+def test_skill_map_requires_active_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+    try:
+        job_id = run_async(
+            seed_scorable_job(
+                factory,
+                raw_hash="map-no-profile-" + ("c" * 48),
+            )
+        )
+    finally:
+        run_async(engine.dispose())
+    fake = GraphApiFakeDriver()
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        response = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": job_id},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ACTIVE_PROFILE_REQUIRED"
+    assert fake.write_queries == []
+
+
+def test_skill_map_revision_mismatch_skips_relationship_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    cand_id, _cand_updated, job_id, job_updated, _attachment_id = run_async(
+        _seed_skill_map_context(db_path)
+    )
+    fake = GraphApiFakeDriver(
+        revision_candidates=[
+            {"id": cand_id, "source_updated_at": "2000-01-01T00:00:00Z"}
+        ],
+        revision_jobs=[
+            {"id": job_id, "source_updated_at": _iso_z(job_updated)}
+        ],
+        selected_candidate_skills=_selected_candidate_rows(),
+        selected_job_skills=_selected_job_rows(),
+    )
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        response = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": job_id},
+        )
+
+    parsed = SelectedJobSkillMap.model_validate(response.json())
+    assert parsed.status == "stale"
+    assert parsed.code == NEO4J_REBUILD_REQUIRED
+    assert parsed.items == []
+    assert not any("r.confidence AS confidence" in query for query in fake.queries)
+
+
+def test_skill_map_preflights_authoritative_limit_before_limited_graph_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+
+    async def _seed_large() -> tuple[str, datetime, str, datetime]:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            await seed_candidate(factory)
+            job_id = await seed_scorable_job(
+                factory,
+                raw_hash="large-map-job-" + ("d" * 50),
+            )
+            async with factory() as session:
+                profile_row = await profile_repo.get_active_profile(session)
+                job_row = await session.get(JobPost, job_id)
+                assert profile_row is not None and job_row is not None
+                payload = profile_payload(include_excluded=False)
+                payload["skills"] = [
+                    {
+                        "skill": {
+                            "canonical_key": f"skill_{index}",
+                            "display_name": f"Synthetic skill {index}",
+                            "aliases": [],
+                            "category": None,
+                        },
+                        "confidence": 0.9,
+                        "proficiency": "advanced",
+                        "years": 1.0,
+                        "source": "cv",
+                        "excluded": False,
+                        "evidence": [f"candidate evidence {index}"],
+                    }
+                    for index in range(202)
+                ]
+                profile_row = await profile_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=profile_row.active_attachment_id,
+                    profile_json=payload,
+                )
+                await session.commit()
+                return (
+                    profile_row.id,
+                    profile_row.updated_at,
+                    job_row.id,
+                    job_row.updated_at,
+                )
+        finally:
+            await engine.dispose()
+
+    cand_id, cand_updated, job_id, job_updated = run_async(_seed_large())
+    candidate_rows = [
+        {
+            "relationship_type": "HAS_SKILL",
+            "canonical_key": f"skill_{index}",
+            "confidence": 0.9,
+            "years": 1.0,
+            "proficiency": "advanced",
+            "evidence": [f"candidate evidence {index}"],
+        }
+        # The production Cypher returns at most 201 rows. This intentionally
+        # models its visible result for an exact 202-row graph.
+        for index in range(201)
+    ]
+    fake = GraphApiFakeDriver(
+        revision_candidates=[
+            {"id": cand_id, "source_updated_at": _iso_z(cand_updated)}
+        ],
+        revision_jobs=[
+            {"id": job_id, "source_updated_at": _iso_z(job_updated)}
+        ],
+        selected_candidate_skills=candidate_rows,
+        selected_job_skills=_selected_job_rows(),
+    )
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        response = client.get(
+            "/api/observability/skill-map",
+            params={"job_id": job_id},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "SKILL_MAP_LIMIT_EXCEEDED",
+        "summary": "Selected skill map exceeds the 200-item safety bound.",
+    }
+    assert "items" not in response.json()
+    assert not any("r.confidence AS confidence" in query for query in fake.queries)
 
 
 def test_graph_no_active_profile_ready_empty(

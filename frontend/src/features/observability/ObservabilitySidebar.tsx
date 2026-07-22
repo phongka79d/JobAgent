@@ -75,6 +75,7 @@ export function ObservabilitySidebar({
       void obs.loadRuns({signal});
     } else if (state.selectedTab === 'graph') {
       void obs.loadGraph({signal});
+      void savedJobs.loadList({}, {signal});
     } else if (
       state.selectedTab === 'chunks' &&
       state.selectedAttachmentId
@@ -90,6 +91,32 @@ export function ObservabilitySidebar({
     state.selectedTab,
     state.selectedAttachmentId,
     state.activationGeneration,
+  ]);
+
+  const selectedSkillMapLoaded = savedJobs.state.selectedJobId
+    ? savedJobs.state.skillMaps[savedJobs.state.selectedJobId]?.loaded
+    : undefined;
+
+  useEffect(() => {
+    const jobId = savedJobs.state.selectedJobId;
+    if (
+      state.selectedTab !== 'graph' ||
+      !jobId ||
+      selectedSkillMapLoaded === true
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    void savedJobs.loadSkillMap(jobId, {signal: controller.signal});
+    return () => {
+      controller.abort();
+    };
+    // The selected Job and cache freshness own this read. loadSkillMap itself
+    // changes as cache state changes, so it is intentionally not a dependency.
+  }, [
+    state.selectedTab,
+    savedJobs.state.selectedJobId,
+    selectedSkillMapLoaded,
   ]);
 
   useEffect(() => {
@@ -116,12 +143,16 @@ export function ObservabilitySidebar({
     }
     handledSavedJobsInvalidateKey.current = savedJobsInvalidateKey;
     const selectedJobId = savedJobs.state.selectedJobId;
-    const tabOpen = state.selectedTab === 'saved-jobs';
+    const savedJobsOpen = state.selectedTab === 'saved-jobs';
+    const graphOpen = state.selectedTab === 'graph';
     savedJobs.invalidateCurrentness();
-    if (tabOpen) {
+    if (savedJobsOpen || graphOpen) {
       void savedJobs.loadList({}, {force: true});
-      if (selectedJobId) {
+      if (savedJobsOpen && selectedJobId) {
         void savedJobs.loadDetail(selectedJobId, {force: true});
+      }
+      if (graphOpen && selectedJobId) {
+        void savedJobs.loadSkillMap(selectedJobId, {force: true});
       }
     }
     // Signal-only trigger; selection/tab captured at invalidation time (Plan 11).
@@ -178,6 +209,9 @@ export function ObservabilitySidebar({
 
   const chunkList = state.selectedAttachmentId
     ? state.chunkLists[state.selectedAttachmentId] ?? null
+    : null;
+  const selectedSkillMap = savedJobs.state.selectedJobId
+    ? savedJobs.state.skillMaps[savedJobs.state.selectedJobId] ?? null
     : null;
 
   if (isCollapsed) {
@@ -284,8 +318,18 @@ export function ObservabilitySidebar({
         {state.selectedTab === 'graph' ? (
           <GraphPanel
             resource={state.graph}
+            selectedJobId={savedJobs.state.selectedJobId}
+            skillMapResource={selectedSkillMap}
             onRefresh={() => {
               void obs.loadGraph({force: true});
+            }}
+            onRefreshSkillMap={() => {
+              if (!savedJobs.state.selectedJobId) {
+                return;
+              }
+              void savedJobs.loadSkillMap(savedJobs.state.selectedJobId, {
+                force: true,
+              });
             }}
           />
         ) : null}

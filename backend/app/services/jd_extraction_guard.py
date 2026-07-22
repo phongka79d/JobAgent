@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
 from app.services.jd_extraction import ExtractedJobPost, ExtractedJobSkillItem
-from app.services.skill_normalization import (
-    SkillNormalizer,
-    collapse_whitespace,
-    comparison_lowercase,
-    unicode_normalize,
+from app.services.skill_assertion_guard import (
+    StructuralSkillIssue,
+    is_label_grounded,
+    is_source_grounded,
+    normalize_assertion_text,
+    structural_compound_part_count,
+    structural_issue,
 )
+from app.services.skill_normalization import SkillNormalizer
 
 GuardIssueCode = Literal[
     "EVIDENCE_NOT_IN_SOURCE",
+    "SKILL_NAME_NOT_IN_SOURCE",
     "RESPONSIBILITY_NOT_IN_SOURCE",
     "METADATA_NOT_IN_SOURCE",
     "COMPOUND_SKILL_LABEL",
@@ -23,37 +26,19 @@ GuardIssueCode = Literal[
     "SKILL_GROUP_CONFLICT",
 ]
 
-ISSUE_CODES: Final[frozenset[str]] = frozenset(
-    {
-        "EVIDENCE_NOT_IN_SOURCE",
-        "RESPONSIBILITY_NOT_IN_SOURCE",
-        "METADATA_NOT_IN_SOURCE",
-        "COMPOUND_SKILL_LABEL",
-        "DUPLICATE_SKILL",
-        "SKILL_GROUP_CONFLICT",
-    }
+ISSUE_CODES: Final[tuple[GuardIssueCode, ...]] = (
+    "EVIDENCE_NOT_IN_SOURCE",
+    "SKILL_NAME_NOT_IN_SOURCE",
+    "RESPONSIBILITY_NOT_IN_SOURCE",
+    "METADATA_NOT_IN_SOURCE",
+    "COMPOUND_SKILL_LABEL",
+    "DUPLICATE_SKILL",
+    "SKILL_GROUP_CONFLICT",
 )
 
 MAX_GUARD_ISSUES: Final[int] = 20
 
-_PUNCTUATION_EXCEPTIONS: Final[frozenset[str]] = frozenset(
-    {"c/c++", ".net", "node.js", "ci/cd"}
-)
-
-_WORD_RE: Final[re.Pattern[str]] = re.compile(r"[^\W_]+", re.UNICODE)
-_ENUMERATION_RE: Final[re.Pattern[str]] = re.compile(
-    r"\s*(?:[,;|/]|\b(?:and|or|và|hoặc)\b)\s*",
-    re.IGNORECASE,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class GuardIssue:
-    """One safe semantic issue without source or provider values."""
-
-    code: GuardIssueCode
-    field_path: str
-    count: int
+GuardIssue = StructuralSkillIssue
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,73 +56,7 @@ class JdExtractionGuardResult:
 
 def normalize_guard_text(value: str) -> str:
     """Return the sole source-containment form: NFKC, whitespace, casefold."""
-    return comparison_lowercase(collapse_whitespace(unicode_normalize(value)))
-
-
-def _word_tokens(value: str) -> tuple[str, ...]:
-    return tuple(_WORD_RE.findall(normalize_guard_text(value)))
-
-
-def _approved_label_tokens(
-    normalizer: SkillNormalizer,
-) -> tuple[dict[str, str], tuple[tuple[tuple[str, ...], str], ...]]:
-    exact_labels: dict[str, str] = {}
-    token_labels: list[tuple[tuple[str, ...], str]] = []
-    for skill in normalizer.taxonomy.skills:
-        for label in (skill.display_name, *skill.aliases):
-            normalized = normalize_guard_text(label)
-            exact_labels[normalized] = skill.canonical_key
-            tokens = _word_tokens(label)
-            if tokens:
-                token_labels.append((tokens, skill.canonical_key))
-    return exact_labels, tuple(token_labels)
-
-
-def _contains_token_sequence(
-    tokens: tuple[str, ...],
-    candidate: tuple[str, ...],
-) -> bool:
-    width = len(candidate)
-    return any(
-        tokens[index : index + width] == candidate
-        for index in range(len(tokens) - width + 1)
-    )
-
-
-def _compound_part_count(
-    label: str,
-    *,
-    exact_labels: dict[str, str],
-    token_labels: tuple[tuple[tuple[str, ...], str], ...],
-) -> int | None:
-    normalized = normalize_guard_text(label)
-    if normalized in _PUNCTUATION_EXCEPTIONS or normalized in exact_labels:
-        return None
-
-    enumerated_parts = tuple(
-        part
-        for part in _ENUMERATION_RE.split(normalized)
-        if _word_tokens(part)
-    )
-    if len(enumerated_parts) >= 2:
-        return len(enumerated_parts)
-
-    tokens = _word_tokens(label)
-    matched_keys = {
-        canonical_key
-        for approved_tokens, canonical_key in token_labels
-        if _contains_token_sequence(tokens, approved_tokens)
-    }
-    if len(matched_keys) >= 2:
-        return len(matched_keys)
-    if matched_keys:
-        return 2
-    return None
-
-
-def _grounded(value: str, normalized_source: str) -> bool:
-    normalized_value = normalize_guard_text(value)
-    return (not normalized_value) or (normalized_value in normalized_source)
+    return normalize_assertion_text(value)
 
 
 def _normalized_key(
@@ -150,6 +69,19 @@ def _normalized_key(
         return None
 
 
+def _approved_labels(
+    item: ExtractedJobSkillItem,
+    normalizer: SkillNormalizer,
+) -> tuple[str, ...]:
+    try:
+        ref = normalizer.normalize_name(item.name)
+    except ValueError:
+        return ()
+    if not normalizer.is_seed_skill(ref.canonical_key):
+        return ()
+    return (ref.display_name, *ref.aliases)
+
+
 def guard_extracted_job_post(
     raw_jd: str,
     extracted: ExtractedJobPost,
@@ -160,11 +92,10 @@ def guard_extracted_job_post(
         raise TypeError("raw JD must be a string")
 
     normalized_source = normalize_guard_text(raw_jd)
-    exact_labels, token_labels = _approved_label_tokens(normalizer)
     all_issues: list[GuardIssue] = []
 
     def add(code: GuardIssueCode, field_path: str, count: int = 1) -> None:
-        all_issues.append(GuardIssue(code=code, field_path=field_path, count=count))
+        all_issues.append(structural_issue(code, field_path, count=count))
 
     metadata = (
         ("title", extracted.title),
@@ -173,11 +104,11 @@ def guard_extracted_job_post(
     for field_path, value in metadata:
         if value is None:
             continue
-        if not _grounded(value, normalized_source):
+        if not is_source_grounded(value, normalized_source):
             add("METADATA_NOT_IN_SOURCE", field_path)
 
     for index, responsibility in enumerate(extracted.responsibilities):
-        if not _grounded(responsibility, normalized_source):
+        if not is_source_grounded(responsibility, normalized_source):
             add("RESPONSIBILITY_NOT_IN_SOURCE", f"responsibilities[{index}]")
 
     required_counts: dict[str, int] = {}
@@ -190,10 +121,16 @@ def guard_extracted_job_post(
     seen_required: dict[str, int] = {}
     for index, item in enumerate(extracted.required_skills):
         name_path = f"required_skills[{index}].name"
-        compound_count = _compound_part_count(
+        approved_labels = _approved_labels(item, normalizer)
+        if not is_label_grounded(
             item.name,
-            exact_labels=exact_labels,
-            token_labels=token_labels,
+            (normalized_source,),
+            approved_aliases=approved_labels,
+        ):
+            add("SKILL_NAME_NOT_IN_SOURCE", name_path)
+        compound_count = structural_compound_part_count(
+            item.name,
+            approved_atomic_labels=approved_labels,
         )
         if compound_count is not None:
             add("COMPOUND_SKILL_LABEL", name_path, compound_count)
@@ -205,7 +142,7 @@ def guard_extracted_job_post(
                 add("DUPLICATE_SKILL", name_path, seen_required[key])
 
         for evidence_index, evidence in enumerate(item.evidence):
-            if not _grounded(evidence, normalized_source):
+            if not is_source_grounded(evidence, normalized_source):
                 add(
                     "EVIDENCE_NOT_IN_SOURCE",
                     f"required_skills[{index}].evidence[{evidence_index}]",
@@ -214,10 +151,16 @@ def guard_extracted_job_post(
     seen_preferred: dict[str, int] = {}
     for index, item in enumerate(extracted.preferred_skills):
         name_path = f"preferred_skills[{index}].name"
-        compound_count = _compound_part_count(
+        approved_labels = _approved_labels(item, normalizer)
+        if not is_label_grounded(
             item.name,
-            exact_labels=exact_labels,
-            token_labels=token_labels,
+            (normalized_source,),
+            approved_aliases=approved_labels,
+        ):
+            add("SKILL_NAME_NOT_IN_SOURCE", name_path)
+        compound_count = structural_compound_part_count(
+            item.name,
+            approved_atomic_labels=approved_labels,
         )
         if compound_count is not None:
             add("COMPOUND_SKILL_LABEL", name_path, compound_count)
@@ -235,13 +178,13 @@ def guard_extracted_job_post(
                 )
 
         for evidence_index, evidence in enumerate(item.evidence):
-            if not _grounded(evidence, normalized_source):
+            if not is_source_grounded(evidence, normalized_source):
                 add(
                     "EVIDENCE_NOT_IN_SOURCE",
                     f"preferred_skills[{index}].evidence[{evidence_index}]",
                 )
 
-    if extracted.location is not None and not _grounded(
+    if extracted.location is not None and not is_source_grounded(
         extracted.location,
         normalized_source,
     ):

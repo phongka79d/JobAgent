@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from app.services.jd_extraction import ExtractedJobPost
-from app.services.skill_normalization import SkillNormalizer
+from app.services.skill_normalization import SkillNormalizer, load_skill_taxonomy
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "jd_extraction_golden.json"
@@ -23,15 +23,14 @@ GUARD_SOURCE = (
     / "jd_extraction_guard.py"
 )
 
-EXPECTED_CODES = frozenset(
-    {
-        "EVIDENCE_NOT_IN_SOURCE",
-        "RESPONSIBILITY_NOT_IN_SOURCE",
-        "METADATA_NOT_IN_SOURCE",
-        "COMPOUND_SKILL_LABEL",
-        "DUPLICATE_SKILL",
-        "SKILL_GROUP_CONFLICT",
-    }
+EXPECTED_CODES = (
+    "EVIDENCE_NOT_IN_SOURCE",
+    "SKILL_NAME_NOT_IN_SOURCE",
+    "RESPONSIBILITY_NOT_IN_SOURCE",
+    "METADATA_NOT_IN_SOURCE",
+    "COMPOUND_SKILL_LABEL",
+    "DUPLICATE_SKILL",
+    "SKILL_GROUP_CONFLICT",
 )
 
 
@@ -45,6 +44,11 @@ def _guard_module() -> ModuleType:
 @pytest.fixture(scope="module")
 def normalizer() -> SkillNormalizer:
     return SkillNormalizer.production()
+
+
+@pytest.fixture(scope="module")
+def empty_normalizer() -> SkillNormalizer:
+    return SkillNormalizer(load_skill_taxonomy({"skills": [], "relationships": []}))
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +92,7 @@ def test_fixture_is_synthetic_bilingual_and_assertions_are_safe(
     for case in cases:
         for expected in case["expected_issues"]:
             assert set(expected) == {"code", "field_path", "count"}
-            assert expected["code"] in EXPECTED_CODES
+            assert expected["code"] in set(EXPECTED_CODES)
             assert isinstance(expected["count"], int)
         assert "provider" not in case
         assert "prompt" not in case
@@ -153,7 +157,7 @@ def test_blank_grounded_fields_are_ignored_and_summary_is_not_grounded(
                 {
                     "name": "Rust",
                     "confidence": 0.8,
-                    "evidence": ["\t"],
+                    "evidence": ["Rust"],
                 }
             ],
             "preferred_skills": [],
@@ -172,11 +176,11 @@ def test_blank_grounded_fields_are_ignored_and_summary_is_not_grounded(
 
 @pytest.mark.parametrize(
     "label",
-    ["C/C++", ".NET", "Node.js", "CI/CD", "Rust", "Machine Learning"],
+    ["Service Design/Research", "Revenue.Funnel+", "Quản trị-rủi ro"],
 )
-def test_protected_punctuation_and_unknown_atomic_labels_pass(
+def test_unknown_contiguous_punctuation_labels_pass_without_seed_membership(
     label: str,
-    normalizer: SkillNormalizer,
+    empty_normalizer: SkillNormalizer,
 ) -> None:
     extracted = _extracted(
         {
@@ -185,7 +189,7 @@ def test_protected_punctuation_and_unknown_atomic_labels_pass(
             "summary": "Synthetic.",
             "responsibilities": [],
             "required_skills": [
-                {"name": label, "confidence": 0.8, "evidence": []}
+                {"name": label, "confidence": 0.8, "evidence": [label]}
             ],
             "preferred_skills": [],
             "seniority": "unknown",
@@ -196,20 +200,77 @@ def test_protected_punctuation_and_unknown_atomic_labels_pass(
             "extraction_confidence": 0.7,
         }
     )
-    assert _guard("Synthetic source.", extracted, normalizer).accepted
+    result = _guard(
+        f"Required capability: {label}.",
+        extracted,
+        empty_normalizer,
+    )
+    assert result.accepted
+
+
+def test_skill_name_or_approved_alias_must_be_grounded_in_retained_source(
+    normalizer: SkillNormalizer,
+) -> None:
+    ungrounded = _extracted(
+        {
+            "title": None,
+            "company": None,
+            "summary": "Synthetic.",
+            "responsibilities": [],
+            "required_skills": [
+                {
+                    "name": "Invented capability",
+                    "confidence": 0.8,
+                    "evidence": ["Lead stakeholder workshops"],
+                }
+            ],
+            "preferred_skills": [],
+            "seniority": "unknown",
+            "min_experience_years": None,
+            "max_experience_years": None,
+            "location": None,
+            "work_mode": "unknown",
+            "extraction_confidence": 0.7,
+        }
+    )
+    result = _guard(
+        "Responsibilities: Lead stakeholder workshops.",
+        ungrounded,
+        normalizer,
+    )
+    assert _issue_dicts(result) == [
+        {
+            "code": "SKILL_NAME_NOT_IN_SOURCE",
+            "field_path": "required_skills[0].name",
+            "count": 1,
+        }
+    ]
+
+    alias_grounded = _extracted(
+        {
+            **ungrounded.model_dump(mode="json"),
+            "required_skills": [
+                {
+                    "name": "Python",
+                    "confidence": 0.8,
+                    "evidence": ["python3"],
+                }
+            ],
+        }
+    )
+    assert _guard("Required: python3.", alias_grounded, normalizer).accepted
 
 
 @pytest.mark.parametrize(
     ("label", "count"),
     [
-        ("Python FastAPI", 2),
-        ("Senior Python", 2),
         ("Rust, Go", 2),
         ("Docker or Kubernetes", 2),
-        ("AWS và Terraform", 2),
+        ("Research / Measurement", 2),
+        ("AWS hoặc Terraform", 2),
     ],
 )
-def test_compound_qualified_and_enumerated_labels_are_reported_without_rewrite(
+def test_clear_structural_enumerations_are_reported_without_rewrite(
     label: str,
     count: int,
     normalizer: SkillNormalizer,
@@ -221,7 +282,7 @@ def test_compound_qualified_and_enumerated_labels_are_reported_without_rewrite(
             "summary": "Synthetic.",
             "responsibilities": [],
             "required_skills": [
-                {"name": label, "confidence": 0.8, "evidence": []}
+                {"name": label, "confidence": 0.8, "evidence": [label]}
             ],
             "preferred_skills": [],
             "seniority": "unknown",
@@ -233,7 +294,7 @@ def test_compound_qualified_and_enumerated_labels_are_reported_without_rewrite(
         }
     )
     before = extracted.model_dump(mode="json")
-    result = _guard("Synthetic source.", extracted, normalizer)
+    result = _guard(f"Required capability: {label}.", extracted, normalizer)
     assert _issue_dicts(result) == [
         {
             "code": "COMPOUND_SKILL_LABEL",
@@ -278,9 +339,13 @@ def test_issues_are_ordered_by_provider_field_index_then_rule(
         "METADATA_NOT_IN_SOURCE",
         "METADATA_NOT_IN_SOURCE",
         "RESPONSIBILITY_NOT_IN_SOURCE",
+        "SKILL_NAME_NOT_IN_SOURCE",
         "COMPOUND_SKILL_LABEL",
         "EVIDENCE_NOT_IN_SOURCE",
+        "SKILL_NAME_NOT_IN_SOURCE",
+        "SKILL_NAME_NOT_IN_SOURCE",
         "DUPLICATE_SKILL",
+        "SKILL_NAME_NOT_IN_SOURCE",
         "SKILL_GROUP_CONFLICT",
         "METADATA_NOT_IN_SOURCE",
     ]
@@ -289,8 +354,12 @@ def test_issues_are_ordered_by_provider_field_index_then_rule(
         "company",
         "responsibilities[0]",
         "required_skills[0].name",
+        "required_skills[0].name",
         "required_skills[0].evidence[0]",
+        "required_skills[1].name",
         "required_skills[2].name",
+        "required_skills[2].name",
+        "preferred_skills[0].name",
         "preferred_skills[0].name",
         "location",
     ]
@@ -390,3 +459,7 @@ def test_guard_import_hygiene() -> None:
         f"import {prefix}" in source or f"from {prefix}" in source
         for prefix in forbidden_prefixes
     )
+    assert "_PUNCTUATION_EXCEPTIONS" not in source
+    assert "_contains_token_sequence" not in source
+    assert "token_labels" not in source
+    assert "from app.services.skill_assertion_guard import" in source

@@ -27,10 +27,11 @@ from app.services.cv_document_extraction import (
     ExtractedConsolidation,
     ExtractedEntryFragment,
     ExtractedSectionFragment,
+    ShopAIKeyStructuredCVDocumentInvoker,
 )
+from app.services.cv_skill_contracts import ExtractedCandidateSkillBatch
 from app.services.pdf_extraction import (
     NO_EXTRACTABLE_TEXT,
-    PdfTextExtraction,
     extract_pdf_text,
 )
 from app.services.profile_drafts import (
@@ -39,7 +40,6 @@ from app.services.profile_drafts import (
     propose_profile_from_cv,
 )
 from app.services.profile_extraction import (
-    CHUNK_JOIN,
     EXTRACTION_SCHEMA_STRATEGY,
     FAILURE_INVALID_STRUCTURED_OUTPUT,
     FAILURE_NO_EXTRACTABLE_TEXT,
@@ -47,20 +47,14 @@ from app.services.profile_extraction import (
     FAILURE_PROVIDER_TIMEOUT,
     STRUCTURED_OUTPUT_METHOD,
     STRUCTURED_OUTPUT_STRICT,
-    ExtractedCandidateProfile,
-    ExtractedSkillItem,
     ProfileExtractionError,
-    ShopAIKeyStructuredProfileInvoker,
-    build_draft_from_extracted,
+    build_draft_from_candidate_profile,
     classify_provider_error,
     compact_draft_summary,
     compute_canonical_source_hash,
     empty_job_preferences,
     extract_document_publication_from_pdf,
-    extract_profile_from_pdf,
-    extracted_to_candidate_profile,
     is_document_structured_invoker,
-    join_chunks_for_model,
 )
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
@@ -84,24 +78,31 @@ def _normalizer() -> SkillNormalizer:
     return SkillNormalizer.from_path(SKILLS_FIXTURE)
 
 
-def _valid_extracted(**overrides: Any) -> ExtractedCandidateProfile:
+def _valid_profile(**overrides: Any) -> Any:
+    from app.schemas.profile import parse_candidate_profile
+
+    normalizer = _normalizer()
     base: dict[str, Any] = {
         "summary": "Backend engineer with Python and FastAPI experience.",
         "current_title": "Senior Backend Engineer",
         "total_experience_years": 6.0,
         "skills": [
             {
-                "name": "Python",
+                "skill": normalizer.normalize_name("Python").model_dump(mode="json"),
                 "confidence": 0.9,
                 "proficiency": "advanced",
                 "years": 5.0,
+                "source": "cv",
+                "excluded": False,
                 "evidence": ["5 years Python"],
             },
             {
-                "name": "React.js",
+                "skill": normalizer.normalize_name("React.js").model_dump(mode="json"),
                 "confidence": 0.7,
                 "proficiency": "intermediate",
                 "years": 2.0,
+                "source": "cv",
+                "excluded": False,
                 "evidence": ["React.js on UI"],
             },
         ],
@@ -126,7 +127,11 @@ def _valid_extracted(**overrides: Any) -> ExtractedCandidateProfile:
         "extraction_confidence": 0.88,
     }
     base.update(overrides)
-    return ExtractedCandidateProfile.model_validate(base)
+    return parse_candidate_profile(base)
+
+
+def _valid_draft(**overrides: Any) -> Any:
+    return build_draft_from_candidate_profile(_valid_profile(**overrides))
 
 
 def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
@@ -193,8 +198,14 @@ def _covering_sections(ordinals: list[int]) -> list[ExtractedSectionFragment]:
 class CoveringDocumentInvoker:
     """Document invoker that covers ordinals mentioned in each prompt."""
 
-    def __init__(self, script: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        script: list[Any] | None = None,
+        *,
+        skill_script: list[Any] | None = None,
+    ) -> None:
         self.script = list(script or [])
+        self.skill_script = list(skill_script or [])
         self.calls: list[dict[str, Any]] = []
         self.last_human_content: str | None = None
 
@@ -220,6 +231,33 @@ class CoveringDocumentInvoker:
                 "message_count": len(msg_list),
             }
         )
+        if schema_name == "candidate_skills":
+            if self.skill_script:
+                item = self.skill_script.pop(0)
+                if isinstance(item, BaseException):
+                    raise item
+                if isinstance(item, type) and issubclass(item, BaseException):
+                    raise item("fake error")
+                if item is not None:
+                    return item
+            entry_match = re.search(
+                r'"entry_id":"([^"]+)"[^}]*Python',
+                joined,
+                re.DOTALL,
+            )
+            assert entry_match is not None
+            return {
+                "assertions": [
+                    {
+                        "name": "Python",
+                        "confidence": 0.9,
+                        "proficiency": "advanced",
+                        "years": None,
+                        "evidence": ["Python"],
+                        "source_entry_ids": [entry_match.group(1)],
+                    }
+                ]
+            }
         if self.script:
             item = self.script.pop(0)
             if isinstance(item, BaseException):
@@ -246,44 +284,6 @@ class CoveringDocumentInvoker:
         )
 
 
-class FakeStructuredInvoker:
-    """Scripted profile-first invoker (legacy unit tests only)."""
-
-    def __init__(self, script: list[Any]) -> None:
-        self.script = list(script)
-        self.calls: list[dict[str, Any]] = []
-        self.last_human_content: str | None = None
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedCandidateProfile | dict[str, Any]:
-        msg_list = list(messages)
-        human = None
-        for m in msg_list:
-            content = getattr(m, "content", None)
-            if isinstance(content, str) and "CV TEXT START" in content:
-                human = content
-                break
-        self.last_human_content = human
-        self.calls.append(
-            {
-                "is_repair": is_repair,
-                "message_count": len(msg_list),
-            }
-        )
-        if not self.script:
-            raise RuntimeError("fake invoker script exhausted")
-        item = self.script.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        if isinstance(item, type) and issubclass(item, BaseException):
-            raise item("fake error")
-        return item
-
-
 class _TimeoutExc(Exception):
     """Named like APITimeoutError for classify_provider_error coverage."""
 
@@ -307,31 +307,27 @@ def test_strict_json_schema_strategy_constants() -> None:
     assert STRUCTURED_OUTPUT_STRICT is True
 
 
-def test_shopaikey_invoker_uses_with_structured_output() -> None:
-    """Production invoker binds strict json_schema structured output (no network)."""
+def test_document_invoker_binds_candidate_skill_structured_output() -> None:
+    """Production document invoker binds the guarded skill schema without network."""
     fake_model = MagicMock()
-    bound = MagicMock()
-    fake_model.with_structured_output.return_value = bound
-    bound.invoke.return_value = _valid_extracted()
+    fake_model.with_structured_output.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
 
-    invoker = ShopAIKeyStructuredProfileInvoker(model=fake_model)
+    invoker = ShopAIKeyStructuredCVDocumentInvoker(model=fake_model)
     assert invoker.model_name  # may fall back to locked default
-    fake_model.with_structured_output.assert_called_once()
-    kwargs = fake_model.with_structured_output.call_args
-    assert kwargs.kwargs.get("method") == "json_schema"
-    assert kwargs.kwargs.get("strict") is True
-    assert kwargs.args[0] is ExtractedCandidateProfile or (
-        kwargs.kwargs.get("schema") is ExtractedCandidateProfile
-    )
-
-    result = invoker.invoke_structured([MagicMock()])
-    assert isinstance(result, ExtractedCandidateProfile)
-    assert result.current_title == "Senior Backend Engineer"
+    calls = fake_model.with_structured_output.call_args_list
+    assert len(calls) == 3
+    assert all(call.kwargs.get("method") == "json_schema" for call in calls)
+    assert all(call.kwargs.get("strict") is True for call in calls)
+    schemas = [call.args[0] for call in calls]
+    assert ExtractedCandidateSkillBatch in schemas
 
 
 def test_normalize_skills_and_empty_preferences() -> None:
-    extracted = _valid_extracted()
-    draft = build_draft_from_extracted(extracted, _normalizer())
+    draft = _valid_draft()
     keys = {s.skill.canonical_key for s in draft.candidate_profile.skills}
     # Fixture taxonomy should resolve Python; React.js via alias/fingerprint.
     assert "python" in keys or any("python" in k for k in keys)
@@ -343,29 +339,6 @@ def test_normalize_skills_and_empty_preferences() -> None:
     assert summary["draft_id"] == "current"
     assert "evidence" not in summary
     assert "raw" not in str(summary).lower()
-
-
-def test_valid_extraction_from_digital_fixture() -> None:
-    pdf = CV_DIR / "digital_cv_01.pdf"
-    invoker = FakeStructuredInvoker([_valid_extracted()])
-    outcome = extract_profile_from_pdf(
-        pdf, invoker=invoker, normalizer=_normalizer()
-    )
-    assert outcome.schema_repairs_used == 0
-    assert outcome.provider_retries_used == 0
-    assert outcome.draft.candidate_profile.summary
-    assert len(invoker.calls) == 1
-    assert invoker.calls[0]["is_repair"] is False
-    assert outcome.chunks
-    assert [c.ordinal for c in outcome.chunks] == list(
-        range(len(outcome.chunks))
-    )
-    assert outcome.model_input_text == join_chunks_for_model(outcome.chunks)
-    assert outcome.model_input_text == CHUNK_JOIN.join(
-        c.text for c in outcome.chunks
-    )
-    assert invoker.last_human_content is not None
-    assert outcome.model_input_text in invoker.last_human_content
 
 
 def test_extraction_failure_writes_no_chunk_rows(
@@ -504,8 +477,11 @@ def test_successful_propose_persists_chunks_document_and_profile_atomically(
     run_async(_body())
 
 
+@pytest.mark.parametrize("failure_stage", ("document", "candidate_skills"))
 def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
-    migrated_sqlite: Path, tmp_path: Path
+    migrated_sqlite: Path,
+    tmp_path: Path,
+    failure_stage: str,
 ) -> None:
     storage = AttachmentStorage(tmp_path / "files")
     storage.ensure_root()
@@ -513,7 +489,16 @@ def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
         "ExtractedBatchDocument",
         [{"type": "missing", "loc": ("sections",), "input": {}}],
     )
-    invoker = CoveringDocumentInvoker(script=[bad, bad])
+    invoker = (
+        CoveringDocumentInvoker(script=[bad, bad])
+        if failure_stage == "document"
+        else CoveringDocumentInvoker(
+            skill_script=[
+                {"assertions": "invalid"},
+                {"assertions": "invalid"},
+            ]
+        )
+    )
     pdf = CV_DIR / "digital_cv_01.pdf"
 
     async def _body() -> None:
@@ -525,7 +510,7 @@ def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
             async with factory() as session:
                 await att_repo.create_staged(
                     session,
-                    file_hash="bad-schema-hash",
+                    file_hash=f"bad-schema-{failure_stage}",
                     original_name="cv.pdf",
                     size_bytes=pdf.stat().st_size,
                     storage_path=rel,
@@ -561,7 +546,7 @@ def test_publish_failpoint_rolls_back_all_draft_artifacts(
     storage.ensure_root()
     invoker = CoveringDocumentInvoker()
     pdf = CV_DIR / "digital_cv_01.pdf"
-    prior_draft = build_draft_from_extracted(_valid_extracted(), _normalizer())
+    prior_draft = _valid_draft()
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
@@ -640,144 +625,111 @@ def test_document_publication_pure_path_has_matching_hash() -> None:
     assert artifacts.extraction_version == EXTRACTION_VERSION
     assert "sections" in artifacts.outline_json
     assert artifacts.draft.candidate_profile.summary
+    assert [
+        item.skill.canonical_key for item in artifacts.draft.candidate_profile.skills
+    ] == ["python"]
+    assert [call["schema_name"] for call in invoker.calls].count(
+        "candidate_skills"
+    ) == 1
     assert is_document_structured_invoker(invoker) is True
-    assert is_document_structured_invoker(FakeStructuredInvoker([])) is False
+    assert is_document_structured_invoker(object()) is False
 
 
 def test_no_extractable_text_short_circuit() -> None:
     pdf = CV_DIR / "image_only_cv.pdf"
-    invoker = FakeStructuredInvoker([_valid_extracted()])
+    invoker = CoveringDocumentInvoker()
     with pytest.raises(ProfileExtractionError) as ei:
-        extract_profile_from_pdf(pdf, invoker=invoker, normalizer=_normalizer())
+        extract_document_publication_from_pdf(
+            pdf,
+            attachment_id=new_uuid(),
+            invoker=invoker,
+            normalizer=_normalizer(),
+        )
     assert ei.value.code == FAILURE_NO_EXTRACTABLE_TEXT
     assert ei.value.code == NO_EXTRACTABLE_TEXT
     assert invoker.calls == []
 
 
 def test_exactly_one_schema_repair_then_success() -> None:
-    invoker = FakeStructuredInvoker(
-        [
-            ValidationError.from_exception_data(
-                "ExtractedCandidateProfile",
-                [
-                    {
-                        "type": "missing",
-                        "loc": ("summary",),
-                        "input": {},
-                    }
-                ],
-            ),
-            _valid_extracted(),
-        ]
-    )
-    # Bypass PDF: inject meaningful extraction.
-    fake_pdf = PdfTextExtraction(
-        page_count=1,
-        normal_text="x" * 100 + " email engineer python",
-        layout_text="name email experience engineer skills python docker",
-        normal_is_meaningful=True,
-        layout_is_meaningful=True,
-    )
-    outcome = extract_profile_from_pdf(
-        b"%PDF-fake",
+    invoker = CoveringDocumentInvoker(skill_script=[{"assertions": "invalid"}, None])
+    outcome = extract_document_publication_from_pdf(
+        CV_DIR / "digital_cv_01.pdf",
+        attachment_id=new_uuid(),
         invoker=invoker,
         normalizer=_normalizer(),
-        extract_text_fn=lambda _s: fake_pdf,
     )
     assert outcome.schema_repairs_used == 1
-    assert len(invoker.calls) == 2
-    assert invoker.calls[0]["is_repair"] is False
-    assert invoker.calls[1]["is_repair"] is True
+    skill_calls = [
+        call for call in invoker.calls if call["schema_name"] == "candidate_skills"
+    ]
+    assert [call["is_repair"] for call in skill_calls] == [False, True]
 
 
 def test_schema_repair_exhausted_fails() -> None:
-    bad = ValidationError.from_exception_data(
-        "ExtractedCandidateProfile",
-        [{"type": "missing", "loc": ("summary",), "input": {}}],
-    )
-    invoker = FakeStructuredInvoker([bad, bad])
-    fake_pdf = PdfTextExtraction(
-        page_count=1,
-        normal_text="name email experience engineer skills python " + ("z" * 80),
-        layout_text="name email experience engineer skills python " + ("z" * 80),
-        normal_is_meaningful=True,
-        layout_is_meaningful=True,
+    invoker = CoveringDocumentInvoker(
+        skill_script=[{"assertions": "invalid"}, {"assertions": "invalid"}]
     )
     with pytest.raises(ProfileExtractionError) as ei:
-        extract_profile_from_pdf(
-            b"%PDF-fake",
+        extract_document_publication_from_pdf(
+            CV_DIR / "digital_cv_01.pdf",
+            attachment_id=new_uuid(),
             invoker=invoker,
             normalizer=_normalizer(),
-            extract_text_fn=lambda _s: fake_pdf,
         )
     assert ei.value.code == FAILURE_INVALID_STRUCTURED_OUTPUT
-    assert len(invoker.calls) == 2
+    skill_calls = [
+        call for call in invoker.calls if call["schema_name"] == "candidate_skills"
+    ]
+    assert len(skill_calls) == 2
 
 
 def test_exactly_one_timeout_retry_then_success() -> None:
-    invoker = FakeStructuredInvoker([APITimeoutError("timeout"), _valid_extracted()])
-    fake_pdf = PdfTextExtraction(
-        page_count=1,
-        normal_text="name email experience engineer skills python " + ("a" * 80),
-        layout_text="name email experience engineer skills python " + ("a" * 80),
-        normal_is_meaningful=True,
-        layout_is_meaningful=True,
-    )
-    outcome = extract_profile_from_pdf(
-        b"%PDF-fake",
+    invoker = CoveringDocumentInvoker(skill_script=[APITimeoutError("timeout"), None])
+    outcome = extract_document_publication_from_pdf(
+        CV_DIR / "digital_cv_01.pdf",
+        attachment_id=new_uuid(),
         invoker=invoker,
         normalizer=_normalizer(),
-        extract_text_fn=lambda _s: fake_pdf,
     )
     assert outcome.provider_retries_used == 1
-    assert len(invoker.calls) == 2
+    skill_calls = [
+        call for call in invoker.calls if call["schema_name"] == "candidate_skills"
+    ]
+    assert len(skill_calls) == 2
 
 
 def test_timeout_retry_exhausted() -> None:
-    invoker = FakeStructuredInvoker(
-        [APITimeoutError("t1"), APITimeoutError("t2")]
-    )
-    fake_pdf = PdfTextExtraction(
-        page_count=1,
-        normal_text="name email experience engineer skills python " + ("b" * 80),
-        layout_text="name email experience engineer skills python " + ("b" * 80),
-        normal_is_meaningful=True,
-        layout_is_meaningful=True,
+    invoker = CoveringDocumentInvoker(
+        skill_script=[APITimeoutError("t1"), APITimeoutError("t2")]
     )
     with pytest.raises(ProfileExtractionError) as ei:
-        extract_profile_from_pdf(
-            b"%PDF-fake",
+        extract_document_publication_from_pdf(
+            CV_DIR / "digital_cv_01.pdf",
+            attachment_id=new_uuid(),
             invoker=invoker,
             normalizer=_normalizer(),
-            extract_text_fn=lambda _s: fake_pdf,
         )
     assert ei.value.code == FAILURE_PROVIDER_TIMEOUT
-    assert len(invoker.calls) == 2
+    skill_calls = [
+        call for call in invoker.calls if call["schema_name"] == "candidate_skills"
+    ]
+    assert len(skill_calls) == 2
 
 
 def test_rate_limit_retry_once() -> None:
-    invoker = FakeStructuredInvoker(
-        [RateLimitError("rate"), _valid_extracted()]
-    )
-    fake_pdf = PdfTextExtraction(
-        page_count=1,
-        normal_text="name email experience engineer skills python " + ("c" * 80),
-        layout_text="name email experience engineer skills python " + ("c" * 80),
-        normal_is_meaningful=True,
-        layout_is_meaningful=True,
-    )
-    outcome = extract_profile_from_pdf(
-        b"%PDF-fake",
+    invoker = CoveringDocumentInvoker(skill_script=[RateLimitError("rate"), None])
+    outcome = extract_document_publication_from_pdf(
+        CV_DIR / "digital_cv_01.pdf",
+        attachment_id=new_uuid(),
         invoker=invoker,
         normalizer=_normalizer(),
-        extract_text_fn=lambda _s: fake_pdf,
     )
     assert outcome.provider_retries_used == 1
     assert classify_provider_error(RateLimitError("x")) == FAILURE_PROVIDER_RATE_LIMIT
 
 
 def test_raw_cv_text_absent_from_compact_outputs() -> None:
-    draft = build_draft_from_extracted(_valid_extracted(), _normalizer())
+    draft = _valid_draft()
     compact = compact_draft_summary(draft)
     dumped = str(compact)
     assert "CV TEXT" not in dumped
@@ -829,9 +781,7 @@ def test_propose_active_reuses_profile_without_provider(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id, page_count=1)
-                profile_json = extracted_to_candidate_profile(
-                    _valid_extracted(), normalizer
-                ).model_dump(mode="json")
+                profile_json = _valid_profile().model_dump(mode="json")
                 await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=att_id,
@@ -868,7 +818,7 @@ def test_propose_existing_draft_reuse_without_provider(
     invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
-    draft = build_draft_from_extracted(_valid_extracted(), normalizer)
+    draft = _valid_draft()
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
@@ -919,9 +869,7 @@ def test_propose_new_draft_and_replace_prior_staged(
     invoker = CoveringDocumentInvoker()
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
-    old_draft = build_draft_from_extracted(
-        _valid_extracted(summary="old draft summary"), normalizer
-    )
+    old_draft = _valid_draft(summary="old draft summary")
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
@@ -1278,9 +1226,7 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                 await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=active_id,
-                    profile_json=extracted_to_candidate_profile(
-                        _valid_extracted(), normalizer
-                    ).model_dump(mode="json"),
+                    profile_json=_valid_profile().model_dump(mode="json"),
                 )
                 await att_repo.create_staged(
                     session,
@@ -1356,26 +1302,3 @@ def test_digital_fixture_still_extracts_text_for_pipeline() -> None:
     extraction = extract_pdf_text(CV_DIR / "digital_cv_01.pdf")
     assert extraction.has_meaningful_text
     assert extraction.preferred_text
-
-
-def test_invalid_skill_row_filtered_by_empty_name() -> None:
-    extracted = _valid_extracted(
-        skills=[
-            ExtractedSkillItem(
-                name="   ",
-                confidence=0.5,
-                proficiency="unknown",
-                years=None,
-                evidence=[],
-            ),
-            ExtractedSkillItem(
-                name="Python",
-                confidence=0.9,
-                proficiency="advanced",
-                years=3.0,
-                evidence=["Python"],
-            ),
-        ]
-    )
-    profile = extracted_to_candidate_profile(extracted, _normalizer())
-    assert len(profile.skills) == 1

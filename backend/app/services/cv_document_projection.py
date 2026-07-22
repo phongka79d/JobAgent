@@ -1,13 +1,13 @@
 """Deterministic CandidateProfile projection from a validated CVDocument.
 
-Profile facts come only from the document. Certifications, projects, awards,
-and other dynamic sections remain document-only and are never coerced into
-skills. Skill labels pass through the sole SkillNormalizer.
+Profile facts come only from the document. Skills are accepted only as the
+separate guarded atomic collection produced by ``cv_skill_projection``.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, Final
 
 from app.schemas.cv_document import CVDocument, CVEntry, CVSection
@@ -19,25 +19,8 @@ from app.schemas.profile import (
     LanguageItem,
     parse_candidate_profile,
 )
-from app.services.skill_normalization import (
-    SkillNormalizer,
-    comparison_fingerprint,
-)
 
-_MAX_EVIDENCE_SNIPPET_LEN: Final[int] = 240
 _YEAR_RE: Final[re.Pattern[str]] = re.compile(r"\b(19|20)\d{2}\b")
-
-
-def _clip_evidence(snippets: list[str]) -> list[str]:
-    clipped: list[str] = []
-    for item in snippets:
-        text = " ".join(str(item).split())
-        if not text:
-            continue
-        if len(text) > _MAX_EVIDENCE_SNIPPET_LEN:
-            text = text[:_MAX_EVIDENCE_SNIPPET_LEN]
-        clipped.append(text)
-    return clipped
 
 
 def _entry_text(entry: CVEntry) -> str:
@@ -121,72 +104,6 @@ def _project_education(document: CVDocument) -> list[EducationItem]:
     return items
 
 
-def _skill_names_from_entry(entry: CVEntry, *, section_heading: str) -> list[str]:
-    names: list[str] = []
-    if (
-        entry.title
-        and entry.title.strip()
-        and comparison_fingerprint(entry.title)
-        != comparison_fingerprint(section_heading)
-    ):
-        names.append(entry.title.strip())
-    for bullet in entry.bullets:
-        for part in re.split(r"[,;/|]", bullet):
-            label = part.strip()
-            if label:
-                names.append(label)
-    if entry.body.strip():
-        for part in re.split(r"[,;/|]", entry.body):
-            label = part.strip()
-            if label and len(label) <= 64:
-                names.append(label)
-    # attributes may list skills
-    for key, value in entry.attributes.items():
-        if key.lower() in {"skill", "skills", "name"}:
-            if isinstance(value, str) and value.strip():
-                names.append(value.strip())
-            elif isinstance(value, list):
-                names.extend(
-                    v.strip()
-                    for v in value
-                    if isinstance(v, str) and v.strip()
-                )
-    return names
-
-
-def _project_skills(
-    document: CVDocument,
-    normalizer: SkillNormalizer,
-) -> list[CandidateSkill]:
-    skills: list[CandidateSkill] = []
-    seen: set[str] = set()
-    for section in _sections_of_kind(document, "skills"):
-        for entry in section.entries:
-            evidence = _clip_evidence(
-                [s for s in [entry.body, *entry.bullets, entry.title or ""] if s]
-            )
-            for name in _skill_names_from_entry(
-                entry,
-                section_heading=section.heading,
-            ):
-                for ref in normalizer.normalize_grouped_name(name):
-                    if ref.canonical_key in seen:
-                        continue
-                    seen.add(ref.canonical_key)
-                    skills.append(
-                        CandidateSkill(
-                            skill=ref,
-                            confidence=0.7,
-                            proficiency="unknown",
-                            years=None,
-                            source="cv",
-                            excluded=False,
-                            evidence=evidence or _clip_evidence([name]),
-                        )
-                    )
-    return skills
-
-
 def _project_languages(document: CVDocument) -> list[LanguageItem]:
     items: list[LanguageItem] = []
     for section in _sections_of_kind(document, "languages"):
@@ -220,7 +137,8 @@ def _project_current_title(
 
 def project_candidate_profile(
     document: CVDocument,
-    normalizer: SkillNormalizer,
+    *,
+    skills: Sequence[CandidateSkill],
 ) -> CandidateProfile:
     """Derive a validated CandidateProfile solely from *document*.
 
@@ -228,7 +146,6 @@ def project_candidate_profile(
     """
     experiences = _project_experiences(document)
     education = _project_education(document)
-    skills = _project_skills(document, normalizer)
     languages = _project_languages(document)
     summary = _project_summary(document)
     current_title = _project_current_title(document, experiences)
@@ -241,7 +158,7 @@ def project_candidate_profile(
         "summary": summary,
         "current_title": current_title,
         "total_experience_years": None,
-        "skills": [s.model_dump(mode="json") for s in skills],
+        "skills": [skill.model_dump(mode="json") for skill in skills],
         "experiences": [e.model_dump(mode="json") for e in experiences],
         "education": [e.model_dump(mode="json") for e in education],
         "languages": [lang.model_dump(mode="json") for lang in languages],

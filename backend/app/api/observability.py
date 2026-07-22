@@ -29,18 +29,24 @@ from app.schemas.observability import (
     GraphSnapshot,
     ObservabilityQuery,
     RunHistoryPage,
+    SelectedJobSkillMap,
 )
 from app.services.observability import (
+    ERROR_ACTIVE_PROFILE_REQUIRED,
     ERROR_CHUNK_NOT_FOUND,
     ERROR_CHUNKS_UNAVAILABLE,
     ERROR_CV_ATTACHMENT_NOT_FOUND,
     ERROR_CV_FILE_UNAVAILABLE,
+    ERROR_JOB_NOT_FOUND,
+    ERROR_JOB_NOT_SCORABLE,
+    ERROR_SKILL_MAP_LIMIT_EXCEEDED,
     ObservabilityServiceError,
     get_chunk_detail,
     get_chunk_list_page,
     get_cv_history_page,
     get_graph_snapshot,
     get_run_history_page,
+    get_selected_job_skill_map,
     resolve_retained_cv_file,
 )
 from app.storage.attachments import AttachmentStorage, PathEscapeError
@@ -48,10 +54,14 @@ from app.storage.attachments import AttachmentStorage, PathEscapeError
 router = APIRouter(tags=["observability"])
 
 _ERROR_STATUS: dict[str, int] = {
+    ERROR_ACTIVE_PROFILE_REQUIRED: 409,
     ERROR_CV_ATTACHMENT_NOT_FOUND: 404,
     ERROR_CV_FILE_UNAVAILABLE: 404,
     ERROR_CHUNKS_UNAVAILABLE: 404,
     ERROR_CHUNK_NOT_FOUND: 404,
+    ERROR_JOB_NOT_FOUND: 404,
+    ERROR_JOB_NOT_SCORABLE: 409,
+    ERROR_SKILL_MAP_LIMIT_EXCEEDED: 422,
     "INVALID_LIMIT": 422,
 }
 
@@ -241,6 +251,30 @@ async def get_observability_runs(
             raise _http_for_service_error(exc) from exc
         await session.commit()
     return page
+
+
+@router.get(
+    "/observability/skill-map",
+    response_model=SelectedJobSkillMap,
+)
+async def get_observability_skill_map(
+    request: Request,
+    job_id: Annotated[UuidStr, Query()],
+) -> SelectedJobSkillMap:
+    """Return one read-only selected CV/Job compatibility map."""
+    driver: AsyncGraphReadDriver = request.app.state.neo4j_driver
+    factory: async_sessionmaker[AsyncSession] = get_session_factory()
+    async with factory() as session:
+        try:
+            snapshot = await get_selected_job_skill_map(
+                session,
+                driver,
+                job_id=job_id,
+            )
+        except ObservabilityServiceError as exc:
+            raise _http_for_service_error(exc) from exc
+        await session.commit()
+    return snapshot
 
 
 @router.get(

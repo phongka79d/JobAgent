@@ -528,6 +528,7 @@ python C:\Users\ACER\.codex\skills\plan-splitter\scripts\validate_plan_structure
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\verify_pdf_extraction.py
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\diagnose_shopaikey.py
 $env:PYTHONPATH=(Resolve-Path 'backend').Path; & '.\.venv\Scripts\python.exe' infrastructure/scripts/diagnose_jd_extraction.py --cases backend/tests/fixtures/jd_extraction_golden.json
+$env:PYTHONPATH=(Resolve-Path 'backend').Path; & '.\.venv\Scripts\python.exe' infrastructure/scripts/diagnose_cross_profession_skills.py --cases backend/tests/fixtures/skill_extraction_golden.json
 & '.\.venv\Scripts\python.exe' infrastructure\scripts\rebuild_neo4j.py --help
 ```
 
@@ -547,6 +548,14 @@ embed, sync graph state, or evaluate matches. Passing fake-provider unit tests
 alone does not prove live semantic extraction quality; this command is not a
 model benchmark or broad quality score.
 
+The cross-profession skill diagnostic is the corresponding explicit live check
+for Plan 16. It runs exactly three synthetic CVDocument cases and three synthetic
+JD cases through the production guarded skill extractors and normalizer. It
+performs no persistence, embedding, graph access, synchronization, or evaluation,
+and prints only approved case IDs with status, aggregate skill count, and a safe
+code. It requires valid root `.env` provider settings and the locked chat model;
+do not add seed aliases or expose source/provider text to make it pass.
+
 The host `rebuild_neo4j.py --help` command is non-destructive and prints the
 authorized Compose rebuild command. It never opens the stores. Use the live
 rebuild only for the recovery case described below.
@@ -555,8 +564,9 @@ Keep raw manual/browser data out of documentation and reports. Use the
 [local release checklist](docs/acceptance/local_release_checklist.md),
 [CV Manager checklist](docs/acceptance/cv_manager_checklist.md),
 [saved-JD evaluation checklist](docs/acceptance/saved_jd_evaluation_checklist.md),
-[full functional matrix](docs/acceptance/full_functional_test_matrix.md), and
-[Plan 13 acceptance ledger](docs/acceptance/plan13_acceptance_ledger.md) for the
+[full functional matrix](docs/acceptance/full_functional_test_matrix.md),
+[cross-profession skill-map checklist](docs/acceptance/cross_profession_skill_map_checklist.md),
+and [Plan 13 acceptance ledger](docs/acceptance/plan13_acceptance_ledger.md) for the
 sanitized manual and browser procedures.
 
 ## Failure and Recovery
@@ -618,6 +628,13 @@ sanitized manual and browser procedures.
   run with one allowed UI action. Never bypass confirmation with direct database
   or graph edits. CV activation and passive JD mutation occur only after the
   corresponding explicit approval.
+- **Existing CV/JD skills predate the atomic Plan 16 contract:** do not edit
+  SQLite JSON or Neo4j directly. Reprocess the CV in CV Manager and explicitly
+  approve **Save Profile**; then use **Re-extract JD** for affected saved Jobs.
+  Re-extraction preserves Job identity/raw source, advances its revision, and
+  makes prior evaluations stale without recomputing them. If the selected map
+  reports `NEO4J_REBUILD_REQUIRED`, run the provider-free rebuild command above,
+  reload the map, and use explicit **Evaluate** only when a new score is wanted.
 
 ## Development Notes for AI Agents
 

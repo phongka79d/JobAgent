@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 2.0
-**Date:** 2026-07-21
-**Status:** Amended for Plan 15 guarded JD extraction, safe retained-JD re-extraction, and complete saved-JD detail; the incremental portfolio requires fresh review before task writing
+**Version:** 2.1
+**Date:** 2026-07-22
+**Status:** Amended for Plan 16 domain-neutral CV/JD skill extraction and the selected-JD compatibility map; the incremental portfolio requires fresh review before task writing
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -30,6 +30,8 @@ The system must let the user:
 15. Render Agent answers as readable, conclusion-first Markdown and show an exact active-CV source dialog only when durable `read_active_cv` evidence exists.
 16. Recognize a passively pasted raw JD, show a concise preview, and require an explicit **Lưu JD** or **Không lưu** decision before any persistence, extraction, embedding, evaluation, or graph mutation.
 17. Validate extracted JD facts against their retained source, keep skill labels atomic, render the complete existing extraction contract, and let the user safely re-extract a retained JD without changing its identity or automatically evaluating it.
+18. Extract, normalize, match, synchronize, and display source-grounded skills from any profession without requiring profession-specific code, frontend dictionaries, or seed-taxonomy expansion.
+19. Show a non-technical compatibility map for the active CV and one selected saved JD, while retaining the existing bounded Neo4j snapshot as an explicit technical view.
 
 The goal is to demonstrate practical AI/NLP engineering through structured extraction, multilingual embeddings, entity normalization, a knowledge graph, tool calling, human approval, transparent matching, and failure handling.
 
@@ -59,6 +61,7 @@ Otherwise, it remains outside the MVP.
 - Upload one active PDF CV and retain multiple archived PDF CVs.
 - CV Manager actions to reprocess an archived CV for approval, activate only the approved result, and delete a non-active CV with its owned records.
 - Document-first extraction that retains ordered known and unknown sections before deriving the canonical Candidate Profile.
+- Domain-neutral Candidate skill projection from the complete validated CV document, including explicit capabilities mentioned outside a dedicated Skills section.
 - Bounded Agent retrieval of the active CV by outline, section, search, or chunk.
 - Read-only history of Agent runs for the single local user.
 - Candidate Profile draft and approval flow.
@@ -72,7 +75,8 @@ Otherwise, it remains outside the MVP.
 - Revision-keyed persisted JD evaluations that are reused for the same current context and become visibly stale after CV, profile, preference, or scoring-contract changes.
 - Vietnamese and English CV/JD content.
 - JD inputs from any job family, not only AI/NLP roles.
-- Deterministic skill normalization with a small seed alias/relationship taxonomy.
+- Deterministic atomic-skill normalization in which unknown skills are first-class and the small seed taxonomy is optional alias/relationship knowledge, never an extraction whitelist or parser.
+- A selected-saved-JD compatibility read model with backend-owned direct/related/missing/additional classifications, source evidence, cross-store integrity checks, and user-facing display labels.
 - Neo4j skill graph and Neo4j vector search.
 - Transparent hybrid scoring.
 - Skill-gap and score-breakdown explanation.
@@ -539,6 +543,8 @@ SkillRef
 
 `SkillRef` contains normalized identity only. The deterministic normalizer populates aliases and category from `skills_seed.yaml`; an unresolved skill has an empty alias list and may have no category. The LLM must not invent aliases or relationships.
 
+`canonical_key` is an opaque stable identity and `display_name` is the user-facing label. Every profession must work when none of its skills exists in `skills_seed.yaml`: an unknown atomic label is normalized deterministically, retains its source display label, can direct-match the same normalized label, and receives no automatic alias or `RELATED_TO` edge. The seed is optional curated knowledge only; backend extraction/guard logic and frontend presentation must not use seed membership to decide whether text is a skill, split grouped text, format a label, or repair a persisted assertion.
+
 ### 7.2 Candidate Profile
 
 The extractor first produces the complete per-CV document below. It must not ask the model to emit `CandidateProfile` directly from raw chunks.
@@ -599,6 +605,22 @@ CandidateSkill
 - excluded: bool
 - evidence: list[str]
 ```
+
+Candidate skills are projected through one bounded internal assertion stage after `CVDocument` validation and before `CandidateProfile` persistence:
+
+```text
+ExtractedCandidateSkillAssertion (internal provider/guard contract only)
+- name: str
+- confidence: float [0, 1]
+- proficiency: beginner | intermediate | advanced | unknown
+- years: float | None
+- evidence: list[str]
+- source_entry_ids: list[str]
+```
+
+The stage examines all source-ordered entries from every section kind, not only `kind='skills'`. It extracts only explicitly named professional capabilities, tools, methods, platforms, and domain practices; a section heading, category heading, certificate title, employer, degree, achievement, or general noun phrase is not a skill by itself. Every assertion must reference existing entry IDs, every evidence snippet must occur in those entries under NFKC/whitespace/casefold comparison, and the asserted name or one already-approved alias must occur in the referenced evidence. Provider output must contain one atomic skill per row. The deterministic guard rejects missing entry ownership, ungrounded evidence/name, heading-only labels, obvious multi-skill rows, and duplicate normalized keys; it returns only bounded code/path/count issues and permits at most the existing one repair. Only accepted atomic assertions reach `SkillNormalizer` and `CandidateProfile`.
+
+Document headings and list formatting are never parsed into skills with profession-specific dictionaries, colon-prefix recovery, or blind delimiter splitting. Matching, Candidate Neo4j synchronization, the selected-JD map, and explanations all consume the exact approved `CandidateProfile.skills` collection; no downstream owner expands or repairs it differently.
 
 ```text
 ExperienceItem
@@ -664,13 +686,13 @@ JobSkill
 
 `JobPostExtraction` contains extracted facts only. Its field set remains unchanged for this increment. The locked structured provider remains `gpt-4o-mini`; the ingestion or re-extraction service assigns the authoritative `job_posts.jd_quality` column only after the semantic guard accepts the extraction.
 
-All evidence snippets must be short, relevant to the associated Candidate or Job skill, and copied from the source document. The LLM must not invent evidence.
+All evidence snippets must be short, relevant to the associated Candidate or Job skill, and copied from the source document. The LLM must not invent evidence. JD extraction asks for professional capabilities across any occupation; it must not restrict recall to technical skills, frameworks, models, software platforms, or a seeded industry vocabulary.
 
 Before normalization or quality classification, one pure deterministic guard compares source facts using Unicode NFKC, collapsed whitespace, and Unicode casefold without removing punctuation or transliterating text. Every non-blank skill evidence snippet and responsibility, plus every non-null title, company, and location, must occur in the normalized retained JD. Summary remains a concise synthesis; seniority, work mode, and experience bounds remain schema-constrained model facts in this phase.
 
-Every provider skill label must name one atomic capability or technology. The guard never splits or rewrites labels and does not blindly split on `/`, `,`, or another delimiter. It rejects an unknown label that contains multiple approved skill aliases, combines an approved alias with qualifier words without exact normalizer resolution, or enumerates distinct skill-like terms. A small explicit punctuation-token exception set protects technical names such as `C/C++`, `.NET`, `Node.js`, and `CI/CD`; it is not a second taxonomy. Tentatively normalized canonical keys must be unique within each group and disjoint across required/preferred groups. Mandatory or neutral requirements remain required; preferred classification requires explicit optional/preferred wording in the source.
+Every provider skill label must name one atomic professional capability. The provider owns atomic emission; the guard never silently splits or rewrites a label. Its compound check is profession-neutral and structural: exact approved aliases remain atomic, punctuation internal to a contiguous label remains valid, and only an unambiguous enumeration of multiple non-empty skill-like labels is rejected. No code-level allowlist of technical, marketing, finance, healthcare, sales, or other profession names is permitted, and seed membership cannot turn category prefixes into skills. Unknown atomic punctuation-bearing labels remain valid. The asserted name or one already-approved alias must be grounded in its evidence/source. Tentatively normalized canonical keys must be unique within each group and disjoint across required/preferred groups. Mandatory or neutral requirements remain required; preferred classification requires explicit optional/preferred wording in the source.
 
-The ordered internal guard vocabulary is exactly `EVIDENCE_NOT_IN_SOURCE`, `RESPONSIBILITY_NOT_IN_SOURCE`, `METADATA_NOT_IN_SOURCE`, `COMPOUND_SKILL_LABEL`, `DUPLICATE_SKILL`, and `SKILL_GROUP_CONFLICT`. At most 20 sanitized issues containing only code, field path, and safe structural counts may enter the existing single repair instruction. The complete raw JD remains only in the transient extraction messages; issue reports and logs contain no source/evidence values or provider payload. A second invalid result after that one repair fails safely as `INVALID_STRUCTURED_OUTPUT`; only an accepted extraction reaches `SkillNormalizer`, quality classification, embedding, persistence, graph synchronization, or scoring.
+The ordered internal guard vocabulary is exactly `EVIDENCE_NOT_IN_SOURCE`, `SKILL_NAME_NOT_IN_SOURCE`, `RESPONSIBILITY_NOT_IN_SOURCE`, `METADATA_NOT_IN_SOURCE`, `COMPOUND_SKILL_LABEL`, `DUPLICATE_SKILL`, and `SKILL_GROUP_CONFLICT`. At most 20 sanitized issues containing only code, field path, and safe structural counts may enter the existing single repair instruction. The complete raw JD remains only in the transient extraction messages; issue reports and logs contain no source/evidence values or provider payload. A second invalid result after that one repair fails safely as `INVALID_STRUCTURED_OUTPUT`; only an accepted extraction reaches `SkillNormalizer`, quality classification, embedding, persistence, graph synchronization, or scoring.
 
 ### 7.5 Tool execution result
 
@@ -792,6 +814,45 @@ Changing the embedding model or dimensions is outside the MVP. It requires an ex
 - CV deletion matches the exact `CV.id`, deletes its owned `CVSection`/`CVEntry` nodes and connecting relationships, and never deletes shared `Skill`, `Job`, seed `RELATED_TO`, or unrelated Candidate data. The active CV is rejected before graph mutation.
 - Neo4j remains fully rebuildable through one local command using SQLite records.
 
+### 8.5 Selected-JD compatibility projection
+
+The default non-technical graph experience is a separate bounded read model for the active Candidate and one selected saved Job. It does not expose the global seed graph and does not ask React to infer matching from relationship topology.
+
+```text
+SkillAssertionView
+- canonical_key: str                  # opaque identity; hidden in normal UI
+- display_name: str                   # source-context user label
+- confidence: float [0, 1]
+- evidence: list[str]
+
+SkillCompatibilityItem
+- match_type: direct | related | missing_required | missing_preferred | candidate_only
+- requirement: required | preferred | none
+- strength: 1.0 | 0.6 | 0.0
+- candidate_skill: SkillAssertionView | None
+- job_skill: SkillAssertionView | None
+- relationship: {from_key, to_key, weight, source} | None
+
+SelectedJobSkillMap
+- status: ready | stale | unavailable
+- code: str | None
+- summary: str
+- rebuild_instruction: str | None
+- candidate: bounded active-CV/Candidate identity and display metadata | None
+- job: bounded selected-Job identity/title/company/revision | None
+- items: list[SkillCompatibilityItem]
+- counts: backend-computed counts by match_type
+- checked_at: aware UTC datetime
+```
+
+The backend builds match facts by reusing the existing deterministic skill-coverage owner over authoritative SQLite `CandidateProfile.skills` and `JobPostExtraction` skills. Direct and related winners, missing required/preferred skills, and Candidate-only skills are derived once on the server. Source-context display names and evidence stay on each Candidate/Job assertion; the shared Neo4j Skill node's last writer never chooses the UI label.
+
+Before returning `ready`, the service runs the normal Candidate/Job revision gate and compares the selected `HAS_SKILL`, `REQUIRES`, and `PREFERS` relationship payloads against the complete expected SQLite projection, including canonical keys and allowlisted assertion properties. Missing, extra, or mismatched selected relationships return `stale` with `NEO4J_REBUILD_REQUIRED` and no partial map. Unavailable Neo4j returns `unavailable`. The check is bounded to one active Candidate and one saved Job, performs no repair, and does not replace the existing pre-match revision rule.
+
+Only Skills connected to that Candidate or Job may appear. `RELATED_TO` is included only for a backend-selected related winner whose two endpoints are already in the map. The response contains at most 200 compatibility items; exceeding the bound fails explicitly as `SKILL_MAP_LIMIT_EXCEEDED` rather than silently omitting skills. Loading the map is read-only and never creates or refreshes a persisted evaluation.
+
+The existing global bounded graph endpoint remains the explicit technical view. Its Skill DTO carries both opaque `canonical_key` and `display_name` (plus optional category); React displays `display_name` and reserves raw relationship codes, IDs, revisions, and canonical keys for technical mode only.
+
 ---
 
 ## 9. Skill Normalization
@@ -805,9 +866,11 @@ Changing the embedding model or dimensions is outside the MVP. It requires an ex
 5. Resolve against aliases in a small `skills_seed.yaml`.
 6. If unresolved, create a deterministic canonical key without related-skill edges.
 
+The input to this pipeline is already one guarded atomic assertion. The normalizer does not split category prefixes, delimiters, headings, or grouped values and does not expand a stored Candidate skill at matching time. Significant punctuation must be handled consistently enough that the same unknown atomic source label receives the same key, while the original normalized source label remains `display_name`.
+
 ### 9.2 Seed taxonomy
 
-The MVP does not attempt a global job ontology. The seed contains only a small set of manually approved aliases and relationships for common skills used in the demo.
+The MVP does not attempt a global job ontology. The seed contains only a small set of manually approved aliases and relationships for common skills used in the demo. It is not required for extraction, direct matching, graph selection, or display. A seed entry or alias added solely to repair one observed CV/JD is invalid unless it is independently reviewed as reusable alias/relatedness knowledge. Tests for a new profession must pass with an empty or minimal injected taxonomy rather than modifying the production seed.
 
 ### 9.3 User corrections
 
@@ -852,15 +915,19 @@ attachment_id
 → bounded gpt-4o-mini section/entry extraction over every ordered chunk batch
 → one document consolidation and omission audit
 → CVDocument validation, with at most one repair for each invalid model boundary
-→ derive and validate CandidateProfile from CVDocument
-→ deterministic skill normalization
+→ bounded all-section Candidate-skill assertion extraction from CVDocument entries
+→ source/entry ownership, atomicity, heading-only, and duplicate guard with at most one repair
+→ deterministic normalization of accepted atomic skill assertions
+→ derive and validate CandidateProfile from CVDocument plus the accepted skills
 → atomically persist chunks, cv_document_drafts, and profile draft
 → LangGraph interrupt
 ```
 
 If no meaningful digital text is available, return `NO_EXTRACTABLE_TEXT`. Do not add OCR fallback.
 
-The ordered chunks own the exact document-extraction input. The service partitions them into bounded batches with explicit ordinal ranges, extracts section fragments from every batch, and performs one bounded consolidation over fragment metadata and content. It may split consolidation recursively when configured prompt limits would be exceeded, but it must preserve source order and use no unbounded prompt. A final deterministic coverage audit verifies that every source chunk is referenced by at least one section or recorded in an `other` section/warning. A failed parse, model call, repair, document validation, profile derivation, or coverage audit publishes none of the new draft rows. Historical attachments without chunks may be deleted but cannot be reprocessed and return `CHUNKS_UNAVAILABLE`/`CV_FILE_UNAVAILABLE` as appropriate.
+The extractable-text gate is profession- and language-neutral: after Unicode/whitespace normalization, either pypdf mode must contain at least the existing minimum number of non-whitespace characters and at least one Unicode letter or number. It must not require English identity terms, software-role titles, `skills` headings, programming languages, tools, or any other profession marker. The user explicitly chose the CV upload path; semantic CV structure is validated by the bounded document pipeline rather than a keyword allowlist. Image-only, empty, punctuation-only, and below-threshold digital text still return `NO_EXTRACTABLE_TEXT` with no OCR.
+
+The ordered chunks own the exact document-extraction input. The service partitions them into bounded batches with explicit ordinal ranges, extracts section fragments from every batch, and performs one bounded consolidation over fragment metadata and content. It may split consolidation recursively when configured prompt limits would be exceeded, but it must preserve source order and use no unbounded prompt. A final deterministic coverage audit verifies that every source chunk is referenced by at least one section or recorded in an `other` section/warning. The Candidate-skill stage then reads bounded entry projections from every section, returns explicit source-entry ownership, and never reparses headings or delimiters locally. A failed parse, model call, repair, document validation, skill assertion/guard, profile derivation, or coverage audit publishes none of the new draft rows. Historical attachments without chunks may be deleted but cannot be reprocessed and return `CHUNKS_UNAVAILABLE`/`CV_FILE_UNAVAILABLE` as appropriate.
 
 ### 10.3 Chat approval
 
@@ -1206,6 +1273,7 @@ GET  /api/observability/cvs/{attachment_id}/file
 GET  /api/observability/cvs/{attachment_id}/chunks?limit=<n>&before=<opaque_cursor>
 GET  /api/observability/cvs/{attachment_id}/chunks/{ordinal}
 GET  /api/observability/runs?limit=<n>&before=<opaque_cursor>
+GET  /api/observability/skill-map?job_id=<job_uuid>
 GET  /api/observability/graph
 ```
 
@@ -1225,6 +1293,7 @@ GET  /api/observability/graph
 - `GET /api/observability/cvs/{attachment_id}/file` validates an `active` or `archived` attachment, checks retained local-file availability, and streams only `application/pdf` with a sanitized `Content-Disposition` filename. Unknown IDs return `CV_ATTACHMENT_NOT_FOUND`; a missing retained file returns `CV_FILE_UNAVAILABLE`. Both are safe JSON errors and never reveal a storage path.
 - Observability cursors have no expiry. A cursor is valid while its encoded tuple decodes and its row ordering remains queryable; malformed cursors return `422`, and a well-formed cursor past the final page returns an empty page with `next_cursor=null`.
 - `GET /api/observability/graph` exposes a bounded snapshot rooted at the active CV plus Candidate/Job/Skill data and a typed unavailable or stale state. It never mutates the graph or accepts a client query. A `ready` response contains at most one active CV, one Candidate, 20 CVSections, 60 CVEntries, 20 Jobs, and 40 Skills; only `PROJECTS_TO`, `HAS_SECTION`, `HAS_ENTRY`, `HAS_SKILL`, `REQUIRES`, `PREFERS`, and `RELATED_TO` edges are returned. Node/edge caps, stable ordering, omission counts, and truncation flags remain mandatory. Full CV bodies and arbitrary attributes are never serialized. With no active Candidate/CV, return `status='ready'`, an empty projection, and `NO_ACTIVE_PROFILE`.
+- `GET /api/observability/skill-map?job_id=<job_uuid>` validates one saved scorable Job and returns the Section 8.5 read model only after active-Candidate/Job revision and selected relationship-integrity checks pass. It loads no global seed-only Skill nodes, exposes no raw CV/JD body, embedding, arbitrary property, or Cypher, and never evaluates or mutates either store. Unknown/non-scorable Jobs use `JOB_NOT_FOUND`/`JOB_NOT_SCORABLE`; no active profile uses `ACTIVE_PROFILE_REQUIRED`; a projection larger than the hard bound uses `SKILL_MAP_LIMIT_EXCEEDED` without silent truncation.
 - `GET /api/jobs` is cursor-paginated with `limit` in `1..50`, stable `(created_at, id)` ordering, and compact `none | current | stale` evaluation state derived against the current server-side context. It omits raw JD, extraction evidence bodies, embeddings, and historical evaluation arrays. `GET /api/jobs/{job_id}` returns one selected validated detail and its latest evaluation; unknown IDs return `JOB_NOT_FOUND`.
 - `POST /api/jobs/save-and-evaluate` requires the exact initiating `source_message_id` from a completed run whose durable `match_jobs` result succeeded with `count=0`. The server loads that user message, resolves a sole validated public HTTP(S) URL or otherwise uses the complete bounded message as raw text, then reuses JD ingestion/exact deduplication and evaluates the resulting scorable Job. It returns an existing current evaluation when present. It never accepts replacement JD text from the client, selects the latest chat message, or asks the Agent to make a second tool decision.
 - `POST /api/jobs/{job_id}/evaluate` requires an active approved profile and a scorable Job. It returns `outcome='reused'` for the current context without provider/graph scoring calls, otherwise computes and persists exactly one result after the normal graph consistency gate. Stale rows remain immutable. No evaluation runs merely because a CV/profile/preference revision changed.
@@ -1262,12 +1331,13 @@ FastAPI, not ShopAIKey, owns the client-facing stream. Tool decision calls may b
 
 ### 15.2 Sidebar
 
-The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Neo4j graph`, `Agent runs`, and `JD đã lưu` tabs in that order. `JD đã lưu` appears directly below `Agent runs` in the vertical rail.
+The expanded sidebar contains `Overview`, `CV Manager`, `LLM chunks`, `Bản đồ CV–JD`, `Agent runs`, and `JD đã lưu` tabs in that order. `JD đã lưu` appears directly below `Agent runs` in the vertical rail.
 
 - `Overview` retains active-CV filename, profile state, upload/replace, and view/download actions.
 - `CV Manager` lists active and archived attachment metadata, retained-file availability, extraction state, and active badge. An archived CV offers Open/Download, **Make active**, and **Delete**; the active row offers Open/Download and **Re-extract**, but no delete action. Reprocessing streams the normal extraction/approval workflow and does not change the badge before approval. **Delete** requires explicit confirmation naming the file and refreshes CV/chunk/graph/run caches only after the API confirms completion.
 - `LLM chunks` lists fixed previews for a selected attachment; full chunk text is fetched only after that row is expanded.
-- `Neo4j graph` renders the active CV, its dynamic sections/entries, and bounded Candidate/Job/Skill snapshot. After approval it changes to the newly active CV; after archived deletion it contains no nodes owned by the deleted CV.
+- `Bản đồ CV–JD` defaults to a non-technical compatibility view for the active CV and the existing selected saved JD. It shows backend-provided counts and filters for exact matches, approved related matches, missing required skills, missing preferred skills, and additional Candidate skills. User-visible nodes/cards use source-context `display_name`; selecting an item opens the Candidate/JD evidence, required/preferred meaning, and related-skill reason. The default view never displays UUIDs, canonical keys, raw `HAS_SKILL`/`REQUIRES` codes, or unrelated seed-only Skills.
+- The same panel offers an explicit `Kỹ thuật` mode containing the existing bounded active-CV/Candidate/Job/Skill Neo4j snapshot, truncation metadata, pan/zoom/fit/reset controls, raw relationship codes, and technical identifiers. After approval it changes to the newly active CV; after archived deletion it contains no nodes owned by the deleted CV. Technical mode also renders Skill `display_name` as the primary label and keeps `canonical_key` in metadata only.
 - `Agent runs` lists durable run/tool status and safe summaries, not arguments or internal traces.
 - `JD đã lưu` uses one sidebar-local compact list plus a selected detail view. Each row keeps title and company concise, shows processing/quality state and `none | current | stale` evaluation state, and may show the latest score. Selecting a row opens validated JD details and the persisted score/evidence breakdown. Per-JD actions are **Xem chi tiết**, **Đánh giá với CV** when no current result exists, **Đánh giá lại** only when stale, and **Xoá JD** behind an explicit confirmation. Use short one-line headings, existing typography/tokens/components, truncation with accessible full labels, and no overlapping or redundant titles.
 - The selected JD detail renders the complete existing extraction contract in four bounded areas: metadata (title, company, summary, seniority, experience range, location, work mode, and extraction confidence), ordered responsibilities, required skills, and preferred skills. Each skill shows its canonical display label and confidence; source evidence is expandable and collapsed by default. Empty lists render an explicit concise unavailable/none state, and raw source remains only in its existing bounded detail section.
@@ -1327,6 +1397,8 @@ cache successful pages by query, and keep independent loading, empty, and error
 states. The graph panel renders the Master allowlisted bounded snapshot and its
 truncation metadata; it does not infer hidden properties or query for more nodes.
 Reprocessing delegates its SSE events to the existing chat reducer; it does not add a second chat/SSE store. Saved-JD reads/actions extend the same sidebar-local request/cache pattern with independent list/detail/action state. Successful activation/deletion invalidates only affected CV, chunk, profile, graph, run, and evaluation-currentness caches; saved-JD evaluate/delete invalidates only affected job list/detail, graph, and visible chat-card state. Successful JD re-extraction refreshes the affected list/detail and evaluation-currentness projection, invalidates the bounded graph view, and never dispatches evaluate; a pre-commit error retains the current cached detail, while post-commit `NEO4J_SYNC_FAILED` refreshes SQLite-backed views and shows rebuild guidance.
+
+`useSavedJobsState` remains the sole owner of `selectedJobId`, the selected Job detail, and the selected compatibility-map resource keyed by Job ID. `ObservabilitySidebar` passes that existing selection/resource into the map panel; graph/observability state must not create another JD selector, alias map, skill formatter, or match classifier. The frontend strictly parses and renders backend-provided assertion labels, evidence, requirement kind, and match type. Fixed UI copy, accessibility labels, status colors, score-component names, and contract vocabularies are allowed presentation constants; profession names, skill names, aliases, categories, acronym expansions, canonical-key formatters, or rules based on known skills are forbidden in production React code.
 
 ### 15.7 Readable Agent responses and pasted-JD confirmation
 
@@ -1460,6 +1532,8 @@ Match strengths:
 
 For each Job skill, take the strongest match against non-excluded Candidate skills. Coverage is the arithmetic mean of these best strengths. A non-empty Job skill list with no Candidate match has coverage `0`; an empty Job skill list makes that coverage unavailable. When only required or preferred skills exist, renormalize the `0.80/0.20` weights over the available list. `skill_score` is unavailable only when both lists are empty.
 
+Coverage consumes persisted, guarded atomic `CandidateSkill` and `JobSkill` rows exactly as written. It must not parse headings, split labels, promote seed prefixes, or expand Candidate skills at scoring time. Direct matching uses `canonical_key`; explanations and the selected-JD map retain the separate Candidate and Job `display_name`/evidence values. The Phase 12 change bumps `matching_contract_version`, so prior saved evaluations become stale until the user explicitly re-evaluates after any required CV/JD reprocessing.
+
 ### 18.2 Initial hybrid seed
 
 ```text
@@ -1503,7 +1577,7 @@ Sort with unrounded values by `final_score DESC`, `skill_score DESC NULLS LAST`,
 
 ## 19. Manual JD Acceptance
 
-The developer validates JD behavior directly during local testing. No broad labeled JD dataset, benchmark suite, ranking metric, grid search, ablation, model comparison, or evaluation report is required. Plan 15 does require a small repository-owned synthetic English/Vietnamese semantic corpus and one bounded explicit live-provider diagnostic because schema-only tests cannot prove source grounding, atomic skills, or required/preferred grouping.
+The developer validates JD behavior directly during local testing. No broad labeled JD dataset, benchmark suite, ranking metric, grid search, ablation, model comparison, or evaluation report is required. Plans 15-16 require a small repository-owned cross-profession synthetic English/Vietnamese semantic corpus and bounded explicit live-provider diagnostics because schema-only tests cannot prove source grounding, atomic skills, required/preferred grouping, or profession-neutral recall.
 
 Use a small, disposable set of representative JDs to check:
 
@@ -1513,7 +1587,7 @@ Use a small, disposable set of representative JDs to check:
 - Full, partial, and unscorable JDs receive the expected quality status.
 - Title, required/preferred skills, seniority, location, and work mode look reasonable in the saved result.
 - Every guarded responsibility, title/company/location value, and skill evidence is grounded in the retained source under the NFKC/whitespace/casefold comparison contract; summary remains a synthesis.
-- Compound lists and alternatives become separate atomic skill rows, punctuation-bearing technical names remain atomic, unknown atomic skills remain valid, and canonical duplicates/cross-group conflicts are rejected rather than silently rewritten.
+- Compound lists and alternatives become separate atomic skill rows, punctuation-bearing unknown names from multiple professions remain atomic, unknown atomic skills remain valid without seed additions, and canonical duplicates/cross-group conflicts are rejected rather than silently rewritten.
 - A processed exact duplicate returns the existing Job without reprocessing; a failed exact match retries the same row.
 - Re-extracting one retained synthetic JD preserves its ID/source/raw hash, replaces only with `full` or `partial`, makes an existing evaluation stale without evaluating, and leaves the prior extraction unchanged on a pre-commit failure.
 - Saved-JD detail displays metadata, experience, confidence, ordered responsibilities, distinct required/preferred skills, and expandable grounded evidence.
@@ -1532,6 +1606,7 @@ These checks are manual product acceptance only. Automated functional tests rema
 | ShopAIKey timeout/rate limit | Retry once, then persist failure |
 | Invalid structured output | One repair request, then fail safely |
 | No PDF text | `NO_EXTRACTABLE_TEXT`; no OCR |
+| Sufficient digital CV text from an unseeded profession | Continue to bounded document/skill extraction; do not reject by identity, role, heading, language, or tool keywords |
 | CV batch/consolidation omission or invalid document | Keep current active CV; publish no partial draft; return stable extraction failure |
 | Archived CV selected without retained file/chunks | Keep active CV unchanged; return `CV_FILE_UNAVAILABLE` or `CHUNKS_UNAVAILABLE` |
 | Active CV deletion | Reject with `CV_ACTIVE_DELETE_FORBIDDEN`; require another approved active CV first |
@@ -1550,6 +1625,7 @@ These checks are manual product acceptance only. Automated functional tests rema
 | Neo4j unavailable after re-extraction SQLite commit | Keep the new SQLite revision; return HTTP 200 with `sync_ok=false`, `NEO4J_SYNC_FAILED`, and the rebuild instruction |
 | Neo4j unavailable during sync | Keep SQLite data; report `NEO4J_SYNC_FAILED` and offer the local rebuild command |
 | Neo4j unavailable during matching | Return `NEO4J_UNAVAILABLE`; do not return partial ranking |
+| Selected Candidate/Job skill relationships differ from SQLite | Return `NEO4J_REBUILD_REQUIRED`; withhold the compatibility map and perform no read-time repair |
 | SQLite/Neo4j revision mismatch | Return `NEO4J_REBUILD_REQUIRED`; do not rank stale graph data |
 | Match without profile | Ask user to upload/approve CV first |
 | Unauthorized profile commit | Reject tool execution |
@@ -1568,6 +1644,7 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 - Use `Candidate.id='active'`, attachment UUID for `CV.id`, scoped deterministic CV section/entry IDs, the SQLite Job UUID, and `Skill.canonical_key` as Neo4j identities.
 - Copy the SQLite row's `updated_at` into Neo4j as `source_updated_at` on Candidate and Job nodes.
 - Use Neo4j uniqueness constraints and `MERGE` so rerunning the same sync is safe.
+- Candidate and Job synchronization project the exact approved SQLite atomic skill assertions, display metadata, confidence/proficiency/years, and bounded evidence. Sync must not normalize, split, expand, classify, or repair a skill independently.
 - A successful retained-JD re-extraction synchronizes the same `Job.id`, replaces that Job's metadata plus `REQUIRES`/`PREFERS` edges from the committed SQLite extraction, and preserves shared Skill nodes, seed relationships, Candidate/CV data, and unrelated Jobs.
 - Do not add an outbox table, background worker, retry queue, or graph-sync state machine.
 
@@ -1576,6 +1653,8 @@ No unlimited retries, automatic model switching, or hidden fallback features.
 If direct synchronization fails, keep the committed SQLite data and return `NEO4J_SYNC_FAILED`. The UI tells the developer to restore Neo4j and run the rebuild command. The application does not retry continuously or hide the failure.
 
 Before matching, compare the SQLite Candidate `(id, updated_at)` and the full local set of scorable Job `(id, updated_at)` pairs against Neo4j `source_updated_at`. Any missing, extra, or mismatched node returns `NEO4J_REBUILD_REQUIRED`; unavailable Neo4j returns `NEO4J_UNAVAILABLE`. Do not repair or upsert graph data inside the matching path because that would hide a stale derived index.
+
+The selected-JD compatibility endpoint additionally compares the complete selected Candidate/Job skill relationship payload against SQLite as specified in Section 8.5. This narrower integrity check exists because matching explanations and Neo4j observability must not disagree while node timestamps still match. It returns rebuild guidance and no partial map; it does not add a sync ledger, automatic retry, or read-time repair.
 
 `ponytail:` this O(n) ID/revision comparison is intentional for the small local corpus. If the project later grows beyond portfolio scale, replace it with a sync ledger rather than silently adding one to the MVP.
 
@@ -1653,14 +1732,17 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 
 - Pydantic validation.
 - Dynamic `CVDocument` section/entry validation, unknown-heading retention, deterministic IDs, and document-to-profile projection.
+- Profession-neutral PDF extractability with no identity/role/tool keyword requirement; image-only, empty, punctuation-only, and below-threshold failures remain exact.
+- All-section Candidate skill assertion extraction with source-entry ownership, grounded evidence/name, heading/category rejection, atomicity, duplicate handling, and no delimiter/grouped-name recovery.
 - Bounded extraction batching/consolidation coverage and `read_active_cv` mode/cursor/character caps.
 - `ToolResult` success/failure coupling with tool status and `error_code`.
 - UUID, UTC timestamp, enum, and singleton-ID conventions from Section 6.1.
 - Settings-dependent PDF/embedding limits are enforced by services rather than migration constants.
 - JD extraction and field validation.
-- NFKC/whitespace/casefold source comparison; grounded responsibility/evidence/direct-metadata checks; atomic-skill punctuation exceptions; unknown atomic acceptance; deterministic duplicate/cross-group issue ordering; and the exact six-code guard vocabulary.
+- NFKC/whitespace/casefold source comparison; grounded skill name/evidence/responsibility/direct-metadata checks; profession-neutral structural atomicity; unknown punctuation-bearing atomic acceptance; deterministic duplicate/cross-group issue ordering; and the exact seven-code JD guard vocabulary.
 - One invalid semantic output sends at most 20 sanitized issues through the existing single repair, and a second invalid result fails without leaking source/evidence/provider values.
 - Skill canonicalization and alias resolution.
+- Empty/minimal-taxonomy normalization and direct matching for synthetic software, marketing, sales/operations, finance/healthcare, bilingual, and unknown atomic skills without production-seed edits.
 - Exact-hash return and failed-row retry policies.
 - JD quality classification.
 - Score components and weight renormalization.
@@ -1688,6 +1770,7 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Chat-history hydration joins tool activity from `tool_executions` without persisted `role='tool'` messages.
 - SQLite PRAGMAs, named constraints, indexes, foreign-key cascades, singleton seeding, and Alembic migrations.
 - Direct Neo4j synchronization and the local rebuild command.
+- Exact Candidate/Job skill-set and relationship-payload parity from approved SQLite assertions through direct sync and rebuild; matching has no private expansion path.
 - URL and raw-text JD ingestion.
 - Exact initiating-message resolution for pasted-JD confirmation, both resume actions, duplicate-click/terminal replay, cancellation call counts, and direct URL/text compatibility.
 - Active, staged, and failed CV hash reuse plus exact JD return/retry behavior.
@@ -1705,6 +1788,7 @@ The user explicitly chose local testing only. Do not create GitHub Actions workf
 - Attachment chunk persistence, cursor pagination, detail authorization, preview
   bounds, and redaction of PDF bytes/provider data from observability responses.
 - Bounded Neo4j graph snapshot with unavailable/stale typed states and no graph mutation.
+- Selected-JD compatibility-map ready/stale/unavailable states, backend-owned match classes/evidence, connected-skill-only selection, 200-item fail-fast bound, and relationship mismatch withholding with `NEO4J_REBUILD_REQUIRED`.
 - Active-CV graph projection includes dynamic sections/entries and changes with approved selection.
 - Agent prompt contains only the active CV outline; bounded `read_active_cv` cannot access archived IDs and invalidates cursors after active selection changes.
 
@@ -1729,6 +1813,7 @@ Normal automated tests must not call the real ShopAIKey API.
 - CV Manager active badge, reprocess/approval flow, active-delete guard, confirmed archived deletion, cache invalidation, and partial-cleanup errors within the existing refreshed layout.
 - `JD đã lưu` tab order, compact list/selected detail, current/stale labels, persisted evaluation rendering, explicit evaluate/re-evaluate/delete actions, concise headings, confirmation, and narrow-layout behavior.
 - Saved-JD detail renders metadata/experience/confidence, ordered responsibilities, distinct required/preferred skills, expandable evidence, and explicit empty states. Re-extract confirmation copy, request lock/cancel, success refresh/stale projection, graph warning, and pre-commit failure preservation are covered without optimistic replacement or raw-data leakage.
+- `Bản đồ CV–JD` reuses the sole saved-JD selection/cache owner, renders server `display_name`/evidence/status for cross-domain fixtures, exposes no skill-name/acronym/category dictionaries, and retains the raw graph only behind `Kỹ thuật` mode.
 
 ### 24.4 End-to-end smoke test
 
@@ -1750,6 +1835,8 @@ Send greeting
 → click Lưu JD once
 → save/deduplicate/sync the exact initiating message without automatic evaluation
 → explicitly evaluate the saved JD with the active CV and display its persisted score and skill gaps
+→ open Bản đồ CV–JD for that selected Job and verify exact/related/missing/additional groups use source display names and evidence
+→ switch to Kỹ thuật and verify only the raw bounded graph exposes canonical IDs/relationship codes
 → repeat evaluation with the same active context and verify the stored result is reused without provider scoring
 → re-extract the retained synthetic JD and verify Job ID/source/raw hash stay unchanged while structured fields refresh
 → verify the existing evaluation becomes stale and no evaluate request occurs
@@ -1758,6 +1845,8 @@ Send greeting
 → click Đánh giá lại and verify one new revision-keyed result
 → delete the JD and verify its SQLite evaluations and exact Neo4j Job branch are gone while shared Skills remain
 ```
+
+The committed E2E fixtures include at least two professions whose skill labels are absent from the production seed, one bilingual case, and punctuation-bearing unknown atomic labels. They prove both profession families pass the same PDF/CV/JD/normalization/matching/sync/display owners. Local acceptance may additionally reprocess the developer's existing CV/JD records by hash/ID, but no real document text, evidence, filename, or screenshot is committed.
 
 ### 24.5 Local verification commands
 
@@ -2044,6 +2133,32 @@ Exit gate:
 
 ---
 
+### Phase 12 - Domain-neutral skills and selected-JD compatibility map
+
+Tasks:
+
+- [ ] Replace profession-specific PDF meaningful-text markers with the domain-neutral digital-text rule while preserving pypdf-only/image-only behavior.
+- [ ] Add a bounded all-section Candidate-skill assertion model/invoker/guard over validated `CVDocument` entries and make it the sole producer of persisted CV skills.
+- [ ] Remove blind delimiter/category-heading projection and matching-only grouped-skill expansion; make Candidate sync, matching, explanations, and embedding text consume the same approved atomic assertions.
+- [ ] Make JD prompt/repair language profession-neutral, add skill-name grounding, replace technology-specific exception logic with structural atomicity, and retain one bounded sanitized repair.
+- [ ] Audit the production seed so it remains optional curated alias/relatedness knowledge; remove case-specific parsing aliases and prove new profession fixtures need no seed additions.
+- [ ] Bump the matching/evaluation contract version and document explicit CV reprocess, JD re-extract, and Neo4j rebuild rollout without silently rewriting approved records.
+- [ ] Add the selected-JD compatibility schema/service/read-only endpoint, reuse deterministic skill coverage/explanation owners, and withhold the map on revision or exact selected-relationship mismatch.
+- [ ] Extend the raw technical graph DTO with Skill display metadata while keeping its allowlisted topology/caps and no arbitrary query.
+- [ ] Implement `Bản đồ CV–JD` as the default graph-panel mode using the sole saved-JD selection/cache owner, backend statuses/evidence, accessible filters/details, and no profession/skill dictionaries; retain the existing canvas as `Kỹ thuật`.
+- [ ] Add synthetic software, marketing, sales/operations, finance/healthcare, bilingual, unknown-skill, cross-store, frontend, Docker, and browser regression evidence.
+
+Exit gate:
+
+- A digital-text CV from any tested profession reaches document/skill extraction without identity, software-role, tool, or English-heading keywords.
+- Candidate and JD skills are atomic and source-grounded before normalization; unknown skills persist, direct-match, synchronize, and display correctly with an empty/minimal taxonomy.
+- SQLite Candidate/Job assertions, matching facts, Neo4j skill relationships, selected-map labels/evidence, and explanations agree exactly; no matching-only repair path remains.
+- The default selected-JD map contains no unrelated seed skills, raw IDs, canonical-key labels, or frontend-inferred status, while technical mode preserves the bounded Neo4j inspector.
+- Existing approved records are upgraded only through explicit reprocess/re-extract actions; old evaluations become stale through the version/revision contract and no evaluation runs automatically.
+- Full backend/frontend/static/build/plan/Docker/browser gates pass without a new database table, provider model, dependency, Agent/tool, global taxonomy, worker, or multi-candidate scope.
+
+---
+
 ## 26. Estimated Delivery Shape
 
 Recommended sequence for one intern developer:
@@ -2062,8 +2177,9 @@ Recommended sequence for one intern developer:
 | Phase 9 | 4–6 days |
 | Phase 10 | 5–8 days |
 | Phase 11 | 4–7 days |
+| Phase 12 | 5–8 days |
 
-This is approximately 5–8 weeks part-time including the guarded-extraction repair increment. Scope should be reduced, not infrastructure added, if the schedule slips.
+This is approximately 6–9 weeks part-time including the guarded-extraction and domain-neutral skill-map increments. Scope should be reduced, not infrastructure added, if the schedule slips.
 
 ---
 
@@ -2075,6 +2191,8 @@ JobAgent MVP is done only when all conditions are true:
 - The user can chat naturally about general topics without triggering JobAgent tools.
 - The Agent creates a validated profile draft.
 - The extractor preserves all meaningful CV headings/entries in a validated per-CV document before deriving the profile, including unknown sections such as Certifications.
+- Profession-neutral digital-text validation accepts sufficiently meaningful CV text without requiring English identity, software-role, programming-language, or tool markers.
+- Candidate skills are source-entry-owned, grounded, atomic assertions drawn from all CV sections; headings/group labels are not skills and no downstream owner splits or repairs them differently.
 - Profile/preference writes require in-chat approval.
 - Only one active CV/profile exists after commit.
 - CV Manager can reprocess an archive for approval, visibly switch the active CV/profile/graph after approval, and fully delete only a non-active CV.
@@ -2084,6 +2202,7 @@ JobAgent MVP is done only when all conditions are true:
 - A passively pasted raw JD shows a concise unsaved preview and requires **Lưu JD** or **Không lưu** before any Job persistence, JD extraction/embedding, evaluation, or graph side effect; the normal Agent recognition call is allowed.
 - Every accepted JD is represented by a processed or failed row; an exact match returns or retries the existing row without creating another Job.
 - Before a new extraction or re-extraction becomes scorable truth, guarded responsibilities/evidence/direct metadata are source-contained and skill rows are atomic, unique, and disjoint across required/preferred groups; the existing single repair is sanitized and bounded.
+- CV and JD skills from any tested profession remain valid when absent from the optional seed taxonomy; the frontend contains no profession-specific skill, alias, acronym, category, or canonical-label dictionary.
 - A successful zero-result match renders **Chưa có kết quả đánh giá** with a deterministic one-click **Lưu JD & đánh giá lại** recovery path.
 - The saved-JD library exposes compact list/detail and explicit evaluate/re-evaluate/delete actions directly below Agent runs.
 - Saved-JD detail renders the complete existing extraction fields and offers explicit safe re-extraction that preserves identity/raw source on pre-commit failure, replaces only with a scorable revision, makes prior evaluation stale, and never evaluates automatically.
@@ -2091,6 +2210,7 @@ JobAgent MVP is done only when all conditions are true:
 - Complete JD deletion removes every persisted evaluation and only that Job's Neo4j node/relationships while preserving shared Skills and seed relationships.
 - Scorable jobs synchronize to Neo4j.
 - Matching refuses stale Neo4j data and returns top jobs with transparent score breakdown and skill gaps after consistency passes.
+- The selected-JD compatibility map reuses backend matching facts, shows source display labels/evidence and exact/related/missing/additional states, contains only connected skills, and refuses a semantically mismatched Neo4j projection even when node timestamps match.
 - Tool activity is visible and concise.
 - Assistant responses are readable semantic Markdown, user/system text remains literal, and active-CV source controls never appear without successful durable evidence.
 - The sidebar exposes CV Manager, opt-in chunk detail, Agent-run history, and the active-CV-derived graph without exposing internal data or redesigning the implemented observability shell.
@@ -2123,11 +2243,11 @@ Future work must not be silently implemented during MVP phases.
 
 ## 29. Final Planning Decision
 
-Phases 0-10 plus the approved Plan 14 intent-aware pasted-JD boundary form the baseline. This Version 2.0 amendment locks the Phase 11 guarded-extraction, complete saved-detail, and safe retained-JD re-extraction increment. `Plan_15.md` is the sole next implementation plan, but no `task_15.md` or product implementation may be written until the amended `Master_plan.md` and contiguous Plans 1-15 receive a fresh incremental portfolio review.
+Phases 0-11 plus the completed Plan 15 guarded-extraction/re-extraction boundary form the baseline. This Version 2.1 amendment locks Phase 12 profession-neutral CV/JD skill extraction, one authoritative atomic-skill path, exact selected-relationship integrity, and the non-technical selected-JD compatibility map. `Plan_16.md` is the sole next implementation plan, but no `task_16.md` or product implementation may be written until the amended `Master_plan.md` and contiguous Plans 1-16 receive a fresh incremental portfolio review.
 
 The project remains intentionally narrow:
 
-> One user, one natural readable conversation, one approved active CV selected through CV Manager, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, guarded source-grounded extraction with explicit safe repair, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a complete inspectable saved-JD detail, and explicit revision-keyed transparent evaluation.
+> One user, one natural readable conversation, one approved active CV selected through CV Manager, profession-neutral source-grounded atomic skills, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a non-technical selected-JD compatibility map plus explicit technical view, a complete inspectable saved-JD detail, and explicit revision-keyed transparent evaluation.
 
 ---
 

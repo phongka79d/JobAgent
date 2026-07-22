@@ -78,7 +78,9 @@ _JOBS_CYPHER: str = (
 )
 _SKILLS_CYPHER: str = (
     "MATCH (s:Skill) "
-    "RETURN s.canonical_key AS canonical_name "
+    "RETURN s.canonical_key AS canonical_name, "
+    "s.canonical_key AS canonical_key, s.display_name AS display_name, "
+    "s.category AS category "
     "ORDER BY s.canonical_key ASC "
     f"LIMIT {CAP_SKILLS}"
 )
@@ -157,6 +159,9 @@ class ProjectedJob:
 @dataclass(frozen=True, slots=True)
 class ProjectedSkill:
     canonical_name: str
+    canonical_key: str | None = None
+    display_name: str | None = None
+    category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +284,12 @@ def _parse_skill(row: Mapping[str, Any]) -> ProjectedSkill | None:
     name = _require_str(row.get("canonical_name"))
     if name is None:
         return None
-    return ProjectedSkill(canonical_name=name)
+    return ProjectedSkill(
+        canonical_name=name,
+        canonical_key=_require_str(row.get("canonical_key")) or name,
+        display_name=_require_str(row.get("display_name")) or name,
+        category=_require_str(row.get("category")),
+    )
 
 
 def _parse_edge(row: Mapping[str, Any]) -> ProjectedEdge | None:

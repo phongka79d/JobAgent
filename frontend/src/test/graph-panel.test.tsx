@@ -35,6 +35,7 @@ function renderGraphPanel(
       />
     </Theme>,
   );
+  fireEvent.click(screen.getByRole('radio', {name: 'Kỹ thuật'}));
   return {onRefresh};
 }
 

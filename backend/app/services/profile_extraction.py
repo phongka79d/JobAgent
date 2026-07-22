@@ -25,33 +25,23 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Final, Literal, Protocol
+from typing import Any, BinaryIO, Final
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.shopaikey_chat import LOCKED_CHAT_MODEL, build_shopaikey_chat
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories.attachment_text_chunks import ChunkWrite
 from app.schemas.profile import (
     CandidateProfile,
-    CandidateSkill,
-    EducationItem,
-    ExperienceItem,
     JobPreferences,
-    LanguageItem,
     ProfileDraftPayload,
-    parse_candidate_profile,
     parse_profile_draft_payload,
 )
-from app.schemas.skills import SkillRef
 from app.services.pdf_extraction import (
     NO_EXTRACTABLE_TEXT,
     PdfMalformedError,
@@ -61,9 +51,7 @@ from app.services.provider_retry import (
     FAILURE_PROVIDER_ERROR,
     FAILURE_PROVIDER_RATE_LIMIT,
     FAILURE_PROVIDER_TIMEOUT,
-    ProviderRetryError,
     classify_provider_error,
-    invoke_with_provider_retry,
 )
 from app.services.skill_normalization import SkillNormalizer
 
@@ -85,19 +73,6 @@ MAX_CHUNK_CHARS: Final[int] = 1200
 CHUNK_OVERLAP: Final[int] = 0
 CHUNK_JOIN: Final[str] = "\n\n"
 
-_MAX_EVIDENCE_SNIPPET_LEN: Final[int] = 240
-_MAX_REPAIR_ATTEMPTS: Final[int] = 1
-
-_SYSTEM_PROMPT: Final[str] = (
-    "You extract a Candidate Profile from CV text. Return only structured JSON "
-    "matching the schema. Rules: (1) facts only — never invent job preferences; "
-    "(2) evidence must be short verbatim snippets from the CV; (3) do not invent "
-    "precise years or proficiency without explicit evidence — use null years and "
-    "proficiency 'unknown' when unsure; (4) skill names are free-text labels only "
-    "(aliases/categories are filled by a separate normalizer); (5) source is always "
-    "'cv' and excluded is always false for extraction."
-)
-
 
 class ProfileExtractionError(Exception):
     """Extraction failed with a stable application failure code."""
@@ -106,49 +81,6 @@ class ProfileExtractionError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-# --- LLM-facing extraction schema (no Field min/max; strict JSON schema safe) ---
-
-
-class ExtractedSkillItem(BaseModel):
-    """LLM skill row before deterministic SkillRef normalization."""
-
-    name: str
-    confidence: float
-    proficiency: Literal["beginner", "intermediate", "advanced", "unknown"]
-    years: float | None
-    evidence: list[str]
-
-
-class ExtractedCandidateProfile(BaseModel):
-    """LLM structured output for CV facts (validated again as CandidateProfile)."""
-
-    summary: str
-    current_title: str | None
-    total_experience_years: float | None
-    skills: list[ExtractedSkillItem]
-    experiences: list[ExperienceItem]
-    education: list[EducationItem]
-    languages: list[LanguageItem]
-    extraction_confidence: float
-
-
-class StructuredProfileInvoker(Protocol):
-    """Fake-testable structured extraction call surface.
-
-    Production uses ShopAIKey ``with_structured_output``; tests inject fakes
-    that never touch the network.
-    """
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedCandidateProfile | dict[str, Any]:
-        """Return structured profile payload or raise provider/validation errors."""
-        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,24 +101,6 @@ class CanonicalChunk:
     @property
     def preview(self) -> str:
         return chunk_repo.preview_for_text(self.text)
-
-
-@dataclass(frozen=True, slots=True)
-class ExtractionOutcome:
-    """Validated draft payload after extraction + normalization (no DB work).
-
-    ``chunks`` is the exact ascending sequence joined with :data:`CHUNK_JOIN`
-    for the model input. Persistence is a separate explicit call.
-
-    Retained for isolated profile-schema helper tests; proposal publication
-    uses :class:`DocumentPublicationArtifacts` only.
-    """
-
-    draft: ProfileDraftPayload
-    schema_repairs_used: int
-    provider_retries_used: int
-    chunks: tuple[CanonicalChunk, ...]
-    model_input_text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,145 +132,6 @@ def empty_job_preferences() -> JobPreferences:
         acceptable_work_modes=[],
         target_seniority=[],
     )
-
-
-def _clip_evidence(snippets: list[str]) -> list[str]:
-    clipped: list[str] = []
-    for item in snippets:
-        text = " ".join(str(item).split())
-        if not text:
-            continue
-        if len(text) > _MAX_EVIDENCE_SNIPPET_LEN:
-            text = text[:_MAX_EVIDENCE_SNIPPET_LEN]
-        clipped.append(text)
-    return clipped
-
-
-def extracted_to_candidate_profile(
-    extracted: ExtractedCandidateProfile,
-    normalizer: SkillNormalizer,
-) -> CandidateProfile:
-    """Map LLM extraction to validated CandidateProfile with normalized skills."""
-    skills: list[CandidateSkill] = []
-    for row in extracted.skills:
-        name = " ".join(row.name.split())
-        if not name:
-            continue
-        ref: SkillRef = normalizer.normalize_name(name)
-        # Clamp confidence defensively before full model validation.
-        conf = float(row.confidence)
-        if conf < 0.0:
-            conf = 0.0
-        elif conf > 1.0:
-            conf = 1.0
-        skills.append(
-            CandidateSkill(
-                skill=ref,
-                confidence=conf,
-                proficiency=row.proficiency,
-                years=row.years,
-                source="cv",
-                excluded=False,
-                evidence=_clip_evidence(list(row.evidence)),
-            )
-        )
-
-    ext_conf = float(extracted.extraction_confidence)
-    if ext_conf < 0.0:
-        ext_conf = 0.0
-    elif ext_conf > 1.0:
-        ext_conf = 1.0
-
-    raw_profile = {
-        "summary": extracted.summary,
-        "current_title": extracted.current_title,
-        "total_experience_years": extracted.total_experience_years,
-        "skills": [s.model_dump(mode="json") for s in skills],
-        "experiences": [e.model_dump(mode="json") for e in extracted.experiences],
-        "education": [e.model_dump(mode="json") for e in extracted.education],
-        "languages": [lang.model_dump(mode="json") for lang in extracted.languages],
-        "extraction_confidence": ext_conf,
-    }
-    return parse_candidate_profile(raw_profile)
-
-
-def build_draft_from_extracted(
-    extracted: ExtractedCandidateProfile,
-    normalizer: SkillNormalizer,
-) -> ProfileDraftPayload:
-    """Build a fully validated ProfileDraftPayload (empty preferences)."""
-    profile = extracted_to_candidate_profile(extracted, normalizer)
-    return parse_profile_draft_payload(
-        {
-            "candidate_profile": profile.model_dump(mode="json"),
-            "job_preferences": empty_job_preferences().model_dump(mode="json"),
-        }
-    )
-
-
-def _coerce_extracted(raw: Any) -> ExtractedCandidateProfile:
-    if isinstance(raw, ExtractedCandidateProfile):
-        return raw
-    if isinstance(raw, BaseModel):
-        return ExtractedCandidateProfile.model_validate(raw.model_dump())
-    if isinstance(raw, str):
-        return ExtractedCandidateProfile.model_validate(json.loads(raw))
-    return ExtractedCandidateProfile.model_validate(raw)
-
-
-class ShopAIKeyStructuredProfileInvoker:
-    """Production invoker: ShopAIKey + strict JSON schema structured output."""
-
-    def __init__(self, model: BaseChatModel | None = None) -> None:
-        self._model = model if model is not None else build_shopaikey_chat()
-        # Verified Phase 0 strategy: response_format json_schema with strict=true.
-        self._structured = self._model.with_structured_output(
-            ExtractedCandidateProfile,
-            method=STRUCTURED_OUTPUT_METHOD,
-            strict=STRUCTURED_OUTPUT_STRICT,
-        )
-
-    @property
-    def model_name(self) -> str:
-        name = getattr(self._model, "model_name", None)
-        if isinstance(name, str) and name:
-            return name
-        return LOCKED_CHAT_MODEL
-
-    def invoke_structured(
-        self,
-        messages: Sequence[Any],
-        *,
-        is_repair: bool = False,
-    ) -> ExtractedCandidateProfile:
-        del is_repair  # repair is encoded in the message list by the caller
-        result = self._structured.invoke(list(messages))
-        return _coerce_extracted(result)
-
-
-def _build_messages(cv_text: str, *, repair_error: str | None) -> list[Any]:
-    # Canonical joined chunk text appears only in this transient prompt.
-    messages: list[Any] = [
-        SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(
-            content=(
-                "Extract the Candidate Profile from the following CV text.\n\n"
-                f"--- CV TEXT START ---\n{cv_text}\n--- CV TEXT END ---"
-            )
-        ),
-    ]
-    if repair_error is not None:
-        messages.append(
-            HumanMessage(
-                content=(
-                    "Your previous structured output failed validation with this "
-                    f"error:\n{repair_error}\n"
-                    "Repair: return one valid ExtractedCandidateProfile JSON object "
-                    "only. Keep evidence short and do not invent preferences."
-                )
-            )
-        )
-    return messages
 
 
 def _split_oversized_segment(segment: str, max_chars: int) -> list[str]:
@@ -590,72 +365,6 @@ def _parse_and_chunk_pdf(
     return chunks, model_input
 
 
-def _invoke_with_provider_retry(
-    invoker: StructuredProfileInvoker,
-    messages: Sequence[Any],
-    *,
-    is_repair: bool,
-) -> tuple[ExtractedCandidateProfile, int]:
-    """Call structured invoker via shared provider retry; map domain errors."""
-
-    def _call() -> ExtractedCandidateProfile:
-        raw = invoker.invoke_structured(messages, is_repair=is_repair)
-        return _coerce_extracted(raw)
-
-    try:
-        return invoke_with_provider_retry(_call)
-    except ProviderRetryError as exc:
-        raise ProfileExtractionError(exc.code, exc.message) from exc
-
-
-def extract_profile_from_pdf(
-    source: Path | str | bytes | BinaryIO,
-    *,
-    invoker: StructuredProfileInvoker,
-    normalizer: SkillNormalizer,
-    extract_text_fn: Callable[[Any], Any] | None = None,
-) -> ExtractionOutcome:
-    """Legacy profile-first extract for isolated unit tests only.
-
-    Proposal publication must use :func:`extract_document_publication_from_pdf`.
-    """
-    chunks, cv_text = _parse_and_chunk_pdf(
-        source, extract_text_fn=extract_text_fn
-    )
-
-    repairs_used = 0
-    provider_retries_total = 0
-    repair_error: str | None = None
-
-    while True:
-        messages = _build_messages(cv_text, repair_error=repair_error)
-        is_repair = repair_error is not None
-        try:
-            extracted, retries = _invoke_with_provider_retry(
-                invoker, messages, is_repair=is_repair
-            )
-            provider_retries_total += retries
-            draft = build_draft_from_extracted(extracted, normalizer)
-            return ExtractionOutcome(
-                draft=draft,
-                schema_repairs_used=repairs_used,
-                provider_retries_used=provider_retries_total,
-                chunks=tuple(chunks),
-                model_input_text=cv_text,
-            )
-        except ProfileExtractionError:
-            raise
-        except (ValidationError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            if repairs_used >= _MAX_REPAIR_ATTEMPTS:
-                raise ProfileExtractionError(
-                    FAILURE_INVALID_STRUCTURED_OUTPUT,
-                    "structured output invalid after one repair attempt",
-                ) from exc
-            repairs_used += 1
-            repair_error = str(exc)[:500]
-            continue
-
-
 def extract_document_publication_from_pdf(
     source: Path | str | bytes | BinaryIO,
     *,
@@ -678,6 +387,10 @@ def extract_document_publication_from_pdf(
         project_candidate_profile,
         project_outline,
     )
+    from app.services.cv_skill_projection import (
+        CandidateSkillExtractionError,
+        extract_candidate_skills_from_document,
+    )
 
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":
         raise ProfileExtractionError(
@@ -697,8 +410,19 @@ def extract_document_publication_from_pdf(
             invoker=document_invoker,
             max_chars=max_chars,
         )
-        profile = project_candidate_profile(outcome.document, normalizer)
+        skill_outcome = extract_candidate_skills_from_document(
+            outcome.document,
+            invoker=document_invoker,
+            normalizer=normalizer,
+            max_chars=max_chars,
+        )
+        profile = project_candidate_profile(
+            outcome.document,
+            skills=skill_outcome.skills,
+        )
     except CVDocumentExtractionError as exc:
+        raise ProfileExtractionError(exc.code, exc.message) from exc
+    except CandidateSkillExtractionError as exc:
         raise ProfileExtractionError(exc.code, exc.message) from exc
     except (ValidationError, TypeError, ValueError) as exc:
         raise ProfileExtractionError(
@@ -718,8 +442,12 @@ def extract_document_publication_from_pdf(
         outline_json=outline_json,
         extraction_version=outcome.extraction_version,
         source_hash=source_hash,
-        schema_repairs_used=outcome.schema_repairs_used,
-        provider_retries_used=outcome.provider_retries_used,
+        schema_repairs_used=(
+            outcome.schema_repairs_used + skill_outcome.schema_repairs_used
+        ),
+        provider_retries_used=(
+            outcome.provider_retries_used + skill_outcome.provider_retries_used
+        ),
         chunks=tuple(chunks),
         model_input_text=model_input,
     )
@@ -764,6 +492,10 @@ def extract_document_and_profile_from_chunks(
         extract_cv_document_from_chunks,
     )
     from app.services.cv_document_projection import project_candidate_profile
+    from app.services.cv_skill_projection import (
+        CandidateSkillExtractionError,
+        extract_candidate_skills_from_document,
+    )
 
     try:
         outcome = extract_cv_document_from_chunks(
@@ -772,14 +504,25 @@ def extract_document_and_profile_from_chunks(
             invoker=document_invoker,
             max_chars=max_chars,
         )
-        profile = project_candidate_profile(outcome.document, normalizer)
+        skill_outcome = extract_candidate_skills_from_document(
+            outcome.document,
+            invoker=document_invoker,
+            normalizer=normalizer,
+            max_chars=max_chars,
+        )
+        profile = project_candidate_profile(
+            outcome.document,
+            skills=skill_outcome.skills,
+        )
     except CVDocumentExtractionError as exc:
+        raise ProfileExtractionError(exc.code, exc.message) from exc
+    except CandidateSkillExtractionError as exc:
         raise ProfileExtractionError(exc.code, exc.message) from exc
     return (
         outcome.document,
         profile,
-        outcome.schema_repairs_used,
-        outcome.provider_retries_used,
+        outcome.schema_repairs_used + skill_outcome.schema_repairs_used,
+        outcome.provider_retries_used + skill_outcome.provider_retries_used,
     )
 
 
@@ -789,9 +532,6 @@ __all__ = [
     "CanonicalChunk",
     "DocumentPublicationArtifacts",
     "EXTRACTION_SCHEMA_STRATEGY",
-    "ExtractedCandidateProfile",
-    "ExtractedSkillItem",
-    "ExtractionOutcome",
     "FAILURE_EMPTY_CHUNKS",
     "FAILURE_INVALID_STRUCTURED_OUTPUT",
     "FAILURE_MALFORMED_PDF",
@@ -803,10 +543,7 @@ __all__ = [
     "ProfileExtractionError",
     "STRUCTURED_OUTPUT_METHOD",
     "STRUCTURED_OUTPUT_STRICT",
-    "ShopAIKeyStructuredProfileInvoker",
-    "StructuredProfileInvoker",
     "build_draft_from_candidate_profile",
-    "build_draft_from_extracted",
     "chunk_parsed_text",
     "chunks_to_writes",
     "classify_provider_error",
@@ -816,8 +553,6 @@ __all__ = [
     "empty_job_preferences",
     "extract_document_and_profile_from_chunks",
     "extract_document_publication_from_pdf",
-    "extract_profile_from_pdf",
-    "extracted_to_candidate_profile",
     "is_document_structured_invoker",
     "join_chunks_for_model",
     "persist_canonical_chunks",

@@ -50,7 +50,7 @@
     {
       "canonical_key": "machine_learning",
       "display_name": "Machine Learning",
-      "aliases": ["ML", "Machine Learning & CV"],
+      "aliases": ["ML"],
       "category": "ai"
     },
     {
@@ -68,7 +68,7 @@
     {
       "canonical_key": "rag",
       "display_name": "RAG",
-      "aliases": ["RAG Frameworks", "Retrieval-Augmented Generation"],
+      "aliases": ["Retrieval-Augmented Generation"],
       "category": "ai"
     },
     {

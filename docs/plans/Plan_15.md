@@ -454,7 +454,19 @@ acceptance ledger.
 | Saved-JD UI | Complete existing extraction rendering and accessible non-optimistic action | Parser/state/component tests and desktop browser inspection. |
 | Release handoff | Validated terminal incremental portfolio and candidate evidence | Full gates, Docker health, plan validator, acceptance ledger, and scope/diff review. |
 
-## Completion Contract
+### Next Consumer
+
+`Plan_16.md` consumes the completed guarded JD extraction, retained-JD
+re-extraction, source-of-truth skill schemas, current normalizer/matching owners,
+direct Candidate/Job graph synchronization, saved-JD selection/cache owner, and
+bounded technical graph baseline. It alone owns the approved profession-neutral
+PDF/CV/JD skill path, removal of matching-only grouped-skill repair, selected-JD
+relationship integrity read model, matching-contract invalidation, and default
+non-technical CV–JD compatibility map. It must preserve Plan 15 source grounding,
+single repair, compare-and-swap re-extraction, explicit evaluation, one-Agent
+topology, and failure-preservation contracts.
+
+### Historical Completion Contract
 
 Plan 15 is complete only when the locked single-pass extractor rejects every
 ungrounded guarded fact, compound skill label, canonical duplicate, and

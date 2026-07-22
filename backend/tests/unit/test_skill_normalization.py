@@ -160,34 +160,15 @@ def test_correction_and_exclusion_fields_preserved(
     assert out.evidence == ["user removed this skill"]
 
 
-def test_grouped_candidate_skill_expansion_reuses_known_prefix_and_suffix(
-    normalizer: SkillNormalizer,
-) -> None:
-    original = CandidateSkill(
-        skill=SkillRef(
-            canonical_key="python_tooling_fast_api",
-            display_name="Python & Tooling: Fast API",
-            aliases=[],
-            category=None,
-        ),
-        confidence=0.73,
-        proficiency="intermediate",
-        years=2.0,
-        source="cv",
-        excluded=False,
-        evidence=["Python & Tooling: Fast API"],
-    )
+@pytest.mark.parametrize("label", ["Machine Learning & CV", "RAG Frameworks"])
+def test_sample_group_label_is_not_a_production_alias(label: str) -> None:
+    production = SkillNormalizer.production()
 
-    expanded = normalizer.expand_candidate_skill(original)
+    ref = production.normalize_name(label)
 
-    assert [item.skill.canonical_key for item in expanded] == [
-        "python",
-        "fastapi",
-    ]
-    assert all(item.confidence == 0.73 for item in expanded)
-    assert all(item.proficiency == "intermediate" for item in expanded)
-    assert all(item.years == 2.0 for item in expanded)
-    assert all(item.evidence == original.evidence for item in expanded)
+    assert ref.canonical_key not in {"machine_learning", "rag"}
+    assert ref.display_name == label
+    assert ref.aliases == []
 
 
 def test_production_ai_aliases_resolve_to_shared_canonical_keys() -> None:
@@ -197,7 +178,6 @@ def test_production_ai_aliases_resolve_to_shared_canonical_keys() -> None:
         "ML": "machine_learning",
         "Model Fine-tuning": "fine_tuning",
         "GenAI": "generative_ai",
-        "RAG Frameworks": "rag",
     }
 
     assert {

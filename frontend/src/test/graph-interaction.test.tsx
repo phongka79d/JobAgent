@@ -283,7 +283,12 @@ describe('graph simulation hook lifecycle', () => {
     expect(controllers[0].resize).toHaveBeenCalledWith(800, 500);
 
     const changedSnapshot = graphReady();
-    changedSnapshot.skills.push({canonical_name: 'sql'});
+    changedSnapshot.skills.push({
+      canonical_name: 'sql',
+      canonical_key: 'sql',
+      display_name: 'SQL',
+      category: 'language',
+    });
     const secondModel = toGraphModel(changedSnapshot);
     rerender({model: secondModel, width: 800, height: 500});
 

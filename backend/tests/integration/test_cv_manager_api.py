@@ -7,6 +7,7 @@ stable error codes without mutation.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,27 @@ class _CoveringDocumentInvoker:
             for m in list(messages)
             if isinstance(getattr(m, "content", None), str)
         )
+        if schema_name == "candidate_skills":
+            serialized = joined.split(
+                "CV ENTRY RECORDS START\n",
+                maxsplit=1,
+            )[1].split("\nCV ENTRY RECORDS END", maxsplit=1)[0]
+            records = json.loads(serialized)
+            skill_record = next(
+                record for record in records if record.get("body") == "Python"
+            )
+            return {
+                "assertions": [
+                    {
+                        "name": "Python",
+                        "confidence": 0.9,
+                        "proficiency": "advanced",
+                        "years": None,
+                        "evidence": ["Python"],
+                        "source_entry_ids": [skill_record["entry_id"]],
+                    }
+                ]
+            }
         ordinals = sorted(
             {int(m) for m in re.findall(r"\[ordinal=(\d+)\]", joined)}
         ) or [0]

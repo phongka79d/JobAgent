@@ -238,9 +238,10 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
         ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
         ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
         ("GET", "/api/observability/cvs/{attachment_id}/file"),
-        ("GET", "/api/observability/graph"),
-        ("GET", "/api/observability/runs"),
-        ("GET", "/api/profile"),
+            ("GET", "/api/observability/graph"),
+            ("GET", "/api/observability/runs"),
+            ("GET", "/api/observability/skill-map"),
+            ("GET", "/api/profile"),
         ("GET", "/api/profile/cv"),
         ("POST", "/api/attachments/cv"),
         ("POST", "/api/chat/runs/{run_id}/resume"),
@@ -311,6 +312,8 @@ def test_source_tree_has_no_other_route_decorators() -> None:
             "'/observability/graph', response_model=GraphSnapshot)",
             "observability.py:get_observability_runs:router.get("
             "'/observability/runs', response_model=RunHistoryPage)",
+            "observability.py:get_observability_skill_map:router.get("
+            "'/observability/skill-map', response_model=SelectedJobSkillMap)",
             profile_dec,
             "profile.py:get_profile_cv:router.get('/profile/cv')",
         ]

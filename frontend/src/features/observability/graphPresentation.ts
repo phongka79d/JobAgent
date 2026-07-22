@@ -144,13 +144,19 @@ export function toGraphModel(snapshot: GraphSnapshot): GraphModel {
       }),
     ),
     ...snapshot.skills.map(
-      (skill): GraphNodeDatum => ({
-        key: `skill:${skill.canonical_name}`,
-        rawId: skill.canonical_name,
-        kind: 'skill',
-        label: skill.canonical_name,
-        metadata: [['Canonical name', skill.canonical_name]],
-      }),
+      (skill): GraphNodeDatum => {
+        const metadata: Array<readonly [string, string]> = [
+          ['Canonical key', skill.canonical_key],
+        ];
+        if (skill.category) metadata.push(['Category', skill.category]);
+        return {
+          key: `skill:${skill.canonical_key}`,
+          rawId: skill.canonical_key,
+          kind: 'skill',
+          label: skill.display_name,
+          metadata,
+        };
+      },
     ),
   );
 

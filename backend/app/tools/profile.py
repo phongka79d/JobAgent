@@ -33,6 +33,7 @@ from app.db.session import get_session_factory
 from app.graph.sync_candidate import AsyncGraphDriver
 from app.repositories import profiles as profile_repo
 from app.schemas.tools import ToolResult
+from app.services.cv_document_extraction import StructuredCVDocumentInvoker
 from app.services.profile_approval import ApprovalCommitResult, commit_approved_draft
 from app.services.profile_drafts import (
     ERROR_INVALID_PROFILE_UPDATE,
@@ -41,7 +42,6 @@ from app.services.profile_drafts import (
     propose_profile_from_cv,
     propose_profile_update,
 )
-from app.services.profile_extraction import StructuredProfileInvoker
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 from app.storage.attachments import AttachmentStorage
@@ -86,7 +86,7 @@ def build_propose_profile_from_cv_tool(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     storage: AttachmentStorage | None = None,
-    invoker: StructuredProfileInvoker | None = None,
+    invoker: StructuredCVDocumentInvoker | None = None,
     normalizer: SkillNormalizer | None = None,
     extract_text_fn: Callable[[Any], Any] | None = None,
 ) -> Any:
@@ -119,7 +119,9 @@ def build_propose_profile_from_cv_tool(
         active profile/preferences.
         """
         from app.core.settings import get_settings
-        from app.services.profile_extraction import ShopAIKeyStructuredProfileInvoker
+        from app.services.cv_document_extraction import (
+            ShopAIKeyStructuredCVDocumentInvoker,
+        )
 
         factory = (
             session_factory
@@ -194,7 +196,7 @@ def build_propose_profile_from_cv_tool(
             inv = (
                 invoker
                 if invoker is not None
-                else ShopAIKeyStructuredProfileInvoker()
+                else ShopAIKeyStructuredCVDocumentInvoker()
             )
             norm = (
                 normalizer
@@ -248,8 +250,8 @@ def build_propose_profile_from_cv_tool(
                     ok=False,
                     code="ATTACHMENT_NOT_FOUND",
                     summary=(
-                    f"attachment {effective_attachment_id!r} not found; upload a CV "
-                        "or pass a staged attachment UUID"
+                        f"attachment {effective_attachment_id!r} not found; "
+                        "upload a CV or pass a staged attachment UUID"
                         if not do_reprocess
                         else (
                             f"attachment {effective_attachment_id!r} not found or not "
@@ -588,7 +590,7 @@ def build_production_profile_tools(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     storage: AttachmentStorage | None = None,
-    invoker: StructuredProfileInvoker | None = None,
+    invoker: StructuredCVDocumentInvoker | None = None,
     normalizer: SkillNormalizer | None = None,
     driver: AsyncGraphDriver | None = None,
     extract_text_fn: Callable[[Any], Any] | None = None,

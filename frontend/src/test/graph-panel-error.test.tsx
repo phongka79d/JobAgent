@@ -44,6 +44,7 @@ describe('graph visualization failure isolation', () => {
         </Theme>,
       ),
     ).not.toThrow();
+    await userEvent.click(screen.getByRole('radio', {name: 'Kỹ thuật'}));
     expect(
       screen.getByTestId('jobagent-graph-visualization-error'),
     ).toBeInTheDocument();
@@ -66,6 +67,7 @@ describe('graph visualization failure isolation', () => {
       </Theme>,
     );
 
+    await userEvent.click(screen.getByRole('radio', {name: 'Kỹ thuật'}));
     expect(
       screen.getByTestId('jobagent-graph-visualization-error'),
     ).toBeInTheDocument();

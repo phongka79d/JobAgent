@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -171,10 +171,7 @@ def test_lookup_none_current_stale_without_rewriting_history(
                 assert lookup.currentness == "none"
                 assert lookup.evaluation is None
 
-            stale_facts = _facts(
-                profile_revision=_TS - timedelta(days=1),
-                cv_source_hash="old-cv",
-            )
+            stale_facts = _facts(matching_contract_version="match_v2")
             stale_hash = evaluation_context_hash(stale_facts)
             async with f() as s:
                 await eval_repo.insert_evaluation(

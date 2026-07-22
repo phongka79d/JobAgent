@@ -63,18 +63,16 @@ class CandidateSyncError(Exception):
         self.message = message
 
 
-def _skill_props(skill: CandidateSkill) -> dict[str, Any]:
-    """Parameter map for one Skill node (no raw CV body)."""
-    return skill_ref_node_props(skill.skill)
-
-
-def _has_skill_props(skill: CandidateSkill) -> dict[str, Any]:
-    """Parameter map for one HAS_SKILL relationship."""
+def candidate_skill_param_row(skill: CandidateSkill) -> dict[str, Any]:
+    """Exact Skill/HAS_SKILL parameter row shared by sync and integrity reads."""
     return {
-        "confidence": float(skill.confidence),
-        "years": skill.years,
-        "proficiency": skill.proficiency,
-        "evidence": list(skill.evidence),
+        "skill": skill_ref_node_props(skill.skill),
+        "rel": {
+            "confidence": float(skill.confidence),
+            "years": skill.years,
+            "proficiency": skill.proficiency,
+            "evidence": list(skill.evidence),
+        },
     }
 
 
@@ -101,13 +99,7 @@ async def sync_candidate(
         )
 
     skills = non_excluded_skills(profile)
-    skill_rows: list[dict[str, Any]] = [
-        {
-            "skill": _skill_props(s),
-            "rel": _has_skill_props(s),
-        }
-        for s in skills
-    ]
+    skill_rows = [candidate_skill_param_row(skill) for skill in skills]
     related = related_to_param_rows(normalizer)
     seed_skills = seed_skill_param_rows(normalizer)
 

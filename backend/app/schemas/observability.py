@@ -29,7 +29,13 @@ from app.schemas.common import (
     ToolStatus,
     UuidStr,
 )
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 # Abbreviated SHA-256 display width (hex prefix; never full hash in UI).
 FILE_HASH_ABBREV_CHARS: int = 12
@@ -258,6 +264,139 @@ class RunHistoryPage(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Selected-JD skill compatibility map (Plan 16 / Master §8.5)
+# ---------------------------------------------------------------------------
+
+SkillMapStatus = Literal["ready", "stale", "unavailable"]
+SkillMapMatchType = Literal[
+    "direct",
+    "related",
+    "missing_required",
+    "missing_preferred",
+    "candidate_only",
+]
+SkillMapRequirement = Literal["required", "preferred", "none"]
+
+
+class SkillAssertionView(BaseModel):
+    model_config = StrictModelConfig
+
+    canonical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[str]
+
+
+class SkillRelationshipView(BaseModel):
+    model_config = StrictModelConfig
+
+    from_key: str = Field(min_length=1)
+    to_key: str = Field(min_length=1)
+    weight: float = Field(gt=0.0, le=1.0)
+    source: str = Field(min_length=1)
+
+
+class SkillCompatibilityItem(BaseModel):
+    model_config = StrictModelConfig
+
+    match_type: SkillMapMatchType
+    requirement: SkillMapRequirement
+    strength: float = Field(ge=0.0, le=1.0)
+    candidate_skill: SkillAssertionView | None
+    job_skill: SkillAssertionView | None
+    relationship: SkillRelationshipView | None
+
+    @model_validator(mode="after")
+    def validate_coupling(self) -> SkillCompatibilityItem:
+        expected = {
+            "direct": (frozenset({"required", "preferred"}), 1.0, True, True, False),
+            "related": (frozenset({"required", "preferred"}), 0.6, True, True, True),
+            "missing_required": (frozenset({"required"}), 0.0, False, True, False),
+            "missing_preferred": (frozenset({"preferred"}), 0.0, False, True, False),
+            "candidate_only": (frozenset({"none"}), 0.0, True, False, False),
+        }
+        requirements, strength, has_candidate, has_job, has_relationship = expected[
+            self.match_type
+        ]
+        if self.requirement not in requirements or self.strength != strength:
+            raise ValueError("skill compatibility status coupling is invalid")
+        if (self.candidate_skill is not None) is not has_candidate:
+            raise ValueError("candidate skill coupling is invalid")
+        if (self.job_skill is not None) is not has_job:
+            raise ValueError("job skill coupling is invalid")
+        if (self.relationship is not None) is not has_relationship:
+            raise ValueError("relationship coupling is invalid")
+        return self
+
+
+class SkillCompatibilityCounts(BaseModel):
+    model_config = StrictModelConfig
+
+    direct: int = Field(ge=0)
+    related: int = Field(ge=0)
+    missing_required: int = Field(ge=0)
+    missing_preferred: int = Field(ge=0)
+    candidate_only: int = Field(ge=0)
+
+    def as_dict(self) -> dict[str, int]:
+        return self.model_dump()
+
+
+class SkillMapCandidate(BaseModel):
+    model_config = StrictModelConfig
+
+    id: Literal["active"]
+    attachment_id: UuidStr
+    current_title: str | None
+    revision: AwareUtcDatetime
+
+
+class SkillMapJob(BaseModel):
+    model_config = StrictModelConfig
+
+    id: UuidStr
+    title: str | None
+    company: str | None
+    revision: AwareUtcDatetime
+
+
+class SelectedJobSkillMap(BaseModel):
+    model_config = StrictModelConfig
+
+    status: SkillMapStatus
+    code: str | None
+    summary: str = Field(min_length=1)
+    rebuild_instruction: str | None
+    candidate: SkillMapCandidate | None
+    job: SkillMapJob | None
+    items: list[SkillCompatibilityItem] = Field(max_length=200)
+    counts: SkillCompatibilityCounts
+    checked_at: AwareUtcDatetime
+
+    @model_validator(mode="after")
+    def validate_state_and_counts(self) -> SelectedJobSkillMap:
+        actual = {key: 0 for key in self.counts.as_dict()}
+        for item in self.items:
+            actual[item.match_type] += 1
+        if actual != self.counts.as_dict():
+            raise ValueError("skill compatibility counts do not match items")
+        if self.status == "ready":
+            if self.code is not None or self.rebuild_instruction is not None:
+                raise ValueError("ready map cannot carry an error or rebuild command")
+            if self.candidate is None or self.job is None:
+                raise ValueError("ready map requires Candidate and Job metadata")
+            return self
+        if self.items or any(self.counts.as_dict().values()):
+            raise ValueError("non-ready map must withhold every compatibility item")
+        if self.status == "stale":
+            if self.code != "NEO4J_REBUILD_REQUIRED" or not self.rebuild_instruction:
+                raise ValueError("stale map requires rebuild guidance")
+        elif self.code != "NEO4J_UNAVAILABLE" or self.rebuild_instruction is not None:
+            raise ValueError("unavailable map has invalid error coupling")
+        return self
+
+
+# ---------------------------------------------------------------------------
 # Bounded Neo4j graph snapshot (Plan 8/9 / Master §14)
 # ---------------------------------------------------------------------------
 
@@ -332,11 +471,14 @@ class GraphJobNode(BaseModel):
 
 
 class GraphSkillNode(BaseModel):
-    """Allowlisted Skill identity (canonical name only)."""
+    """Allowlisted technical Skill identity plus server display metadata."""
 
     model_config = StrictModelConfig
 
     canonical_name: str = Field(min_length=1)
+    canonical_key: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    category: str | None = None
 
 
 class GraphEdge(BaseModel):
@@ -409,6 +551,16 @@ __all__ = [
     "ObservabilityToolExecution",
     "RunHistoryItem",
     "RunHistoryPage",
+    "SelectedJobSkillMap",
+    "SkillAssertionView",
+    "SkillCompatibilityCounts",
+    "SkillCompatibilityItem",
+    "SkillMapCandidate",
+    "SkillMapJob",
+    "SkillMapMatchType",
+    "SkillMapRequirement",
+    "SkillMapStatus",
+    "SkillRelationshipView",
     "abbreviate_file_hash",
     "decode_chunk_cursor",
     "decode_observability_cursor",

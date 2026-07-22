@@ -3,7 +3,7 @@
 Ownership
 ---------
 * Pinned ``pypdf`` digital-text extraction only (normal + layout modes).
-* Exact Phase 0 meaningful-text thresholds, markers, and normalization.
+* Profession-neutral meaningful-text threshold and normalization.
 * Stable ``NO_EXTRACTABLE_TEXT`` when neither mode yields meaningful text.
 * Page count and malformed-PDF failures for upload validation.
 
@@ -16,6 +16,7 @@ Agent context, or Neo4j.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -24,46 +25,15 @@ from typing import BinaryIO, Final
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError, PdfStreamError
 
-# --- Exact proven Phase 0 meaningful-text rule (single definition) ---
+# --- Profession-neutral meaningful-text rule (single definition) ---
 
 MIN_NON_WHITESPACE_CHARS: Final[int] = 80
 
-# Case-insensitive markers proving identity / experience / skills presence.
-IDENTITY_MARKERS: Final[tuple[str, ...]] = (
-    "email",
-    "phone",
-    "@",
-    "name",
-)
-EXPERIENCE_MARKERS: Final[tuple[str, ...]] = (
-    "experience",
-    "engineer",
-    "developer",
-    "analyst",
-    "worked",
-    "senior",
-    "staff",
-    "platform",
-)
-SKILLS_MARKERS: Final[tuple[str, ...]] = (
-    "skills",
-    "python",
-    "typescript",
-    "sql",
-    "react",
-    "docker",
-    "fastapi",
-)
-
 MEANINGFUL_TEXT_RULE: Final[str] = (
-    "After whitespace normalization (collapse runs of whitespace, strip), text is "
-    "meaningful when (1) non-whitespace character count >= "
-    f"{MIN_NON_WHITESPACE_CHARS}, and (2) the lowercased text contains at least one "
-    "identity marker "
-    f"({', '.join(IDENTITY_MARKERS)}), one experience marker "
-    f"({', '.join(EXPERIENCE_MARKERS)}), and one skills marker "
-    f"({', '.join(SKILLS_MARKERS)}). Image-only / empty digital text maps to "
-    "NO_EXTRACTABLE_TEXT. OCR is never used."
+    "After Unicode NFKC and whitespace normalization, text is meaningful when "
+    f"non-whitespace character count >= {MIN_NON_WHITESPACE_CHARS} and at least "
+    "one Unicode letter or number is present. Image-only, empty, punctuation-only, "
+    "and below-threshold digital text map to NO_EXTRACTABLE_TEXT. OCR is never used."
 )
 
 # Stable application failure codes (attachment/service layer).
@@ -124,8 +94,9 @@ class PdfTextExtraction:
 
 
 def normalize_whitespace(text: str) -> str:
-    """Normalize whitespace only for measurement and rule evaluation."""
-    return re.sub(r"\s+", " ", text or "").strip()
+    """Apply NFKC and collapse whitespace for measurement/rule evaluation."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def non_whitespace_count(text: str) -> int:
@@ -133,22 +104,12 @@ def non_whitespace_count(text: str) -> int:
     return sum(1 for ch in text if not ch.isspace())
 
 
-def has_marker(text_lower: str, markers: tuple[str, ...]) -> bool:
-    """Return True when any marker substring appears in lowercased text."""
-    return any(marker in text_lower for marker in markers)
-
-
 def is_meaningful_text(text: str) -> bool:
     """Apply the owned minimum-text/quality rule for extractable CV text."""
     normalized = normalize_whitespace(text)
     if non_whitespace_count(normalized) < MIN_NON_WHITESPACE_CHARS:
         return False
-    lower = normalized.lower()
-    return (
-        has_marker(lower, IDENTITY_MARKERS)
-        and has_marker(lower, EXPERIENCE_MARKERS)
-        and has_marker(lower, SKILLS_MARKERS)
-    )
+    return any(character.isalnum() for character in normalized)
 
 
 def measure(text: str) -> tuple[int, int]:
