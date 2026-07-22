@@ -142,6 +142,19 @@ def build_read_active_cv_tool(
 
         # Stamp CV ownership before durable result storage (deletion cascade).
         owner = await _resolve_active_attachment_id(factory)
+        expected_identity: active_cv_reader_service.ActiveCvIdentity | None = None
+        expected_no_active = False
+        async with factory() as session:
+            resolved_identity = (
+                await active_cv_reader_service.resolve_active_cv_identity(session)
+            )
+        if isinstance(
+            resolved_identity,
+            active_cv_reader_service.ActiveCvIdentity,
+        ):
+            expected_identity = resolved_identity
+        elif resolved_identity.code == active_cv_reader_service.ERROR_NO_ACTIVE_CV:
+            expected_no_active = True
 
         async def _invoke() -> ToolResult:
             try:
@@ -155,6 +168,8 @@ def build_read_active_cv_tool(
                         cursor=cursor,
                         max_results=max_results,
                         max_chars=max_chars,
+                        expected_identity=expected_identity,
+                        expected_no_active=expected_no_active,
                     )
             except Exception as exc:
                 logger.info(
