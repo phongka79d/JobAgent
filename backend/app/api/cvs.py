@@ -8,14 +8,13 @@ inlined here, and no open DB transaction across yields.
 
 from __future__ import annotations
 
-import json
-from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
-from fastapi.sse import EventSourceResponse, format_sse_event
+from fastapi.sse import EventSourceResponse
 
 from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
+from app.api.sse import open_sse_response
 from app.schemas.common import UuidStr
 from app.schemas.cv_manager import (
     ERROR_APPROVAL_ACTION_REQUIRED,
@@ -29,7 +28,6 @@ from app.schemas.cv_manager import (
     ERROR_CV_FILE_UNAVAILABLE,
     ERROR_CV_NOT_REPROCESSABLE,
 )
-from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.services.chat_turns import (
     ChatTurnError,
     stream_cv_reprocess,
@@ -73,44 +71,6 @@ def _http_for_delete_error(exc: CvDeleteError) -> HTTPException:
     )
 
 
-def _format_validated_sse(event: SseEvent) -> bytes:
-    validated = parse_sse_event(sse_event_to_dict(event))
-    payload = sse_event_to_dict(validated)
-    return format_sse_event(
-        data_str=json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
-        event=validated.event,
-        id=str(validated.event_id),
-    )
-
-
-async def _open_sse_response(
-    events: AsyncIterator[SseEvent],
-) -> EventSourceResponse:
-    """Prime the stream so pre-yield ChatTurnError becomes JSON HTTP errors."""
-    agen = events.__aiter__()
-    try:
-        first = await agen.__anext__()
-    except StopAsyncIteration:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "EMPTY_STREAM",
-                "summary": "Agent stream produced no events",
-            },
-        ) from None
-    except ChatTurnError as exc:
-        raise _http_for_reprocess_error(exc) from exc
-
-    first_bytes = _format_validated_sse(first)
-
-    async def produce() -> AsyncIterator[bytes]:
-        yield first_bytes
-        async for event in agen:
-            yield _format_validated_sse(event)
-
-    return EventSourceResponse(produce())
-
-
 @router.post("/cvs/{attachment_id}/reprocess")
 async def post_cv_reprocess(
     request: Request,
@@ -131,7 +91,10 @@ async def post_cv_reprocess(
         sqlite_path=deps.sqlite_path,
         include_assistant_status=deps.include_assistant_status,
     )
-    return await _open_sse_response(events)
+    return await open_sse_response(
+        events,
+        error_mapper=_http_for_reprocess_error,
+    )
 
 
 @router.delete(

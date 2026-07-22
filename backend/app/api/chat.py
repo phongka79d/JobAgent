@@ -8,16 +8,15 @@ yielding SSE.
 
 from __future__ import annotations
 
-import json
-from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.exceptions import RequestValidationError
-from fastapi.sse import EventSourceResponse, format_sse_event
+from fastapi.sse import EventSourceResponse
 from pydantic import ValidationError
 
 from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
+from app.api.sse import open_sse_response
 from app.db.session import get_session_factory
 from app.schemas.chat import (
     ChatTurnRequest,
@@ -26,7 +25,6 @@ from app.schemas.chat import (
     ResumeRequest,
 )
 from app.schemas.common import UuidStr
-from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.services.chat_history import get_history_page, history_page_as_dict
 from app.services.chat_turns import (
     ERROR_APPROVAL_ACTION_REQUIRED,
@@ -57,52 +55,6 @@ def _http_for_chat_error(exc: ChatTurnError) -> HTTPException:
         status_code=status,
         detail={"code": exc.code, "summary": exc.message},
     )
-
-
-def _format_validated_sse(event: SseEvent) -> bytes:
-    """Re-validate and frame one typed event as SSE wire bytes."""
-    validated = parse_sse_event(sse_event_to_dict(event))
-    payload = sse_event_to_dict(validated)
-    return format_sse_event(
-        data_str=json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
-        event=validated.event,
-        id=str(validated.event_id),
-    )
-
-
-async def _open_sse_response(
-    events: AsyncIterator[SseEvent],
-) -> EventSourceResponse:
-    """Prime the service stream so pre-yield errors become JSON HTTP errors.
-
-    Creates the durable turn/resume claim inside the handler (before headers)
-    so interruption guards and invalid actions are not lost as empty SSE 200.
-    Subsequent events are framed only after the response starts; no DB
-    transaction is held across yields.
-    """
-    agen = events.__aiter__()
-    try:
-        first = await agen.__anext__()
-    except StopAsyncIteration:
-        # Empty stream should not occur for valid turn/resume paths.
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "EMPTY_STREAM",
-                "summary": "Agent stream produced no events",
-            },
-        ) from None
-    except ChatTurnError as exc:
-        raise _http_for_chat_error(exc) from exc
-
-    first_bytes = _format_validated_sse(first)
-
-    async def produce() -> AsyncIterator[bytes]:
-        yield first_bytes
-        async for event in agen:
-            yield _format_validated_sse(event)
-
-    return EventSourceResponse(produce())
 
 
 def _history_query(
@@ -147,7 +99,7 @@ async def post_chat_turn(
         sqlite_path=deps.sqlite_path,
         include_assistant_status=deps.include_assistant_status,
     )
-    return await _open_sse_response(events)
+    return await open_sse_response(events, error_mapper=_http_for_chat_error)
 
 
 @router.post("/chat/runs/{run_id}/resume")
@@ -165,7 +117,7 @@ async def post_chat_resume(
         sqlite_path=deps.sqlite_path,
         include_assistant_status=deps.include_assistant_status,
     )
-    return await _open_sse_response(events)
+    return await open_sse_response(events, error_mapper=_http_for_chat_error)
 
 
 __all__ = ["router"]

@@ -27,8 +27,6 @@ from app.agent.context import (
 )
 from app.agent.graph import AgentGraphBundle
 from app.agent.runner import TerminalOutcome, stream_agent_run
-from app.core.ids import new_uuid
-from app.core.time import utc_now
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
@@ -47,7 +45,7 @@ from app.db.session import get_session_factory, session_scope
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
-from app.schemas.sse import SseEvent, parse_sse_event
+from app.schemas.sse import SseEvent, build_sse_event
 from app.storage.attachments import AttachmentStorage
 from app.tools.registry import ToolRegistry
 
@@ -82,18 +80,6 @@ class CreatedTurn:
     user_message_id: str
     run_id: str
     content: str
-
-
-def _sse(event: str, run_id: str, payload: dict[str, Any]) -> SseEvent:
-    return parse_sse_event(
-        {
-            "event": event,
-            "event_id": new_uuid(),
-            "run_id": run_id,
-            "timestamp": utc_now(),
-            "payload": payload,
-        }
-    )
 
 
 def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
@@ -356,7 +342,7 @@ async def claim_resume(
 
 
 def _approval_required_event(run_id: str, projection: dict[str, Any]) -> SseEvent:
-    return _sse(
+    return build_sse_event(
         "approval_required",
         run_id,
         {
@@ -372,17 +358,19 @@ def _terminal_noop_events(run: AgentRun) -> list[SseEvent]:
     """Persisted terminal state only — no graph, deltas, or tool replay."""
     run_id = run.id
     events = [
-        _sse(
+        build_sse_event(
             "run_started",
             run_id,
             {"state": "running", "resumed": True},
         )
     ]
     if run.state == AGENT_RUN_STATE_COMPLETED:
-        events.append(_sse("run_completed", run_id, {"state": "completed"}))
+        events.append(
+            build_sse_event("run_completed", run_id, {"state": "completed"})
+        )
     elif run.state == AGENT_RUN_STATE_FAILED:
         events.append(
-            _sse(
+            build_sse_event(
                 "run_failed",
                 run_id,
                 {
