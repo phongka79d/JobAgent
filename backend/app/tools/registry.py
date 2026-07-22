@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.graph.sync_candidate import AsyncGraphDriver
 from app.services.cv_document_extraction import StructuredCVDocumentInvoker
 from app.services.jd_extraction import StructuredJdInvoker
-from app.services.jd_ingestion import JobSyncFn, UrlFetcher
-from app.services.job_projection import EmbeddingClient
+from app.services.jd_ingestion import UrlFetcher
+from app.services.job_projection import EmbeddingClient, JobSyncFn
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 

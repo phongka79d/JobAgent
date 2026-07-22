@@ -631,7 +631,6 @@ __all__ = [
     "IngestOutcome",
     "JdIngestResult",
     "JdIngestionError",
-    "JobSyncFn",
     "UrlFetcher",
     "compute_raw_content_hash",
     "ingest_raw_text",

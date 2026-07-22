@@ -401,6 +401,5 @@ __all__ = [
     "JOB_REEXTRACT_CONFLICT_MESSAGE",
     "JobReextractError",
     "JobReextractResult",
-    "JobSyncFn",
     "reextract_job",
 ]

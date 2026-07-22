@@ -82,7 +82,6 @@ from app.services.evaluation_context import (
 from app.services.jd_extraction import StructuredJdInvoker
 from app.services.jd_ingestion import (
     JdIngestionError,
-    JobSyncFn,
     UrlFetcher,
     ingest_raw_text,
     ingest_url,
@@ -100,14 +99,11 @@ from app.services.job_evaluation import (
     ERROR_JOB_NOT_SCORABLE,
     evaluate_job,
 )
-from app.services.job_projection import EmbeddingClient
+from app.services.job_projection import EmbeddingClient, JobSyncFn
 from app.services.job_reextraction import (
     ERROR_JOB_REEXTRACT_CONFLICT,
     JobReextractError,
     reextract_job,
-)
-from app.services.job_reextraction import (
-    JobSyncFn as ReextractJobSyncFn,
 )
 from app.services.skill_normalization import SkillNormalizer
 from app.services.url_fetch import validate_url_scheme
@@ -752,7 +748,7 @@ async def reextract_saved_job(
     embedding_client: EmbeddingClient,
     graph_driver: AsyncGraphDriver | None = None,
     normalizer: SkillNormalizer | None = None,
-    job_sync_fn: ReextractJobSyncFn | None = None,
+    job_sync_fn: JobSyncFn | None = None,
 ) -> ReextractJobResponse:
     """Explicit same-ID re-extraction via the accepted (02A) coordinator.
 
