@@ -96,6 +96,8 @@ async def _fetch(
         "file:///tmp/jd.html",
         "javascript:alert(1)",
         "data:text/plain,hello",
+        "https://user:secret@example.com/jd",
+        "http://user@example.com/jd",
         "not-a-url",
         "",
         "http://",  # no netloc

@@ -148,6 +148,8 @@ def validate_url_scheme(url: str) -> str | None:
         return URL_UNSUPPORTED_SCHEME
     if not parsed.netloc:
         return URL_UNSUPPORTED_SCHEME
+    if parsed.username is not None or parsed.password is not None:
+        return URL_UNSUPPORTED_SCHEME
     return None
 
 
