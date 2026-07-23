@@ -149,6 +149,7 @@ async def upsert_current_draft(
     *,
     draft_json: dict[str, Any],
     source_attachment_id: str | None = None,
+    target_profile_id: str | None = None,
 ) -> ProfileDraft:
     if not isinstance(draft_json, dict):
         raise ProfileRepositoryError("draft_json must be a mapping")
@@ -158,7 +159,7 @@ async def upsert_current_draft(
         row = ProfileDraft(
             id=new_uuid(),
             source_attachment_id=source_attachment_id,
-            target_profile_id=None,
+            target_profile_id=target_profile_id,
             draft_json=draft_json,
             created_at=now,
             updated_at=now,
@@ -166,6 +167,7 @@ async def upsert_current_draft(
         session.add(row)
     else:
         row.source_attachment_id = source_attachment_id
+        row.target_profile_id = target_profile_id
         row.draft_json = draft_json
         row.updated_at = now
     await session.flush()

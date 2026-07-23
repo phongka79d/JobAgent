@@ -224,3 +224,48 @@ async def update_title_from_first_user_message(
         row.updated_at = utc_now()
         await session.flush()
     return row
+
+
+async def delete_and_select(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+    conversation_id: str,
+) -> tuple[Conversation, bool]:
+    """Delete one row and return the server-selected replacement/current row."""
+    row = await session.get(Conversation, conversation_id)
+    if row is None or row.profile_id != profile_id:
+        raise ConversationRepositoryError("conversation profile mismatch")
+    remaining = list(
+        (
+            await session.execute(
+                select(Conversation)
+                .where(
+                    Conversation.profile_id == profile_id,
+                    Conversation.id != conversation_id,
+                )
+                .order_by(
+                    Conversation.last_opened_at.desc(),
+                    Conversation.updated_at.desc(),
+                    Conversation.id.desc(),
+                )
+                .limit(1)
+            )
+        ).scalars()
+    )
+    await session.delete(row)
+    await session.flush()
+    if remaining:
+        return remaining[0], False
+    return await create_for_profile(
+        session, profile_id=profile_id, title=NEW_CONVERSATION_TITLE
+    ), True
+
+
+async def delete(session: AsyncSession, conversation_id: str) -> bool:
+    row = await session.get(Conversation, conversation_id)
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.flush()
+    return True

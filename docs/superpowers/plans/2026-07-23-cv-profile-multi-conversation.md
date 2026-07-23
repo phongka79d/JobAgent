@@ -539,7 +539,7 @@ async def update_title_from_first_user_message(
 
 Use an opaque URL-safe cursor containing the ordering timestamp pair and ID; malformed cursors go through the existing Pydantic 422 boundary.
 
-- [ ] Step 5: Require conversation IDs in message, run, and evaluation repositories
+- [x] Step 5: Require conversation IDs in message, run, and evaluation repositories
 
 Change the message repository interface from implicit main to explicit arguments:
 
@@ -636,7 +636,7 @@ async def assert_profile_idle(
 
 Implement `_has_activity` as `select(AgentRun.id).join(ChatMessage, AgentRun.user_message_id == ChatMessage.id).join(Conversation, ChatMessage.conversation_id == Conversation.id).where(AgentRun.state.in_(("running", "interrupted")), *owner_predicates).limit(1)`. Replace ensure_singleton_seeds with ensure_workspace_seed, inserting only workspace_state(id='main', active_profile_id=NULL). Stop calling the old seed helper from main.py and add PATCH to CORS allow_methods.
 
-- [ ] Step 7: Run repository/static gates and commit
+- [x] Step 7: Run repository/static gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_conversation_titles.py tests/unit/test_activity_gate.py tests/integration/test_profile_selection.py tests/integration/test_chat_persistence.py -q
@@ -1056,7 +1056,7 @@ async def select_owned_conversation(
 
 Each handler maps stable errors without message/CV/provider text. Task 6 adds DELETE only after its checkpoint coordinator exists.
 
-- [ ] Step 4: Thread IDs through turn creation and context
+- [x] Step 4: Thread IDs through turn creation and context
 
 Change create_user_turn to accept conversation_id and resolve the owning profile_id, attachment_id, and preferences inside its transaction:
 
@@ -1119,7 +1119,7 @@ state = build_initial_agent_state(
 
 Change get_history_page(session, conversation_id=conversation_id, limit=limit, before=before) and every repository query to include conversation_id. Keep the response cursor shape unchanged. In stream_resume, call resolve_run_owner before claiming the run, reject deleted or mismatched owners with RUN_PROFILE_MISMATCH, and pass the owner’s conversation/profile context to the graph. Remove the message conversation singleton check in job_save_confirmation.py; replace it with durable owner lookup and preserve the existing exact initiating-message check.
 
-- [ ] Step 6: Run chat/context gates and commit
+- [x] Step 6: Run chat/context gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_conversations_api.py tests/integration/test_chat_history.py tests/integration/test_chat_persistence.py tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_agent_runner.py tests/integration/test_active_cv_tool.py tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/unit/test_active_cv_reader.py -q

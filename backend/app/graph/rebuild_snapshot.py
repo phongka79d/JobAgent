@@ -183,14 +183,10 @@ def validate_stored_embedding(
 async def load_source_revision_snapshot(
     session: AsyncSession,
     *,
-    profile_id: str | None = None,
+    profile_id: str,
 ) -> SourceRevisionSnapshot:
     """Read one requested Candidate and all scorable Job revisions from SQLite."""
-    profile_row = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    profile_row = await profile_repo.get_profile(session, profile_id)
     candidate = (
         SourceRevision(profile_row.id, profile_row.updated_at)
         if profile_row is not None
@@ -207,14 +203,10 @@ async def load_source_revision_snapshot(
 async def load_active_cv_consistency_facts(
     session: AsyncSession,
     *,
-    profile_id: str | None = None,
+    profile_id: str,
 ) -> ActiveCvConsistencyFacts:
     """Load active attachment ID and approved document hash/revision for staleness."""
-    profile_row = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    profile_row = await profile_repo.get_profile(session, profile_id)
     if profile_row is None:
         return ActiveCvConsistencyFacts(
             active_attachment_id=None,

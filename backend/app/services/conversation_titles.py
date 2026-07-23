@@ -8,3 +8,6 @@ def derive_conversation_title(message: str) -> str:
     if not normalized:
         return NEW_CONVERSATION_TITLE
     return normalized[:CONVERSATION_TITLE_MAX].rstrip() or NEW_CONVERSATION_TITLE
+
+
+__all__ = ["NEW_CONVERSATION_TITLE", "derive_conversation_title"]

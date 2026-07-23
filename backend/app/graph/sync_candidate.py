@@ -25,7 +25,6 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph.sync_shared import (
     NEO4J_REBUILD_INSTRUCTION,
     NEO4J_SYNC_FAILED,
@@ -83,7 +82,7 @@ def non_excluded_skills(profile: CandidateProfile) -> list[CandidateSkill]:
 async def sync_candidate(
     driver: AsyncGraphDriver,
     *,
-    profile_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
     profile: CandidateProfile,
     source_updated_at: datetime,
     normalizer: SkillNormalizer,

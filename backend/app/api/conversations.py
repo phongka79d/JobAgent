@@ -13,9 +13,11 @@ from app.api.query_params import (
     conversation_query,
 )
 from app.api.sse import open_sse_response
+from app.core.settings import get_settings
 from app.db.session import get_session_factory
 from app.schemas.chat import (
     ChatTurnRequest,
+    ConversationDeleteResponse,
     ConversationListResponse,
     ConversationMutationResponse,
     ConversationQuery,
@@ -29,6 +31,12 @@ from app.services.chat_history import (
     history_page_as_dict,
 )
 from app.services.chat_turns import ChatTurnError, stream_chat_turn
+from app.services.conversation_deletion import (
+    ConversationDeletionError,
+)
+from app.services.conversation_deletion import (
+    delete_conversation as delete_conversation_service,
+)
 from app.services.conversations import (
     ConversationServiceError,
     create_conversation,
@@ -112,6 +120,25 @@ async def select_conversation(
         )
     except ConversationServiceError as exc:
         raise _error(exc) from exc
+
+
+@router.delete(
+    "/conversations/{conversation_id}",
+    response_model=ConversationDeleteResponse,
+)
+async def delete_conversation(conversation_id: UuidStr) -> ConversationDeleteResponse:
+    try:
+        return await delete_conversation_service(
+            conversation_id=conversation_id,
+            session_factory=get_session_factory(),
+            sqlite_path=get_settings().SQLITE_PATH,
+        )
+    except ConversationDeletionError as exc:
+        status = 404 if exc.code == "CONVERSATION_NOT_FOUND" else 409
+        raise HTTPException(
+            status_code=status,
+            detail={"code": exc.code, "summary": exc.summary},
+        ) from exc
 
 
 @router.get("/conversations/{conversation_id}/history", response_model=HistoryPage)

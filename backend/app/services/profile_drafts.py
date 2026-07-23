@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import (
@@ -38,6 +39,7 @@ from app.db.models.profiles import (
     CANDIDATE_PROFILE_ID,
     JOB_PREFERENCE_KEYS,
     PROFILE_DRAFT_ID,
+    Profile,
 )
 from app.db.session import session_scope
 from app.repositories import attachments as att_repo
@@ -158,6 +160,7 @@ async def propose_profile_from_cv(
     extract_text_fn: Callable[[Any], Any] | None = None,
     publish_failpoint: str | None = None,
     reprocess: bool = False,
+    target_profile_id: str | None = None,
 ) -> ProposeFromCvResult:
     """Run active/draft reuse, staged publication, or active/archived reprocess.
 
@@ -372,6 +375,12 @@ async def propose_profile_from_cv(
                 )
 
             existing = await profile_repo.get_current_draft(session)
+            draft_target_profile_id = target_profile_id
+            if reprocess and draft_target_profile_id is None:
+                owner = await session.scalar(
+                    select(Profile.id).where(Profile.attachment_id == attachment_id)
+                )
+                draft_target_profile_id = owner
             if existing is not None and existing.source_attachment_id is not None:
                 prior_id = existing.source_attachment_id
                 if prior_id != attachment_id:
@@ -387,6 +396,7 @@ async def propose_profile_from_cv(
                 session,
                 draft_json=draft_json,
                 source_attachment_id=attachment_id,
+                target_profile_id=draft_target_profile_id,
             )
             await cv_doc_repo.upsert_draft(
                 session,
@@ -877,6 +887,9 @@ async def propose_profile_update(
                 session,
                 draft_json=draft_json,
                 source_attachment_id=source_attachment_id,
+                target_profile_id=(
+                    draft_row.target_profile_id if draft_row is not None else None
+                ),
             )
     except Exception as exc:
         logger.exception("draft upsert failed during propose_profile_update")

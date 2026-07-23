@@ -320,7 +320,7 @@ def _sort_edges(edges: Sequence[ProjectedEdge]) -> list[ProjectedEdge]:
 async def load_bounded_graph_projection(
     driver: AsyncGraphObservabilityDriver,
     *,
-    profile_id: str = "active",
+    profile_id: str,
 ) -> BoundedGraphProjection:
     """Load one allowlisted, cap-aware active-CV + Candidate/Job/Skill snapshot.
 

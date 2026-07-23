@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph.consistency import (
     NEO4J_REBUILD_REQUIRED,
     NEO4J_UNAVAILABLE,
@@ -165,7 +164,7 @@ async def _load_actual_snapshot(
     driver: AsyncGraphReadDriver,
     *,
     job_id: str,
-    profile_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
 ) -> SelectedSkillRelationshipSnapshot:
     async with driver.session() as session:
         candidate_result = await session.run(
@@ -204,7 +203,7 @@ async def check_selected_skill_relationship_integrity(
     driver: AsyncGraphReadDriver,
     *,
     job_id: str,
-    profile_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
     profile: CandidateProfile,
     extraction: JobPostExtraction,
 ) -> SelectedSkillIntegrityResult:

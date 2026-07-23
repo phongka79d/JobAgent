@@ -22,7 +22,13 @@ from pydantic import BaseModel, Field
 # archived so pending drafts from CV Manager reprocess of archived CVs can
 # surface without 500s (upload outcomes still use staged/active/failed only).
 AttachmentState = Literal["staged", "active", "archived", "failed"]
-CvUploadOutcome = Literal["new", "existing_active", "existing_staged", "retry"]
+CvUploadOutcome = Literal[
+    "new",
+    "existing_active",
+    "existing_staged",
+    "existing_profile",
+    "retry",
+]
 
 assert frozenset(("staged", "active", "archived", "failed")) == frozenset(
     {
@@ -54,6 +60,7 @@ class ProfileUploadSummary(BaseModel):
     model_config = StrictModelConfig
 
     present: bool
+    profile_id: UuidStr | None = None
     current_title: str | None = None
 
 

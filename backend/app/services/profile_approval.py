@@ -34,13 +34,14 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.time import utc_now
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
     Attachment,
 )
 from app.db.models.profiles import (
-    CANDIDATE_PROFILE_ID,
     PROFILE_DRAFT_ID,
+    PROFILE_STATE_READY,
 )
 from app.db.session import session_scope
 from app.graph.sync_candidate import (
@@ -51,9 +52,12 @@ from app.graph.sync_candidate import (
     sync_candidate,
 )
 from app.graph.sync_cv import CvSyncError, sync_cv
+from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.cv_document import CVDocument, parse_cv_document
 from app.schemas.profile import (
     CandidateProfile,
@@ -62,6 +66,7 @@ from app.schemas.profile import (
     parse_job_preferences,
     parse_profile_draft_payload,
 )
+from app.services.conversation_titles import NEW_CONVERSATION_TITLE
 from app.services.profile_activation import (
     ActivationError,
     DocumentDraftBundle,
@@ -70,6 +75,7 @@ from app.services.profile_activation import (
     load_document_draft_bundle,
     promote_document_draft,
 )
+from app.services.profile_identity_guard import guard_optional_identity_fields
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 
@@ -127,6 +133,8 @@ class ApprovalCommitResult:
     previous_attachment_id: str | None
     preferences_updated: bool
     data: dict[str, Any]
+    profile_id: str | None = None
+    conversation_id: str | None = None
 
 
 def _prefs_equal(a: JobPreferences, b: JobPreferences) -> bool:
@@ -145,6 +153,7 @@ class _Preflight:
     preferences_changed: bool
     current_prefs: JobPreferences
     document_bundle: DocumentDraftBundle | None
+    target_profile_id: str | None
 
 
 def _activation_to_approval_error(exc: ActivationError) -> ProfileApprovalError:
@@ -188,13 +197,30 @@ async def _load_preflight(
         ) from exc
 
     source_id = draft_row.source_attachment_id
+    target_profile_id = draft_row.target_profile_id
+    if target_profile_id is not None:
+        target_profile = await profile_repo.get_profile(session, target_profile_id)
+        if target_profile is None or target_profile.state != PROFILE_STATE_READY:
+            raise ProfileApprovalError(
+                "Target profile is not ready",
+                code="PROFILE_NOT_READY",
+            )
+        if source_id != target_profile.attachment_id:
+            raise ProfileApprovalError(
+                "Re-extraction attachment does not belong to target profile",
+                code="PROFILE_INCONSISTENT",
+            )
     new_attachment: Attachment | None = None
     new_storage_path: str | None = None
     old_attachment_id: str | None = None
     old_storage_path: str | None = None
     document_bundle: DocumentDraftBundle | None = None
 
-    active_profile = await profile_repo.get_active_profile(session)
+    active_profile = (
+        await profile_repo.get_profile(session, target_profile_id)
+        if target_profile_id is not None
+        else await profile_repo.get_active_profile(session)
+    )
     active_att = await att_repo.get_active(session)
 
     if source_id is not None:
@@ -245,9 +271,15 @@ async def _load_preflight(
                 "Active attachment missing for profile without draft CV source",
                 code=ERROR_ACTIVE_ATTACHMENT_MISSING,
             )
+        if target_profile_id is None:
+            target_profile_id = active_profile.id
         active_attachment_id_for_profile = active_profile.active_attachment_id
 
-    prefs_row = await profile_repo.get_job_preferences(session)
+    prefs_row = (
+        await profile_repo.get_profile_preferences(session, target_profile_id)
+        if target_profile_id is not None
+        else await profile_repo.get_job_preferences(session)
+    )
     if prefs_row is None:
         current_prefs = JobPreferences(
             target_roles=[],
@@ -280,6 +312,7 @@ async def _load_preflight(
         preferences_changed=preferences_changed,
         current_prefs=current_prefs,
         document_bundle=document_bundle,
+        target_profile_id=target_profile_id,
     )
 
 
@@ -319,23 +352,19 @@ async def _load_approved_cv_sync_inputs(
 async def _assert_final_invariant(
     session: AsyncSession,
     *,
+    profile_id: str,
     expected_attachment_id: str,
 ) -> None:
-    """Require one active attachment referenced by candidate_profile('active')."""
-    profile = await profile_repo.get_active_profile(session)
+    """Require the approved profile and attachment rows are durable."""
+    profile = await profile_repo.get_profile(session, profile_id)
     if profile is None:
         raise ProfileApprovalError(
-            "candidate_profile('active') missing after approval writes",
+            "approved profile missing after approval writes",
             code=ERROR_INVARIANT_VIOLATION,
         )
-    if profile.id != CANDIDATE_PROFILE_ID:
+    if profile.attachment_id != expected_attachment_id:
         raise ProfileApprovalError(
-            "candidate_profile singleton id invariant broken",
-            code=ERROR_INVARIANT_VIOLATION,
-        )
-    if profile.active_attachment_id != expected_attachment_id:
-        raise ProfileApprovalError(
-            "candidate_profile.active_attachment_id does not match approved "
+            "profile attachment does not match approved "
             "attachment",
             code=ERROR_INVARIANT_VIOLATION,
         )
@@ -367,28 +396,95 @@ async def _run_sqlite_approval(
     preflight: _Preflight,
     *,
     failpoint: str | None,
-) -> datetime:
+) -> tuple[datetime, str, str | None]:
     """Apply constraint-safe ordering inside one open session (no commit here)."""
-    profile_json = preflight.draft.candidate_profile.model_dump(mode="json")
+    source_fragments: tuple[str, ...] = ()
+    if preflight.document_bundle is not None:
+        rows = await chunk_repo.list_for_attachment(
+            session, preflight.document_bundle.attachment_id
+        )
+        source_fragments = tuple(str(row.text) for row in rows)
+    guarded_profile = guard_optional_identity_fields(
+        preflight.draft.candidate_profile,
+        source_fragments=source_fragments,
+    )
+    profile_json = guarded_profile.model_dump(mode="json")
     target_att_id = preflight.active_attachment_id_for_profile
 
-    # 1. Upsert active profile (repoint first so old attachment can be archived).
-    await profile_repo.upsert_active_profile(
-        session,
-        active_attachment_id=target_att_id,
-        profile_json=profile_json,
-    )
-    if failpoint == "after_profile_upsert":
-        raise RuntimeError("failpoint:after_profile_upsert")
+    # 1. First approval creates a profile and empty conversation; re-extraction
+    # updates only the requested profile and preserves its conversations.
+    profile_id = preflight.target_profile_id
+    conversation_id: str | None = None
+    if profile_id is None:
+        attachment = await att_repo.get_by_id(session, target_att_id)
+        if attachment is None:
+            raise ProfileApprovalError(
+                "Approved attachment disappeared during transaction",
+                code=ERROR_ATTACHMENT_NOT_FOUND,
+            )
+        from app.services.profile_projection import project_display_name
 
-    # 2. Preferences only when changed.
-    if preflight.preferences_changed:
-        await profile_repo.upsert_job_preferences(
+        profile = await profile_repo.create_profile(
             session,
+            attachment_id=target_att_id,
+            display_name=project_display_name(
+                guarded_profile, attachment.original_name
+            ),
+            profile_json=profile_json,
+            location=guarded_profile.location,
+            extraction_version=(
+                preflight.document_bundle.extraction_version
+                if preflight.document_bundle is not None
+                else "profile-v1"
+            ),
+            source_hash=(
+                preflight.document_bundle.source_hash
+                if preflight.document_bundle is not None
+                else f"profile:{target_att_id}"
+            ),
+        )
+        profile_id = profile.id
+        await workspace_repo.set_active_profile_id(session, profile_id)
+        await profile_repo.upsert_profile_preferences(
+            session,
+            profile_id=profile_id,
             preferences_json=preflight.draft.job_preferences.model_dump(
                 mode="json"
             ),
         )
+        conversation = await conversations_repo.create_for_profile(
+            session, profile_id=profile_id, title=NEW_CONVERSATION_TITLE
+        )
+        conversation_id = conversation.id
+    else:
+        existing_profile = await profile_repo.get_profile(session, profile_id)
+        if existing_profile is None or existing_profile.state != PROFILE_STATE_READY:
+            raise ProfileApprovalError(
+                "Target profile is not ready", code="PROFILE_NOT_READY"
+            )
+        existing_profile.profile_json = profile_json
+        existing_profile.location = guarded_profile.location
+        if preflight.document_bundle is not None:
+            existing_profile.extraction_version = (
+                preflight.document_bundle.extraction_version
+            )
+            existing_profile.source_hash = preflight.document_bundle.source_hash
+        existing_profile.updated_at = utc_now()
+        await session.flush()
+
+    if failpoint == "after_profile_upsert":
+        raise RuntimeError("failpoint:after_profile_upsert")
+
+    # 2. Preferences only when changed.
+    if preflight.preferences_changed or preflight.target_profile_id is None:
+        if profile_id is not None:
+            await profile_repo.upsert_profile_preferences(
+                session,
+                profile_id=profile_id,
+                preferences_json=preflight.draft.job_preferences.model_dump(
+                    mode="json"
+                ),
+            )
 
     # 3–4. CV-backed: archive prior active when IDs differ; activate selected.
     # Profile already repointed so FK RESTRICT on candidate_profile is satisfied.
@@ -421,15 +517,18 @@ async def _run_sqlite_approval(
     await profile_repo.delete_current_draft(session)
 
     # 6. Final invariant, then caller commits.
-    await _assert_final_invariant(session, expected_attachment_id=target_att_id)
+    assert profile_id is not None
+    await _assert_final_invariant(
+        session, profile_id=profile_id, expected_attachment_id=target_att_id
+    )
 
     if failpoint == "before_commit":
         raise RuntimeError("failpoint:before_commit")
 
     # Refresh updated_at after all writes.
-    refreshed = await profile_repo.get_active_profile(session)
+    refreshed = await profile_repo.get_profile(session, profile_id)
     assert refreshed is not None
-    return refreshed.updated_at
+    return refreshed.updated_at, profile_id, conversation_id
 
 
 async def commit_approved_draft(
@@ -498,7 +597,11 @@ async def commit_approved_draft(
                     "Draft or attachment changed during approval preflight",
                     code=ERROR_APPROVAL_TRANSACTION_FAILED,
                 )
-            profile_updated_at = await _run_sqlite_approval(
+            (
+                profile_updated_at,
+                approved_profile_id,
+                created_conversation_id,
+            ) = await _run_sqlite_approval(
                 session, live, failpoint=failpoint
             )
     except ProfileApprovalError as exc:
@@ -557,6 +660,7 @@ async def commit_approved_draft(
             )
         await sync_candidate(
             driver,
+            profile_id=approved_profile_id,
             profile=profile_model,
             source_updated_at=profile_updated_at,
             normalizer=normalizer,
@@ -570,6 +674,7 @@ async def commit_approved_draft(
             )
             await sync_cv(
                 driver,
+                profile_id=approved_profile_id,
                 document=document,
                 original_name=original_name,
                 extraction_version=extraction_version,
@@ -597,6 +702,8 @@ async def commit_approved_draft(
         "sqlite_committed": True,
         "draft_id": PROFILE_DRAFT_ID,
         "active_attachment_id": target_att_id,
+        "profile_id": approved_profile_id,
+        "conversation_id": created_conversation_id,
         "preferences_updated": preferences_updated,
         "previous_attachment_id": old_attachment_id,
         "previous_attachment_archived": old_attachment_id is not None,
@@ -626,6 +733,8 @@ async def commit_approved_draft(
                 "code": sync_code or NEO4J_SYNC_FAILED,
                 "sync_message": sync_message,
             },
+            profile_id=approved_profile_id,
+            conversation_id=created_conversation_id,
         )
 
     summary = "Profile approved and synchronized"
@@ -646,4 +755,6 @@ async def commit_approved_draft(
         previous_attachment_id=old_attachment_id,
         preferences_updated=preferences_updated,
         data=data,
+        profile_id=approved_profile_id,
+        conversation_id=created_conversation_id,
     )

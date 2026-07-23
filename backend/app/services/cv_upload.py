@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.ids import new_uuid
@@ -27,10 +28,12 @@ from app.core.settings import Settings, get_settings
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
+from app.db.models.profiles import Profile
 from app.db.session import get_session_factory, session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import profiles as profile_repo
@@ -113,12 +116,18 @@ def _attachment_public(row: Attachment) -> AttachmentPublic:
     )
 
 
-def _profile_summary(profile_json: dict[str, Any] | None) -> ProfileUploadSummary:
+def _profile_summary(
+    profile_json: dict[str, Any] | None,
+    *,
+    profile_id: str | None = None,
+) -> ProfileUploadSummary:
     if not isinstance(profile_json, dict):
-        return ProfileUploadSummary(present=False, current_title=None)
+        return ProfileUploadSummary(present=False, profile_id=profile_id)
     title = profile_json.get("current_title")
     current_title = title if isinstance(title, str) and title.strip() else None
-    return ProfileUploadSummary(present=True, current_title=current_title)
+    return ProfileUploadSummary(
+        present=True, profile_id=profile_id, current_title=current_title
+    )
 
 
 async def _assert_no_interrupted(
@@ -223,13 +232,39 @@ async def _build_active_response(
     summary: ProfileUploadSummary | None = None
     if profile is not None:
         summary = _profile_summary(
-            profile.profile_json if isinstance(profile.profile_json, dict) else None
+            profile.profile_json if isinstance(profile.profile_json, dict) else None,
+            profile_id=profile.id,
         )
     else:
         summary = ProfileUploadSummary(present=False, current_title=None)
     return CvUploadResponse(
         attachment=_attachment_public(row),
         outcome="existing_active",
+        profile=summary,
+        draft=None,
+    )
+
+
+async def _build_existing_profile_response(
+    session: AsyncSession,
+    row: Attachment,
+) -> CvUploadResponse:
+    profile = (
+        await session.execute(
+            select(Profile).where(Profile.attachment_id == row.id)
+        )
+    ).scalar_one_or_none()
+    summary = (
+        _profile_summary(
+            profile.profile_json if profile is not None else None,
+            profile_id=profile.id if profile is not None else None,
+        )
+        if profile is not None
+        else ProfileUploadSummary(present=False)
+    )
+    return CvUploadResponse(
+        attachment=_attachment_public(row),
+        outcome="existing_profile",
         profile=summary,
         draft=None,
     )
@@ -346,6 +381,23 @@ async def upload_cv(
                     storage.discard_temp(temp_path)
                     temp_path = None
                     return response
+
+                if state == ATTACHMENT_STATE_ARCHIVED:
+                    profile = (
+                        await session.execute(
+                            select(Profile).where(
+                                Profile.attachment_id == existing.id,
+                                Profile.state.in_(("ready", "deleting")),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if profile is not None:
+                        response = await _build_existing_profile_response(
+                            session, existing
+                        )
+                        storage.discard_temp(temp_path)
+                        temp_path = None
+                        return response
 
                 raise CvUploadError(
                     ERROR_MALFORMED_PDF,

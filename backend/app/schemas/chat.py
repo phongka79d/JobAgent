@@ -184,6 +184,14 @@ class ConversationMutationResponse(BaseModel):
 
     conversation: ConversationSummary
 
+
+class ConversationDeleteResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    deleted_conversation_id: UuidStr
+    selected_conversation: ConversationSummary
+    replacement_conversation_id: UuidStr | None
+
 class ResumeRequest(BaseModel):
     """``POST /api/chat/runs/{run_id}/resume`` body: exactly one approval action."""
 

@@ -203,19 +203,13 @@ async def check_graph_revision_consistency(
     session: Any,
     driver: AsyncGraphReadDriver,
     *,
-    profile_id: str | None = None,
+    profile_id: str,
 ) -> GraphConsistencyResult:
     """Compare SQLite source revisions with complete Neo4j revision sets."""
     sqlite_snapshot = await load_source_revision_snapshot(
         session, profile_id=profile_id
     )
-    requested_profile_id = (
-        sqlite_snapshot.candidate.id
-        if sqlite_snapshot.candidate is not None
-        else profile_id
-    )
-    if requested_profile_id is None:
-        return _rebuild_required()
+    requested_profile_id = profile_id
     try:
         graph_snapshot = await _load_graph_revision_snapshot(
             driver, profile_id=requested_profile_id
@@ -292,7 +286,7 @@ async def check_active_cv_consistency(
     session: Any,
     driver: AsyncGraphReadDriver,
     *,
-    profile_id: str | None = None,
+    profile_id: str,
 ) -> GraphConsistencyResult:
     """Compare SQLite active CV id/document revision with Neo4j PROJECTS_TO branch.
 
@@ -301,13 +295,6 @@ async def check_active_cv_consistency(
     sqlite_facts = await load_active_cv_consistency_facts(
         session, profile_id=profile_id
     )
-    if profile_id is None:
-        snapshot = await load_source_revision_snapshot(session)
-        profile_id = (
-            snapshot.candidate.id if snapshot.candidate is not None else None
-        )
-    if profile_id is None:
-        return _rebuild_required()
     try:
         graph_rev = await _load_active_cv_graph_revision(
             driver, profile_id=profile_id

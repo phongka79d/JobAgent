@@ -25,7 +25,6 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph.sync_shared import (
     NEO4J_REBUILD_INSTRUCTION,
     NEO4J_SYNC_FAILED,
@@ -138,7 +137,7 @@ def _entry_row(
 def build_cv_graph_payload(
     document: CVDocument,
     *,
-    profile_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
     original_name: str,
     extraction_version: str,
     source_updated_at: datetime,
@@ -268,7 +267,7 @@ CLEAR_THIS_CV_PROJECTS_TO_CYPHER: str = (
 async def sync_cv(
     driver: AsyncGraphDriver,
     *,
-    profile_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
     document: CVDocument,
     original_name: str,
     extraction_version: str,

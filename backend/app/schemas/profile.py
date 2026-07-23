@@ -249,6 +249,12 @@ class ProfileUpdateRequest(BaseModel):
     display_name: str = Field(min_length=1)
 
 
+class ReextractRequest(BaseModel):
+    """Empty approval-gated request for profile-owned re-extraction."""
+
+    model_config = StrictModelConfig
+
+
 class SafeWarning(BaseModel):
     model_config = StrictModelConfig
 
@@ -263,6 +269,14 @@ class SelectionResponse(BaseModel):
     profile: ProfileDetail
     conversation: ConversationSummary | None
     warning: SafeWarning | None
+
+
+class ProfileDeleteResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    deleted_profile_id: UuidStr
+    active_profile: ProfileListItem | None
+    selected_conversation: ConversationSummary | None
 
 
 def empty_profile_read_response(
