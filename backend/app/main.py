@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
+from app.api.conversations import router as conversations_router
 from app.api.cvs import router as cvs_router
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
     application.include_router(profile_router, prefix="/api")
     application.include_router(profiles_router, prefix="/api")
     application.include_router(chat_router, prefix="/api")
+    application.include_router(conversations_router, prefix="/api")
     application.include_router(jobs_router, prefix="/api")
     application.include_router(observability_router, prefix="/api")
     return application

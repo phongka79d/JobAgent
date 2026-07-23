@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.sse import EventSourceResponse
-from pydantic import ValidationError
 
 from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
+from app.api.query_params import history_query as _history_query
 from app.api.sse import open_sse_response
 from app.db.session import get_session_factory
 from app.schemas.chat import (
@@ -35,6 +34,7 @@ from app.services.chat_turns import (
     ERROR_INVALID_APPROVAL_ACTION,
     ERROR_RUN_NOT_FOUND,
     ERROR_RUN_NOT_RESUMABLE,
+    ERROR_RUN_PROFILE_MISMATCH,
     ChatTurnError,
     stream_chat_turn,
     stream_resume,
@@ -48,6 +48,9 @@ _CHAT_ERROR_STATUS: dict[str, int] = {
     ERROR_INVALID_APPROVAL_ACTION: 400,
     ERROR_RUN_NOT_FOUND: 404,
     ERROR_RUN_NOT_RESUMABLE: 409,
+    ERROR_RUN_PROFILE_MISMATCH: 409,
+    "CONVERSATION_NOT_FOUND": 404,
+    "CONVERSATION_PROFILE_MISMATCH": 409,
     "EMPTY_MESSAGE": 422,
 }
 
@@ -59,18 +62,6 @@ def _http_for_chat_error(exc: ChatTurnError) -> HTTPException:
         status_code=status,
         detail={"code": exc.code, "summary": exc.message},
     )
-
-
-def _history_query(
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    before: Annotated[str | None, Query()] = None,
-    conversation_id: Annotated[str | None, Query()] = None,
-) -> HistoryQuery:
-    """Validate history query params (malformed cursor → 422)."""
-    try:
-        return HistoryQuery(limit=limit, before=before, conversation_id=conversation_id)
-    except ValidationError as exc:
-        raise RequestValidationError(exc.errors()) from exc
 
 
 @router.get("/chat/history", response_model=HistoryPage)

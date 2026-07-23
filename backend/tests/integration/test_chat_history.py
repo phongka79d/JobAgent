@@ -37,7 +37,11 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.support.db_migration import run_async, session_factory
+from tests.support.db_migration import (
+    run_async,
+    seed_legacy_test_conversation,
+    session_factory,
+)
 
 T0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
 
@@ -45,6 +49,7 @@ T0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
     """Migrated isolated SQLite file (Alembic head + singleton seeds)."""
+    seed_legacy_test_conversation(migrated_sqlite)
     return migrated_sqlite
 
 

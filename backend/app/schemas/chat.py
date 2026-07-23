@@ -125,9 +125,40 @@ class HistoryQuery(BaseModel):
             return None
         if value.strip() == "":
             raise ValueError("before cursor must be non-empty when provided")
-        # Full encode/shape/time/UUID validation (422-suitable).
         decode_history_cursor(value)
         return value
+
+
+class ConversationQuery(BaseModel):
+    model_config = StrictModelConfig
+
+    limit: int = Field(default=50, ge=1, le=100)
+    before: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    model_config = StrictModelConfig
+
+    id: UuidStr
+    profile_id: UuidStr
+    title: str
+    created_at: AwareUtcDatetime
+    updated_at: AwareUtcDatetime
+    last_opened_at: AwareUtcDatetime
+    is_selected: bool
+
+
+class ConversationListResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    items: list[ConversationSummary]
+    next_cursor: str | None = None
+
+
+class ConversationMutationResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    conversation: ConversationSummary
 
 class ResumeRequest(BaseModel):
     """``POST /api/chat/runs/{run_id}/resume`` body: exactly one approval action."""

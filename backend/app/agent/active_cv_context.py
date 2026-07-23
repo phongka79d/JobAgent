@@ -175,6 +175,8 @@ def project_active_cv_context(
 
 async def load_active_cv_context(
     session: AsyncSession,
+    *,
+    profile_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Load compact active-CV outline into Agent ``active_cv_context``.
 
@@ -182,7 +184,11 @@ async def load_active_cv_context(
     a caller-supplied attachment ID. Never reads draft documents, archived
     attachments, raw bytes, or chunk bodies.
     """
-    profile = await profile_repo.get_active_profile(session)
+    profile = (
+        await profile_repo.get_profile(session, profile_id)
+        if profile_id is not None
+        else await profile_repo.get_active_profile(session)
+    )
     if profile is None:
         return empty_active_cv_context()
     attachment_id = profile.active_attachment_id

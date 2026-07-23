@@ -200,8 +200,14 @@ def _validate_bounds(
     return None
 
 
-async def _resolve_active_target(session: AsyncSession) -> _ActiveTarget | ToolResult:
-    profile = await profile_repo.get_active_profile(session)
+async def _resolve_active_target(
+    session: AsyncSession, profile_id: str | None = None
+) -> _ActiveTarget | ToolResult:
+    profile = (
+        await profile_repo.get_profile(session, profile_id)
+        if profile_id is not None
+        else await profile_repo.get_active_profile(session)
+    )
     if profile is None:
         return _fail(ERROR_NO_ACTIVE_CV, "No active CV/profile is available")
     attachment_id = profile.active_attachment_id
@@ -230,8 +236,9 @@ async def _resolve_active_target(session: AsyncSession) -> _ActiveTarget | ToolR
 
 async def resolve_active_cv_identity(
     session: AsyncSession,
+    profile_id: str | None = None,
 ) -> ActiveCvIdentity | ToolResult:
-    resolved = await _resolve_active_target(session)
+    resolved = await _resolve_active_target(session, profile_id)
     if isinstance(resolved, ToolResult):
         return resolved
     return ActiveCvIdentity(
@@ -580,6 +587,7 @@ async def read_active_cv(
     max_results: int = DEFAULT_MAX_RESULTS,
     max_chars: int = DEFAULT_MAX_CHARS,
     expected_identity: ActiveCvIdentity | None = None,
+    profile_id: str | None = None,
 ) -> ToolResult:
     """Read one bounded page of active-CV evidence.
 
@@ -633,7 +641,7 @@ async def read_active_cv(
                 "chunk_ordinal must be a non-negative integer when provided",
             )
 
-    resolved = await _resolve_active_target(session)
+    resolved = await _resolve_active_target(session, profile_id)
     if isinstance(resolved, ToolResult):
         return resolved
     target = resolved

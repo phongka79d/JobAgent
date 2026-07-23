@@ -869,7 +869,7 @@ git commit -m "feat: add profile selection API"
 - Modify: backend/app/services/active_cv_reader.py
 - Test: backend/tests/integration/test_conversations_api.py, test_chat_history.py, test_chat_persistence.py, test_chat_api.py, test_interrupt_resume.py, backend/tests/unit/test_agent_context.py, test_agent_graph.py, test_active_cv_reader.py
 
-- [ ] Step 1: Add failing cross-owner tests
+- [x] Step 1: Add failing cross-owner tests
 
 Create test_conversations_api.py covering two profiles and two conversations:
 
@@ -901,7 +901,7 @@ def test_first_user_message_derives_local_bounded_title(
 
 Extend history/resume tests to prove profile A rows never appear in profile B, and that a run resume resolves its stored conversation/profile rather than trusting a caller-selected profile.
 
-- [ ] Step 2: Run chat tests to verify RED
+- [x] Step 2: Run chat tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -910,7 +910,7 @@ Set-Location backend
 
 Expected: old /api/chat/history and /api/chat/turns implementations still force main and build_initial_agent_state returns main.
 
-- [ ] Step 3: Add conversation DTOs and routes
+- [x] Step 3: Add conversation DTOs and routes
 
 Move the current _history_query validator from api/chat.py to api/query_params.py as the single reusable dependency, then add a path-scoped conversation ID validation dependency and register:
 
@@ -1115,11 +1115,11 @@ state = build_initial_agent_state(
 )
 ~~~
 
-- [ ] Step 5: Scope history and resume, including job-save confirmation
+- [x] Step 5: Scope history and resume, including job-save confirmation
 
 Change get_history_page(session, conversation_id=conversation_id, limit=limit, before=before) and every repository query to include conversation_id. Keep the response cursor shape unchanged. In stream_resume, call resolve_run_owner before claiming the run, reject deleted or mismatched owners with RUN_PROFILE_MISMATCH, and pass the owner’s conversation/profile context to the graph. Remove the message conversation singleton check in job_save_confirmation.py; replace it with durable owner lookup and preserve the existing exact initiating-message check.
 
-- [ ] Step 6: Run chat/context gates and commit
+- [x] Step 6: Run chat/context gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_conversations_api.py tests/integration/test_chat_history.py tests/integration/test_chat_persistence.py tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_agent_runner.py tests/integration/test_active_cv_tool.py tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/unit/test_active_cv_reader.py -q

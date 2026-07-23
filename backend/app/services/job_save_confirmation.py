@@ -16,9 +16,10 @@ from typing import Any, Final, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.chat import CHAT_MESSAGE_ROLE_USER, CONVERSATION_ID
+from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.schemas.jobs import (
     SAVE_JOB_CANCEL_OUTCOME,
     SAVE_JOB_SOURCE_CURRENT_MESSAGE,
@@ -191,7 +192,7 @@ async def resolve_initiating_user_message(
             code=ERROR_INVALID_CURRENT_MESSAGE,
             summary="initiating message is not a valid user message",
         )
-    if message.conversation_id != CONVERSATION_ID:
+    if await conversations_repo.resolve_owner(session, message.conversation_id) is None:
         return SourceLookupFailure(
             code=ERROR_INVALID_CURRENT_MESSAGE,
             summary="initiating message is not a valid user message",

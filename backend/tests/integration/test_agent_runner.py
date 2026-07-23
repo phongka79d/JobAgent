@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
+import pytest
 from app.agent.checkpoint import (
     delete_run_checkpoint,
     open_checkpointer,
@@ -56,12 +57,21 @@ from langgraph.prebuilt import InjectedState
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.fakes.fake_chat_model import FakeChatModel
-from tests.support.db_migration import run_async, session_factory
+from tests.support.db_migration import (
+    run_async,
+    seed_legacy_test_conversation,
+    session_factory,
+)
 from tests.support.graph_rebuild import seed_candidate, skills_fixture
 
 RUN_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 RUN_B = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _legacy_chat_owner(migrated_sqlite: Path) -> None:
+    seed_legacy_test_conversation(migrated_sqlite)
 
 
 def _ai_text(content: str) -> AIMessage:

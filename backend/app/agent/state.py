@@ -82,6 +82,7 @@ def build_initial_agent_state(
     *,
     run_id: str,
     conversation_id: str = AGENT_CONVERSATION_ID,
+    profile_id: str | None = None,
     messages_for_this_turn: list[ContextMessage] | None = None,
     recent_context: list[ContextMessage] | None = None,
     candidate_context: list[dict[str, Any]] | None = None,
@@ -100,6 +101,8 @@ def build_initial_agent_state(
     """
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
+    if profile_id is not None and not profile_id.strip():
+        raise ValueError("profile_id must be a non-empty string when provided")
     if tool_iteration_count < 0:
         raise ValueError("tool_iteration_count must be >= 0")
 

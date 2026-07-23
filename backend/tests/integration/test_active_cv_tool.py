@@ -43,12 +43,17 @@ from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import ToolNode
 
 from tests.fakes.fake_chat_model import FakeChatModel
-from tests.support.db_migration import run_async, session_factory
+from tests.support.db_migration import (
+    run_async,
+    seed_legacy_test_conversation,
+    session_factory,
+)
 from tests.unit.test_agent_graph import _ai_text
 
 
 @pytest.fixture
 def sqlite_factory(migrated_sqlite: Path) -> Iterator[Any]:
+    seed_legacy_test_conversation(migrated_sqlite)
     engine = build_async_engine(migrated_sqlite)
     factory = session_factory(engine)
     try:

@@ -22,7 +22,10 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from tests.fakes.fake_chat_model import FakeChatModel
-from tests.support.db_migration import cleanup_isolated_sqlite
+from tests.support.db_migration import (
+    cleanup_isolated_sqlite,
+    seed_legacy_test_conversation,
+)
 from tests.support.health import (
     FakeDriver,
     install_fake_driver,
@@ -127,6 +130,7 @@ def chat_env(
 ) -> Iterator[tuple[Path, Path, FakeDriver]]:
     """Migrated temp SQLite + FILES_DIR + fake Neo4j for public chat API tests."""
     db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    seed_legacy_test_conversation(db_path)
     fake = install_fake_driver(monkeypatch)
     yield db_path, files_dir, fake
     cleanup_isolated_sqlite()

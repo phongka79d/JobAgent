@@ -6,6 +6,8 @@ and fixtures. Schema parity helpers live in ``schema_parity``.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+import uuid
 from collections.abc import Coroutine, Iterator
 from pathlib import Path
 from typing import Any, TypeVar
@@ -74,6 +76,43 @@ def alembic_config(db_path: Path) -> Config:
 def upgrade_to_head(db_path: Path) -> None:
     """Apply Alembic migrations through head on ``db_path``."""
     command.upgrade(alembic_config(db_path), "head")
+
+
+def seed_legacy_test_conversation(db_path: Path) -> None:
+    """Test-only compatibility owner for callers not yet migrated off ``main``."""
+    connection = sqlite3.connect(db_path)
+    try:
+        if connection.execute(
+            "SELECT 1 FROM conversations WHERE id = 'main'"
+        ).fetchone():
+            return
+        attachment_id = str(uuid.uuid4())
+        profile_id = str(uuid.uuid4())
+        now = "2026-07-23 00:00:00+00:00"
+        connection.execute(
+            "INSERT INTO attachments "
+            "(id, file_hash, original_name, mime_type, size_bytes, page_count, "
+            "storage_path, state, created_at, updated_at) "
+            "VALUES (?, ?, 'compat.pdf', 'application/pdf', 10, 1, ?, "
+            "'archived', ?, ?)",
+            (attachment_id, uuid.uuid4().hex * 2, f"{attachment_id}.pdf", now, now),
+        )
+        connection.execute(
+            "INSERT INTO profiles "
+            "(id, attachment_id, display_name, profile_json, extraction_version, "
+            "source_hash, state, created_at, updated_at, last_opened_at) "
+            "VALUES (?, ?, 'Compatibility', '{}', 'test-only', ?, 'ready', ?, ?, ?)",
+            (profile_id, attachment_id, f"compat:{attachment_id}", now, now, now),
+        )
+        connection.execute(
+            "INSERT INTO conversations "
+            "(id, profile_id, title, created_at, updated_at, last_opened_at) "
+            "VALUES ('main', ?, 'Chat mới', ?, ?, ?)",
+            (profile_id, now, now, now),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

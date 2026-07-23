@@ -693,14 +693,14 @@ def test_reader_never_accepts_archived_guess_via_server_resolve(
             async with factory() as session:
                 await _seed_active_document(session, attachment_id=archived)
                 await att_repo.mark_archived(session, archived)
-                # No profile -> no active.
-                from app.db.models.profiles import CANDIDATE_PROFILE_ID
+                # No workspace-selected profile -> no active CV.
+                from app.repositories import workspace_state as workspace_repo
 
-                row = await session.get(
-                    __import__(
-                        "app.db.models.profiles", fromlist=["CandidateProfile"]
-                    ).CandidateProfile,
-                    CANDIDATE_PROFILE_ID,
+                active_id = await workspace_repo.get_active_profile_id(session)
+                row = (
+                    await profile_repo.get_profile(session, active_id)
+                    if active_id is not None
+                    else None
                 )
                 if row is not None:
                     await session.delete(row)

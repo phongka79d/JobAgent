@@ -53,13 +53,18 @@ from tests.fakes.synthetic_tool import (
     SYNTHETIC_TOOL_NAME,
     build_synthetic_interrupt_tool,
 )
-from tests.support.db_migration import run_async, session_factory
+from tests.support.db_migration import (
+    run_async,
+    seed_legacy_test_conversation,
+    session_factory,
+)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
+    seed_legacy_test_conversation(migrated_sqlite)
     return migrated_sqlite
 
 

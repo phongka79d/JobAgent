@@ -1189,6 +1189,7 @@ def initial_graph_state(
     run_id: str,
     user_text: str,
     conversation_id: str = AGENT_CONVERSATION_ID,
+    profile_id: str | None = None,
     recent_context: Sequence[dict[str, Any]] | None = None,
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
@@ -1199,6 +1200,8 @@ def initial_graph_state(
     """Build a valid starting graph state for one user turn (no DB access)."""
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
+    if profile_id is not None and not profile_id.strip():
+        raise ValueError("profile_id must be a non-empty string when provided")
     state: AgentGraphState = {
         "conversation_id": conversation_id,
         "run_id": run_id,

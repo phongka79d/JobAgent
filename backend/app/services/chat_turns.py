@@ -45,7 +45,9 @@ from app.db.session import get_session_factory, session_scope
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.schemas.sse import SseEvent, build_sse_event
+from app.services.activity_gate import ActivityBlockedError, assert_conversation_idle
 from app.storage.attachments import AttachmentStorage
 from app.tools.registry import ToolRegistry
 
@@ -54,6 +56,7 @@ ERROR_APPROVAL_ACTION_REQUIRED: str = "APPROVAL_ACTION_REQUIRED"
 ERROR_INVALID_APPROVAL_ACTION: str = "INVALID_APPROVAL_ACTION"
 ERROR_RUN_NOT_FOUND: str = "RUN_NOT_FOUND"
 ERROR_RUN_NOT_RESUMABLE: str = "RUN_NOT_RESUMABLE"
+ERROR_RUN_PROFILE_MISMATCH: str = "RUN_PROFILE_MISMATCH"
 ERROR_CV_ATTACHMENT_NOT_FOUND: str = "CV_ATTACHMENT_NOT_FOUND"
 ERROR_CV_NOT_REPROCESSABLE: str = "CV_NOT_REPROCESSABLE"
 ERROR_CV_FILE_UNAVAILABLE: str = "CV_FILE_UNAVAILABLE"
@@ -80,6 +83,11 @@ class CreatedTurn:
     user_message_id: str
     run_id: str
     content: str
+    # ponytail: legacy /api/chat callers omit conversation ownership until the
+    # frontend switches in Task 10; Task 13 removes this fallback and alias.
+    conversation_id: str = "main"
+    profile_id: str | None = None
+    attachment_id: str | None = None
 
 
 def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
@@ -129,13 +137,18 @@ def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
 
 async def get_interrupted_run(
     session: AsyncSession,
+    *,
+    conversation_id: str | None = None,
 ) -> AgentRun | None:
     """Return any currently interrupted run (at most one expected)."""
-    stmt = (
-        select(AgentRun)
-        .where(AgentRun.state == AGENT_RUN_STATE_INTERRUPTED)
-        .limit(1)
+    stmt = select(AgentRun).where(
+        AgentRun.state == AGENT_RUN_STATE_INTERRUPTED
     )
+    if conversation_id is not None:
+        stmt = stmt.join(
+            ChatMessage, AgentRun.user_message_id == ChatMessage.id
+        ).where(ChatMessage.conversation_id == conversation_id)
+    stmt = stmt.limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -152,6 +165,7 @@ async def create_user_turn(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     source_attachment_id: str | None = None,
     conversation_id: str | None = None,
+    attachment_ids: Sequence[str] | None = None,
 ) -> CreatedTurn:
     """Atomically insert user message + ``running`` run, or reject interruption.
 
@@ -176,7 +190,48 @@ async def create_user_turn(
 
     factory = session_factory or get_session_factory()
     async with session_scope(factory) as session:
-        interrupted = await get_interrupted_run(session)
+        durable_conversation_id = conversation_id or "main"
+        resolved_owner = None
+        if conversation_id is not None:
+            resolved_owner = await conversations_repo.resolve_owner(
+                session, conversation_id
+            )
+            if resolved_owner is None:
+                raise ChatTurnError(
+                    "CONVERSATION_NOT_FOUND", "conversation not found"
+                )
+            requested = [str(item) for item in (attachment_ids or ())]
+            if owner is not None and owner != resolved_owner.attachment_id:
+                raise ChatTurnError(
+                    "CONVERSATION_PROFILE_MISMATCH",
+                    "source attachment does not belong to conversation",
+                )
+            if owner_attachment := resolved_owner.attachment_id:
+                if any(item != owner_attachment for item in requested):
+                    raise ChatTurnError(
+                        "CONVERSATION_PROFILE_MISMATCH",
+                        "attachment does not belong to conversation",
+                    )
+            try:
+                await assert_conversation_idle(
+                    session,
+                    conversation_id=conversation_id,
+                    code="CONVERSATION_SWITCH_BLOCKED",
+                )
+            except ActivityBlockedError as exc:
+                raise ChatTurnError(
+                    "CONVERSATION_SWITCH_BLOCKED",
+                    "conversation has an active run",
+                ) from exc
+            await conversations_repo.update_title_from_first_user_message(
+                session, conversation_id=conversation_id, message=text
+            )
+        interrupted = await get_interrupted_run(
+            session,
+            conversation_id=durable_conversation_id
+            if conversation_id is not None
+            else None,
+        )
         if interrupted is not None:
             raise ChatTurnError(
                 ERROR_APPROVAL_ACTION_REQUIRED,
@@ -184,7 +239,7 @@ async def create_user_turn(
             )
         user = await messages_repo.insert_message(
             session,
-            conversation_id=conversation_id or "main",
+            conversation_id=durable_conversation_id,
             role=CHAT_MESSAGE_ROLE_USER,
             content=text,
             source_attachment_id=owner,
@@ -198,6 +253,9 @@ async def create_user_turn(
             user_message_id=user.id,
             run_id=run.id,
             content=text,
+            conversation_id=durable_conversation_id,
+            profile_id=resolved_owner.profile_id if resolved_owner else None,
+            attachment_id=resolved_owner.attachment_id if resolved_owner else None,
         )
 
 
@@ -257,7 +315,11 @@ async def persist_terminal_success(
         if content == "":
             content = "(no assistant text)"
         owner = await runs_repo.resolve_run_owner(session, run_id)
-        conversation_id = owner.conversation_id if owner is not None else "main"
+        if owner is None:
+            raise ChatTurnError(
+                ERROR_RUN_PROFILE_MISMATCH, "run owner could not be resolved"
+            )
+        conversation_id = owner.conversation_id
         await messages_repo.insert_message(
             session,
             conversation_id=conversation_id,
@@ -451,6 +513,7 @@ async def stream_chat_turn(
         session_factory=factory,
         source_attachment_id=source_attachment_id,
         conversation_id=conversation_id,
+        attachment_ids=attachment_ids,
     )
     interrupt_holder: dict[str, Any] = {}
 
@@ -465,12 +528,19 @@ async def stream_chat_turn(
     async with factory() as session:
         recent_loaded = await load_recent_context(
             session,
-            conversation_id=conversation_id,
+            conversation_id=turn.conversation_id,
+            profile_id=turn.profile_id,
             exclude_ids=frozenset({turn.user_message_id}),
         )
-        candidate_context = await load_candidate_context(session)
-        active_cv_context = await load_active_cv_context(session)
-        working_memory = await load_profile_working_memory_messages(session)
+        candidate_context = await load_candidate_context(
+            session, profile_id=turn.profile_id
+        )
+        active_cv_context = await load_active_cv_context(
+            session, profile_id=turn.profile_id
+        )
+        working_memory = await load_profile_working_memory_messages(
+            session, profile_id=turn.profile_id
+        )
         effective_attachment_ids = normalize_turn_attachment_ids(attachment_ids)
     # Graph state uses list[dict] channels; ContextMessage is a TypedDict.
     recent_context: list[dict[str, Any]] = [
@@ -486,7 +556,7 @@ async def stream_chat_turn(
 
     async for event in stream_agent_run(
         run_id=turn.run_id,
-        conversation_id=conversation_id or "main",
+        conversation_id=turn.conversation_id,
         user_text=turn.content,
         recent_context=recent_context,
         candidate_context=candidate_context,
@@ -569,6 +639,15 @@ async def stream_resume(
     the graph or replays text/tool side effects.
     """
     factory = session_factory or get_session_factory()
+    async with factory() as owner_session:
+        owner = await runs_repo.resolve_run_owner(owner_session, run_id)
+        if owner is None:
+            persisted = await runs_repo.get_run(owner_session, run_id)
+            if persisted is None:
+                raise ChatTurnError(ERROR_RUN_NOT_FOUND, f"run {run_id!r} not found")
+            raise ChatTurnError(
+                ERROR_RUN_PROFILE_MISMATCH, "run owner could not be resolved"
+            )
     run, chosen = await claim_resume(
         run_id=run_id,
         action=action,
@@ -586,9 +665,7 @@ async def stream_resume(
             f"run {run_id!r} not running after resume claim (state={run.state!r})",
         )
 
-    async with factory() as owner_session:
-        owner = await runs_repo.resolve_run_owner(owner_session, run_id)
-    conversation_id = owner.conversation_id if owner is not None else "main"
+    conversation_id = owner.conversation_id
 
     interrupt_holder: dict[str, Any] = {}
 
@@ -627,6 +704,7 @@ __all__ = [
     "ERROR_INVALID_APPROVAL_ACTION",
     "ERROR_RUN_NOT_FOUND",
     "ERROR_RUN_NOT_RESUMABLE",
+    "ERROR_RUN_PROFILE_MISMATCH",
     "ChatTurnError",
     "CreatedTurn",
     "assert_cv_reprocessable",
