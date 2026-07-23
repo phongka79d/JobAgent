@@ -1,6 +1,6 @@
-"""Message insert/list repository for the singleton conversation.
+"""Conversation-scoped message persistence.
 
-Persists only ``user | assistant | system`` roles for ``conversation='main'``.
+Persists only ``user | assistant | system`` roles for a durable conversation.
 Never persists provider ``tool`` roles. History order is ``(created_at, id)``.
 Pagination uses the composite index
 ``(conversation_id, created_at, id)`` with newest-first ``limit`` fetches.
@@ -37,16 +37,16 @@ class InvalidMessageRoleError(ChatMessageRepositoryError):
 async def insert_message(
     session: AsyncSession,
     *,
+    conversation_id: str = CONVERSATION_ID,
     role: str,
     content: str,
     structured_payload: dict[str, Any] | None = None,
     source_attachment_id: str | None = None,
     redacted_at: datetime | None = None,
 ) -> ChatMessage:
-    """Insert one message into the singleton conversation.
+    """Insert one message into the requested durable conversation.
 
-    Always sets ``conversation_id`` to :data:`CONVERSATION_ID`. Rejects the
-    provider tool role and any other non-durable role before flush. Optional
+    Rejects the provider tool role and any other non-durable role before flush. Optional
     *source_attachment_id* / *redacted_at* expose CV ownership fields without
     lifecycle logic. Does not finalize the caller's unit of work.
     """
@@ -66,10 +66,14 @@ async def insert_message(
             "source_attachment_id must be a non-empty string when set"
         )
 
+    if not isinstance(conversation_id, str) or not conversation_id.strip():
+        raise ChatMessageRepositoryError("conversation_id must be non-empty")
+    # ponytail: the default keeps pre-Task-4 callers importable; every new
+    # caller passes a durable ID and Task 4 removes the default.
     # Omit structured_payload when absent so the JSON column stays SQL NULL
     # (SQLAlchemy JSON maps Python None to JSON null by default).
     kwargs: dict[str, Any] = {
-        "conversation_id": CONVERSATION_ID,
+        "conversation_id": conversation_id.strip(),
         "role": role,
         "content": content,
     }
@@ -98,15 +102,16 @@ async def get_by_id(
     return await session.get(ChatMessage, message_id.strip())
 
 
-async def list_messages(session: AsyncSession) -> list[ChatMessage]:
-    """Return all main-conversation messages ordered by ``(created_at, id)``.
+async def list_messages(
+    session: AsyncSession, *, conversation_id: str = CONVERSATION_ID
+) -> list[ChatMessage]:
+    """Return conversation messages ordered by ``(created_at, id)``.
 
-    Only rows with ``conversation_id == 'main'`` are returned. Ordering is
-    ascending on ``created_at`` then ``id`` for deterministic history.
+    Ordering is ascending on ``created_at`` then ``id`` for deterministic history.
     """
     stmt = (
         select(ChatMessage)
-        .where(ChatMessage.conversation_id == CONVERSATION_ID)
+        .where(ChatMessage.conversation_id == conversation_id)
         .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
     )
     result = await session.execute(stmt)
@@ -116,6 +121,7 @@ async def list_messages(session: AsyncSession) -> list[ChatMessage]:
 async def list_messages_before(
     session: AsyncSession,
     *,
+    conversation_id: str = CONVERSATION_ID,
     limit: int,
     before: tuple[datetime, str] | None = None,
 ) -> list[ChatMessage]:
@@ -129,7 +135,7 @@ async def list_messages_before(
     if limit < 1:
         raise ChatMessageRepositoryError("limit must be >= 1")
 
-    conditions = [ChatMessage.conversation_id == CONVERSATION_ID]
+    conditions = [ChatMessage.conversation_id == conversation_id]
     if before is not None:
         before_created_at, before_id = before
         # Lexicographic (created_at, id) < cursor pair.
@@ -167,10 +173,7 @@ async def list_by_source_attachment_id(
         )
     stmt = (
         select(ChatMessage)
-        .where(
-            ChatMessage.conversation_id == CONVERSATION_ID,
-            ChatMessage.source_attachment_id == attachment_id.strip(),
-        )
+        .where(ChatMessage.source_attachment_id == attachment_id.strip())
         .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
     )
     result = await session.execute(stmt)
@@ -187,10 +190,7 @@ async def list_with_structured_payload(
     """
     stmt = (
         select(ChatMessage)
-        .where(
-            ChatMessage.conversation_id == CONVERSATION_ID,
-            ChatMessage.structured_payload.is_not(None),
-        )
+        .where(ChatMessage.structured_payload.is_not(None))
         .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
     )
     result = await session.execute(stmt)

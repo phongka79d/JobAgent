@@ -1,82 +1,146 @@
-"""Singleton candidate-profile, draft, and job-preferences repository primitives.
-
-Owns focused reads/upserts/deletes for ``candidate_profile``,
-``profile_drafts``, and ``job_preferences`` using the fixed singleton IDs
-``active`` / ``current`` / ``active``. JSON document shape is not validated
-here — services must validate Pydantic contracts before calling writers.
-Callers own the async session and commit; this module never opens a session,
-commits/rolls back, or touches providers, filesystem, or Neo4j.
-"""
+"""Flush-only profile, draft, and preference repository primitives."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.models.profiles import (
-    CANDIDATE_PROFILE_ID,
-    JOB_PREFERENCES_ID,
-    PROFILE_DRAFT_ID,
-    CandidateProfile,
-    JobPreferences,
+    PROFILE_STATE_READY,
+    WORKSPACE_STATE_ID,
+    Profile,
     ProfileDraft,
+    ProfilePreference,
+    WorkspaceState,
 )
 
 
 class ProfileRepositoryError(Exception):
-    """Base error for profile-family repository invariant violations."""
+    """Profile repository invariant violation."""
 
 
-async def get_active_profile(
-    session: AsyncSession,
-) -> CandidateProfile | None:
-    """Return ``candidate_profile('active')``, or ``None`` if not created yet."""
-    return await session.get(CandidateProfile, CANDIDATE_PROFILE_ID)
+def _required(name: str, value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ProfileRepositoryError(f"{name} must be a non-empty string")
+    return value.strip()
 
 
-async def upsert_active_profile(
+async def get_profile(session: AsyncSession, profile_id: str) -> Profile | None:
+    return await session.get(Profile, _required("profile_id", profile_id))
+
+
+async def list_profiles(session: AsyncSession) -> list[Profile]:
+    result = await session.execute(
+        select(Profile).order_by(
+            Profile.last_opened_at.desc(),
+            Profile.updated_at.desc(),
+            Profile.id.desc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def create_profile(
     session: AsyncSession,
     *,
-    active_attachment_id: str,
+    attachment_id: str,
+    display_name: str,
     profile_json: dict[str, Any],
-) -> CandidateProfile:
-    """Insert or update the singleton approved profile row.
-
-    Always uses :data:`CANDIDATE_PROFILE_ID`. Does not validate *profile_json*
-    shape or attachment state cross-row invariants. Does not finalize the
-    caller's unit of work.
-    """
-    if not isinstance(active_attachment_id, str) or active_attachment_id.strip() == "":
-        raise ProfileRepositoryError(
-            "active_attachment_id must be a non-empty string"
-        )
+    location: str | None,
+    extraction_version: str,
+    source_hash: str,
+) -> Profile:
+    attachment_id = _required("attachment_id", attachment_id)
+    display_name = _required("display_name", display_name)
+    extraction_version = _required("extraction_version", extraction_version)
+    source_hash = _required("source_hash", source_hash)
     if not isinstance(profile_json, dict):
         raise ProfileRepositoryError("profile_json must be a mapping")
-
     now = utc_now()
-    row = await session.get(CandidateProfile, CANDIDATE_PROFILE_ID)
+    row = Profile(
+        id=new_uuid(),
+        attachment_id=attachment_id,
+        display_name=display_name,
+        profile_json=profile_json,
+        location=location,
+        extraction_version=extraction_version,
+        source_hash=source_hash,
+        state=PROFILE_STATE_READY,
+        created_at=now,
+        updated_at=now,
+        last_opened_at=now,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def update_display_name(
+    session: AsyncSession, *, profile_id: str, display_name: str
+) -> Profile:
+    row = await get_profile(session, profile_id)
     if row is None:
-        row = CandidateProfile(
-            id=CANDIDATE_PROFILE_ID,
-            active_attachment_id=active_attachment_id,
-            profile_json=profile_json,
+        raise ProfileRepositoryError("profile not found")
+    row.display_name = _required("display_name", display_name)
+    row.updated_at = utc_now()
+    await session.flush()
+    return row
+
+
+async def get_profile_preferences(
+    session: AsyncSession, profile_id: str
+) -> ProfilePreference | None:
+    return await session.get(
+        ProfilePreference, _required("profile_id", profile_id)
+    )
+
+
+async def upsert_profile_preferences(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+    preferences_json: dict[str, Any],
+) -> ProfilePreference:
+    profile_id = _required("profile_id", profile_id)
+    if not isinstance(preferences_json, dict):
+        raise ProfileRepositoryError("preferences_json must be a mapping")
+    now = utc_now()
+    row = await session.get(ProfilePreference, profile_id)
+    if row is None:
+        row = ProfilePreference(
+            profile_id=profile_id,
+            preferences_json=preferences_json,
             created_at=now,
             updated_at=now,
         )
         session.add(row)
     else:
-        row.active_attachment_id = active_attachment_id
-        row.profile_json = profile_json
+        row.preferences_json = preferences_json
         row.updated_at = now
     await session.flush()
     return row
 
 
+# Transitional read/write adapters for services migrated in Task 5. They use
+# workspace ownership and never restore singleton table semantics.
+async def get_active_profile(session: AsyncSession) -> Profile | None:
+    state = await session.get(WorkspaceState, WORKSPACE_STATE_ID)
+    if state is None or state.active_profile_id is None:
+        return None
+    return await session.get(Profile, state.active_profile_id)
+
+
 async def get_current_draft(session: AsyncSession) -> ProfileDraft | None:
-    """Return ``profile_drafts('current')``, or ``None`` if no draft exists."""
-    return await session.get(ProfileDraft, PROFILE_DRAFT_ID)
+    result = await session.execute(
+        select(ProfileDraft)
+        .order_by(ProfileDraft.updated_at.desc(), ProfileDraft.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def upsert_current_draft(
@@ -85,28 +149,15 @@ async def upsert_current_draft(
     draft_json: dict[str, Any],
     source_attachment_id: str | None = None,
 ) -> ProfileDraft:
-    """Insert or update the singleton draft row.
-
-    Always uses :data:`PROFILE_DRAFT_ID`. *source_attachment_id* may be
-    ``None`` for profile/preference-only updates. Does not validate
-    *draft_json* shape. Does not finalize the caller's unit of work.
-    """
     if not isinstance(draft_json, dict):
         raise ProfileRepositoryError("draft_json must be a mapping")
-    if source_attachment_id is not None and (
-        not isinstance(source_attachment_id, str)
-        or source_attachment_id.strip() == ""
-    ):
-        raise ProfileRepositoryError(
-            "source_attachment_id must be a non-empty string when set"
-        )
-
+    row = await get_current_draft(session)
     now = utc_now()
-    row = await session.get(ProfileDraft, PROFILE_DRAFT_ID)
     if row is None:
         row = ProfileDraft(
-            id=PROFILE_DRAFT_ID,
+            id=new_uuid(),
             source_attachment_id=source_attachment_id,
+            target_profile_id=None,
             draft_json=draft_json,
             created_at=now,
             updated_at=now,
@@ -121,12 +172,7 @@ async def upsert_current_draft(
 
 
 async def delete_current_draft(session: AsyncSession) -> bool:
-    """Delete ``profile_drafts('current')`` if present.
-
-    Returns ``True`` when a row was deleted, ``False`` when already absent.
-    Does not finalize the caller's unit of work.
-    """
-    row = await session.get(ProfileDraft, PROFILE_DRAFT_ID)
+    row = await get_current_draft(session)
     if row is None:
         return False
     await session.delete(row)
@@ -136,39 +182,37 @@ async def delete_current_draft(session: AsyncSession) -> bool:
 
 async def get_job_preferences(
     session: AsyncSession,
-) -> JobPreferences | None:
-    """Return ``job_preferences('active')``, or ``None`` if missing.
-
-    After seed the row always exists; ``None`` is for incomplete environments.
-    """
-    return await session.get(JobPreferences, JOB_PREFERENCES_ID)
+) -> ProfilePreference | None:
+    profile = await get_active_profile(session)
+    if profile is None:
+        return None
+    return await get_profile_preferences(session, profile.id)
 
 
 async def upsert_job_preferences(
+    session: AsyncSession, *, preferences_json: dict[str, Any]
+) -> ProfilePreference:
+    profile = await get_active_profile(session)
+    if profile is None:
+        raise ProfileRepositoryError("no active profile")
+    return await upsert_profile_preferences(
+        session,
+        profile_id=profile.id,
+        preferences_json=preferences_json,
+    )
+
+
+async def upsert_active_profile(
     session: AsyncSession,
     *,
-    preferences_json: dict[str, Any],
-) -> JobPreferences:
-    """Insert or update the singleton job-preferences row.
-
-    Always uses :data:`JOB_PREFERENCES_ID`. Does not validate
-    *preferences_json* shape. Does not finalize the caller's unit of work.
-    """
-    if not isinstance(preferences_json, dict):
-        raise ProfileRepositoryError("preferences_json must be a mapping")
-
-    now = utc_now()
-    row = await session.get(JobPreferences, JOB_PREFERENCES_ID)
-    if row is None:
-        row = JobPreferences(
-            id=JOB_PREFERENCES_ID,
-            preferences_json=preferences_json,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(row)
-    else:
-        row.preferences_json = preferences_json
-        row.updated_at = now
+    active_attachment_id: str,
+    profile_json: dict[str, Any],
+) -> Profile:
+    profile = await get_active_profile(session)
+    if profile is None:
+        raise ProfileRepositoryError("first approval requires create_profile")
+    profile.attachment_id = _required("active_attachment_id", active_attachment_id)
+    profile.profile_json = profile_json
+    profile.updated_at = utc_now()
     await session.flush()
-    return row
+    return profile

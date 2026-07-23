@@ -22,7 +22,11 @@ from app.db.models.chat import (
     AGENT_RUN_STATE_INTERRUPTED,
     AGENT_RUN_STATE_RUNNING,
     AgentRun,
+    ChatMessage,
+    Conversation,
 )
+from app.repositories import conversations as conversations_repo
+from app.repositories.conversations import ConversationOwner
 
 # Approved transitions only (Master §12.2):
 # running → interrupted | completed | failed
@@ -126,6 +130,43 @@ async def list_runs_for_user_message_ids(
         return []
     stmt = select(AgentRun).where(AgentRun.user_message_id.in_(list(user_message_ids)))
     result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def resolve_run_owner(
+    session: AsyncSession, run_id: str
+) -> ConversationOwner | None:
+    result = await session.execute(
+        select(ChatMessage.conversation_id)
+        .join(AgentRun, AgentRun.user_message_id == ChatMessage.id)
+        .where(AgentRun.id == run_id)
+    )
+    conversation_id = result.scalar_one_or_none()
+    if conversation_id is None:
+        return None
+    return await conversations_repo.resolve_owner(session, conversation_id)
+
+
+async def list_run_ids_for_conversation(
+    session: AsyncSession, conversation_id: str
+) -> list[str]:
+    result = await session.execute(
+        select(AgentRun.id)
+        .join(ChatMessage, AgentRun.user_message_id == ChatMessage.id)
+        .where(ChatMessage.conversation_id == conversation_id)
+    )
+    return list(result.scalars().all())
+
+
+async def list_run_ids_for_profile(
+    session: AsyncSession, profile_id: str
+) -> list[str]:
+    result = await session.execute(
+        select(AgentRun.id)
+        .join(ChatMessage, AgentRun.user_message_id == ChatMessage.id)
+        .join(Conversation, ChatMessage.conversation_id == Conversation.id)
+        .where(Conversation.profile_id == profile_id)
+    )
     return list(result.scalars().all())
 
 

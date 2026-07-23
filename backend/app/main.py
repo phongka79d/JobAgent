@@ -32,11 +32,15 @@ from app.api.jobs import router as jobs_router
 from app.api.observability import router as observability_router
 from app.api.profile import router as profile_router
 from app.core.settings import Settings, get_settings
-from app.db.seed import ensure_singleton_seeds
+from app.db.seed import ensure_workspace_seed
 from app.db.session import dispose_engine, get_engine, session_scope
 from app.graph.constraints import ensure_base_schema
 from app.graph.driver import check_connectivity, close_driver, open_driver
 from app.storage.attachments import AttachmentStorage
+
+# ponytail: health tests and older startup callers are migrated in Task 13;
+# this alias still writes only workspace_state.
+ensure_singleton_seeds = ensure_workspace_seed
 
 
 async def _try_singleton_seeds_if_sqlite_ready() -> None:
@@ -107,7 +111,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         # Public surface needs GET/POST/DELETE; keep origin restricted.
         # Starlette owns OPTIONS preflight; DELETE serves CV and Job removal.
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["*"],
     )
     application.include_router(health_router, prefix="/api")

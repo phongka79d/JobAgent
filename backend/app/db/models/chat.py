@@ -27,6 +27,11 @@ from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
 
+# ponytail: Agent/context callers move to durable conversation IDs in Task 4.
+# This import-only alias keeps intermediate commits collectable and must be
+# removed once those callers accept an explicit conversation ID.
+CONVERSATION_ID = "main"
+
 # Single production owners for message/run/tool immutable status values.
 CHAT_MESSAGE_ROLE_USER = "user"
 CHAT_MESSAGE_ROLE_ASSISTANT = "assistant"

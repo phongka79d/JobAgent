@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from app.core.ids import new_uuid
 from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
     AGENT_RUN_STATE_FAILED,
@@ -52,7 +53,38 @@ APPROVAL_PROJECTION = {
 
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
-    """Migrated isolated SQLite file (Alembic head + singleton seeds)."""
+    """Migrated SQLite with one legacy-call compatibility conversation."""
+    async def _seed() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        try:
+            async with session_factory(engine)() as session:
+                profile_id = new_uuid()
+                attachment_id = new_uuid()
+                now = "2026-07-23 00:00:00+00:00"
+                await session.execute(text(
+                    "INSERT INTO attachments (id, file_hash, original_name, "
+                    "mime_type, size_bytes, page_count, storage_path, state, "
+                    "created_at, updated_at) VALUES (:aid, :hash, 'cv.pdf', "
+                    "'application/pdf', 10, 1, :path, 'archived', :now, :now)"
+                ), {"aid": attachment_id, "hash": "c" * 64,
+                    "path": f"{attachment_id}.pdf", "now": now})
+                await session.execute(text(
+                    "INSERT INTO profiles (id, attachment_id, display_name, "
+                    "profile_json, extraction_version, source_hash, state, "
+                    "created_at, updated_at, last_opened_at) VALUES "
+                    "(:pid, :aid, 'Test', '{}', 'v1', 'source', 'ready', "
+                    ":now, :now, :now)"
+                ), {"pid": profile_id, "aid": attachment_id, "now": now})
+                await session.execute(text(
+                    "INSERT INTO conversations (id, profile_id, title, "
+                    "created_at, updated_at, last_opened_at) VALUES "
+                    "(:cid, :pid, 'Chat mới', :now, :now, :now)"
+                ), {"cid": CONVERSATION_ID, "pid": profile_id, "now": now})
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    run_async(_seed())
     return migrated_sqlite
 
 

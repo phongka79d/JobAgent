@@ -22,6 +22,19 @@ CONVERSATION_TITLE_MAX = 120
 PROFILE_SKILL_TAG_LIMIT = 12
 NEW_CONVERSATION_TITLE = "Chat mới"
 
+# ponytail: Legacy modules are migrated in Tasks 5 and 8, so these import-only
+# aliases temporarily keep the application importable. Remove them when those
+# callers use durable profile IDs; the upgrade path is profile-scoped lookup.
+CANDIDATE_PROFILE_ID = "active"
+PROFILE_DRAFT_ID = "current"
+JOB_PREFERENCES_ID = "active"
+JOB_PREFERENCE_KEYS: tuple[str, ...] = (
+    "target_roles",
+    "preferred_locations",
+    "acceptable_work_modes",
+    "target_seniority",
+)
+
 
 class Profile(Base):
     """One source-backed candidate profile owned by one attachment."""
@@ -56,6 +69,11 @@ class Profile(Base):
     last_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+    @property
+    def active_attachment_id(self) -> str:
+        """Temporary read alias for callers migrated in Tasks 5 and 8."""
+        return self.attachment_id
 
 
 class ProfileDraft(Base):
@@ -102,6 +120,11 @@ class ProfilePreference(Base):
         DateTime(timezone=True), nullable=False, default=utc_now
     )
 
+    @property
+    def id(self) -> str:
+        """Temporary read alias for callers migrated in Task 5."""
+        return self.profile_id
+
 
 class WorkspaceState(Base):
     """Singleton pointer to the active profile for the local workspace."""
@@ -125,3 +148,10 @@ class WorkspaceState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+# ponytail: Type aliases keep legacy imports collectable while services are
+# migrated task-by-task. Remove them after Tasks 5 and 8; no legacy tables or
+# singleton writes are restored by these aliases.
+CandidateProfile = Profile
+JobPreferences = ProfilePreference

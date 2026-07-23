@@ -44,7 +44,8 @@ def _as_record(row: JobEvaluation) -> JobEvaluationRecord:
     return record_from_row(
         id=row.id,
         job_id=row.job_id,
-        active_attachment_id=row.active_attachment_id,
+        # ponytail: public schema renames this field to profile_id in Task 7.
+        active_attachment_id=row.profile_id,
         evaluation_context_hash=row.evaluation_context_hash,
         job_revision=row.job_revision,
         profile_revision=row.profile_revision,
@@ -69,6 +70,7 @@ async def get_by_job_context(
     session: AsyncSession,
     *,
     job_id: str,
+    profile_id: str | None = None,
     evaluation_context_hash: str,
 ) -> JobEvaluation | None:
     """Return the unique row for ``(job_id, evaluation_context_hash)``."""
@@ -76,24 +78,34 @@ async def get_by_job_context(
     evaluation_context_hash = _require_nonempty(
         "evaluation_context_hash", evaluation_context_hash
     )
-    result = await session.execute(
-        select(JobEvaluation).where(
-            JobEvaluation.job_id == job_id,
-            JobEvaluation.evaluation_context_hash == evaluation_context_hash,
+    predicates = [
+        JobEvaluation.job_id == job_id,
+        JobEvaluation.evaluation_context_hash == evaluation_context_hash,
+    ]
+    if profile_id is not None:
+        predicates.append(
+            JobEvaluation.profile_id == _require_nonempty("profile_id", profile_id)
         )
-    )
+    result = await session.execute(select(JobEvaluation).where(*predicates))
     return result.scalar_one_or_none()
 
 
 async def get_latest_for_job(
     session: AsyncSession,
     job_id: str,
+    *,
+    profile_id: str | None = None,
 ) -> JobEvaluation | None:
     """Return the newest evaluation for *job_id*, or ``None`` when empty."""
     job_id = _require_nonempty("job_id", job_id)
+    predicates = [JobEvaluation.job_id == job_id]
+    if profile_id is not None:
+        predicates.append(
+            JobEvaluation.profile_id == _require_nonempty("profile_id", profile_id)
+        )
     result = await session.execute(
         select(JobEvaluation)
-        .where(JobEvaluation.job_id == job_id)
+        .where(*predicates)
         .order_by(
             JobEvaluation.created_at.desc(),
             JobEvaluation.id.desc(),
@@ -103,13 +115,18 @@ async def get_latest_for_job(
     return result.scalar_one_or_none()
 
 
-async def count_for_job(session: AsyncSession, job_id: str) -> int:
+async def count_for_job(
+    session: AsyncSession, job_id: str, *, profile_id: str | None = None
+) -> int:
     """Return how many evaluation rows exist for *job_id*."""
     job_id = _require_nonempty("job_id", job_id)
+    predicates = [JobEvaluation.job_id == job_id]
+    if profile_id is not None:
+        predicates.append(
+            JobEvaluation.profile_id == _require_nonempty("profile_id", profile_id)
+        )
     result = await session.execute(
-        select(func.count())
-        .select_from(JobEvaluation)
-        .where(JobEvaluation.job_id == job_id)
+        select(func.count()).select_from(JobEvaluation).where(*predicates)
     )
     return int(result.scalar_one())
 
@@ -118,6 +135,7 @@ async def lookup_for_job(
     session: AsyncSession,
     *,
     job_id: str,
+    profile_id: str | None = None,
     current_context_hash: str,
 ) -> JobEvaluationLookup:
     """Derive none|current|stale and the relevant row without rewriting history.
@@ -132,9 +150,10 @@ async def lookup_for_job(
     exact = await get_by_job_context(
         session,
         job_id=job_id,
+        profile_id=profile_id,
         evaluation_context_hash=current_context_hash,
     )
-    latest = await get_latest_for_job(session, job_id)
+    latest = await get_latest_for_job(session, job_id, profile_id=profile_id)
     has_any = latest is not None
     has_exact = exact is not None
     state: EvaluationCurrentness = derive_evaluation_currentness(
@@ -159,7 +178,8 @@ async def insert_evaluation(
     session: AsyncSession,
     *,
     job_id: str,
-    active_attachment_id: str,
+    profile_id: str | None = None,
+    active_attachment_id: str | None = None,
     evaluation_context_hash: str,
     job_revision: datetime,
     profile_revision: datetime,
@@ -175,8 +195,10 @@ async def insert_evaluation(
     ``(row, False)``. Does not finalize the caller's unit of work.
     """
     job_id = _require_nonempty("job_id", job_id)
-    active_attachment_id = _require_nonempty(
-        "active_attachment_id", active_attachment_id
+    # ponytail: old callers pass active_attachment_id until Task 7; new callers
+    # pass profile_id. The compatibility branch is removed with schema rename.
+    owner_profile_id = _require_nonempty(
+        "profile_id", profile_id if profile_id is not None else active_attachment_id
     )
     evaluation_context_hash = _require_nonempty(
         "evaluation_context_hash", evaluation_context_hash
@@ -194,6 +216,7 @@ async def insert_evaluation(
     existing = await get_by_job_context(
         session,
         job_id=job_id,
+        profile_id=owner_profile_id,
         evaluation_context_hash=evaluation_context_hash,
     )
     if existing is not None:
@@ -202,7 +225,7 @@ async def insert_evaluation(
     now = utc_now()
     row = JobEvaluation(
         job_id=job_id,
-        active_attachment_id=active_attachment_id,
+        profile_id=owner_profile_id,
         evaluation_context_hash=evaluation_context_hash,
         job_revision=job_revision,
         profile_revision=profile_revision,
@@ -222,6 +245,7 @@ async def insert_evaluation(
         winner = await get_by_job_context(
             session,
             job_id=job_id,
+            profile_id=owner_profile_id,
             evaluation_context_hash=evaluation_context_hash,
         )
         if winner is None:

@@ -79,3 +79,10 @@ class JobEvaluation(Base):
         nullable=False,
         default=utc_now,
     )
+
+    @property
+    def active_attachment_id(self) -> str:
+        """Temporary compatibility alias removed by Task 7 schema migration."""
+        # ponytail: this mirrors the transitional repository/schema adapter;
+        # callers must move to profile_id before the final grep gate.
+        return self.profile_id

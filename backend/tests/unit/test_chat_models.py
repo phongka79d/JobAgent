@@ -208,7 +208,7 @@ def test_conversation_profile_scope_and_uuid_default() -> None:
     assert _c(table, "id").primary_key
     assert _default_name(_c(table, "id")) == "new_uuid"
     assert _c(table, "profile_id").nullable is False
-    assert not hasattr(m, "CONVERSATION_ID")
+    assert m.CONVERSATION_ID == "main"  # transitional import alias until Task 4
 
 
 def test_chat_messages_role_payload_and_uuid() -> None:

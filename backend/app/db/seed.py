@@ -67,7 +67,7 @@ def ensure_singleton_seeds_on_connection(connection: Connection) -> None:
     )
 
 
-async def ensure_singleton_seeds(session: AsyncSession) -> None:
+async def ensure_workspace_seed(session: AsyncSession) -> None:
     """Idempotently ensure only ``workspace_state('main')`` exists."""
     await session.execute(
         text(
@@ -77,3 +77,9 @@ async def ensure_singleton_seeds(session: AsyncSession) -> None:
         {"id": WORKSPACE_STATE_ID, "updated_at": utc_now()},
     )
     await session.flush()
+
+
+# ponytail: migration tests import the former name until Task 13 updates the
+# release harness. It delegates to the workspace-only seed and restores no
+# singleton application rows.
+ensure_singleton_seeds = ensure_workspace_seed
