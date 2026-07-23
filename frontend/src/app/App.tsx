@@ -7,7 +7,7 @@
  * CV Manager reprocess delegates SSE to ChatPage (sole stream/reducer path).
  */
 
-import {useCallback, useRef, useState} from 'react';
+import {useCallback, useMemo, useRef, useState} from 'react';
 import {AppShell} from '@astryxdesign/core/AppShell';
 
 import {
@@ -24,12 +24,17 @@ import {
   type CvReprocessTerminalNotice,
 } from '../features/profile/CvSidebar';
 import type {CvUploadResponse} from '../features/profile/types';
+import {
+  useProfileWorkspaceState,
+  type ProfileWorkspaceApi,
+} from '../features/profile/workspaceState';
 
 export {SIDEBAR_CV_TURN_MESSAGE} from '../features/profile/api';
 
 export type AppDeps = {
   chat?: ChatPageDeps;
   sidebar?: CvSidebarDeps;
+  workspace?: Partial<ProfileWorkspaceApi>;
 };
 
 export type AppProps = {
@@ -42,6 +47,10 @@ export const CV_REPROCESS_TURN_MESSAGE =
 
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
+  const workspaceApi = useMemo(() => deps?.workspace ?? {}, [deps?.workspace]);
+  const workspace = useProfileWorkspaceState(workspaceApi, uploadLocked);
+  const workspaceLocked = workspace.state.pending.size > 0;
+  const interactionLocked = uploadLocked || workspaceLocked;
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [sidebarTurn, setSidebarTurn] =
     useState<SidebarAttachmentTurnRequest | null>(null);
@@ -136,7 +145,7 @@ export function App({deps}: AppProps = {}) {
       variant="surface"
       sideNav={
         <CvSidebar
-          isUploadDisabled={uploadLocked}
+          isUploadDisabled={interactionLocked}
           onSidebarUploadSuccess={handleSidebarUploadSuccess}
           onCvReprocess={handleCvReprocess}
           onCvDeleted={handleCvDeleted}
@@ -149,6 +158,8 @@ export function App({deps}: AppProps = {}) {
       }
     >
       <ChatPage
+        key={workspace.state.selectedConversationId ?? 'no-conversation'}
+        conversationId={workspace.state.selectedConversationId}
         deps={deps?.chat}
         onInteractionLockChange={setUploadLocked}
         sidebarAttachmentTurn={sidebarTurn}

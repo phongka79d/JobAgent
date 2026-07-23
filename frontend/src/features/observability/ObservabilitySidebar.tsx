@@ -43,6 +43,8 @@ export type ObservabilitySidebarProps = {
   onCvReprocess?: (attachmentId: string) => boolean;
   /** After confirmed delete success (profile summary may need refresh). */
   onCvDeleted?: () => void;
+  /** Shared workspace/chat mutation lock. */
+  isInteractionLocked?: boolean;
 };
 
 export function ObservabilitySidebar({
@@ -52,6 +54,7 @@ export function ObservabilitySidebar({
   savedJobsInvalidateKey = 0,
   onCvReprocess,
   onCvDeleted,
+  isInteractionLocked = false,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
@@ -186,6 +189,9 @@ export function ObservabilitySidebar({
   };
 
   const handleReprocess = (item: CvHistoryItem) => {
+    if (isInteractionLocked) {
+      return;
+    }
     if (!obs.beginReprocess(item.id)) {
       return;
     }
@@ -200,6 +206,9 @@ export function ObservabilitySidebar({
   const handleConfirmDelete = async (
     item: CvHistoryItem,
   ): Promise<'success' | 'duplicate' | 'error'> => {
+    if (isInteractionLocked) {
+      return 'duplicate';
+    }
     const outcome = await obs.confirmDelete(item.id);
     if (outcome === 'success') {
       onCvDeleted?.();
@@ -358,9 +367,15 @@ export function ObservabilitySidebar({
             onSelect={savedJobs.selectJob}
             onLoad={loadSavedJobsList}
             onRefresh={refreshSavedJobsList}
-            onEvaluate={savedJobs.evaluateJob}
-            onConfirmDelete={savedJobs.confirmDelete}
-            onConfirmReextract={savedJobs.confirmReextract}
+            onEvaluate={(jobId) =>
+              isInteractionLocked ? Promise.resolve('duplicate') : savedJobs.evaluateJob(jobId)
+            }
+            onConfirmDelete={(jobId) =>
+              isInteractionLocked ? Promise.resolve('duplicate') : savedJobs.confirmDelete(jobId)
+            }
+            onConfirmReextract={(jobId) =>
+              isInteractionLocked ? Promise.resolve('duplicate') : savedJobs.confirmReextract(jobId)
+            }
             onClearError={savedJobs.clearActionError}
             onRefreshDetail={(jobId) => {
               void savedJobs.loadDetail(jobId, {force: true});

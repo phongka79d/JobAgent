@@ -20,9 +20,11 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import {
   ChatApiError,
+  fetchConversationHistory,
   fetchChatHistory,
   streamChatResume,
   streamChatTurn,
+  streamConversationTurn,
   streamCvReprocess,
   type StreamCallbacks,
 } from '../../lib/api/chat';
@@ -46,6 +48,8 @@ import {useSavedJobRecovery} from './useSavedJobRecovery';
 export type ChatPageDeps = {
   loadHistory?: typeof fetchChatHistory;
   sendTurn?: typeof streamChatTurn;
+  loadConversationHistory?: typeof fetchConversationHistory;
+  sendConversationTurn?: typeof streamConversationTurn;
   /** Injectable resume transport for approval actions. */
   resumeRun?: typeof streamChatResume;
   /** Injectable CV reprocess SSE transport (defaults to streamCvReprocess). */
@@ -78,6 +82,7 @@ export type CvReprocessTerminal =
   | 'http_error';
 
 export type ChatPageProps = {
+  conversationId?: string | null;
   /** Injectable transport for tests; defaults to Plan 3/4 API clients. */
   deps?: ChatPageDeps;
   /** Reflect lock to App/sidebar so upload disables with composer. */
@@ -111,6 +116,7 @@ function newClientKey(prefix: string): string {
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 export function ChatPage({
+  conversationId,
   deps,
   onInteractionLockChange,
   sidebarAttachmentTurn,
@@ -123,6 +129,10 @@ export function ChatPage({
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
+  const loadConversationHistory =
+    deps?.loadConversationHistory ?? fetchConversationHistory;
+  const sendConversationTurn =
+    deps?.sendConversationTurn ?? streamConversationTurn;
   const resumeRun = deps?.resumeRun ?? streamChatResume;
   const reprocessCv = deps?.reprocessCv ?? streamCvReprocess;
   const doUpload = deps?.uploadCv ?? defaultUploadCv;
@@ -185,6 +195,23 @@ export function ChatPage({
   const onCvReprocessTerminalRef = useRef(onCvReprocessTerminal);
   onCvReprocessTerminalRef.current = onCvReprocessTerminal;
 
+  const loadOwnedHistory = useCallback(
+    (query: {limit?: number; before?: string | null}, signal?: AbortSignal) => {
+      if (conversationId === null) {
+        return Promise.resolve({items: [], next_cursor: null});
+      }
+      if (conversationId === undefined) {
+        // Keep the legacy singleton transport's historical one-argument
+        // invocation shape for transitional tests/callers.
+        return signal === undefined
+          ? loadHistory(query)
+          : loadHistory(query, signal);
+      }
+      return loadConversationHistory(conversationId, query, signal);
+    },
+    [conversationId, loadConversationHistory, loadHistory],
+  );
+
   useEffect(() => {
     if (
       state.streamPhase === 'idle' ||
@@ -200,18 +227,19 @@ export function ChatPage({
     }
   }, [state.streamPhase]);
 
-  const locked = isComposerLocked(state);
+  const locked = isComposerLocked(state) || conversationId === null;
   useEffect(() => {
     onInteractionLockChange?.(locked);
   }, [locked, onInteractionLockChange]);
 
   // Initial history hydration (newest page) — reconstructs pending approval cards.
   useEffect(() => {
+    dispatch({type: 'history/reset', page: {items: [], next_cursor: null}});
     const controller = new AbortController();
     let cancelled = false;
     (async () => {
       try {
-        const page = await loadHistory({limit: 50}, controller.signal);
+        const page = await loadOwnedHistory({limit: 50}, controller.signal);
         if (!cancelled) {
           dispatch({type: 'history/reset', page});
           setHistoryLoadError(null);
@@ -233,7 +261,7 @@ export function ChatPage({
       cancelled = true;
       controller.abort();
     };
-  }, [loadHistory]);
+  }, [loadOwnedHistory]);
 
   const nextCursorRef = useRef(state.nextCursor);
   nextCursorRef.current = state.nextCursor;
@@ -247,7 +275,7 @@ export function ChatPage({
     loadingOlderRef.current = true;
     setIsLoadingOlder(true);
     try {
-      const page = await loadHistory({
+      const page = await loadOwnedHistory({
         limit: 50,
         before: cursor,
       });
@@ -266,7 +294,7 @@ export function ChatPage({
       loadingOlderRef.current = false;
       setIsLoadingOlder(false);
     }
-  }, [loadHistory]);
+  }, [loadOwnedHistory]);
 
   /**
    * After a terminal turn, re-fetch durable history so ToolResult.data
@@ -276,7 +304,7 @@ export function ChatPage({
    */
   const rehydrateDurableHistory = useCallback(async () => {
     try {
-      const page = await loadHistory({limit: 50});
+      const page = await loadOwnedHistory({limit: 50});
       dispatch({type: 'history/rehydrate', page});
       for (const runId of [
         ...pendingSaveJobInvalidateRunIdsRef.current,
@@ -295,7 +323,7 @@ export function ChatPage({
     } catch {
       // Leave stream/reducer state; do not invent tool results.
     }
-  }, [loadHistory]);
+  }, [loadOwnedHistory]);
 
   const makeStreamCallbacks = useCallback(
     (opts?: {
@@ -336,7 +364,11 @@ export function ChatPage({
       const trimmed = message.trim();
       // Allow ID-only turns when message is the concise sidebar intent;
       // still require non-empty message (backend contract).
-      if (trimmed === '' || isComposerLocked(stateRef.current)) {
+      if (
+        trimmed === '' ||
+        conversationId === null ||
+        isComposerLocked(stateRef.current)
+      ) {
         return false;
       }
 
@@ -356,14 +388,24 @@ export function ChatPage({
 
       void (async () => {
         try {
-          await sendTurn(
-            {
-              message: trimmed,
-              attachment_ids: attachmentIds,
-            },
-            callbacks,
-            controller.signal,
-          );
+          const body = {message: trimmed, attachment_ids: attachmentIds};
+          if (conversationId === null) {
+            throw new ChatApiError(
+              409,
+              'NO_ACTIVE_PROFILE',
+              'Select a conversation first',
+            );
+          }
+          if (conversationId === undefined) {
+            await sendTurn(body, callbacks, controller.signal);
+          } else {
+            await sendConversationTurn(
+              conversationId,
+              body,
+              callbacks,
+              controller.signal,
+            );
+          }
         } catch (err) {
           if (controller.signal.aborted) {
             return;
@@ -386,7 +428,7 @@ export function ChatPage({
       })();
       return true;
     },
-    [makeStreamCallbacks, sendTurn],
+    [conversationId, makeStreamCallbacks, sendConversationTurn, sendTurn],
   );
 
   const handleSubmit = useCallback(
@@ -523,7 +565,7 @@ export function ChatPage({
     if (handledSidebarKeysRef.current.has(requestKey)) {
       return;
     }
-    if (isComposerLocked(stateRef.current)) {
+    if (conversationId === null || isComposerLocked(stateRef.current)) {
       // Wait until unlock; do not mark handled so it can retry.
       return;
     }
@@ -536,6 +578,7 @@ export function ChatPage({
     }
   }, [
     sidebarAttachmentTurn,
+    conversationId,
     runTurn,
     onSidebarAttachmentTurnHandled,
     state.streamPhase,
@@ -552,7 +595,7 @@ export function ChatPage({
     if (handledReprocessKeysRef.current.has(requestKey)) {
       return;
     }
-    if (isComposerLocked(stateRef.current) || inFlightRef.current) {
+    if (conversationId === null || isComposerLocked(stateRef.current) || inFlightRef.current) {
       return;
     }
     handledReprocessKeysRef.current.add(requestKey);
@@ -628,6 +671,7 @@ export function ChatPage({
     })();
   }, [
     cvReprocessRequest,
+    conversationId,
     focusApprovalCard,
     makeStreamCallbacks,
     onCvReprocessHandled,
