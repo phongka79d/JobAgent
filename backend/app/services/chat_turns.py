@@ -41,6 +41,7 @@ from app.db.models.chat import (
     AgentRun,
     ChatMessage,
 )
+from app.db.models.profiles import Profile
 from app.db.session import get_session_factory, session_scope
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
@@ -83,11 +84,9 @@ class CreatedTurn:
     user_message_id: str
     run_id: str
     content: str
-    # ponytail: legacy /api/chat callers omit conversation ownership until the
-    # frontend switches in Task 10; Task 13 removes this fallback and alias.
-    conversation_id: str = "main"
-    profile_id: str | None = None
-    attachment_id: str | None = None
+    conversation_id: str
+    profile_id: str
+    attachment_id: str
 
 
 def _normalize_projection(raw: dict[str, Any]) -> dict[str, Any]:
@@ -161,22 +160,22 @@ async def count_chat_messages(session: AsyncSession) -> int:
 
 async def create_user_turn(
     *,
+    conversation_id: str,
     message: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     source_attachment_id: str | None = None,
-    conversation_id: str | None = None,
     attachment_ids: Sequence[str] | None = None,
 ) -> CreatedTurn:
     """Atomically insert user message + ``running`` run, or reject interruption.
 
-    Raises ``ChatTurnError(APPROVAL_ACTION_REQUIRED)`` **before** any insert when
-    an interrupted run exists. Optional *source_attachment_id* stamps CV
-    ownership on both the message and run rows (reprocess turns).
+    Raises ``ChatTurnError(CONVERSATION_SWITCH_BLOCKED)`` **before** any insert
+    when the conversation has an active run. Optional *source_attachment_id*
+    stamps CV ownership on both the message and run rows (reprocess turns).
     """
     text = message.strip() if isinstance(message, str) else ""
     if text == "":
         raise ChatTurnError("EMPTY_MESSAGE", "message must be non-empty")
-    owner: str | None = None
+    source_owner: str | None = None
     if source_attachment_id is not None:
         if (
             not isinstance(source_attachment_id, str)
@@ -186,51 +185,57 @@ async def create_user_turn(
                 ERROR_CV_ATTACHMENT_NOT_FOUND,
                 "source_attachment_id must be a non-empty attachment id",
             )
-        owner = source_attachment_id.strip()
+        source_owner = source_attachment_id.strip()
 
     factory = session_factory or get_session_factory()
     async with session_scope(factory) as session:
-        durable_conversation_id = conversation_id or "main"
-        resolved_owner = None
-        if conversation_id is not None:
-            resolved_owner = await conversations_repo.resolve_owner(
-                session, conversation_id
+        resolved_owner = await conversations_repo.resolve_owner(
+            session, conversation_id
+        )
+        if resolved_owner is None:
+            raise ChatTurnError("CONVERSATION_NOT_FOUND", "conversation not found")
+        requested = [str(item) for item in (attachment_ids or ())]
+        if (
+            source_owner is not None
+            and source_owner != resolved_owner.attachment_id
+        ):
+            raise ChatTurnError(
+                "CONVERSATION_PROFILE_MISMATCH",
+                "source attachment does not belong to conversation",
             )
-            if resolved_owner is None:
-                raise ChatTurnError(
-                    "CONVERSATION_NOT_FOUND", "conversation not found"
+        for requested_attachment_id in requested:
+            attachment_profile_id = (
+                await session.execute(
+                    select(Profile.id).where(
+                        Profile.attachment_id == requested_attachment_id
+                    )
                 )
-            requested = [str(item) for item in (attachment_ids or ())]
-            if owner is not None and owner != resolved_owner.attachment_id:
+            ).scalar_one_or_none()
+            if (
+                attachment_profile_id is not None
+                and attachment_profile_id != resolved_owner.profile_id
+            ):
                 raise ChatTurnError(
                     "CONVERSATION_PROFILE_MISMATCH",
-                    "source attachment does not belong to conversation",
+                    "attachment does not belong to conversation",
                 )
-            if owner_attachment := resolved_owner.attachment_id:
-                if any(item != owner_attachment for item in requested):
-                    raise ChatTurnError(
-                        "CONVERSATION_PROFILE_MISMATCH",
-                        "attachment does not belong to conversation",
-                    )
-            try:
-                await assert_conversation_idle(
-                    session,
-                    conversation_id=conversation_id,
-                    code="CONVERSATION_SWITCH_BLOCKED",
-                )
-            except ActivityBlockedError as exc:
-                raise ChatTurnError(
-                    "CONVERSATION_SWITCH_BLOCKED",
-                    "conversation has an active run",
-                ) from exc
-            await conversations_repo.update_title_from_first_user_message(
-                session, conversation_id=conversation_id, message=text
+        try:
+            await assert_conversation_idle(
+                session,
+                conversation_id=resolved_owner.conversation_id,
+                code="CONVERSATION_SWITCH_BLOCKED",
             )
+        except ActivityBlockedError as exc:
+            raise ChatTurnError(
+                "CONVERSATION_SWITCH_BLOCKED",
+                "conversation has an active run",
+            ) from exc
+        await conversations_repo.update_title_from_first_user_message(
+            session, conversation_id=resolved_owner.conversation_id, message=text
+        )
         interrupted = await get_interrupted_run(
             session,
-            conversation_id=durable_conversation_id
-            if conversation_id is not None
-            else None,
+            conversation_id=resolved_owner.conversation_id,
         )
         if interrupted is not None:
             raise ChatTurnError(
@@ -239,23 +244,23 @@ async def create_user_turn(
             )
         user = await messages_repo.insert_message(
             session,
-            conversation_id=durable_conversation_id,
+            conversation_id=resolved_owner.conversation_id,
             role=CHAT_MESSAGE_ROLE_USER,
             content=text,
-            source_attachment_id=owner,
+            source_attachment_id=source_owner,
         )
         run = await runs_repo.create_run(
             session,
             user_message_id=user.id,
-            source_attachment_id=owner,
+            source_attachment_id=source_owner,
         )
         return CreatedTurn(
             user_message_id=user.id,
             run_id=run.id,
             content=text,
-            conversation_id=durable_conversation_id,
-            profile_id=resolved_owner.profile_id if resolved_owner else None,
-            attachment_id=resolved_owner.attachment_id if resolved_owner else None,
+            conversation_id=resolved_owner.conversation_id,
+            profile_id=resolved_owner.profile_id,
+            attachment_id=resolved_owner.attachment_id,
         )
 
 
@@ -491,6 +496,7 @@ async def _on_durable_terminal(
 
 async def stream_chat_turn(
     *,
+    conversation_id: str,
     message: str,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
     registry: ToolRegistry | None = None,
@@ -500,7 +506,6 @@ async def stream_chat_turn(
     sqlite_path: str | Path | None = None,
     include_assistant_status: bool = False,
     source_attachment_id: str | None = None,
-    conversation_id: str | None = None,
 ) -> AsyncIterator[SseEvent]:
     """Create a durable turn, run the graph, persist terminal/interrupt state.
 
@@ -533,13 +538,19 @@ async def stream_chat_turn(
             exclude_ids=frozenset({turn.user_message_id}),
         )
         candidate_context = await load_candidate_context(
-            session, profile_id=turn.profile_id
+            session,
+            conversation_id=turn.conversation_id,
+            profile_id=turn.profile_id,
         )
         active_cv_context = await load_active_cv_context(
-            session, profile_id=turn.profile_id
+            session,
+            conversation_id=turn.conversation_id,
+            profile_id=turn.profile_id,
         )
         working_memory = await load_profile_working_memory_messages(
-            session, profile_id=turn.profile_id
+            session,
+            conversation_id=turn.conversation_id,
+            profile_id=turn.profile_id,
         )
         effective_attachment_ids = normalize_turn_attachment_ids(attachment_ids)
     # Graph state uses list[dict] channels; ContextMessage is a TypedDict.
@@ -557,6 +568,7 @@ async def stream_chat_turn(
     async for event in stream_agent_run(
         run_id=turn.run_id,
         conversation_id=turn.conversation_id,
+        profile_id=turn.profile_id,
         user_text=turn.content,
         recent_context=recent_context,
         candidate_context=candidate_context,
@@ -600,6 +612,24 @@ async def stream_cv_reprocess(
         storage=storage,
         session_factory=factory,
     )
+    async with factory() as session:
+        profile_id = (
+            await session.execute(
+                select(Profile.id).where(Profile.attachment_id == attachment_id)
+            )
+        ).scalar_one_or_none()
+        conversation = (
+            await conversations_repo.most_recent_for_profile(
+                session, profile_id=profile_id
+            )
+            if profile_id is not None
+            else None
+        )
+    if conversation is None:
+        raise ChatTurnError(
+            ERROR_CV_NOT_REPROCESSABLE,
+            "CV owner conversation could not be resolved",
+        )
     # Domain-agnostic user text; attachment_ids + ownership drive the tools.
     # Do not name tool symbols here (ownership boundary). CV-owned runs stamp
     # source_attachment_id so propose forces reprocess even if the model omits it.
@@ -609,6 +639,7 @@ async def stream_cv_reprocess(
         "existing approved profile as a no-extract short-circuit."
     )
     async for event in stream_chat_turn(
+        conversation_id=conversation.id,
         message=message,
         model=model,
         registry=registry,
@@ -665,8 +696,6 @@ async def stream_resume(
             f"run {run_id!r} not running after resume claim (state={run.state!r})",
         )
 
-    conversation_id = owner.conversation_id
-
     interrupt_holder: dict[str, Any] = {}
 
     async def on_terminal(outcome: TerminalOutcome) -> bool:
@@ -678,7 +707,8 @@ async def stream_resume(
 
     async for event in stream_agent_run(
         run_id=run_id,
-        conversation_id=conversation_id,
+        conversation_id=owner.conversation_id,
+        profile_id=owner.profile_id,
         resumed=True,
         resume_value=chosen,
         model=model,

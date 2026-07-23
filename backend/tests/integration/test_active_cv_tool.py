@@ -19,6 +19,7 @@ from app.agent.graph import (
 from app.agent.prompt import build_system_prompt
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
+    CONVERSATION_ID,
     TOOL_EXECUTION_STATUS_COMPLETED,
     TOOL_EXECUTION_STATUS_FAILED,
 )
@@ -27,6 +28,7 @@ from app.repositories import agent_runs as runs_repo
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
@@ -62,6 +64,8 @@ def sqlite_factory(migrated_sqlite: Path) -> Iterator[Any]:
         run_async(engine.dispose())
 
 _ATTACHMENT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+_CONVERSATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01"
+_PROFILE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb02"
 _SECTION_ID = "cv-document-v1:s0:experience"
 _ENTRY_0 = "cv-document-v1:s0:e0:role"
 _SOURCE_HASH = "toolhashfixed00000000000000000000000000000000000000000000001"
@@ -139,7 +143,9 @@ def _outline(document: dict[str, Any]) -> dict[str, Any]:
     return {"sections": sections}
 
 
-async def _seed_active(session: Any, *, attachment_id: str = _ATTACHMENT) -> str:
+async def _seed_active(
+    session: Any, *, attachment_id: str = _ATTACHMENT
+) -> tuple[str, str]:
     await att_repo.create_staged(
         session,
         file_hash=f"hash-{attachment_id[:8]}",
@@ -150,7 +156,7 @@ async def _seed_active(session: Any, *, attachment_id: str = _ATTACHMENT) -> str
         attachment_id=attachment_id,
     )
     await att_repo.mark_active(session, attachment_id, page_count=1)
-    await profile_repo.upsert_active_profile(
+    profile = await profile_repo.upsert_active_profile(
         session,
         active_attachment_id=attachment_id,
         profile_json={
@@ -163,6 +169,9 @@ async def _seed_active(session: Any, *, attachment_id: str = _ATTACHMENT) -> str
             "languages": [],
             "extraction_confidence": 0.9,
         },
+    )
+    conversation = await conversations_repo.create_for_profile(
+        session, profile_id=profile.id
     )
     doc = _document(attachment_id)
     await cv_doc_repo.upsert_document(
@@ -183,24 +192,34 @@ async def _seed_active(session: Any, *, attachment_id: str = _ATTACHMENT) -> str
         ],
     )
     await session.commit()
-    return attachment_id
+    return profile.id, conversation.id
 
 
-async def _seed_run(session: Any, content: str = "read cv turn") -> str:
+async def _seed_run(
+    session: Any,
+    content: str = "read cv turn",
+    *,
+    conversation_id: str = CONVERSATION_ID,
+) -> tuple[str, str]:
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    assert owner is not None
     user = await messages_repo.insert_message(
         session,
+        conversation_id=conversation_id,
         role=CHAT_MESSAGE_ROLE_USER,
         content=content,
     )
     run = await runs_repo.create_run(session, user_message_id=user.id)
     await session.flush()
-    return run.id
+    return run.id, owner.profile_id
 
 
 async def _ainvoke_read(
     tool_fn: Any,
     *,
     run_id: str,
+    conversation_id: str | None,
+    profile_id: str | None,
     tool_call_id: str,
     mode: str,
     section_id: str | None = None,
@@ -223,12 +242,17 @@ async def _ainvoke_read(
         args["max_results"] = max_results
     if max_chars is not None:
         args["max_chars"] = max_chars
+    state: dict[str, Any] = {"run_id": run_id}
+    if conversation_id is not None:
+        state["conversation_id"] = conversation_id
+    if profile_id is not None:
+        state["profile_id"] = profile_id
     raw = await tool_fn.ainvoke(
         {
             "type": "tool_call",
             "id": tool_call_id,
             "name": tool_fn.name,
-            "args": {**args, "state": {"run_id": run_id}},
+            "args": {**args, "state": state},
         }
     )
     if isinstance(raw, str):
@@ -287,16 +311,18 @@ def test_graph_topology_one_toolnode_six_iteration_limit() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_read_active_cv_no_active_fails_terminal(sqlite_factory: Any) -> None:
+def test_read_active_cv_owner_mismatch_fails_terminal(sqlite_factory: Any) -> None:
     async def _body() -> None:
         async with sqlite_factory() as session:
-            run_id = await _seed_run(session, "no active")
+            run_id, _ = await _seed_run(session, "owner mismatch")
             await session.commit()
 
         tool_fn = build_read_active_cv_tool(session_factory=sqlite_factory)
         result = await _ainvoke_read(
             tool_fn,
             run_id=run_id,
+            conversation_id=CONVERSATION_ID,
+            profile_id=_PROFILE_ID,
             tool_call_id="read_no_active",
             mode="search",
             query="python",
@@ -319,13 +345,55 @@ def test_read_active_cv_no_active_fails_terminal(sqlite_factory: Any) -> None:
     run_async(_body())
 
 
+def test_read_active_cv_missing_state_owner_fails_closed(
+    sqlite_factory: Any,
+) -> None:
+    async def _body() -> None:
+        async with sqlite_factory() as session:
+            run_id, profile_id = await _seed_run(session, "missing state owner")
+            await session.commit()
+
+        tool_fn = build_read_active_cv_tool(session_factory=sqlite_factory)
+        missing_cases = (
+            ("conversation", None, profile_id),
+            ("profile", CONVERSATION_ID, None),
+        )
+        for suffix, conversation_id, state_profile_id in missing_cases:
+            call_id = f"read_missing_{suffix}"
+            result = await _ainvoke_read(
+                tool_fn,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                profile_id=state_profile_id,
+                tool_call_id=call_id,
+                mode="search",
+                query="python",
+            )
+            assert result.ok is False
+            assert result.code == ERROR_NO_ACTIVE_CV
+            assert result.data is None
+
+            async with sqlite_factory() as session:
+                row = await tool_repo.get_by_identity(
+                    session, run_id=run_id, tool_call_id=call_id
+                )
+                assert row is not None
+                assert row.status == TOOL_EXECUTION_STATUS_FAILED
+                assert row.source_attachment_id is None
+                assert "Built APIs" not in json.dumps(row.result_json)
+
+    run_async(_body())
+
+
 def test_read_active_cv_section_search_chunk_and_ownership(
     sqlite_factory: Any,
 ) -> None:
     async def _body() -> None:
         async with sqlite_factory() as session:
-            await _seed_active(session)
-            run_id = await _seed_run(session, "all modes")
+            profile_id, conversation_id = await _seed_active(session)
+            run_id, _ = await _seed_run(
+                session, "all modes", conversation_id=conversation_id
+            )
             await session.commit()
 
         tool_fn = build_read_active_cv_tool(session_factory=sqlite_factory)
@@ -333,6 +401,8 @@ def test_read_active_cv_section_search_chunk_and_ownership(
         section = await _ainvoke_read(
             tool_fn,
             run_id=run_id,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
             tool_call_id="read_section",
             mode="section",
             section_id=_SECTION_ID,
@@ -350,6 +420,8 @@ def test_read_active_cv_section_search_chunk_and_ownership(
         search = await _ainvoke_read(
             tool_fn,
             run_id=run_id,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
             tool_call_id="read_search",
             mode="search",
             query="Kubernetes",
@@ -362,6 +434,8 @@ def test_read_active_cv_section_search_chunk_and_ownership(
         chunk = await _ainvoke_read(
             tool_fn,
             run_id=run_id,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
             tool_call_id="read_chunk",
             mode="chunk",
             chunk_ordinal=0,
@@ -393,8 +467,10 @@ def test_read_active_cv_section_search_chunk_and_ownership(
 def test_read_active_cv_replay_skips_second_read(sqlite_factory: Any) -> None:
     async def _body() -> None:
         async with sqlite_factory() as session:
-            await _seed_active(session)
-            run_id = await _seed_run(session, "replay")
+            profile_id, conversation_id = await _seed_active(session)
+            run_id, _ = await _seed_run(
+                session, "replay", conversation_id=conversation_id
+            )
             await session.commit()
 
         call_count = {"n": 0}
@@ -405,6 +481,8 @@ def test_read_active_cv_replay_skips_second_read(sqlite_factory: Any) -> None:
         first = await _ainvoke_read(
             original,
             run_id=run_id,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
             tool_call_id="read_replay_once",
             mode="search",
             query="Python",
@@ -417,6 +495,8 @@ def test_read_active_cv_replay_skips_second_read(sqlite_factory: Any) -> None:
         second = await _ainvoke_read(
             original,
             run_id=run_id,
+            conversation_id=conversation_id,
+            profile_id=profile_id,
             tool_call_id="read_replay_once",
             mode="search",
             query="Python",
@@ -507,6 +587,8 @@ def test_active_cv_outline_block_excludes_bodies() -> None:
 
     state = initial_graph_state(
         run_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        conversation_id=_CONVERSATION_ID,
+        profile_id=_PROFILE_ID,
         user_text="What did I do at Acme?",
         active_cv_context=outline,
     )

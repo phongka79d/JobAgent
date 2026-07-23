@@ -99,7 +99,6 @@ class ChatTurnRequest(BaseModel):
 
     message: str
     attachment_ids: list[UuidStr] = Field(default_factory=list)
-    conversation_id: UuidStr | None = None
 
     @field_validator("message")
     @classmethod
@@ -109,6 +108,19 @@ class ChatTurnRequest(BaseModel):
         return value
 
 
+class LegacyChatTurnRequest(ChatTurnRequest):
+    """Legacy chat alias body with mandatory explicit durable ownership."""
+
+    conversation_id: str = Field(min_length=1)
+
+    @field_validator("conversation_id")
+    @classmethod
+    def conversation_id_must_be_non_empty(cls, value: str) -> str:
+        if value.strip() == "":
+            raise ValueError("conversation_id must be a non-empty string")
+        return value.strip()
+
+
 class HistoryQuery(BaseModel):
     """``GET /api/chat/history`` query parameters."""
 
@@ -116,7 +128,6 @@ class HistoryQuery(BaseModel):
 
     limit: int = Field(default=50, ge=1, le=100)
     before: str | None = None
-    conversation_id: UuidStr | None = None
 
     @field_validator("before")
     @classmethod
@@ -127,6 +138,19 @@ class HistoryQuery(BaseModel):
             raise ValueError("before cursor must be non-empty when provided")
         decode_history_cursor(value)
         return value
+
+
+class LegacyHistoryQuery(HistoryQuery):
+    """Legacy chat alias query with mandatory explicit durable ownership."""
+
+    conversation_id: str = Field(min_length=1)
+
+    @field_validator("conversation_id")
+    @classmethod
+    def conversation_id_must_be_non_empty(cls, value: str) -> str:
+        if value.strip() == "":
+            raise ValueError("conversation_id must be a non-empty string")
+        return value.strip()
 
 
 class ConversationQuery(BaseModel):
@@ -275,6 +299,8 @@ __all__ = [
     "HistoryCursorPoint",
     "HistoryPage",
     "HistoryQuery",
+    "LegacyChatTurnRequest",
+    "LegacyHistoryQuery",
     "MESSAGE_ROLE_ASSISTANT",
     "MESSAGE_ROLE_SYSTEM",
     "MESSAGE_ROLE_USER",

@@ -18,9 +18,9 @@ from app.api.query_params import history_query as _history_query
 from app.api.sse import open_sse_response
 from app.db.session import get_session_factory
 from app.schemas.chat import (
-    ChatTurnRequest,
     HistoryPage,
-    HistoryQuery,
+    LegacyChatTurnRequest,
+    LegacyHistoryQuery,
     ResumeRequest,
 )
 from app.schemas.common import UuidStr
@@ -51,6 +51,7 @@ _CHAT_ERROR_STATUS: dict[str, int] = {
     ERROR_RUN_PROFILE_MISMATCH: 409,
     "CONVERSATION_NOT_FOUND": 404,
     "CONVERSATION_PROFILE_MISMATCH": 409,
+    "CONVERSATION_SWITCH_BLOCKED": 409,
     "EMPTY_MESSAGE": 422,
 }
 
@@ -66,7 +67,7 @@ def _http_for_chat_error(exc: ChatTurnError) -> HTTPException:
 
 @router.get("/chat/history", response_model=HistoryPage)
 async def get_chat_history(
-    query: Annotated[HistoryQuery, Depends(_history_query)],
+    query: Annotated[LegacyHistoryQuery, Depends(_history_query)],
 ) -> dict[str, Any]:
     """Return one hydrated chronological history page ``{items, next_cursor}``."""
     factory = get_session_factory()
@@ -90,7 +91,7 @@ async def get_chat_history(
 
 @router.post("/chat/turns")
 async def post_chat_turn(
-    body: ChatTurnRequest,
+    body: LegacyChatTurnRequest,
     deps: Annotated[ChatAgentDeps, Depends(get_chat_agent_deps)],
 ) -> EventSourceResponse:
     """Persist user+run then stream validated SSE for one Agent turn."""

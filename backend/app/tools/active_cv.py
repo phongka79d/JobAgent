@@ -105,6 +105,31 @@ def build_read_active_cv_tool(
                 summary="read_active_cv requires run_id in graph state",
                 data=None,
             ).model_dump(mode="json")
+        conversation_id = (
+            state.get("conversation_id") if isinstance(state, dict) else None
+        )
+        profile_id = state.get("profile_id") if isinstance(state, dict) else None
+        if (
+            not isinstance(conversation_id, str)
+            or conversation_id.strip() == ""
+            or not isinstance(profile_id, str)
+            or profile_id.strip() == ""
+        ):
+            owner_error = ToolResult(
+                ok=False,
+                code=active_cv_reader_service.ERROR_NO_ACTIVE_CV,
+                summary=(
+                    "read_active_cv requires conversation/profile owner "
+                    "in graph state"
+                ),
+                data=None,
+            )
+            conversation_id = None
+            profile_id = None
+        else:
+            owner_error = None
+            conversation_id = conversation_id.strip()
+            profile_id = profile_id.strip()
 
         if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
             return ToolResult(
@@ -125,22 +150,34 @@ def build_read_active_cv_tool(
             cursor=cursor,
         )
 
-        async with factory() as session:
-            identity_or_error = (
-                await active_cv_reader_service.resolve_active_cv_identity(session)
-            )
-        if isinstance(identity_or_error, ToolResult):
+        if owner_error is not None:
             identity = None
-            preflight_error = identity_or_error
+            preflight_error = owner_error
         else:
-            identity = identity_or_error
-            preflight_error = None
+            assert conversation_id is not None
+            assert profile_id is not None
+            async with factory() as session:
+                identity_or_error = (
+                    await active_cv_reader_service.resolve_active_cv_identity(
+                        session,
+                        conversation_id=conversation_id,
+                        profile_id=profile_id,
+                    )
+                )
+            if isinstance(identity_or_error, ToolResult):
+                identity = None
+                preflight_error = identity_or_error
+            else:
+                identity = identity_or_error
+                preflight_error = None
         owner = identity.attachment_id if identity is not None else None
 
         async def _invoke() -> ToolResult:
             if preflight_error is not None:
                 return preflight_error
             assert identity is not None
+            assert conversation_id is not None
+            assert profile_id is not None
             try:
                 async with factory() as session:
                     result = await active_cv_reader_service.read_active_cv(
@@ -153,13 +190,17 @@ def build_read_active_cv_tool(
                         max_results=max_results,
                         max_chars=max_chars,
                         expected_identity=identity,
+                        conversation_id=conversation_id,
+                        profile_id=profile_id,
                     )
                 if not result.ok:
                     return result
                 async with factory() as session:
                     current = (
                         await active_cv_reader_service.resolve_active_cv_identity(
-                            session
+                            session,
+                            conversation_id=conversation_id,
+                            profile_id=profile_id,
                         )
                     )
                 if isinstance(current, ToolResult) or current != identity:

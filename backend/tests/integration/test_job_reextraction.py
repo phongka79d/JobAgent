@@ -65,6 +65,9 @@ SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
 
 _TS = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 _ATT_ID = "11111111-2222-4333-8444-555555555555"
+_ATT_OTHER = "22222222-2222-4333-8444-555555555555"
+_PROFILE_A = "33333333-3333-4333-8333-333333333333"
+_PROFILE_B = "44444444-4444-4444-8444-444444444444"
 
 _GROUNDED_CORE: str = (
     "Title: Backend Engineer\n"
@@ -258,6 +261,96 @@ async def _seed_attachment(session: AsyncSession) -> None:
             f"'p/cv.pdf', 'active', '{_TS.isoformat()}', '{_TS.isoformat()}')"
         )
     )
+    await session.execute(
+        text(
+            "INSERT INTO profiles ("
+            "id, attachment_id, display_name, profile_json, extraction_version, "
+            "source_hash, state, created_at, updated_at, last_opened_at) VALUES "
+            "(:id, :aid, 'Profile A', '{}', 'v1', 'cv-source-a', 'ready', "
+            ":now, :now, :now)"
+        ),
+        {"id": _PROFILE_A, "aid": _ATT_ID, "now": _TS},
+    )
+
+
+def test_evaluation_get_by_id_is_scoped_to_profile(db_path: Path) -> None:
+    """A UUID belonging to another profile must not disclose an evaluation."""
+
+    async def _body() -> None:
+        engine, factory = _factory(db_path)
+        try:
+            async with factory() as session:
+                await _seed_attachment(session)
+                await session.execute(
+                    text(
+                        "INSERT INTO attachments ("
+                        "id, file_hash, original_name, mime_type, size_bytes, "
+                        "page_count, storage_path, state, created_at, updated_at) "
+                        "VALUES (:id, 'h-att-other', 'other.pdf', 'application/pdf', "
+                        "10, 1, 'p/other.pdf', 'archived', :now, :now)"
+                    ),
+                    {"id": _ATT_OTHER, "now": _TS},
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO profiles ("
+                        "id, attachment_id, display_name, profile_json, "
+                        "extraction_version, source_hash, state, created_at, "
+                        "updated_at, last_opened_at) VALUES "
+                        "(:id, :aid, :name, '{}', 'v1', :hash, 'ready', "
+                        ":now, :now, :now)"
+                    ),
+                    {
+                        "id": _PROFILE_B,
+                        "aid": _ATT_OTHER,
+                        "name": "Profile B",
+                        "hash": "cv-source-b",
+                        "now": _TS,
+                    },
+                )
+                job = await _seed_processed_job(
+                    session, raw_hash="hash-profile-scoped-eval"
+                )
+                facts = EvaluationContextFacts(
+                    job_id=job.id,
+                    job_revision=job.updated_at,
+                    active_attachment_id=_ATT_ID,
+                    cv_source_hash="cv-source-a",
+                    profile_revision=_TS,
+                    preferences_revision=_TS,
+                    matching_contract_version=MATCHING_CONTRACT_VERSION,
+                )
+                row, created = await eval_repo.insert_evaluation(
+                    session,
+                    job_id=job.id,
+                    profile_id=_PROFILE_A,
+                    evaluation_context_hash=evaluation_context_hash(facts),
+                    job_revision=facts.job_revision,
+                    profile_revision=facts.profile_revision,
+                    preferences_revision=facts.preferences_revision,
+                    cv_source_hash=facts.cv_source_hash,
+                    matching_contract_version=facts.matching_contract_version,
+                    result=_match_payload(job.id),
+                )
+                await session.commit()
+                evaluation_id = row.id
+
+            async with factory() as session:
+                assert (
+                    await eval_repo.get_by_id(
+                        session, evaluation_id, profile_id=_PROFILE_B
+                    )
+                    is None
+                )
+                owned = await eval_repo.get_by_id(
+                    session, evaluation_id, profile_id=_PROFILE_A
+                )
+                assert owned is not None
+                assert owned.profile_id == _PROFILE_A
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 # ---------------------------------------------------------------------------
@@ -672,7 +765,7 @@ def test_reextract_success_projects_evaluation_stale_without_evaluate(
                 eval_row, created = await eval_repo.insert_evaluation(
                     session,
                     job_id=job_id,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_A,
                     evaluation_context_hash=digest,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,
@@ -689,6 +782,7 @@ def test_reextract_success_projects_evaluation_stale_without_evaluate(
                 lookup = await eval_repo.lookup_for_job(
                     session,
                     job_id=job_id,
+                    profile_id=_PROFILE_A,
                     current_context_hash=digest,
                 )
                 assert lookup.currentness == "current"
@@ -728,7 +822,9 @@ def test_reextract_success_projects_evaluation_stale_without_evaluate(
                     .where(JobEvaluation.job_id == job_id)
                 )
                 assert int(count.scalar_one()) == 1
-                stored = await eval_repo.get_by_id(session, evaluation_id)
+                stored = await eval_repo.get_by_id(
+                    session, evaluation_id, profile_id=_PROFILE_A
+                )
                 assert stored is not None
                 assert stored.evaluation_context_hash == digest
 
@@ -749,6 +845,7 @@ def test_reextract_success_projects_evaluation_stale_without_evaluate(
                 lookup = await eval_repo.lookup_for_job(
                     session,
                     job_id=job_id,
+                    profile_id=_PROFILE_A,
                     current_context_hash=new_digest,
                 )
                 assert lookup.currentness == "stale"

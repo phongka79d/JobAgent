@@ -61,7 +61,10 @@ async def _insert_with_time(
     created_at: datetime,
 ) -> str:
     msg = await messages_repo.insert_message(
-        session, role=role, content=content
+        session,
+        conversation_id=CONVERSATION_ID,
+        role=role,
+        content=content,
     )
     msg.created_at = created_at
     msg.updated_at = created_at
@@ -218,7 +221,12 @@ def test_pagination_equal_timestamps_tie_break_no_duplicates_or_gaps(
             async with factory() as session:
                 # Newest-first: late, then id_c > id_b > id_a among ties.
                 # limit=2 page: [late, id_c] newest-first -> chrono [id_c, late]
-                page1 = await get_history_page(session, limit=2, before=None)
+                page1 = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=2,
+                    before=None,
+                )
                 assert [i.id for i in page1.items] == [id_c, id_late]
                 assert page1.next_cursor is not None
                 ct, cid = decode_history_cursor(page1.next_cursor)
@@ -226,7 +234,10 @@ def test_pagination_equal_timestamps_tie_break_no_duplicates_or_gaps(
                 assert ct == T0 or _as_utc(ct) == T0
 
                 page2 = await get_history_page(
-                    session, limit=2, before=page1.next_cursor
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=2,
+                    before=page1.next_cursor,
                 )
                 assert [i.id for i in page2.items] == [id_a, id_b]
                 assert page2.next_cursor is None
@@ -265,18 +276,29 @@ def test_first_middle_final_pages_and_null_cursor(db_path: Path) -> None:
             # Chronological ids[0]..ids[4] (oldest..newest)
 
             async with factory() as session:
-                first = await get_history_page(session, limit=2, before=None)
+                first = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=2,
+                    before=None,
+                )
                 assert [i.content for i in first.items] == ["m3", "m4"]
                 assert first.next_cursor is not None
 
                 middle = await get_history_page(
-                    session, limit=2, before=first.next_cursor
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=2,
+                    before=first.next_cursor,
                 )
                 assert [i.content for i in middle.items] == ["m1", "m2"]
                 assert middle.next_cursor is not None
 
                 final = await get_history_page(
-                    session, limit=2, before=middle.next_cursor
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=2,
+                    before=middle.next_cursor,
                 )
                 assert [i.content for i in final.items] == ["m0"]
                 assert final.next_cursor is None
@@ -307,13 +329,23 @@ def test_limit_one_and_limit_one_hundred(db_path: Path) -> None:
                 await session.commit()
 
             async with factory() as session:
-                page = await get_history_page(session, limit=1, before=None)
+                page = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=1,
+                    before=None,
+                )
                 assert len(page.items) == 1
                 assert page.items[0].content == "n2"
                 assert page.next_cursor is not None
 
                 # limit=100 with only 3 rows: full set, no next_cursor
-                full = await get_history_page(session, limit=100, before=None)
+                full = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=100,
+                    before=None,
+                )
                 assert len(full.items) == 3
                 assert [i.content for i in full.items] == ["n0", "n1", "n2"]
                 assert full.next_cursor is None
@@ -338,7 +370,12 @@ def test_next_cursor_only_when_older_rows_exist(db_path: Path) -> None:
                 await session.commit()
 
             async with factory() as session:
-                page = await get_history_page(session, limit=50, before=None)
+                page = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=50,
+                    before=None,
+                )
                 assert len(page.items) == 1
                 assert page.next_cursor is None
         finally:
@@ -355,7 +392,10 @@ def test_service_rejects_malformed_before_cursor(db_path: Path) -> None:
             async with factory() as session:
                 with pytest.raises(ValueError):
                     await get_history_page(
-                        session, limit=10, before="not-a-valid-cursor"
+                        session,
+                        conversation_id=CONVERSATION_ID,
+                        limit=10,
+                        before="not-a-valid-cursor",
                     )
         finally:
             await engine.dispose()
@@ -378,11 +418,13 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
             async with factory() as session:
                 user = await messages_repo.insert_message(
                     session,
+                    conversation_id=CONVERSATION_ID,
                     role=CHAT_MESSAGE_ROLE_USER,
                     content="please run tool",
                 )
                 assistant = await messages_repo.insert_message(
                     session,
+                    conversation_id=CONVERSATION_ID,
                     role=CHAT_MESSAGE_ROLE_ASSISTANT,
                     content="done",
                 )
@@ -415,7 +457,12 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
                 user_id, assistant_id, run_id = user.id, assistant.id, run.id
 
             async with factory() as session:
-                page = await get_history_page(session, limit=50, before=None)
+                page = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=50,
+                    before=None,
+                )
                 assert isinstance(page, HistoryPage)
                 assert set(history_page_as_dict(page).keys()) == {
                     "items",
@@ -460,7 +507,9 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
                 ).scalar_one()
                 assert int(count_tool_role) == 0
                 assert all(m.conversation_id == CONVERSATION_ID for m in (
-                    await messages_repo.list_messages(session)
+                    await messages_repo.list_messages(
+                        session, conversation_id=CONVERSATION_ID
+                    )
                 ))
         finally:
             await engine.dispose()
@@ -476,13 +525,18 @@ def test_hydration_without_run_leaves_run_null(db_path: Path) -> None:
             async with factory() as session:
                 await messages_repo.insert_message(
                     session,
+                    conversation_id=CONVERSATION_ID,
                     role=CHAT_MESSAGE_ROLE_USER,
                     content="no run yet",
                 )
                 await session.commit()
 
             async with factory() as session:
-                page = await get_history_page(session, limit=10)
+                page = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=10,
+                )
                 assert len(page.items) == 1
                 assert page.items[0].run is None
                 assert page.next_cursor is None
@@ -502,21 +556,29 @@ def test_history_http_malformed_cursor_422(
     from tests.support.db_migration import (
         bind_isolated_sqlite,
         cleanup_isolated_sqlite,
+        seed_legacy_test_conversation,
         upgrade_to_head,
     )
     from tests.support.health import install_fake_driver
 
     db = bind_isolated_sqlite(monkeypatch, tmp_path, db_name="history-http.db")
     upgrade_to_head(db)
+    seed_legacy_test_conversation(db)
     install_fake_driver(monkeypatch)
     try:
         with TestClient(create_app()) as client:
             response = client.get(
                 "/api/chat/history",
-                params={"before": "!!!not-base64!!!"},
+                params={
+                    "conversation_id": CONVERSATION_ID,
+                    "before": "!!!not-base64!!!",
+                },
             )
             assert response.status_code == 422
-            empty = client.get("/api/chat/history")
+            empty = client.get(
+                "/api/chat/history",
+                params={"conversation_id": CONVERSATION_ID},
+            )
             assert empty.status_code == 200
             body = empty.json()
             assert set(body.keys()) == {"items", "next_cursor"}

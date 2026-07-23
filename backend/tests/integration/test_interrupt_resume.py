@@ -21,6 +21,7 @@ from app.db.models.chat import (
     AGENT_RUN_STATE_INTERRUPTED,
     CHAT_MESSAGE_ROLE_ASSISTANT,
     CHAT_MESSAGE_ROLE_USER,
+    CONVERSATION_ID,
     TOOL_EXECUTION_STATUS_COMPLETED,
     TOOL_EXECUTION_STATUS_RUNNING,
     AgentRun,
@@ -32,14 +33,15 @@ from app.repositories import tool_executions as tool_repo
 from app.schemas.sse import SseEvent, parse_sse_event
 from app.services import chat_turns
 from app.services.chat_turns import (
-    ERROR_APPROVAL_ACTION_REQUIRED,
     ERROR_INVALID_APPROVAL_ACTION,
     ERROR_RUN_NOT_RESUMABLE,
     ChatTurnError,
     count_chat_messages,
     create_user_turn,
-    stream_chat_turn,
     stream_resume,
+)
+from app.services.chat_turns import (
+    stream_chat_turn as _production_stream_chat_turn,
 )
 from app.tools.registry import ToolRegistry, production_registry
 from langchain_core.messages import AIMessage
@@ -60,6 +62,7 @@ from tests.support.db_migration import (
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+PROFILE_ID = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb"
 
 
 @pytest.fixture
@@ -88,6 +91,14 @@ def _ai_tool_call(name: str, call_id: str = "call-synth-1") -> AIMessage:
 
 async def _collect(gen: AsyncIterator[SseEvent]) -> list[SseEvent]:
     return [event async for event in gen]
+
+
+def stream_chat_turn(**kwargs: Any) -> AsyncIterator[SseEvent]:
+    """Stream a legacy-fixture turn with an explicit durable owner."""
+    return _production_stream_chat_turn(
+        conversation_id=CONVERSATION_ID,
+        **kwargs,
+    )
 
 
 def _names(events: list[SseEvent]) -> list[str]:
@@ -329,7 +340,7 @@ def test_interrupt_resume_reject_branch(db_path: Path) -> None:
 
 
 def test_new_turn_blocked_during_interrupt_zero_inserts(db_path: Path) -> None:
-    """APPROVAL_ACTION_REQUIRED before insert; message/run counts unchanged."""
+    """CONVERSATION_SWITCH_BLOCKED before insert; counts unchanged."""
 
     async def _body() -> None:
         engine, factory = _factory(db_path)
@@ -358,10 +369,11 @@ def test_new_turn_blocked_during_interrupt_zero_inserts(db_path: Path) -> None:
 
             with pytest.raises(ChatTurnError) as exc_info:
                 await create_user_turn(
+                    conversation_id=CONVERSATION_ID,
                     message="should be blocked",
                     session_factory=factory,
                 )
-            assert exc_info.value.code == ERROR_APPROVAL_ACTION_REQUIRED
+            assert exc_info.value.code == "CONVERSATION_SWITCH_BLOCKED"
 
             async with factory() as session:
                 after_msgs = await count_chat_messages(session)
@@ -676,6 +688,7 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
                 return "x"
 
             turn = await create_user_turn(
+                conversation_id=CONVERSATION_ID,
                 message="will fail controlled",
                 session_factory=factory,
             )
@@ -688,6 +701,8 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
             # tool_iteration_count already at limit → controlled failure.
             state = initial_graph_state(
                 run_id=turn.run_id,
+                conversation_id=CONVERSATION_ID,
+                profile_id=PROFILE_ID,
                 user_text=turn.content,
                 tool_iteration_count=1,
             )
@@ -712,6 +727,8 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
             events = await _collect(
                 stream_agent_run(
                     run_id=turn.run_id,
+                    conversation_id=CONVERSATION_ID,
+                    profile_id=PROFILE_ID,
                     input_state=state,
                     graph_bundle=bundle,
                     sqlite_path=db_path,

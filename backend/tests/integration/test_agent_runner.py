@@ -28,9 +28,11 @@ from app.agent.graph import (
     build_agent_graph,
     initial_graph_state,
 )
-from app.agent.runner import TerminalOutcome, stream_agent_run
+from app.agent.runner import TerminalOutcome
+from app.agent.runner import stream_agent_run as _production_stream_agent_run
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
+    CONVERSATION_ID,
     TOOL_EXECUTION_STATUS_COMPLETED,
     TOOL_EXECUTION_STATUS_FAILED,
     AgentRun,
@@ -38,6 +40,7 @@ from app.db.models.chat import (
 from app.db.session import build_async_engine
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
 from app.schemas.sse import SseEvent, parse_sse_event
@@ -66,6 +69,7 @@ from tests.support.graph_rebuild import seed_candidate, skills_fixture
 
 RUN_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 RUN_B = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+PROFILE_ID = "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa"
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -99,6 +103,15 @@ def _ai_tool_call(
 
 async def _collect(gen: AsyncIterator[SseEvent]) -> list[SseEvent]:
     return [event async for event in gen]
+
+
+def stream_agent_run(**kwargs: Any) -> AsyncIterator[SseEvent]:
+    """Run the Agent with explicit durable test ownership."""
+    return _production_stream_agent_run(
+        conversation_id=CONVERSATION_ID,
+        profile_id=PROFILE_ID,
+        **kwargs,
+    )
 
 
 def _names(events: list[SseEvent]) -> list[str]:
@@ -244,6 +257,8 @@ def test_controlled_graph_failure_emits_run_failed(tmp_path: Path) -> None:
         )
         state = initial_graph_state(
             run_id=RUN_A,
+            conversation_id=CONVERSATION_ID,
+            profile_id=PROFILE_ID,
             user_text="loop",
             tool_iteration_count=1,
         )
@@ -528,6 +543,7 @@ async def _seed_run_for_tools(
     async with factory() as session:
         user = await messages_repo.insert_message(
             session,
+            conversation_id=CONVERSATION_ID,
             role=CHAT_MESSAGE_ROLE_USER,
             content=content,
         )
@@ -1174,7 +1190,7 @@ def test_stream_chat_turn_loads_active_cv_outline_before_graph(
                     attachment_id=attachment_id,
                 )
                 await att_repo.mark_active(session, attachment_id, page_count=1)
-                await profile_repo.upsert_active_profile(
+                profile = await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=attachment_id,
                     profile_json={
@@ -1187,6 +1203,9 @@ def test_stream_chat_turn_loads_active_cv_outline_before_graph(
                         "languages": [],
                         "extraction_confidence": 0.9,
                     },
+                )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile.id
                 )
                 await cv_doc_repo.upsert_document(
                     session,
@@ -1202,6 +1221,7 @@ def test_stream_chat_turn_loads_active_cv_outline_before_graph(
             model = FakeChatModel(responses=[_ai_text("Got outline.")])
             events = await _collect(
                 stream_chat_turn(
+                    conversation_id=conversation.id,
                     message="What sections are on my active CV?",
                     model=model,
                     session_factory=factory,
@@ -1258,7 +1278,7 @@ def test_stream_chat_turn_legacy_active_cv_reprocess_outline(
                     attachment_id=attachment_id,
                 )
                 await att_repo.mark_active(session, attachment_id, page_count=1)
-                await profile_repo.upsert_active_profile(
+                profile = await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=attachment_id,
                     profile_json={
@@ -1272,11 +1292,15 @@ def test_stream_chat_turn_legacy_active_cv_reprocess_outline(
                         "extraction_confidence": 0.5,
                     },
                 )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile.id
+                )
                 await session.commit()
 
             model = FakeChatModel(responses=[_ai_text("Legacy noted.")])
             events = await _collect(
                 stream_chat_turn(
+                    conversation_id=conversation.id,
                     message="Is my CV ready?",
                     model=model,
                     session_factory=factory,

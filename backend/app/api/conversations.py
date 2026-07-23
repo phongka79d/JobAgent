@@ -146,14 +146,6 @@ async def post_conversation_turn(
     body: ChatTurnRequest,
     deps: Annotated[ChatAgentDeps, Depends(get_chat_agent_deps)],
 ) -> EventSourceResponse:
-    if body.conversation_id is not None and body.conversation_id != conversation_id:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "CONVERSATION_PROFILE_MISMATCH",
-                "summary": "conversation body does not match path",
-            },
-        )
     events = stream_chat_turn(
         conversation_id=conversation_id,
         message=body.message,

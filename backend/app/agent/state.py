@@ -1,6 +1,6 @@
 """Exact Agent runtime state (Plan 3 §7.4 / Master §12.3).
 
-``AgentState`` exposes exactly ten fields. Large documents stay out of state
+``AgentState`` exposes exactly eleven fields. Large documents stay out of state
 and are referenced by attachment IDs only. ``active_cv_context`` is a compact
 outline projection (never section bodies or chunks). No classifier, long-term
 memory, or second-agent fields are permitted.
@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from app.db.models.chat import CONVERSATION_ID
-
 # Exact runtime field set — single owner for Agent input/graph state shape.
 AGENT_STATE_FIELDS: frozenset[str] = frozenset(
     {
         "conversation_id",
+        "profile_id",
         "run_id",
         "messages_for_this_turn",
         "recent_context",
@@ -27,10 +26,6 @@ AGENT_STATE_FIELDS: frozenset[str] = frozenset(
         "error",
     }
 )
-
-# Singleton conversation identity for every Agent turn (Master §6.1 / §12.3).
-AGENT_CONVERSATION_ID: str = CONVERSATION_ID
-
 
 class ContextMessage(TypedDict):
     """Compact chat row projection for the model: role + text only.
@@ -45,9 +40,10 @@ class ContextMessage(TypedDict):
 
 
 class AgentState(TypedDict):
-    """LangGraph / runner state with exactly the ten named fields.
+    """LangGraph / runner state with exactly the eleven named fields.
 
-    - ``conversation_id`` is always the singleton ``main``.
+    - ``conversation_id`` is the explicit durable conversation owner.
+    - ``profile_id`` is that conversation's explicit durable profile owner.
     - ``run_id`` is the durable agent-run id and future LangGraph ``thread_id``.
     - ``messages_for_this_turn`` is the current turn only (not prior history).
     - ``recent_context`` is a budget-bounded prior window (see ``context``).
@@ -62,6 +58,7 @@ class AgentState(TypedDict):
     """
 
     conversation_id: str
+    profile_id: str
     run_id: str
     messages_for_this_turn: list[ContextMessage]
     recent_context: list[ContextMessage]
@@ -81,8 +78,8 @@ def agent_state_field_names() -> frozenset[str]:
 def build_initial_agent_state(
     *,
     run_id: str,
-    conversation_id: str = AGENT_CONVERSATION_ID,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
     messages_for_this_turn: list[ContextMessage] | None = None,
     recent_context: list[ContextMessage] | None = None,
     candidate_context: list[dict[str, Any]] | None = None,
@@ -92,22 +89,19 @@ def build_initial_agent_state(
     tool_iteration_count: int = 0,
     error: str | None = None,
 ) -> AgentState:
-    """Construct a valid initial ``AgentState`` with singleton conversation.
-
-    Always sets ``conversation_id`` to ``main``. ``candidate_context`` defaults
-    to empty and must be a compact list of dict cards (never raw document
-    bodies). ``active_cv_context`` defaults to null (no outline). Does not
-    accept extra state keys.
-    """
+    """Construct a valid state for one durable conversation/profile owner."""
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
-    if profile_id is not None and not profile_id.strip():
-        raise ValueError("profile_id must be a non-empty string when provided")
+    if not isinstance(conversation_id, str) or conversation_id.strip() == "":
+        raise ValueError("conversation_id must be a non-empty string")
+    if not isinstance(profile_id, str) or profile_id.strip() == "":
+        raise ValueError("profile_id must be a non-empty string")
     if tool_iteration_count < 0:
         raise ValueError("tool_iteration_count must be >= 0")
 
     state: AgentState = {
-        "conversation_id": conversation_id,
+        "conversation_id": conversation_id.strip(),
+        "profile_id": profile_id.strip(),
         "run_id": run_id,
         "messages_for_this_turn": list(messages_for_this_turn or ()),
         "recent_context": list(recent_context or ()),

@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.time import utc_now
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLES,
-    CONVERSATION_ID,
     ChatMessage,
 )
 
@@ -37,7 +36,7 @@ class InvalidMessageRoleError(ChatMessageRepositoryError):
 async def insert_message(
     session: AsyncSession,
     *,
-    conversation_id: str = CONVERSATION_ID,
+    conversation_id: str,
     role: str,
     content: str,
     structured_payload: dict[str, Any] | None = None,
@@ -68,8 +67,6 @@ async def insert_message(
 
     if not isinstance(conversation_id, str) or not conversation_id.strip():
         raise ChatMessageRepositoryError("conversation_id must be non-empty")
-    # ponytail: the default keeps pre-Task-4 callers importable; every new
-    # caller passes a durable ID and Task 4 removes the default.
     # Omit structured_payload when absent so the JSON column stays SQL NULL
     # (SQLAlchemy JSON maps Python None to JSON null by default).
     kwargs: dict[str, Any] = {
@@ -103,7 +100,7 @@ async def get_by_id(
 
 
 async def list_messages(
-    session: AsyncSession, *, conversation_id: str = CONVERSATION_ID
+    session: AsyncSession, *, conversation_id: str
 ) -> list[ChatMessage]:
     """Return conversation messages ordered by ``(created_at, id)``.
 
@@ -121,7 +118,7 @@ async def list_messages(
 async def list_messages_before(
     session: AsyncSession,
     *,
-    conversation_id: str = CONVERSATION_ID,
+    conversation_id: str,
     limit: int,
     before: tuple[datetime, str] | None = None,
 ) -> list[ChatMessage]:

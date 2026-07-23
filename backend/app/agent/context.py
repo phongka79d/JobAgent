@@ -37,7 +37,6 @@ from app.agent.active_cv_context import (
     project_active_cv_context,
 )
 from app.agent.state import ContextMessage
-from app.db.models.chat import CONVERSATION_ID
 from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
@@ -141,37 +140,35 @@ def apply_recent_context_budget(
 async def load_recent_context(
     session: AsyncSession,
     *,
-    conversation_id: str | None = None,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
     exclude_ids: frozenset[str] | None = None,
     max_messages: int = RECENT_CONTEXT_MAX_MESSAGES,
     char_budget: int = RECENT_CONTEXT_CHAR_BUDGET,
 ) -> list[ContextMessage]:
-    """Load recent main-conversation messages within the documented budget.
+    """Load recent messages for one verified conversation/profile owner.
 
-    Uses a single bounded repository fetch (``limit=max_messages``) against the
-    singleton conversation. Does not paginate through the whole conversation and
-    does not use history-cursor hydration (that path is for the public API).
+    Uses one bounded repository fetch (``limit=max_messages``) against the
+    verified conversation. It does not paginate through the full conversation
+    or use history-cursor hydration (that path is for the public API).
     """
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if owner is None:
+        raise RuntimeError("conversation not found")
+    if owner.profile_id != profile_id:
+        raise RuntimeError("conversation/profile ownership mismatch")
     if max_messages < 1:
         return []
-    if conversation_id is not None:
-        owner = await conversations_repo.resolve_owner(session, conversation_id)
-        if owner is None:
-            raise RuntimeError("conversation not found")
-        if profile_id is not None and owner.profile_id != profile_id:
-            raise RuntimeError("conversation/profile ownership mismatch")
 
     # Bounded newest-first fetch only — hard stop at max_messages rows.
     rows = await messages_repo.list_messages_before(
         session,
-        conversation_id=conversation_id or CONVERSATION_ID,
+        conversation_id=owner.conversation_id,
         limit=max_messages,
         before=None,
     )
-    # Repository already confines to conversation_id == main; assert invariant.
     for row in rows:
-        if row.conversation_id != (conversation_id or CONVERSATION_ID):
+        if row.conversation_id != owner.conversation_id:
             raise RuntimeError(
                 "recent context loader received a foreign conversation row"
             )
@@ -288,7 +285,8 @@ def project_candidate_context(
 async def load_candidate_context(
     session: AsyncSession,
     *,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
 ) -> list[dict[str, Any]]:
     """Load compact approved profile/preferences into Agent ``candidate_context``.
 
@@ -297,11 +295,12 @@ async def load_candidate_context(
     stored JSON fails closed (empty context) rather than injecting unvalidated
     data into the model prompt.
     """
-    row = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if owner is None:
+        raise RuntimeError("conversation not found")
+    if owner.profile_id != profile_id:
+        raise RuntimeError("conversation/profile ownership mismatch")
+    row = await profile_repo.get_profile(session, profile_id)
     if row is None:
         return list(empty_candidate_context())
 
@@ -311,11 +310,7 @@ async def load_candidate_context(
         return list(empty_candidate_context())
 
     prefs_model: JobPreferences | None = None
-    prefs_row = (
-        await profile_repo.get_profile_preferences(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_job_preferences(session)
-    )
+    prefs_row = await profile_repo.get_profile_preferences(session, profile_id)
     if prefs_row is not None:
         try:
             prefs_model = parse_job_preferences(prefs_row.preferences_json)
@@ -328,7 +323,8 @@ async def load_candidate_context(
 async def load_profile_working_memory_messages(
     session: AsyncSession,
     *,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
 ) -> list[ContextMessage]:
     """Build system messages for unapproved draft + durable attachment IDs.
 
@@ -344,14 +340,19 @@ async def load_profile_working_memory_messages(
     from app.services.attachment_resolve import list_processable_attachment_ids
     from app.services.profile_extraction import compact_draft_summary
 
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if owner is None:
+        raise RuntimeError("conversation not found")
+    if owner.profile_id != profile_id:
+        raise RuntimeError("conversation/profile ownership mismatch")
     messages: list[ContextMessage] = []
-    approved = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    approved = await profile_repo.get_profile(session, profile_id)
     draft_row = await profile_repo.get_current_draft(session)
-    if approved is None and draft_row is not None:
+    if (
+        approved is None
+        and draft_row is not None
+        and draft_row.source_attachment_id == owner.attachment_id
+    ):
         try:
             draft = parse_profile_draft_payload(draft_row.draft_json)
             summary = compact_draft_summary(draft)
@@ -386,7 +387,11 @@ async def load_profile_working_memory_messages(
                 }
             )
 
-    processable = await list_processable_attachment_ids(session)
+    processable = [
+        attachment_id
+        for attachment_id in await list_processable_attachment_ids(session)
+        if attachment_id == owner.attachment_id
+    ]
     if processable:
         lines = "\n".join(f"- {aid}" for aid in processable)
         messages.append(

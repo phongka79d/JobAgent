@@ -19,8 +19,8 @@ from app.agent.graph import (
     _build_model_messages,
     _format_attachment_ids_block,
     build_agent_graph,
-    initial_graph_state,
 )
+from app.agent.graph import initial_graph_state as _production_initial_graph_state
 from app.agent.state import AGENT_STATE_FIELDS
 from app.services import job_save_confirmation as conf
 from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
@@ -43,6 +43,21 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APP_AGENT = BACKEND_ROOT / "app" / "agent"
 APP_TOOLS = BACKEND_ROOT / "app" / "tools"
 RUN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+CONVERSATION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee01"
+PROFILE_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee02"
+
+
+def initial_graph_state(
+    *, run_id: str, user_text: str, **kwargs: Any
+) -> Any:
+    """Build graph state with explicit durable test ownership."""
+    return _production_initial_graph_state(
+        run_id=run_id,
+        user_text=user_text,
+        conversation_id=CONVERSATION_ID,
+        profile_id=PROFILE_ID,
+        **kwargs,
+    )
 
 
 @tool
@@ -318,7 +333,8 @@ def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:
 def test_initial_graph_state_matches_agent_state_keys() -> None:
     state = initial_graph_state(run_id=RUN_ID, user_text="hi")
     assert set(state) == AGENT_STATE_FIELDS
-    assert state["conversation_id"] == "main"
+    assert state["conversation_id"] == CONVERSATION_ID
+    assert state["profile_id"] == PROFILE_ID
     assert state["run_id"] == RUN_ID
     assert state["tool_iteration_count"] == 0
     assert state["error"] is None

@@ -21,6 +21,7 @@ from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
     CHAT_MESSAGE_ROLE_ASSISTANT,
     CHAT_MESSAGE_ROLE_USER,
+    CONVERSATION_ID,
     TOOL_EXECUTION_STATUS_COMPLETED,
     AgentRun,
     ChatMessage,
@@ -146,12 +147,29 @@ def test_route_handlers_are_transport_thin() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_legacy_chat_routes_require_explicit_conversation_id(
+    chat_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    db_path, _files, _fake = chat_env
+    with _client_with_fake(db_path, _direct_model()) as client:
+        history = client.get("/api/chat/history")
+        turn = client.post(
+            "/api/chat/turns",
+            json={"message": "missing owner", "attachment_ids": []},
+        )
+    assert history.status_code == 422
+    assert turn.status_code == 422
+
+
 def test_history_empty_page_shape(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     db_path, _files, _fake = chat_env
     with _client_with_fake(db_path, _direct_model()) as client:
-        response = client.get("/api/chat/history")
+        response = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID},
+        )
     assert response.status_code == 200
     body = response.json()
     page = HistoryPage.model_validate(body)
@@ -167,15 +185,24 @@ def test_history_malformed_cursor_returns_422(
     with _client_with_fake(db_path, _direct_model()) as client:
         bad = client.get(
             "/api/chat/history",
-            params={"before": "!!!not-base64!!!"},
+            params={
+                "conversation_id": CONVERSATION_ID,
+                "before": "!!!not-base64!!!",
+            },
         )
         assert bad.status_code == 422
         assert FAKE_SHOPAIKEY not in bad.text
         assert "Traceback" not in bad.text
 
-        bad_limit = client.get("/api/chat/history", params={"limit": 0})
+        bad_limit = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID, "limit": 0},
+        )
         assert bad_limit.status_code == 422
-        bad_limit2 = client.get("/api/chat/history", params={"limit": 101})
+        bad_limit2 = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID, "limit": 101},
+        )
         assert bad_limit2.status_code == 422
 
 
@@ -191,6 +218,7 @@ def test_turn_injects_approved_candidate_context_not_draft(
     from app.core.ids import new_uuid
     from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
     from app.repositories import attachments as att_repo
+    from app.repositories import conversations as conversations_repo
     from app.repositories import profiles as profile_repo
     from app.storage.attachments import AttachmentStorage
 
@@ -249,7 +277,7 @@ def test_turn_injects_approved_candidate_context_not_draft(
         },
     }
 
-    async def _seed() -> None:
+    async def _seed() -> str:
         factory = get_session_factory()
         async with factory() as session:
             att_id = new_uuid()
@@ -264,10 +292,13 @@ def test_turn_injects_approved_candidate_context_not_draft(
                 attachment_id=att_id,
             )
             await att_repo.mark_active(session, att_id, page_count=1)
-            await profile_repo.upsert_active_profile(
+            profile = await profile_repo.upsert_active_profile(
                 session,
                 active_attachment_id=att_id,
                 profile_json=profile_json,
+            )
+            conversation = await conversations_repo.create_for_profile(
+                session, profile_id=profile.id
             )
             await profile_repo.upsert_job_preferences(
                 session, preferences_json=prefs_json
@@ -290,14 +321,19 @@ def test_turn_injects_approved_candidate_context_not_draft(
             )
             await session.commit()
             assert ATTACHMENT_STATE_ACTIVE == "active"
+            return conversation.id
 
-    run_async(_seed())
+    conversation_id = run_async(_seed())
 
     model = _direct_model("I see your approved profile.")
     with _client_with_fake(db_path, model) as client:
         response = client.post(
             "/api/chat/turns",
-            json={"message": "what is my title?", "attachment_ids": []},
+            json={
+                "conversation_id": conversation_id,
+                "message": "what is my title?",
+                "attachment_ids": [],
+            },
         )
         assert response.status_code == 200
         events = _parse_sse(response.text)
@@ -332,7 +368,11 @@ def test_turn_greeting_sse_order_and_persistence(
     with _client_with_fake(db_path, model) as client:
         response = client.post(
             "/api/chat/turns",
-            json={"message": "hi there", "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": "hi there",
+                "attachment_ids": [],
+            },
         )
         assert response.status_code == 200
         assert "text/event-stream" in response.headers.get("content-type", "")
@@ -356,7 +396,10 @@ def test_turn_greeting_sse_order_and_persistence(
         assert "".join(deltas) == reply
 
         # Durable history reflects user + assistant + one completed run, zero tools
-        hist = client.get("/api/chat/history", params={"limit": 50})
+        hist = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID, "limit": 50},
+        )
         assert hist.status_code == 200
         page = HistoryPage.model_validate(hist.json())
         assert len(page.items) == 2
@@ -407,7 +450,11 @@ def test_turn_empty_message_422(
     with _client_with_fake(db_path, _direct_model()) as client:
         response = client.post(
             "/api/chat/turns",
-            json={"message": "   ", "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": "   ",
+                "attachment_ids": [],
+            },
         )
     assert response.status_code == 422
 
@@ -419,10 +466,71 @@ def test_turn_empty_message_422(
 
 def test_public_turn_resume_synthetic_interrupt(
     chat_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, _files, _fake = chat_env
     counter: dict[str, int] = {"n": 0}
     factory = get_session_factory()
+    from app.repositories import attachments as attachments_repo
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import profiles as profiles_repo
+    from app.repositories import workspace_state as workspace_repo
+    from app.services import chat_turns as chat_turns_service
+
+    async def _activate_run_owner() -> str:
+        async with factory() as session:
+            owner = await conversations_repo.resolve_owner(session, CONVERSATION_ID)
+            assert owner is not None
+            await workspace_repo.set_active_profile_id(session, owner.profile_id)
+            await session.commit()
+            return owner.profile_id
+
+    async def _create_and_activate_profile_b() -> tuple[str, str]:
+        async with factory() as session:
+            attachment_id = new_uuid()
+            await attachments_repo.create_staged(
+                session,
+                file_hash="resume-owner-b-" + attachment_id,
+                original_name="profile-b.pdf",
+                size_bytes=10,
+                storage_path=f"{attachment_id}.pdf",
+                page_count=1,
+                attachment_id=attachment_id,
+            )
+            profile = await profiles_repo.create_profile(
+                session,
+                attachment_id=attachment_id,
+                display_name="Resume profile B",
+                profile_json={},
+                location=None,
+                extraction_version="test-only",
+                source_hash="resume-profile-b",
+            )
+            conversation = await conversations_repo.create_for_profile(
+                session, profile_id=profile.id
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await session.commit()
+            return profile.id, conversation.id
+
+    profile_a = run_async(_activate_run_owner())
+    runner_owners: list[tuple[str, str, bool]] = []
+    real_stream_agent_run = chat_turns_service.stream_agent_run
+
+    async def _recording_stream_agent_run(**kwargs: Any) -> Any:
+        runner_owners.append(
+            (
+                kwargs["conversation_id"],
+                kwargs["profile_id"],
+                bool(kwargs["resumed"]),
+            )
+        )
+        async for event in real_stream_agent_run(**kwargs):
+            yield event
+
+    monkeypatch.setattr(
+        chat_turns_service, "stream_agent_run", _recording_stream_agent_run
+    )
     tool = build_synthetic_interrupt_tool(
         session_factory=factory,
         side_effect_counter=counter,
@@ -438,7 +546,11 @@ def test_public_turn_resume_synthetic_interrupt(
     with _client_with_fake(db_path, model, registry) as client:
         turn = client.post(
             "/api/chat/turns",
-            json={"message": "please interrupt", "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": "please interrupt",
+                "attachment_ids": [],
+            },
         )
         assert turn.status_code == 200
         events = _parse_sse(turn.text)
@@ -453,15 +565,22 @@ def test_public_turn_resume_synthetic_interrupt(
             SYNTHETIC_ALLOWED_ACTIONS
         )
         run_id = approval["run_id"]
+        assert runner_owners == [(CONVERSATION_ID, profile_a, False)]
+
+        profile_b, conversation_b = run_async(_create_and_activate_profile_b())
 
         # New turn blocked while interrupted
         blocked = client.post(
             "/api/chat/turns",
-            json={"message": "another turn", "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": "another turn",
+                "attachment_ids": [],
+            },
         )
         assert blocked.status_code == 409
         detail = blocked.json()["detail"]
-        assert detail["code"] == "APPROVAL_ACTION_REQUIRED"
+        assert detail["code"] == "CONVERSATION_SWITCH_BLOCKED"
         assert FAKE_SHOPAIKEY not in blocked.text
         assert "Traceback" not in blocked.text
 
@@ -496,6 +615,31 @@ def test_public_turn_resume_synthetic_interrupt(
         assert rev[0]["payload"]["resumed"] is True
         assert rnames[-1] == "run_completed"
         assert counter["n"] == 1
+        assert runner_owners == [
+            (CONVERSATION_ID, profile_a, False),
+            (CONVERSATION_ID, profile_a, True),
+        ]
+
+        history_a = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID},
+        )
+        history_b = client.get(
+            f"/api/conversations/{conversation_b}/history"
+        )
+        assert history_a.status_code == 200
+        assert history_b.status_code == 200
+        assert [item["content"] for item in history_a.json()["items"]] == [
+            "please interrupt",
+            "Approved path finished.",
+        ]
+        assert history_b.json()["items"] == []
+
+        async def _active_profile_id() -> str | None:
+            async with factory() as session:
+                return await workspace_repo.get_active_profile_id(session)
+
+        assert run_async(_active_profile_id()) == profile_b
 
         # Terminal no-op resume
         model3 = FakeChatModel(responses=[_ai_text("should not run")])
@@ -514,6 +658,7 @@ def test_public_turn_resume_synthetic_interrupt(
         assert [e["event"] for e in nevents] == ["run_started", "run_completed"]
         assert model3.invoke_count == 0
         assert counter["n"] == 1
+        assert len(runner_owners) == 2
 
     async def _assert_db() -> None:
         factory2 = get_session_factory()
@@ -691,7 +836,11 @@ def test_public_passive_binding_aware_confirmation_card(
     with _client_with_fake(db_path, model, ToolRegistry(tools)) as client:
         turn = client.post(
             "/api/chat/turns",
-            json={"message": _BINDING_AWARE_PUBLIC_JD, "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": _BINDING_AWARE_PUBLIC_JD,
+                "attachment_ids": [],
+            },
         )
         assert turn.status_code == 200
         events = _parse_sse(turn.text)
@@ -820,7 +969,11 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
     ) as client:
         turn = client.post(
             "/api/chat/turns",
-            json={"message": _PUBLIC_JD_MESSAGE, "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": _PUBLIC_JD_MESSAGE,
+                "attachment_ids": [],
+            },
         )
         assert turn.status_code == 200
         events = _parse_sse(turn.text)
@@ -936,7 +1089,11 @@ def test_public_save_job_current_message_interrupt_cancel_and_save(
     ) as client:
         turn = client.post(
             "/api/chat/turns",
-            json={"message": _PUBLIC_JD_MESSAGE, "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": _PUBLIC_JD_MESSAGE,
+                "attachment_ids": [],
+            },
         )
         assert turn.status_code == 200
         events = _parse_sse(turn.text)
@@ -1052,6 +1209,7 @@ def test_cors_allows_configured_origin_get_and_post(
 
         get_resp = client.get(
             "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID},
             headers={"Origin": FRONTEND_ORIGIN},
         )
         assert get_resp.status_code == 200
@@ -1059,7 +1217,11 @@ def test_cors_allows_configured_origin_get_and_post(
 
         post_resp = client.post(
             "/api/chat/turns",
-            json={"message": "hello", "attachment_ids": []},
+            json={
+                "conversation_id": CONVERSATION_ID,
+                "message": "hello",
+                "attachment_ids": [],
+            },
             headers={"Origin": FRONTEND_ORIGIN},
         )
         assert post_resp.status_code == 200
@@ -1117,6 +1279,7 @@ def test_cors_rejects_disallowed_origin(
 
         get_resp = client.get(
             "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID},
             headers={"Origin": OTHER_ORIGIN},
         )
         assert get_resp.headers.get("access-control-allow-origin") != OTHER_ORIGIN
@@ -1138,12 +1301,19 @@ def test_history_after_turn_has_cursor_when_paged(
         for i in range(3):
             r = client.post(
                 "/api/chat/turns",
-                json={"message": f"msg {i}", "attachment_ids": []},
+                json={
+                    "conversation_id": CONVERSATION_ID,
+                    "message": f"msg {i}",
+                    "attachment_ids": [],
+                },
             )
             assert r.status_code == 200
             assert _parse_sse(r.text)[-1]["event"] == "run_completed"
 
-        page1 = client.get("/api/chat/history", params={"limit": 2})
+        page1 = client.get(
+            "/api/chat/history",
+            params={"conversation_id": CONVERSATION_ID, "limit": 2},
+        )
         assert page1.status_code == 200
         body = page1.json()
         assert set(body.keys()) == {"items", "next_cursor"}
@@ -1151,7 +1321,11 @@ def test_history_after_turn_has_cursor_when_paged(
         assert body["next_cursor"] is not None
         page2 = client.get(
             "/api/chat/history",
-            params={"limit": 2, "before": body["next_cursor"]},
+            params={
+                "conversation_id": CONVERSATION_ID,
+                "limit": 2,
+                "before": body["next_cursor"],
+            },
         )
         assert page2.status_code == 200
         body2 = page2.json()

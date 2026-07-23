@@ -61,9 +61,19 @@ def _as_record(row: JobEvaluation) -> JobEvaluationRecord:
 async def get_by_id(
     session: AsyncSession,
     evaluation_id: str,
+    *,
+    profile_id: str,
 ) -> JobEvaluation | None:
-    """Return the evaluation with primary key *evaluation_id*, or ``None``."""
-    return await session.get(JobEvaluation, evaluation_id)
+    """Return an evaluation only when owned by *profile_id*."""
+    evaluation_id = _require_nonempty("evaluation_id", evaluation_id)
+    profile_id = _require_nonempty("profile_id", profile_id)
+    result = await session.execute(
+        select(JobEvaluation).where(
+            JobEvaluation.id == evaluation_id,
+            JobEvaluation.profile_id == profile_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_by_job_context(

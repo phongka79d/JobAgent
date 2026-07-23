@@ -93,6 +93,7 @@ async def _insert_user(
 ) -> ChatMessage:
     return await messages_repo.insert_message(
         session,
+        conversation_id=CONVERSATION_ID,
         role=CHAT_MESSAGE_ROLE_USER,
         content=content,
     )
@@ -115,16 +116,28 @@ def test_insert_and_list_messages_ordered_by_created_at_id(db_path: Path) -> Non
                 t1 = t0 + timedelta(seconds=1)
 
                 m_late = await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_USER, content="second-time"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="second-time",
                 )
                 m_early = await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_ASSISTANT, content="first-time"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_ASSISTANT,
+                    content="first-time",
                 )
                 m_same_a = await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_SYSTEM, content="same-a"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_SYSTEM,
+                    content="same-a",
                 )
                 m_same_b = await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_USER, content="same-b"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="same-b",
                 )
 
                 # Force timestamps: two at t0 with id order, one later.
@@ -137,7 +150,9 @@ def test_insert_and_list_messages_ordered_by_created_at_id(db_path: Path) -> Non
                 await session.commit()
 
             async with factory() as session:
-                rows = await messages_repo.list_messages(session)
+                rows = await messages_repo.list_messages(
+                    session, conversation_id=CONVERSATION_ID
+                )
                 assert all(r.conversation_id == CONVERSATION_ID for r in rows)
                 assert len(rows) == 4
                 # Within t0: (created_at, id) — ids alphabetical among the three.
@@ -154,6 +169,72 @@ def test_insert_and_list_messages_ordered_by_created_at_id(db_path: Path) -> Non
     run_async(_body())
 
 
+def test_message_repository_requires_explicit_conversation_id() -> None:
+    """Chat message ownership is explicit for every read/write entry point."""
+    for name in ("insert_message", "list_messages", "list_messages_before"):
+        parameter = inspect.signature(getattr(messages_repo, name)).parameters[
+            "conversation_id"
+        ]
+        assert parameter.default is inspect.Parameter.empty, name
+
+
+def test_message_reads_are_isolated_between_conversations(db_path: Path) -> None:
+    """A real two-conversation read cannot return another conversation's rows."""
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        second_conversation_id = new_uuid()
+        try:
+            async with factory() as session:
+                profile_id = (
+                    await session.execute(
+                        text("SELECT profile_id FROM conversations LIMIT 1")
+                    )
+                ).scalar_one()
+                now = "2026-07-23 00:00:00+00:00"
+                await session.execute(
+                    text(
+                        "INSERT INTO conversations "
+                        "(id, profile_id, title, created_at, updated_at, "
+                        "last_opened_at) "
+                        "VALUES (:cid, :pid, 'Second', :now, :now, :now)"
+                    ),
+                    {"cid": second_conversation_id, "pid": profile_id, "now": now},
+                )
+                await messages_repo.insert_message(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="first conversation",
+                )
+                await messages_repo.insert_message(
+                    session,
+                    conversation_id=second_conversation_id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="second conversation",
+                )
+                await session.commit()
+
+            async with factory() as session:
+                first_rows = await messages_repo.list_messages(
+                    session, conversation_id=CONVERSATION_ID
+                )
+                second_rows = await messages_repo.list_messages(
+                    session, conversation_id=second_conversation_id
+                )
+                assert [row.content for row in first_rows] == [
+                    "first conversation"
+                ]
+                assert [row.content for row in second_rows] == [
+                    "second conversation"
+                ]
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_tool_role_rejected_and_not_persisted(db_path: Path) -> None:
     """``role='tool'`` is rejected; no tool row is written."""
 
@@ -164,7 +245,10 @@ def test_tool_role_rejected_and_not_persisted(db_path: Path) -> None:
             async with factory() as session:
                 with pytest.raises(InvalidMessageRoleError):
                     await messages_repo.insert_message(
-                        session, role="tool", content="tool output"
+                        session,
+                        conversation_id=CONVERSATION_ID,
+                        role="tool",
+                        content="tool output",
                     )
                 await session.rollback()
 
@@ -187,7 +271,10 @@ def test_empty_content_without_payload_rejected(db_path: Path) -> None:
             async with factory() as session:
                 with pytest.raises(ChatMessageRepositoryError):
                     await messages_repo.insert_message(
-                        session, role=CHAT_MESSAGE_ROLE_USER, content=""
+                        session,
+                        conversation_id=CONVERSATION_ID,
+                        role=CHAT_MESSAGE_ROLE_USER,
+                        content="",
                     )
         finally:
             await engine.dispose()
@@ -203,6 +290,7 @@ def test_empty_content_with_structured_payload_allowed(db_path: Path) -> None:
             async with factory() as session:
                 msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=CONVERSATION_ID,
                     role=CHAT_MESSAGE_ROLE_ASSISTANT,
                     content="",
                     structured_payload={"kind": "approval_card"},
@@ -225,11 +313,16 @@ def test_list_only_main_conversation(db_path: Path) -> None:
         try:
             async with factory() as session:
                 await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_USER, content="main-only"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="main-only",
                 )
                 await session.commit()
             async with factory() as session:
-                rows = await messages_repo.list_messages(session)
+                rows = await messages_repo.list_messages(
+                    session, conversation_id=CONVERSATION_ID
+                )
                 assert len(rows) == 1
                 assert rows[0].conversation_id == CONVERSATION_ID
         finally:
@@ -514,7 +607,10 @@ def test_repository_does_not_commit_caller_owned_unit(db_path: Path) -> None:
         try:
             async with factory() as session:
                 user = await messages_repo.insert_message(
-                    session, role=CHAT_MESSAGE_ROLE_USER, content="uncommitted"
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="uncommitted",
                 )
                 run = await runs_repo.create_run(
                     session, user_message_id=user.id

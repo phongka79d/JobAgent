@@ -15,14 +15,15 @@ from app.agent.context import (
     normalize_turn_attachment_ids,
 )
 from app.agent.state import (
-    AGENT_CONVERSATION_ID,
     AGENT_STATE_FIELDS,
     AgentState,
     ContextMessage,
     agent_state_field_names,
     build_initial_agent_state,
 )
-from app.db.models.chat import CONVERSATION_ID
+
+TEST_CONVERSATION_ID = "11111111-1111-4111-8111-111111111110"
+TEST_PROFILE_ID = "11111111-1111-4111-8111-111111111112"
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -54,9 +55,10 @@ def _msg(i: int, *, role: str = "user", content: str | None = None) -> _FakeMsg:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_state_has_exactly_ten_named_fields() -> None:
+def test_agent_state_has_exactly_eleven_named_fields() -> None:
     expected = {
         "conversation_id",
+        "profile_id",
         "run_id",
         "messages_for_this_turn",
         "recent_context",
@@ -69,32 +71,73 @@ def test_agent_state_has_exactly_ten_named_fields() -> None:
     }
     assert AGENT_STATE_FIELDS == expected
     assert agent_state_field_names() == expected
-    assert len(AGENT_STATE_FIELDS) == 10
-    # TypedDict annotations expose the same ten keys.
+    assert len(AGENT_STATE_FIELDS) == 11
+    # TypedDict annotations expose the same eleven keys.
     hints = get_type_hints(AgentState)
     assert set(hints) == expected
 
 
-def test_build_initial_state_singleton_conversation_and_run_identity() -> None:
+def test_build_initial_state_retains_explicit_conversation_and_profile_ids() -> None:
+    state = build_initial_agent_state(
+        run_id="11111111-1111-4111-8111-111111111111",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
+    )
+    assert state["conversation_id"] == TEST_CONVERSATION_ID
+    assert state["profile_id"] == TEST_PROFILE_ID
+    assert "profile_id" in AGENT_STATE_FIELDS
+
+
+def test_build_initial_state_requires_explicit_owner_ids() -> None:
+    with pytest.raises(TypeError):
+        build_initial_agent_state(run_id="11111111-1111-4111-8111-111111111111")
+    with pytest.raises(ValueError, match="conversation_id"):
+        build_initial_agent_state(
+            run_id="11111111-1111-4111-8111-111111111111",
+            conversation_id="",
+            profile_id=TEST_PROFILE_ID,
+        )
+    with pytest.raises(ValueError, match="profile_id"):
+        build_initial_agent_state(
+            run_id="11111111-1111-4111-8111-111111111111",
+            conversation_id=TEST_CONVERSATION_ID,
+            profile_id="   ",
+        )
+
+
+def test_build_initial_state_durable_owner_and_run_identity() -> None:
     run_id = "11111111-1111-4111-8111-111111111111"
-    state = build_initial_agent_state(run_id=run_id)
-    assert state["conversation_id"] == "main"
-    assert state["conversation_id"] == CONVERSATION_ID
-    assert state["conversation_id"] == AGENT_CONVERSATION_ID
+    state = build_initial_agent_state(
+        run_id=run_id,
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
+    )
+    assert state["conversation_id"] == TEST_CONVERSATION_ID
+    assert state["profile_id"] == TEST_PROFILE_ID
     assert state["run_id"] == run_id
     assert set(state) == AGENT_STATE_FIELDS
 
 
 def test_build_initial_state_rejects_empty_run_id() -> None:
     with pytest.raises(ValueError, match="run_id"):
-        build_initial_agent_state(run_id="")
+        build_initial_agent_state(
+            run_id="",
+            conversation_id=TEST_CONVERSATION_ID,
+            profile_id=TEST_PROFILE_ID,
+        )
     with pytest.raises(ValueError, match="run_id"):
-        build_initial_agent_state(run_id="   ")
+        build_initial_agent_state(
+            run_id="   ",
+            conversation_id=TEST_CONVERSATION_ID,
+            profile_id=TEST_PROFILE_ID,
+        )
 
 
 def test_build_initial_state_candidate_context_defaults_empty() -> None:
     state = build_initial_agent_state(
         run_id="22222222-2222-4222-8222-222222222222",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
         recent_context=[
             ContextMessage(id="a", role="user", content="hi"),
         ],
@@ -111,6 +154,8 @@ def test_build_initial_state_accepts_compact_candidate_context() -> None:
     cards = [{"kind": "approved_profile", "summary": "Engineer"}]
     state = build_initial_agent_state(
         run_id="22222222-2222-4222-8222-222222222223",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
         candidate_context=cards,
     )
     assert state["candidate_context"] == cards
@@ -121,6 +166,8 @@ def test_build_initial_state_attachment_ids_only_no_document_bodies() -> None:
     att = "44444444-4444-4444-8444-444444444444"
     state = build_initial_agent_state(
         run_id="55555555-5555-4555-8555-555555555555",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
         attachment_ids=[att],
     )
     assert state["attachment_ids"] == [att]
@@ -143,7 +190,11 @@ def test_normalize_turn_attachment_ids_does_not_add_durable_ids() -> None:
 
 
 def test_build_initial_state_defaults() -> None:
-    state = build_initial_agent_state(run_id="66666666-6666-4666-8666-666666666666")
+    state = build_initial_agent_state(
+        run_id="66666666-6666-4666-8666-666666666666",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
+    )
     assert state["messages_for_this_turn"] == []
     assert state["recent_context"] == []
     assert state["attachment_ids"] == []
@@ -157,6 +208,8 @@ def test_build_initial_state_rejects_negative_iteration() -> None:
     with pytest.raises(ValueError, match="tool_iteration_count"):
         build_initial_agent_state(
             run_id="77777777-7777-4777-8777-777777777777",
+            conversation_id=TEST_CONVERSATION_ID,
+            profile_id=TEST_PROFILE_ID,
             tool_iteration_count=-1,
         )
 
@@ -176,7 +229,11 @@ def test_no_extra_memory_or_classifier_fields_on_agent_state() -> None:
         "cv_raw",
     }
     assert AGENT_STATE_FIELDS.isdisjoint(forbidden)
-    state = build_initial_agent_state(run_id="88888888-8888-4888-8888-888888888888")
+    state = build_initial_agent_state(
+        run_id="88888888-8888-4888-8888-888888888888",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
+    )
     assert forbidden.isdisjoint(state.keys())
 
 
@@ -331,6 +388,8 @@ def test_state_with_recent_context_keeps_candidate_empty_by_default() -> None:
     turn = [ContextMessage(id=_msg(3).id, role="user", content="now")]
     state = build_initial_agent_state(
         run_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
         messages_for_this_turn=turn,
         recent_context=recent,
         attachment_ids=[],
@@ -481,6 +540,7 @@ def test_load_candidate_context_uses_approved_not_draft(
     )
     from app.db.session import build_async_engine
     from app.repositories import attachments as att_repo
+    from app.repositories import conversations as conversations_repo
     from app.repositories import profiles as profile_repo
 
     from tests.support.db_migration import run_async, session_factory
@@ -502,13 +562,16 @@ def test_load_candidate_context_uses_approved_not_draft(
                     attachment_id=active_id,
                 )
                 await att_repo.mark_active(session, active_id, page_count=1)
-                await profile_repo.upsert_active_profile(
+                profile = await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=active_id,
                     profile_json=_valid_profile_dict(
                         summary="APPROVED_SUMMARY",
                         current_title="Approved Title",
                     ),
+                )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile.id
                 )
                 await profile_repo.upsert_job_preferences(
                     session,
@@ -541,7 +604,11 @@ def test_load_candidate_context_uses_approved_not_draft(
                 await session.commit()
 
             async with factory() as session:
-                cards = await load_candidate_context(session)
+                cards = await load_candidate_context(
+                    session,
+                    conversation_id=conversation.id,
+                    profile_id=profile.id,
+                )
             assert cards
             assert cards[0]["kind"] == CANDIDATE_CONTEXT_KIND_PROFILE
             assert cards[0]["summary"] == "APPROVED_SUMMARY"
@@ -560,7 +627,7 @@ def test_load_candidate_context_uses_approved_not_draft(
     run_async(_body())
 
 
-def test_load_candidate_context_empty_when_no_profile(
+def test_load_candidate_context_rejects_missing_owner(
     migrated_sqlite: Path,
 ) -> None:
     from app.agent.context import load_candidate_context
@@ -573,8 +640,12 @@ def test_load_candidate_context_empty_when_no_profile(
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                cards = await load_candidate_context(session)
-            assert cards == []
+                with pytest.raises(RuntimeError, match="conversation not found"):
+                    await load_candidate_context(
+                        session,
+                        conversation_id=TEST_CONVERSATION_ID,
+                        profile_id=TEST_PROFILE_ID,
+                    )
         finally:
             await engine.dispose()
 
@@ -600,6 +671,8 @@ def test_build_initial_state_accepts_compact_active_cv_outline_only() -> None:
     }
     state = build_initial_agent_state(
         run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
         active_cv_context=outline,
     )
     assert state["active_cv_context"] == outline

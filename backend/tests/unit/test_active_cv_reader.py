@@ -15,6 +15,7 @@ from app.core.ids import new_uuid
 from app.db.session import build_async_engine
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.repositories.attachment_text_chunks import build_chunk_write
@@ -43,6 +44,8 @@ _SECTION_ID = "cv-document-v1:s0:experience"
 _ENTRY_0 = "cv-document-v1:s0:e0:role"
 _ENTRY_1 = "cv-document-v1:s0:e1:lead"
 _SOURCE_HASH = "abc123sourcehashfixed000000000000000000000000000000000000001"
+_EMPTY_CONVERSATION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1"
+_EMPTY_PROFILE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2"
 
 
 def _entry(
@@ -154,7 +157,7 @@ async def _seed_active_document(
     with_chunks: bool = True,
     document: dict[str, Any] | None = None,
     source_hash: str = _SOURCE_HASH,
-) -> str:
+) -> tuple[str, str, str]:
     await att_repo.create_staged(
         session,
         file_hash=f"hash-{attachment_id[:8]}",
@@ -165,7 +168,7 @@ async def _seed_active_document(
         attachment_id=attachment_id,
     )
     await att_repo.mark_active(session, attachment_id, page_count=1)
-    await profile_repo.upsert_active_profile(
+    profile = await profile_repo.upsert_active_profile(
         session,
         active_attachment_id=attachment_id,
         profile_json={
@@ -178,6 +181,9 @@ async def _seed_active_document(
             "languages": [],
             "extraction_confidence": 0.9,
         },
+    )
+    conversation = await conversations_repo.create_for_profile(
+        session, profile_id=profile.id
     )
     doc = document or _document(attachment_id)
     if with_document:
@@ -202,7 +208,7 @@ async def _seed_active_document(
             [build_chunk_write(i, t) for i, t in enumerate(texts)],
         )
     await session.commit()
-    return attachment_id
+    return attachment_id, profile.id, conversation.id
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +270,13 @@ def test_load_active_cv_context_document_and_legacy(migrated_sqlite: Path) -> No
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session)
+                _, profile_id, conversation_id = await _seed_active_document(session)
             async with factory() as session:
-                ctx = await load_active_cv_context(session)
+                ctx = await load_active_cv_context(
+                    session,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
+                )
             assert ctx is not None
             assert ctx["attachment_id"] == _ATTACHMENT
             assert ctx["reprocess_required"] is False
@@ -281,7 +291,11 @@ def test_load_active_cv_context_document_and_legacy(migrated_sqlite: Path) -> No
                 await cv_doc_repo.delete_document(session, _ATTACHMENT)
                 await session.commit()
             async with factory() as session:
-                legacy = await load_active_cv_context(session)
+                legacy = await load_active_cv_context(
+                    session,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
+                )
             assert legacy is not None
             assert legacy["reprocess_required"] is True
             assert legacy["sections"] == []
@@ -292,14 +306,18 @@ def test_load_active_cv_context_document_and_legacy(migrated_sqlite: Path) -> No
     run_async(_body())
 
 
-def test_load_active_cv_context_empty_without_profile(migrated_sqlite: Path) -> None:
+def test_load_active_cv_context_rejects_missing_owner(migrated_sqlite: Path) -> None:
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                ctx = await load_active_cv_context(session)
-            assert ctx is None
+                with pytest.raises(RuntimeError, match="conversation not found"):
+                    await load_active_cv_context(
+                        session,
+                        conversation_id=_EMPTY_CONVERSATION_ID,
+                        profile_id=_EMPTY_PROFILE_ID,
+                    )
         finally:
             await engine.dispose()
 
@@ -332,7 +350,7 @@ def test_section_mode_stable_order_and_caps(migrated_sqlite: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session)
+                _, profile_id, conversation_id = await _seed_active_document(session)
             async with factory() as session:
                 result = await read_active_cv(
                     session,
@@ -340,6 +358,8 @@ def test_section_mode_stable_order_and_caps(migrated_sqlite: Path) -> None:
                     section_id=_SECTION_ID,
                     max_results=1,
                     max_chars=DEFAULT_MAX_CHARS,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert result.ok is True
             assert result.data is not None
@@ -360,6 +380,8 @@ def test_section_mode_stable_order_and_caps(migrated_sqlite: Path) -> None:
                     section_id=_SECTION_ID,
                     cursor=result.data["next_cursor"],
                     max_results=5,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert page2.ok is True
             assert page2.data is not None
@@ -378,23 +400,36 @@ def test_section_not_found_and_invalid_input(migrated_sqlite: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session)
+                _, profile_id, conversation_id = await _seed_active_document(session)
             async with factory() as session:
                 missing = await read_active_cv(
-                    session, mode="section", section_id="missing-section"
+                    session,
+                    mode="section",
+                    section_id="missing-section",
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
-                bad_mode = await read_active_cv(session, mode="vector")  # type: ignore[arg-type]
+                bad_mode = await read_active_cv(
+                    session,
+                    mode="vector",  # type: ignore[arg-type]
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
+                )
                 bad_bounds = await read_active_cv(
                     session,
                     mode="chunk",
                     chunk_ordinal=0,
                     max_results=0,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
                 bad_chars = await read_active_cv(
                     session,
                     mode="chunk",
                     chunk_ordinal=0,
                     max_chars=1,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert missing.ok is False and missing.code == ERROR_SECTION_NOT_FOUND
             assert bad_mode.ok is False and bad_mode.code == ERROR_INVALID_INPUT
@@ -420,13 +455,15 @@ def test_search_matches_entries_and_chunks_stable_order(
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session)
+                _, profile_id, conversation_id = await _seed_active_document(session)
             async with factory() as session:
                 result = await read_active_cv(
                     session,
                     mode="search",
                     query="Python",
                     max_results=10,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert result.ok is True
             assert result.data is not None
@@ -465,7 +502,9 @@ def test_chunk_mode_page_and_character_truncation(migrated_sqlite: Path) -> None
                 ]
             )
             async with factory() as session:
-                await _seed_active_document(session, document=doc, with_chunks=False)
+                _, profile_id, conversation_id = await _seed_active_document(
+                    session, document=doc, with_chunks=False
+                )
                 await chunk_repo.replace_for_attachment(
                     session,
                     _ATTACHMENT,
@@ -483,6 +522,8 @@ def test_chunk_mode_page_and_character_truncation(migrated_sqlite: Path) -> None
                     chunk_ordinal=0,
                     max_results=1,
                     max_chars=500,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert result.ok is True
             assert result.data is not None
@@ -502,6 +543,8 @@ def test_chunk_mode_page_and_character_truncation(migrated_sqlite: Path) -> None
                     cursor=result.data["next_cursor"],
                     max_results=5,
                     max_chars=6000,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert page2.ok is True
             assert page2.data is not None
@@ -521,13 +564,15 @@ def test_malformed_cursor_and_active_switch_invalidation(
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session)
+                _, profile_id, conversation_id = await _seed_active_document(session)
             async with factory() as session:
                 first = await read_active_cv(
                     session,
                     mode="section",
                     section_id=_SECTION_ID,
                     max_results=1,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert first.ok and first.data and first.data["next_cursor"]
             cursor = first.data["next_cursor"]
@@ -541,6 +586,8 @@ def test_malformed_cursor_and_active_switch_invalidation(
                     mode="section",
                     section_id=_SECTION_ID,
                     cursor="!!!not-a-cursor!!!",
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert bad.ok is False
             assert bad.code == ERROR_MALFORMED_CURSOR
@@ -591,6 +638,8 @@ def test_malformed_cursor_and_active_switch_invalidation(
                     mode="section",
                     section_id=_SECTION_ID,
                     cursor=cursor,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert changed.ok is False
             assert changed.code == ERROR_ACTIVE_CV_CHANGED
@@ -621,6 +670,8 @@ def test_malformed_cursor_and_active_switch_invalidation(
                     mode="section",
                     section_id=_SECTION_ID,
                     cursor=other_cursor,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert revised.ok is False
             assert revised.code == ERROR_ACTIVE_CV_CHANGED
@@ -636,16 +687,30 @@ def test_legacy_section_reprocess_search_chunk(migrated_sqlite: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await _seed_active_document(session, with_document=False)
+                _, profile_id, conversation_id = await _seed_active_document(
+                    session, with_document=False
+                )
             async with factory() as session:
                 section = await read_active_cv(
-                    session, mode="section", section_id=_SECTION_ID
+                    session,
+                    mode="section",
+                    section_id=_SECTION_ID,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
                 search = await read_active_cv(
-                    session, mode="search", query="Python"
+                    session,
+                    mode="search",
+                    query="Python",
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
                 chunk = await read_active_cv(
-                    session, mode="chunk", chunk_ordinal=0
+                    session,
+                    mode="chunk",
+                    chunk_ordinal=0,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert section.ok is False
             assert section.code == ERROR_CV_DOCUMENT_REPROCESS_REQUIRED
@@ -691,7 +756,9 @@ def test_reader_never_accepts_archived_guess_via_server_resolve(
         try:
             archived = new_uuid()
             async with factory() as session:
-                await _seed_active_document(session, attachment_id=archived)
+                _, profile_id, conversation_id = await _seed_active_document(
+                    session, attachment_id=archived
+                )
                 await att_repo.mark_archived(session, archived)
                 # No workspace-selected profile -> no active CV.
                 from app.repositories import workspace_state as workspace_repo
@@ -707,7 +774,11 @@ def test_reader_never_accepts_archived_guess_via_server_resolve(
                 await session.commit()
             async with factory() as session:
                 result = await read_active_cv(
-                    session, mode="chunk", chunk_ordinal=0
+                    session,
+                    mode="chunk",
+                    chunk_ordinal=0,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                 )
             assert result.ok is False
             assert result.code == ERROR_NO_ACTIVE_CV

@@ -43,7 +43,6 @@ from app.agent.graph import (
     build_agent_graph,
     initial_graph_state,
 )
-from app.agent.state import AGENT_CONVERSATION_ID
 from app.core.settings import Settings
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.tool_execution import (
@@ -202,7 +201,8 @@ def _compile_with_checkpointer(
 async def stream_agent_run(
     *,
     run_id: str,
-    conversation_id: str = AGENT_CONVERSATION_ID,
+    conversation_id: str,
+    profile_id: str,
     user_text: str | None = None,
     resumed: bool = False,
     resume_value: Any | None = None,
@@ -244,6 +244,10 @@ async def stream_agent_run(
     """
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
+    if not isinstance(conversation_id, str) or conversation_id.strip() == "":
+        raise ValueError("conversation_id must be a non-empty string")
+    if not isinstance(profile_id, str) or profile_id.strip() == "":
+        raise ValueError("profile_id must be a non-empty string")
 
     open_cm: CheckpointerOpen = (
         checkpointer_open if checkpointer_open is not None else open_checkpointer
@@ -299,6 +303,7 @@ async def stream_agent_run(
                 run_id=run_id,
                 user_text=user_text,
                 conversation_id=conversation_id,
+                profile_id=profile_id,
                 recent_context=recent_context,
                 candidate_context=candidate_context,
                 active_cv_context=active_cv_context,

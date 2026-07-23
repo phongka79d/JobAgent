@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 
@@ -176,7 +177,8 @@ def project_active_cv_context(
 async def load_active_cv_context(
     session: AsyncSession,
     *,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
 ) -> dict[str, Any] | None:
     """Load compact active-CV outline into Agent ``active_cv_context``.
 
@@ -184,16 +186,19 @@ async def load_active_cv_context(
     a caller-supplied attachment ID. Never reads draft documents, archived
     attachments, raw bytes, or chunk bodies.
     """
-    profile = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if owner is None:
+        raise RuntimeError("conversation not found")
+    if owner.profile_id != profile_id:
+        raise RuntimeError("conversation/profile ownership mismatch")
+    profile = await profile_repo.get_profile(session, profile_id)
     if profile is None:
         return empty_active_cv_context()
     attachment_id = profile.active_attachment_id
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":
         return empty_active_cv_context()
+    if attachment_id != owner.attachment_id:
+        raise RuntimeError("profile attachment ownership mismatch")
 
     doc = await cv_doc_repo.get_document(session, attachment_id)
     if doc is None:

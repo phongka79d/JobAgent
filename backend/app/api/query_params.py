@@ -8,16 +8,19 @@ from fastapi import Query
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
-from app.schemas.chat import ConversationQuery, HistoryQuery
+from app.schemas.chat import ConversationQuery, HistoryQuery, LegacyHistoryQuery
 
 
 def history_query(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     before: Annotated[str | None, Query()] = None,
-    conversation_id: Annotated[str | None, Query()] = None,
-) -> HistoryQuery:
+    *,
+    conversation_id: Annotated[str, Query(min_length=1)],
+) -> LegacyHistoryQuery:
     try:
-        return HistoryQuery(limit=limit, before=before, conversation_id=conversation_id)
+        return LegacyHistoryQuery(
+            limit=limit, before=before, conversation_id=conversation_id
+        )
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
 

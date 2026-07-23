@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.active_cv_context import LEGACY_EXTRACTION_VERSION
 from app.repositories import attachment_text_chunks as chunk_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.cv_document import parse_cv_document
@@ -57,7 +58,6 @@ _CURSOR_VERSION: int = 1
 
 # Ceiling for local O(n) scan: one active CV's entries + chunks only.
 _LOCAL_SEARCH_ENTRY_CHUNK_CEILING: int = 2_000
-
 
 @dataclass(frozen=True, slots=True)
 class _ActiveTarget:
@@ -201,18 +201,31 @@ def _validate_bounds(
 
 
 async def _resolve_active_target(
-    session: AsyncSession, profile_id: str | None = None
+    session: AsyncSession,
+    *,
+    conversation_id: str | None = None,
+    profile_id: str | None = None,
 ) -> _ActiveTarget | ToolResult:
-    profile = (
-        await profile_repo.get_profile(session, profile_id)
-        if profile_id is not None
-        else await profile_repo.get_active_profile(session)
-    )
+    if (
+        not isinstance(conversation_id, str)
+        or conversation_id.strip() == ""
+        or not isinstance(profile_id, str)
+        or profile_id.strip() == ""
+    ):
+        return _fail(ERROR_NO_ACTIVE_CV, "No conversation/profile owner is available")
+    conversation_id = conversation_id.strip()
+    profile_id = profile_id.strip()
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if owner is None or owner.profile_id != profile_id:
+        return _fail(ERROR_NO_ACTIVE_CV, "Conversation/profile ownership is invalid")
+    profile = await profile_repo.get_profile(session, profile_id)
     if profile is None:
         return _fail(ERROR_NO_ACTIVE_CV, "No active CV/profile is available")
     attachment_id = profile.active_attachment_id
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":
         return _fail(ERROR_NO_ACTIVE_CV, "No active CV attachment is available")
+    if attachment_id != owner.attachment_id:
+        return _fail(ERROR_NO_ACTIVE_CV, "Active CV ownership is invalid")
 
     doc = await cv_doc_repo.get_document(session, attachment_id)
     if doc is None:
@@ -236,9 +249,15 @@ async def _resolve_active_target(
 
 async def resolve_active_cv_identity(
     session: AsyncSession,
+    *,
+    conversation_id: str | None = None,
     profile_id: str | None = None,
 ) -> ActiveCvIdentity | ToolResult:
-    resolved = await _resolve_active_target(session, profile_id)
+    resolved = await _resolve_active_target(
+        session,
+        conversation_id=conversation_id,
+        profile_id=profile_id,
+    )
     if isinstance(resolved, ToolResult):
         return resolved
     return ActiveCvIdentity(
@@ -587,6 +606,7 @@ async def read_active_cv(
     max_results: int = DEFAULT_MAX_RESULTS,
     max_chars: int = DEFAULT_MAX_CHARS,
     expected_identity: ActiveCvIdentity | None = None,
+    conversation_id: str | None = None,
     profile_id: str | None = None,
 ) -> ToolResult:
     """Read one bounded page of active-CV evidence.
@@ -641,7 +661,11 @@ async def read_active_cv(
                 "chunk_ordinal must be a non-negative integer when provided",
             )
 
-    resolved = await _resolve_active_target(session, profile_id)
+    resolved = await _resolve_active_target(
+        session,
+        conversation_id=conversation_id,
+        profile_id=profile_id,
+    )
     if isinstance(resolved, ToolResult):
         return resolved
     target = resolved

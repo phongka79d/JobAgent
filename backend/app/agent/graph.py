@@ -42,7 +42,7 @@ from typing_extensions import TypedDict
 
 from app.adapters.shopaikey_chat import bind_chat_tools, build_shopaikey_chat
 from app.agent.prompt import build_system_prompt
-from app.agent.state import AGENT_CONVERSATION_ID, AGENT_STATE_FIELDS
+from app.agent.state import AGENT_STATE_FIELDS
 from app.core.settings import Settings, get_settings
 from app.db.models.profiles import PROFILE_DRAFT_ID
 from app.schemas.jobs import SAVE_JOB_SOURCE_CURRENT_MESSAGE, SaveJobInput
@@ -138,6 +138,7 @@ class AgentGraphState(TypedDict):
     """
 
     conversation_id: str
+    profile_id: str
     run_id: str
     messages_for_this_turn: Annotated[list[AnyMessage], add_messages]
     recent_context: list[dict[str, Any]]
@@ -1188,8 +1189,8 @@ def initial_graph_state(
     *,
     run_id: str,
     user_text: str,
-    conversation_id: str = AGENT_CONVERSATION_ID,
-    profile_id: str | None = None,
+    conversation_id: str,
+    profile_id: str,
     recent_context: Sequence[dict[str, Any]] | None = None,
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
@@ -1200,10 +1201,13 @@ def initial_graph_state(
     """Build a valid starting graph state for one user turn (no DB access)."""
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
-    if profile_id is not None and not profile_id.strip():
-        raise ValueError("profile_id must be a non-empty string when provided")
+    if not isinstance(conversation_id, str) or conversation_id.strip() == "":
+        raise ValueError("conversation_id must be a non-empty string")
+    if not isinstance(profile_id, str) or profile_id.strip() == "":
+        raise ValueError("profile_id must be a non-empty string")
     state: AgentGraphState = {
-        "conversation_id": conversation_id,
+        "conversation_id": conversation_id.strip(),
+        "profile_id": profile_id.strip(),
         "run_id": run_id,
         "messages_for_this_turn": [HumanMessage(content=user_text)],
         "recent_context": list(recent_context or ()),

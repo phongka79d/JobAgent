@@ -1,7 +1,7 @@
 """Passive-JD recognition, durable source resolution, and cancel projection.
 
 Owns pure fixed recognition/opt-out/sole-URL/obvious-JD predicates, one short
-read of the initiating main-conversation user message via existing
+read of the initiating conversation-owned user message via existing
 repositories, bounded ``job_save_confirmation`` pending projection, and the
 successful no-mutation cancellation ToolResult.
 
@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
-from app.repositories import conversations as conversations_repo
 from app.schemas.jobs import (
     SAVE_JOB_CANCEL_OUTCOME,
     SAVE_JOB_SOURCE_CURRENT_MESSAGE,
@@ -192,7 +191,8 @@ async def resolve_initiating_user_message(
             code=ERROR_INVALID_CURRENT_MESSAGE,
             summary="initiating message is not a valid user message",
         )
-    if await conversations_repo.resolve_owner(session, message.conversation_id) is None:
+    owner = await runs_repo.resolve_run_owner(session, run.id)
+    if owner is None or owner.conversation_id != message.conversation_id:
         return SourceLookupFailure(
             code=ERROR_INVALID_CURRENT_MESSAGE,
             summary="initiating message is not a valid user message",

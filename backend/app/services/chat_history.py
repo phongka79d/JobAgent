@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
-    CONVERSATION_ID,
     AgentRun,
     ChatMessage,
     ToolExecution,
@@ -112,9 +111,9 @@ def _message_view(
 async def get_history_page(
     session: AsyncSession,
     *,
+    conversation_id: str,
     limit: int = 50,
     before: str | None = None,
-    conversation_id: str | None = None,
 ) -> HistoryPage:
     """Load one chronological history page with opaque cursor pagination.
 
@@ -124,9 +123,7 @@ async def get_history_page(
     """
     if not isinstance(limit, int) or limit < 1 or limit > 100:
         raise ChatHistoryServiceError("limit must be an integer in 1..100")
-    if conversation_id is not None and await conversations_repo.resolve_owner(
-        session, conversation_id
-    ) is None:
+    if await conversations_repo.resolve_owner(session, conversation_id) is None:
         raise ChatHistoryServiceError("conversation not found")
 
     cursor_pair: tuple[datetime, str] | None = None
@@ -137,7 +134,7 @@ async def get_history_page(
     # Newest-first with one extra row to detect older pages.
     newest_first = await messages_repo.list_messages_before(
         session,
-        conversation_id=conversation_id or CONVERSATION_ID,
+        conversation_id=conversation_id,
         limit=limit + 1,
         before=cursor_pair,
     )
