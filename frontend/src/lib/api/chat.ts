@@ -117,6 +117,28 @@ export async function fetchChatHistory(
   return parseHistoryPage(json);
 }
 
+export async function fetchConversationHistory(
+  conversationId: string,
+  query: HistoryQuery = {},
+  signal?: AbortSignal,
+): Promise<HistoryPage> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.before) params.set('before', query.before);
+  const suffix = params.size ? `?${params}` : '';
+  const response = await fetch(
+    apiUrl(`/api/conversations/${encodeURIComponent(conversationId)}/history${suffix}`),
+    {method: 'GET', headers: {Accept: 'application/json'}, signal},
+  );
+  const text = await response.text();
+  if (!response.ok) throw parseErrorBody(response.status, text);
+  try {
+    return parseHistoryPage(JSON.parse(text) as unknown);
+  } catch {
+    throw new ChatApiError(response.status, 'INVALID_JSON', 'History body is not JSON');
+  }
+}
+
 export type TurnRequest = {
   message: string;
   attachment_ids?: string[];
@@ -150,6 +172,27 @@ export async function streamChatTurn(
     }),
     signal,
   });
+  await consumeWithMappedErrors(response, callbacks, signal);
+}
+
+export async function streamConversationTurn(
+  conversationId: string,
+  body: TurnRequest,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/conversations/${encodeURIComponent(conversationId)}/turns`),
+    {
+      method: 'POST',
+      headers: {Accept: 'text/event-stream', 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message: body.message,
+        attachment_ids: body.attachment_ids ?? [],
+      }),
+      signal,
+    },
+  );
   await consumeWithMappedErrors(response, callbacks, signal);
 }
 

@@ -1517,7 +1517,7 @@ git commit -m "feat: key graph projections by profile"
 - Modify: frontend/src/lib/api/chat.ts
 - Test: frontend/src/test/profile-api.test.ts, frontend/src/test/conversation-api.test.ts, frontend/src/test/saved-jobs-api.test.ts, frontend/src/test/cv-sidebar.test.tsx
 
-- [ ] Step 1: Write failing parser and request tests
+- [x] Step 1: Write failing parser and request tests
 
 Add strict UUID fixtures and safe fields:
 
@@ -1561,7 +1561,7 @@ it('sends profile and conversation IDs in paths', async () => {
 
 Cover every endpoint method, stable error parsing, cursor query, empty replacement selection, and rejection of unknown/raw fields.
 
-- [ ] Step 2: Run frontend transport tests to verify RED
+- [x] Step 2: Run frontend transport tests to verify RED
 
 ~~~powershell
 Set-Location frontend
@@ -1570,7 +1570,7 @@ npm test -- --run src/test/profile-api.test.ts src/test/conversation-api.test.ts
 
 Expected: profile/conversation types and clients are missing.
 
-- [ ] Step 3: Define strict DTOs and parsers
+- [x] Step 3: Define strict DTOs and parsers
 
 Create conversationTypes.ts and extend profile/types.ts with exact TypeScript types:
 
@@ -1667,11 +1667,11 @@ export type SelectionResponse = {
 
 Parsers must enforce UUID v4, exact keys, bounded strings, safe attachment metadata, and no storage path, contact details, raw CV text, or provider payloads. Keep the existing ChatApiError safe status/code/summary mapping.
 
-- [ ] Step 4: Implement typed profile and conversation clients
+- [x] Step 4: Implement typed profile and conversation clients
 
 Rename the existing singleton compatibility reader to fetchActiveProfileCompat(signal), then add fetchProfiles, fetchProfile(profileId, signal), updateProfile, activateProfile, deleteProfile, fetchProfileConversations, createProfileConversation, selectConversation, and deleteConversation to features/profile/api.ts. Export defaultProfileApi as an object containing those functions so workspaceState.ts has one injectable transport contract. Add fetchConversationHistory(conversationId, query, signal) and streamConversationTurn(conversationId, request, callbacks, signal) to lib/api/chat.ts; preserve SSE parsing/event names and streamChatResume(runId, action, callbacks, signal). Every path segment uses encodeURIComponent; no client request sends profile JSON or attachment ownership.
 
-- [ ] Step 5: Run transport/static gates and commit
+- [x] Step 5: Run transport/static gates and commit
 
 ~~~powershell
 npm test -- --run src/test/profile-api.test.ts src/test/conversation-api.test.ts src/test/saved-jobs-api.test.ts src/test/cv-sidebar.test.tsx

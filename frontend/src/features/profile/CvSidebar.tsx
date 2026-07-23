@@ -25,7 +25,7 @@ import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
 import {useObservabilityState} from '../observability/state';
 import {
   ChatApiError,
-  fetchProfile,
+  fetchActiveProfileCompat,
   getActiveCvUrl,
   uploadCv,
 } from './api';
@@ -33,7 +33,7 @@ import {ProfileOverviewPanel} from './ProfileOverviewPanel';
 import type {CvUploadResponse, ProfileReadResponse} from './types';
 
 export type CvSidebarDeps = {
-  loadProfile?: typeof fetchProfile;
+  loadProfile?: typeof fetchActiveProfileCompat;
   uploadCv?: typeof uploadCv;
   getActiveCvUrl?: typeof getActiveCvUrl;
   observability?: Partial<ObservabilityApi>;
@@ -160,7 +160,7 @@ function CvSidebarController({
 }: CvSidebarProps) {
   const observability = useObservabilityState({api: deps?.observability});
   const {endReprocess, failReprocess, invalidateAfterActivation} = observability;
-  const loadProfile = deps?.loadProfile ?? fetchProfile;
+  const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
 

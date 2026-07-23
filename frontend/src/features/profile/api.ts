@@ -15,11 +15,27 @@ import {
   type CvUploadResponse,
   type ProfileReadResponse,
 } from './types';
+import {
+  parseConversationDeleteResponse,
+  parseConversationListResponse,
+  parseConversationMutationResponse,
+  parseProfileDeleteResponse,
+  parseProfileDetail,
+  parseProfileListResponse,
+  parseSelectionResponse,
+  type ConversationDeleteResponse,
+  type ConversationListResponse,
+  type ConversationMutationResponse,
+  type ProfileDeleteResponse,
+  type ProfileDetail,
+  type ProfileListResponse,
+  type SelectionResponse,
+} from './conversationTypes';
 
 export {ChatApiError};
 
 /** GET /api/profile → empty or active profile + attachment metadata. */
-export async function fetchProfile(
+export async function fetchActiveProfileCompat(
   signal?: AbortSignal,
 ): Promise<ProfileReadResponse> {
   const response = await fetch(apiUrl('/api/profile'), {
@@ -51,6 +67,57 @@ export async function fetchProfile(
     );
   }
 }
+
+async function jsonRequest<T>(
+  path: string,
+  init: RequestInit,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  const response = await fetch(apiUrl(path), init);
+  const text = await response.text();
+  if (!response.ok) throw parseErrorBody(response.status, text);
+  try {
+    return parse(JSON.parse(text) as unknown);
+  } catch (error) {
+    if (error instanceof ChatApiError) throw error;
+    throw new ChatApiError(response.status, 'INVALID_PROFILE_PAYLOAD', error instanceof Error ? error.message : 'Invalid profile payload');
+  }
+}
+
+const jsonHeaders = {'Content-Type': 'application/json', Accept: 'application/json'};
+const profilePath = (profileId: string) => `/api/profiles/${encodeURIComponent(profileId)}`;
+
+export function fetchProfiles(signal?: AbortSignal): Promise<ProfileListResponse> {
+  return jsonRequest('/api/profiles', {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseProfileListResponse);
+}
+export function fetchProfile(profileId: string, signal?: AbortSignal): Promise<ProfileDetail> {
+  return jsonRequest(profilePath(profileId), {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseProfileDetail);
+}
+export function updateProfile(profileId: string, displayName: string, signal?: AbortSignal): Promise<ProfileDetail> {
+  return jsonRequest(profilePath(profileId), {method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({display_name: displayName}), signal}, parseProfileDetail);
+}
+export function activateProfile(profileId: string, signal?: AbortSignal): Promise<SelectionResponse> {
+  return jsonRequest(`${profilePath(profileId)}/activate`, {method: 'POST', headers: {Accept: 'application/json'}, signal}, parseSelectionResponse);
+}
+export function deleteProfile(profileId: string, signal?: AbortSignal): Promise<ProfileDeleteResponse> {
+  return jsonRequest(profilePath(profileId), {method: 'DELETE', headers: {Accept: 'application/json'}, signal}, parseProfileDeleteResponse);
+}
+export function fetchProfileConversations(profileId: string, query: {limit?: number; before?: string | null} = {}, signal?: AbortSignal): Promise<ConversationListResponse> {
+  const params = new URLSearchParams(); if (query.limit !== undefined) params.set('limit', String(query.limit)); if (query.before) params.set('before', query.before);
+  const suffix = params.size ? `?${params}` : '';
+  return jsonRequest(`${profilePath(profileId)}/conversations${suffix}`, {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseConversationListResponse);
+}
+export function createProfileConversation(profileId: string, signal?: AbortSignal): Promise<ConversationMutationResponse> {
+  return jsonRequest(`${profilePath(profileId)}/conversations`, {method: 'POST', headers: {Accept: 'application/json'}, signal}, parseConversationMutationResponse);
+}
+export function selectConversation(conversationId: string, signal?: AbortSignal): Promise<ConversationMutationResponse> {
+  return jsonRequest(`/api/conversations/${encodeURIComponent(conversationId)}/select`, {method: 'POST', headers: {Accept: 'application/json'}, signal}, parseConversationMutationResponse);
+}
+export function deleteConversation(conversationId: string, signal?: AbortSignal): Promise<ConversationDeleteResponse> {
+  return jsonRequest(`/api/conversations/${encodeURIComponent(conversationId)}`, {method: 'DELETE', headers: {Accept: 'application/json'}, signal}, parseConversationDeleteResponse);
+}
+
+export const defaultProfileApi = {fetchProfiles, fetchProfile, updateProfile, activateProfile, deleteProfile, fetchProfileConversations, createProfileConversation, selectConversation, deleteConversation};
 
 /**
  * POST /api/attachments/cv — shared by sidebar and chat composer.

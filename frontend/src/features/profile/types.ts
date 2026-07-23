@@ -9,6 +9,7 @@ export type CvUploadOutcome =
   | 'new'
   | 'existing_active'
   | 'existing_staged'
+  | 'existing_profile'
   | 'retry';
 
 /** Safe public attachment metadata (no filesystem path). */
@@ -24,6 +25,7 @@ export type AttachmentPublic = {
 
 export type ProfileUploadSummary = {
   present: boolean;
+  profile_id?: string | null;
   current_title: string | null;
 };
 
@@ -103,6 +105,7 @@ const UPLOAD_OUTCOMES: ReadonlySet<string> = new Set([
   'new',
   'existing_active',
   'existing_staged',
+  'existing_profile',
   'retry',
 ]);
 
@@ -189,7 +192,14 @@ export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
     ) {
       throw new Error('profile.current_title must be string or null');
     }
-    profile = {present, current_title};
+    profile = {
+      present,
+      profile_id:
+        raw.profile.profile_id === null || raw.profile.profile_id === undefined
+          ? null
+          : asString(raw.profile.profile_id),
+      current_title,
+    };
   }
   let draft: DraftUploadSummary | null = null;
   if (raw.draft !== null && raw.draft !== undefined) {
