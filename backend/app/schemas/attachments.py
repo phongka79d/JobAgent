@@ -22,13 +22,6 @@ from pydantic import BaseModel, Field
 # archived so pending drafts from CV Manager reprocess of archived CVs can
 # surface without 500s (upload outcomes still use staged/active/failed only).
 AttachmentState = Literal["staged", "active", "archived", "failed"]
-CvUploadOutcome = Literal[
-    "new",
-    "existing_active",
-    "existing_staged",
-    "existing_profile",
-    "retry",
-]
 
 assert frozenset(("staged", "active", "archived", "failed")) == frozenset(
     {
@@ -74,27 +67,9 @@ class DraftUploadSummary(BaseModel):
     source_attachment_id: UuidStr | None = None
 
 
-class CvUploadResponse(BaseModel):
-    """``POST /api/attachments/cv`` success body.
-
-    ``outcome`` distinguishes new staging, exact-hash reuse of active/staged,
-    and explicit failed→staged retry. Profile/draft summaries are present only
-    when relevant; they never carry raw CV text.
-    """
-
-    model_config = StrictModelConfig
-
-    attachment: AttachmentPublic
-    outcome: CvUploadOutcome
-    profile: ProfileUploadSummary | None = None
-    draft: DraftUploadSummary | None = None
-
-
 __all__ = [
     "AttachmentPublic",
     "AttachmentState",
-    "CvUploadOutcome",
-    "CvUploadResponse",
     "DraftUploadSummary",
     "ProfileUploadSummary",
 ]

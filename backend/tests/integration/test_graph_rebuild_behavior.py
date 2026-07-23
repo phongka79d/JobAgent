@@ -10,6 +10,9 @@ import pytest
 from app.core.settings import clear_settings_cache
 from app.db.session import build_async_engine
 from app.graph.rebuild import RebuildError, rebuild_graph
+from app.repositories import attachments as attachment_repo
+from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.services.skill_normalization import SkillNormalizer
 
 from tests.fakes.graph_rebuild import FakeNeo4jDriver
@@ -250,6 +253,54 @@ def test_rebuild_projects_every_ready_profile(
         if "profile_id" in params and "skills" in params
     ]
     assert set(candidate_params) == {profile_a, profile_b}
+
+
+def test_rebuild_excludes_pending_profile_projection(
+    migrated_sqlite: Path,
+) -> None:
+    engine = build_async_engine(migrated_sqlite)
+    factory = session_factory(engine)
+    normalizer = SkillNormalizer.from_path(skills_fixture())
+    driver = FakeNeo4jDriver()
+
+    async def _setup() -> tuple[str, str]:
+        ready_id = await seed_candidate(
+            factory,
+            file_hash="hash-ready-only-projection",
+            display_name="Ready Profile",
+        )
+        async with factory() as session:
+            attachment = await attachment_repo.create_staged(
+                session,
+                file_hash="hash-pending-no-projection",
+                original_name="pending.pdf",
+                size_bytes=100,
+                storage_path="rebuild/pending.pdf",
+                page_count=1,
+            )
+            pending = await profile_repo.create_pending_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Pending Profile",
+            )
+            await workspace_repo.set_active_profile_id(session, pending.id)
+            await session.commit()
+            return ready_id, pending.id
+
+    ready_id, pending_id = run_async(_setup())
+
+    counts = run_async(
+        rebuild_graph(
+            driver,
+            session_factory=factory,
+            normalizer=normalizer,
+            settings=settings(),
+        )
+    )
+
+    assert counts.Candidate == 1
+    assert driver.candidates == {ready_id}
+    assert pending_id not in driver.candidates
 
 
 def test_rebuild_repeat_safe(

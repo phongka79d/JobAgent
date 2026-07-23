@@ -347,6 +347,13 @@ async def load_rebuild_inputs(
     )
     ready_profiles: list[ReadyProfileRebuildRow] = []
     for profile_row in profile_result.scalars().all():
+        source_hash = profile_row.source_hash
+        if source_hash is None:
+            raise RebuildError(
+                f"Profile {profile_row.id}: ready profile source hash is missing; "
+                "fix SQLite profile data before rebuild.",
+                code="CANDIDATE_INVALID",
+            )
         try:
             profile = parse_candidate_profile(profile_row.profile_json)
         except Exception as exc:
@@ -396,7 +403,7 @@ async def load_rebuild_inputs(
                 source_updated_at=profile_row.updated_at,
                 cv=cv,
                 legacy_cv=legacy_cv,
-                source_hash=profile_row.source_hash,
+                source_hash=source_hash,
             )
         )
 

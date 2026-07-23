@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.time import utc_now
 from app.db.models.chat import Conversation
-from app.db.models.profiles import NEW_CONVERSATION_TITLE, PROFILE_STATE_READY
+from app.db.models.profiles import (
+    NEW_CONVERSATION_TITLE,
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
+)
 from app.db.session import session_scope
 from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profiles_repo
@@ -70,7 +74,7 @@ async def list_conversations(
         profile = await profiles_repo.get_profile(session, profile_id)
         if profile is None:
             raise ConversationServiceError("PROFILE_NOT_FOUND", "profile not found")
-        if profile.state != PROFILE_STATE_READY:
+        if profile.state not in {PROFILE_STATE_PENDING, PROFILE_STATE_READY}:
             raise ConversationServiceError("PROFILE_NOT_READY", "profile is not ready")
         page = await conversations_repo.list_for_profile(
             session, profile_id=profile_id, limit=limit, before=before
@@ -90,6 +94,8 @@ async def create_conversation(
         profile = await profiles_repo.get_profile(session, profile_id)
         if profile is None:
             raise ConversationServiceError("PROFILE_NOT_FOUND", "profile not found")
+        if profile.state != PROFILE_STATE_READY:
+            raise ConversationServiceError("PROFILE_NOT_READY", "profile is not ready")
         try:
             await assert_workspace_idle(session, code="CONVERSATION_SWITCH_BLOCKED")
         except ActivityBlockedError as exc:
@@ -115,6 +121,9 @@ async def select_owned_conversation(
             raise ConversationServiceError(
                 "CONVERSATION_NOT_FOUND", "conversation not found"
             )
+        profile = await profiles_repo.get_profile(session, owner.profile_id)
+        if profile is None or profile.state != PROFILE_STATE_READY:
+            raise ConversationServiceError("PROFILE_NOT_READY", "profile is not ready")
         active_id = await workspace_repo.get_active_profile_id(session)
         if active_id != owner.profile_id:
             raise ConversationServiceError(

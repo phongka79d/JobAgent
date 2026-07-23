@@ -197,7 +197,7 @@ async def _load_shared_context(
     session: AsyncSession,
 ) -> _SharedContextRevisions | None:
     """Load active approved profile/CV/prefs facts, or ``None`` if incomplete."""
-    profile_row = await profiles_repo.get_active_profile(session)
+    profile_row = await profiles_repo.get_selected_ready_profile(session)
     if profile_row is None:
         return None
     prefs_row = await profiles_repo.get_job_preferences(session)

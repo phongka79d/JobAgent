@@ -88,7 +88,7 @@ async def build_profile_read_response(
     """
     draft_present, pending_attachment = await _pending_draft_attachment(session)
 
-    profile_row = await profile_repo.get_active_profile(session)
+    profile_row = await profile_repo.get_selected_ready_profile(session)
     if profile_row is None:
         return empty_profile_read_response(
             draft_present=draft_present,
@@ -177,7 +177,7 @@ async def get_profile_cv(request: Request) -> StreamingResponse:
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
 
     async with factory() as session:
-        profile_row = await profile_repo.get_active_profile(session)
+        profile_row = await profile_repo.get_selected_ready_profile(session)
         if profile_row is None:
             raise _http(
                 ERROR_PROFILE_NOT_FOUND,

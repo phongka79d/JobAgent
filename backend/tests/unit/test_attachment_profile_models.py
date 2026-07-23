@@ -145,9 +145,24 @@ def test_registry_and_shared_base() -> None:
 def test_frozen_profile_contract_constants_and_state_check() -> None:
     from app.db.models import profiles as profile_models
 
+    assert profile_models.PROFILE_STATE_PENDING == "pending"
     assert profile_models.PROFILE_STATE_READY == "ready"
     assert profile_models.PROFILE_STATE_DELETING == "deleting"
-    assert profile_models.PROFILE_STATES == frozenset({"ready", "deleting"})
+    assert profile_models.PROFILE_STATES == frozenset(
+        {"pending", "ready", "deleting"}
+    )
+    assert (
+        profile_models.PROFILE_SETUP_STATUS_AWAITING_EXTRACTION
+        == "awaiting_extraction"
+    )
+    assert (
+        profile_models.PROFILE_SETUP_STATUS_AWAITING_APPROVAL
+        == "awaiting_approval"
+    )
+    assert (
+        profile_models.PROFILE_SETUP_STATUS_EXTRACTION_FAILED
+        == "extraction_failed"
+    )
     assert profile_models.PROFILE_DISPLAY_NAME_MAX == 120
     assert profile_models.CONVERSATION_TITLE_MAX == 120
     assert profile_models.PROFILE_SKILL_TAG_LIMIT == 12
@@ -243,8 +258,9 @@ def test_profile_contract() -> None:
     _assert_cols(
         table,
         _PROFILE_COLS,
-        not_null=_PROFILE_COLS - {"location"},
-        nullable={"location"},
+        not_null=_PROFILE_COLS
+        - {"profile_json", "location", "extraction_version", "source_hash"},
+        nullable={"profile_json", "location", "extraction_version", "source_hash"},
     )
     assert _c(table, "id").primary_key
     assert _default_name(_c(table, "id")) == "new_uuid"
@@ -256,6 +272,24 @@ def test_profile_contract() -> None:
         ondelete="RESTRICT",
         uq="uq_profiles__attachment_id",
     )
+    state_shape = _check_sql(table)["ck_profiles__state"]
+    for value in ("pending", "ready", "deleting"):
+        assert value in state_shape
+    for field in ("profile_json", "location", "extraction_version", "source_hash"):
+        assert field in state_shape
+
+    incomplete = [
+        index
+        for index in table.indexes
+        if index.name == "uq_profiles__single_incomplete"
+    ]
+    assert len(incomplete) == 1
+    index = incomplete[0]
+    assert index.unique is True
+    assert [_literal_sql(expression) for expression in index.expressions] == ["1"]
+    where = index.dialect_options.get("sqlite", {}).get("where")
+    assert where is not None
+    assert _literal_sql(where) == "profile_json IS NULL"
 
 
 def test_profile_drafts_contract() -> None:

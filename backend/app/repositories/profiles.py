@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.models.profiles import (
+    PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
     WORKSPACE_STATE_ID,
     Profile,
@@ -43,6 +44,49 @@ async def list_profiles(session: AsyncSession) -> list[Profile]:
         )
     )
     return list(result.scalars().all())
+
+
+async def get_profile_by_attachment_id(
+    session: AsyncSession, attachment_id: str
+) -> Profile | None:
+    result = await session.execute(
+        select(Profile).where(
+            Profile.attachment_id == _required("attachment_id", attachment_id)
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_incomplete_profile(session: AsyncSession) -> Profile | None:
+    result = await session.execute(
+        select(Profile).where(Profile.profile_json.is_(None)).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_pending_profile(
+    session: AsyncSession,
+    *,
+    attachment_id: str,
+    display_name: str,
+) -> Profile:
+    now = utc_now()
+    row = Profile(
+        id=new_uuid(),
+        attachment_id=_required("attachment_id", attachment_id),
+        display_name=_required("display_name", display_name),
+        profile_json=None,
+        location=None,
+        extraction_version=None,
+        source_hash=None,
+        state=PROFILE_STATE_PENDING,
+        created_at=now,
+        updated_at=now,
+        last_opened_at=now,
+    )
+    session.add(row)
+    await session.flush()
+    return row
 
 
 async def create_profile(
@@ -135,6 +179,13 @@ async def get_active_profile(session: AsyncSession) -> Profile | None:
     return await session.get(Profile, state.active_profile_id)
 
 
+async def get_selected_ready_profile(session: AsyncSession) -> Profile | None:
+    profile = await get_active_profile(session)
+    if profile is None or profile.state != PROFILE_STATE_READY:
+        return None
+    return profile
+
+
 async def get_current_draft(session: AsyncSession) -> ProfileDraft | None:
     result = await session.execute(
         select(ProfileDraft)
@@ -153,6 +204,12 @@ async def upsert_current_draft(
 ) -> ProfileDraft:
     if not isinstance(draft_json, dict):
         raise ProfileRepositoryError("draft_json must be a mapping")
+    if source_attachment_id is not None:
+        source_attachment_id = _required(
+            "source_attachment_id", source_attachment_id
+        )
+    if target_profile_id is not None:
+        target_profile_id = _required("target_profile_id", target_profile_id)
     row = await get_current_draft(session)
     now = utc_now()
     if row is None:
@@ -186,7 +243,7 @@ async def delete_current_draft(session: AsyncSession) -> bool:
 async def get_job_preferences(
     session: AsyncSession,
 ) -> ProfilePreference | None:
-    profile = await get_active_profile(session)
+    profile = await get_selected_ready_profile(session)
     if profile is None:
         return None
     return await get_profile_preferences(session, profile.id)
@@ -195,7 +252,7 @@ async def get_job_preferences(
 async def upsert_job_preferences(
     session: AsyncSession, *, preferences_json: dict[str, Any]
 ) -> ProfilePreference:
-    profile = await get_active_profile(session)
+    profile = await get_selected_ready_profile(session)
     if profile is None:
         raise ProfileRepositoryError("no active profile")
     return await upsert_profile_preferences(
@@ -226,6 +283,8 @@ async def upsert_active_profile(
         )
         await workspace_repo.set_active_profile_id(session, profile.id)
         return profile
+    if profile.state != PROFILE_STATE_READY:
+        raise ProfileRepositoryError("selected profile is not ready")
     profile.attachment_id = _required("active_attachment_id", active_attachment_id)
     profile.profile_json = profile_json
     profile.updated_at = utc_now()

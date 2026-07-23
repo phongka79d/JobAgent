@@ -271,6 +271,12 @@ async def activate_profile_by_id(
                 raise ProfileActivationError(
                     "PROFILE_NOT_READY", "profile is not ready"
                 )
+            incomplete = await profiles_repo.get_incomplete_profile(session)
+            if incomplete is not None:
+                raise ProfileActivationError(
+                    "PROFILE_SETUP_IN_PROGRESS",
+                    "finish or discard the pending profile setup first",
+                )
             current_id = await workspace_repo.get_active_profile_id(session)
             current = (
                 await profiles_repo.get_profile(session, current_id)

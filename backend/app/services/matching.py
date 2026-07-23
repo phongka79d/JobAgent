@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Final, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -53,6 +54,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MATCH_LIMIT: int = 10
 MATCH_LIMIT_MIN: int = 1
 MATCH_LIMIT_MAX: int = 10
+ERROR_PROFILE_NOT_READY: Final = "PROFILE_NOT_READY"
 
 NO_PROFILE_MATCH_MESSAGE: str = (
     "Upload and approve a CV before matching. Matching requires an active "
@@ -118,10 +120,17 @@ def _validate_limit(limit: int) -> None:
 
 async def _load_approved_profile_and_preferences(
     session: AsyncSession,
-) -> tuple[str, CandidateProfile, JobPreferences] | None:
+) -> (
+    tuple[str, CandidateProfile, JobPreferences]
+    | Literal["PROFILE_NOT_READY"]
+    | None
+):
     """Load approved profile/preferences only (never a pending draft)."""
-    profile_row = await profiles_repo.get_active_profile(session)
+    profile_row = await profiles_repo.get_selected_ready_profile(session)
     if profile_row is None:
+        selected = await profiles_repo.get_active_profile(session)
+        if selected is not None:
+            return ERROR_PROFILE_NOT_READY
         return None
     profile = parse_candidate_profile(profile_row.profile_json)
 
@@ -180,6 +189,12 @@ async def match_jobs(
         return _failure(
             limit=limit,
             error_code=ERROR_ACTIVE_PROFILE_MISSING,
+            message=NO_PROFILE_MATCH_MESSAGE,
+        )
+    if loaded == ERROR_PROFILE_NOT_READY:
+        return _failure(
+            limit=limit,
+            error_code=ERROR_PROFILE_NOT_READY,
             message=NO_PROFILE_MATCH_MESSAGE,
         )
     profile_id, profile, preferences = loaded
@@ -257,6 +272,7 @@ __all__ = [
     "MATCH_LIMIT_MIN",
     "NO_PROFILE_MATCH_MESSAGE",
     "ERROR_ACTIVE_PROFILE_MISSING",
+    "ERROR_PROFILE_NOT_READY",
     "MatchJobsServiceResult",
     "match_jobs",
 ]

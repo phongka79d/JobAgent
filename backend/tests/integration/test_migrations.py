@@ -636,6 +636,9 @@ def test_migration_0005_is_guarded_explicit_and_provider_free() -> None:
     assert "create_all" not in src
     assert 'op.drop_table("checkpoint' not in src
     assert 'op.drop_table("langgraph_' not in src
+    assert "'pending'" in src
+    assert "profile_json IS NULL" in src
+    assert "uq_profiles__single_incomplete" in src
 
 
 def test_upgrade_from_0003_preserves_rows_without_evaluation_synthesis(

@@ -39,6 +39,7 @@ from app.services.observability import (
     ERROR_CV_FILE_UNAVAILABLE,
     ERROR_JOB_NOT_FOUND,
     ERROR_JOB_NOT_SCORABLE,
+    ERROR_PROFILE_NOT_READY,
     ERROR_SKILL_MAP_LIMIT_EXCEEDED,
     ObservabilityServiceError,
     get_chunk_detail,
@@ -55,6 +56,7 @@ router = APIRouter(tags=["observability"])
 
 _ERROR_STATUS: dict[str, int] = {
     ERROR_ACTIVE_PROFILE_REQUIRED: 409,
+    ERROR_PROFILE_NOT_READY: 409,
     ERROR_CV_ATTACHMENT_NOT_FOUND: 404,
     ERROR_CV_FILE_UNAVAILABLE: 404,
     ERROR_CHUNKS_UNAVAILABLE: 404,

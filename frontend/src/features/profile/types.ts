@@ -4,13 +4,28 @@
  * Never carries storage_path, raw PDF bytes, or secrets.
  */
 
-export type AttachmentState = 'staged' | 'active' | 'archived' | 'failed';
+import {
+  parseAttachmentPublic,
+  parseConversationSummary,
+  parseProfileListItem,
+  type ConversationSummary,
+  type ProfileListItem,
+} from './conversationTypes';
+
+export {parseAttachmentPublic} from './conversationTypes';
+
+export type AttachmentState =
+  | 'staged'
+  | 'active'
+  | 'archived'
+  | 'failed'
+  | 'deleting';
 export type CvUploadOutcome =
-  | 'new'
+  | 'new_pending'
+  | 'retry_pending'
+  | 'existing_pending'
   | 'existing_active'
-  | 'existing_staged'
-  | 'existing_profile'
-  | 'retry';
+  | 'existing_profile';
 
 /** Safe public attachment metadata (no filesystem path). */
 export type AttachmentPublic = {
@@ -35,12 +50,19 @@ export type DraftUploadSummary = {
   source_attachment_id: string | null;
 };
 
+export type PendingProfileBootstrap = {
+  profile: ProfileListItem;
+  conversation: ConversationSummary;
+  start_extraction: boolean;
+};
+
 /** POST /api/attachments/cv success body. */
 export type CvUploadResponse = {
   attachment: AttachmentPublic;
   outcome: CvUploadOutcome;
   profile: ProfileUploadSummary | null;
   draft: DraftUploadSummary | null;
+  bootstrap: PendingProfileBootstrap | null;
 };
 
 /**
@@ -86,77 +108,26 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 function asBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
-const ATTACHMENT_STATES: ReadonlySet<string> = new Set([
-  'staged',
-  'active',
-  'archived',
-  'failed',
-]);
-
 const UPLOAD_OUTCOMES: ReadonlySet<string> = new Set([
-  'new',
+  'new_pending',
+  'retry_pending',
+  'existing_pending',
   'existing_active',
-  'existing_staged',
   'existing_profile',
-  'retry',
 ]);
 
-export function parseAttachmentPublic(raw: unknown): AttachmentPublic {
-  if (!isObject(raw)) {
-    throw new Error('attachment must be an object');
-  }
-  const id = asString(raw.id);
-  const original_name = asString(raw.original_name);
-  const mime_type = asString(raw.mime_type);
-  const size_bytes = asNumber(raw.size_bytes);
-  const state = asString(raw.state);
-  if (!id || !original_name || mime_type !== 'application/pdf') {
-    throw new Error('attachment missing required safe fields');
-  }
-  if (size_bytes === null || size_bytes <= 0) {
-    throw new Error('attachment size_bytes must be a positive number');
-  }
-  if (!state || !ATTACHMENT_STATES.has(state)) {
-    throw new Error('attachment state is invalid');
-  }
-  // Reject path leakage at the client boundary.
-  if ('storage_path' in raw) {
-    throw new Error('attachment must not include storage_path');
-  }
-  const pageRaw = raw.page_count;
-  const page_count =
-    pageRaw === null || pageRaw === undefined ? null : asNumber(pageRaw);
-  if (pageRaw !== null && pageRaw !== undefined && page_count === null) {
-    throw new Error('attachment page_count must be number or null');
-  }
-  const failure_code =
-    raw.failure_code === null || raw.failure_code === undefined
-      ? null
-      : asString(raw.failure_code);
+function exact(raw: Record<string, unknown>, keys: readonly string[]): void {
+  const expected = new Set(keys);
   if (
-    raw.failure_code !== null &&
-    raw.failure_code !== undefined &&
-    failure_code === null
+    Object.keys(raw).some((key) => !expected.has(key)) ||
+    keys.some((key) => !(key in raw))
   ) {
-    throw new Error('attachment failure_code must be string or null');
+    throw new Error('unexpected response field');
   }
-  return {
-    id,
-    original_name,
-    mime_type: 'application/pdf',
-    size_bytes,
-    page_count,
-    state: state as AttachmentState,
-    failure_code,
-  };
 }
 
 export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
@@ -166,6 +137,7 @@ export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
   if ('storage_path' in raw) {
     throw new Error('CV upload response must not include storage_path');
   }
+  exact(raw, ['attachment', 'outcome', 'profile', 'draft', 'bootstrap']);
   const attachment = parseAttachmentPublic(raw.attachment);
   const outcome = asString(raw.outcome);
   if (!outcome || !UPLOAD_OUTCOMES.has(outcome)) {
@@ -176,6 +148,7 @@ export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
     if (!isObject(raw.profile)) {
       throw new Error('profile summary must be an object or null');
     }
+    exact(raw.profile, ['present', 'profile_id', 'current_title']);
     const present = asBoolean(raw.profile.present);
     if (present === null) {
       throw new Error('profile.present must be boolean');
@@ -200,12 +173,20 @@ export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
           : asString(raw.profile.profile_id),
       current_title,
     };
+    if (
+      raw.profile.profile_id !== null &&
+      raw.profile.profile_id !== undefined &&
+      profile.profile_id === null
+    ) {
+      throw new Error('profile.profile_id must be string or null');
+    }
   }
   let draft: DraftUploadSummary | null = null;
   if (raw.draft !== null && raw.draft !== undefined) {
     if (!isObject(raw.draft)) {
       throw new Error('draft summary must be an object or null');
     }
+    exact(raw.draft, ['present', 'draft_id', 'source_attachment_id']);
     const present = asBoolean(raw.draft.present);
     if (present === null) {
       throw new Error('draft.present must be boolean');
@@ -233,11 +214,56 @@ export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
     }
     draft = {present, draft_id, source_attachment_id};
   }
+
+  let bootstrap: PendingProfileBootstrap | null = null;
+  if (raw.bootstrap !== null && raw.bootstrap !== undefined) {
+    if (!isObject(raw.bootstrap)) {
+      throw new Error('bootstrap must be an object or null');
+    }
+    exact(raw.bootstrap, ['profile', 'conversation', 'start_extraction']);
+    const profileItem = parseProfileListItem(raw.bootstrap.profile);
+    const conversation = parseConversationSummary(raw.bootstrap.conversation);
+    const start_extraction = asBoolean(raw.bootstrap.start_extraction);
+    if (start_extraction === null) {
+      throw new Error('bootstrap.start_extraction must be boolean');
+    }
+    if (profileItem.state !== 'pending') {
+      throw new Error('bootstrap profile must be pending');
+    }
+    if (conversation.profile_id !== profileItem.id) {
+      throw new Error('bootstrap conversation owner mismatch');
+    }
+    bootstrap = {profile: profileItem, conversation, start_extraction};
+  }
+
+  const pendingOutcome =
+    outcome === 'new_pending' ||
+    outcome === 'retry_pending' ||
+    outcome === 'existing_pending';
+  if (pendingOutcome) {
+    if (bootstrap === null || profile !== null) {
+      throw new Error('pending upload outcome requires bootstrap only');
+    }
+    if (
+      (outcome === 'new_pending' || outcome === 'retry_pending') &&
+      !bootstrap.start_extraction
+    ) {
+      throw new Error('new and retry pending outcomes must start extraction');
+    }
+  } else {
+    if (bootstrap !== null) {
+      throw new Error('ready upload outcome cannot include bootstrap');
+    }
+    if (profile === null) {
+      throw new Error('ready upload outcome requires profile summary');
+    }
+  }
   return {
     attachment,
     outcome: outcome as CvUploadOutcome,
     profile,
     draft,
+    bootstrap,
   };
 }
 

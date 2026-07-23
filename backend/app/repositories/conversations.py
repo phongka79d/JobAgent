@@ -17,6 +17,7 @@ from app.core.time import utc_now
 from app.db.models.chat import CHAT_MESSAGE_ROLE_USER, ChatMessage, Conversation
 from app.db.models.profiles import (
     NEW_CONVERSATION_TITLE,
+    PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
     Profile,
 )
@@ -170,6 +171,28 @@ async def create_for_profile(
     return row
 
 
+async def create_bootstrap_for_profile(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+) -> Conversation:
+    profile = await profiles_repo.get_profile(session, profile_id)
+    if profile is None or profile.state != PROFILE_STATE_PENDING:
+        raise ConversationRepositoryError("profile is not pending")
+    now = utc_now()
+    row = Conversation(
+        id=new_uuid(),
+        profile_id=profile_id,
+        title=NEW_CONVERSATION_TITLE,
+        created_at=now,
+        updated_at=now,
+        last_opened_at=now,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
 async def select_for_profile(
     session: AsyncSession,
     *,
@@ -214,6 +237,7 @@ async def update_title_from_first_user_message(
                 select(func.count(ChatMessage.id)).where(
                     ChatMessage.conversation_id == conversation_id,
                     ChatMessage.role == CHAT_MESSAGE_ROLE_USER,
+                    ChatMessage.source_attachment_id.is_(None),
                     func.trim(ChatMessage.content) != "",
                 )
             )

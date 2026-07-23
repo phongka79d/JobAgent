@@ -12,9 +12,20 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_DELETING,
+    ATTACHMENT_STATE_FAILED,
+    ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.models.profiles import PROFILE_SKILL_TAG_LIMIT, Profile
+from app.db.models.profiles import (
+    PROFILE_SETUP_STATUS_AWAITING_APPROVAL,
+    PROFILE_SETUP_STATUS_AWAITING_EXTRACTION,
+    PROFILE_SETUP_STATUS_EXTRACTION_FAILED,
+    PROFILE_SKILL_TAG_LIMIT,
+    PROFILE_STATE_DELETING,
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
+    Profile,
+)
 from app.repositories import attachments as attachments_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_documents_repo
@@ -29,6 +40,7 @@ from app.schemas.profile import (
     ProfileDetail,
     ProfileListItem,
     ProfileListResponse,
+    ProfileSetupStatus,
     ProfileSkillTag,
     parse_candidate_profile,
     parse_job_preferences,
@@ -43,7 +55,7 @@ class ProfileProjectionError(Exception):
         self.summary = summary
 
 
-_PROFILE_ATTACHMENT_STATES = frozenset(
+_READY_ATTACHMENT_STATES = frozenset(
     {
         ATTACHMENT_STATE_ACTIVE,
         ATTACHMENT_STATE_ARCHIVED,
@@ -109,7 +121,8 @@ async def _validated(
             raise ValueError("missing profile document")
         parsed_document = parse_cv_document(document.document_json)
         if (
-            attachment.state not in _PROFILE_ATTACHMENT_STATES
+            row.state not in {PROFILE_STATE_READY, PROFILE_STATE_DELETING}
+            or attachment.state not in _READY_ATTACHMENT_STATES
             or parsed_document.attachment_id != row.attachment_id
             or document.extraction_version != row.extraction_version
             or document.source_hash != row.source_hash
@@ -149,7 +162,8 @@ def _project_list_item(
         skill_count=count,
         extraction_version=row.extraction_version,
         source_hash=row.source_hash,
-        state=cast("Literal['ready', 'deleting']", row.state),
+        state=cast("Literal['pending', 'ready', 'deleting']", row.state),
+        setup_status=None,
         is_active=row.id == active_id,
         created_at=_utc(row.created_at),
         updated_at=_utc(row.updated_at),
@@ -160,6 +174,48 @@ def _project_list_item(
 async def project_profile_list_item(
     session: AsyncSession, row: Profile, active_id: str | None
 ) -> ProfileListItem:
+    if row.profile_json is None:
+        attachment = await attachments_repo.get_by_id(session, row.attachment_id)
+        if attachment is None:
+            raise ProfileProjectionError(
+                "PROFILE_INCONSISTENT", "profile attachment is missing"
+            )
+        allowed = (
+            {ATTACHMENT_STATE_STAGED, ATTACHMENT_STATE_FAILED}
+            if row.state == PROFILE_STATE_PENDING
+            else {ATTACHMENT_STATE_DELETING}
+        )
+        if attachment.state not in allowed:
+            raise ProfileProjectionError(
+                "PROFILE_INCONSISTENT", "profile data is inconsistent"
+            )
+        setup_status: ProfileSetupStatus | None = None
+        if row.state == PROFILE_STATE_PENDING:
+            draft = await profiles_repo.get_current_draft(session)
+            if attachment.state == ATTACHMENT_STATE_FAILED:
+                setup_status = PROFILE_SETUP_STATUS_EXTRACTION_FAILED  # type: ignore[assignment]
+            elif draft is not None and draft.target_profile_id == row.id:
+                setup_status = PROFILE_SETUP_STATUS_AWAITING_APPROVAL  # type: ignore[assignment]
+            else:
+                setup_status = PROFILE_SETUP_STATUS_AWAITING_EXTRACTION  # type: ignore[assignment]
+        safe_filename = sanitize_original_name(attachment.original_name)
+        return ProfileListItem(
+            id=row.id,
+            display_name=row.display_name.strip() or safe_filename,
+            cv_filename=safe_filename,
+            attachment_state=cast(ProfileAttachmentState, attachment.state),
+            location=None,
+            skill_tags=[],
+            skill_count=0,
+            extraction_version=None,
+            source_hash=None,
+            state=cast("Literal['pending', 'deleting']", row.state),
+            setup_status=setup_status,
+            is_active=row.id == active_id,
+            created_at=_utc(row.created_at),
+            updated_at=_utc(row.updated_at),
+            last_opened_at=_utc(row.last_opened_at),
+        )
     profile, _, attachment = await _validated(session, row)
     return _project_list_item(
         row, profile=profile, attachment=attachment, active_id=active_id
@@ -202,6 +258,8 @@ async def build_profile_detail(
     row = await profiles_repo.get_profile(session, profile_id)
     if row is None:
         raise ProfileProjectionError("PROFILE_NOT_FOUND", "profile not found")
+    if row.state != PROFILE_STATE_READY:
+        raise ProfileProjectionError("PROFILE_NOT_READY", "profile is not ready")
     active_id = await workspace_repo.get_active_profile_id(session)
     return await project_profile_detail(session, row, active_id)
 

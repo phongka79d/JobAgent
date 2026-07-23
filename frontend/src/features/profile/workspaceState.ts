@@ -10,6 +10,7 @@ import type {
   ProfileListResponse,
   SelectionResponse,
 } from './conversationTypes';
+import type {PendingProfileBootstrap} from './types';
 
 export type ProfileWorkspaceState = {
   profiles: ProfileListItem[];
@@ -29,6 +30,7 @@ export type ProfileWorkspaceAction =
   | {type: 'conversation/created'; response: ConversationMutationResponse}
   | {type: 'conversation/selected'; response: ConversationMutationResponse}
   | {type: 'conversation/deleted'; response: ConversationDeleteResponse}
+  | {type: 'workspace/bootstrapAdopted'; bootstrap: PendingProfileBootstrap}
   | {type: 'error/reset'}
   | {type: 'mutation/started'; key: string}
   | {type: 'mutation/finished'; key: string}
@@ -89,6 +91,22 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
       const remaining = state.conversations.filter((item) => item.id !== action.response.deleted_conversation_id).map((item) => item.id === selected.id ? selected : {...item, is_selected: false});
       return {...state, selectedConversationId: selected.id, conversations: remaining.some((item) => item.id === selected.id) ? remaining : [selected, ...remaining]};
     }
+    case 'workspace/bootstrapAdopted': {
+      const {profile, conversation} = action.bootstrap;
+      return {
+        ...state,
+        profiles: [
+          profile,
+          ...state.profiles
+            .filter((item) => item.id !== profile.id)
+            .map((item) => ({...item, is_active: false})),
+        ],
+        activeProfileId: profile.id,
+        selectedConversationId: conversation.id,
+        conversations: [{...conversation, is_selected: true}],
+        error: null,
+      };
+    }
     case 'mutation/started': return {...state, pending: new Set([...state.pending, action.key]), error: null};
     case 'mutation/finished': { const pending = new Set(state.pending); pending.delete(action.key); return {...state, pending}; }
     case 'mutation/failed': return {...state, error: action.error};
@@ -103,6 +121,7 @@ export type ProfileWorkspaceController = {
   selectConversation: (conversationId: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   reload: () => Promise<void>;
+  adoptBootstrap: (bootstrap: PendingProfileBootstrap) => void;
 };
 
 export function useProfileWorkspaceState(
@@ -146,6 +165,10 @@ export function useProfileWorkspaceState(
   const createConversation = useCallback((profileId: string) => mutate(`create:${profileId}`, () => api.createProfileConversation(profileId), (response) => ({type: 'conversation/created', response})), [api, mutate]);
   const selectConversation = useCallback((conversationId: string) => mutate(`select:${conversationId}`, () => api.selectConversation(conversationId), (response) => ({type: 'conversation/selected', response})), [api, mutate]);
   const deleteConversation = useCallback((conversationId: string) => mutate(`delete:${conversationId}`, () => api.deleteConversation(conversationId), (response) => ({type: 'conversation/deleted', response})), [api, mutate]);
+  const adoptBootstrap = useCallback((bootstrap: PendingProfileBootstrap) => {
+    requestRef.current += 1;
+    dispatch({type: 'workspace/bootstrapAdopted', bootstrap});
+  }, []);
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
     try {
@@ -163,5 +186,5 @@ export function useProfileWorkspaceState(
     }
   }, [api]);
   useEffect(() => { void reload(); return () => { requestRef.current += 1; }; }, [reload]);
-  return {state, activate, createConversation, selectConversation, deleteConversation, reload};
+  return {state, activate, createConversation, selectConversation, deleteConversation, reload, adoptBootstrap};
 }

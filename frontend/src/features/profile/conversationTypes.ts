@@ -1,8 +1,17 @@
-import {parseAttachmentPublic, type JobPreferencesSummary} from './types';
+import type {
+  AttachmentPublic,
+  AttachmentState,
+  JobPreferencesSummary,
+} from './types';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export type ProfileSkillTag = {key: string; label: string};
+export type ProfileAttachmentState = AttachmentState;
+export type ProfileSetupStatus =
+  | 'awaiting_extraction'
+  | 'awaiting_approval'
+  | 'extraction_failed';
 export type CandidateSkillDetail = {
   skill: {canonical_key: string; display_name: string; aliases: string[]; category: string | null};
   confidence: number;
@@ -23,9 +32,10 @@ export type CandidateProfileDetail = {
   education: EducationDetail[]; languages: LanguageDetail[]; extraction_confidence: number;
 };
 export type ProfileListItem = {
-  id: string; display_name: string; cv_filename: string; attachment_state: 'active' | 'archived' | 'deleting';
-  location: string | null; skill_tags: ProfileSkillTag[]; skill_count: number; extraction_version: string;
-  source_hash: string; state: 'ready' | 'deleting'; is_active: boolean; created_at: string; updated_at: string; last_opened_at: string | null;
+  id: string; display_name: string; cv_filename: string; attachment_state: ProfileAttachmentState;
+  location: string | null; skill_tags: ProfileSkillTag[]; skill_count: number; extraction_version: string | null;
+  source_hash: string | null; state: 'pending' | 'ready' | 'deleting'; setup_status: ProfileSetupStatus | null;
+  is_active: boolean; created_at: string; updated_at: string; last_opened_at: string;
 };
 export type ProfileDetail = ProfileListItem & {
   profile: CandidateProfileDetail; preferences: JobPreferencesSummary; attachment: import('./types').AttachmentPublic;
@@ -57,17 +67,49 @@ function uuid(value: unknown): string {
 function string(value: unknown, name: string): string { if (typeof value !== 'string') throw new Error(`${name} must be string`); return value; }
 function nullableString(value: unknown, name: string): string | null { if (value === null) return null; return string(value, name); }
 
+export function parseAttachmentPublic(raw: unknown): AttachmentPublic {
+  const value = object(raw);
+  if ('storage_path' in value) throw new Error('attachment must not include storage_path');
+  exact(value, ['id','original_name','mime_type','size_bytes','page_count','state','failure_code']);
+  if (value.mime_type !== 'application/pdf') throw new Error('invalid attachment mime_type');
+  if (typeof value.size_bytes !== 'number' || !Number.isFinite(value.size_bytes) || value.size_bytes <= 0) throw new Error('attachment size_bytes must be positive');
+  if (value.page_count !== null && (typeof value.page_count !== 'number' || !Number.isFinite(value.page_count) || value.page_count <= 0)) throw new Error('attachment page_count must be positive or null');
+  if (!['staged','active','archived','failed','deleting'].includes(String(value.state))) throw new Error('invalid attachment state');
+  return {
+    id: uuid(value.id),
+    original_name: string(value.original_name, 'original_name'),
+    mime_type: 'application/pdf',
+    size_bytes: value.size_bytes,
+    page_count: value.page_count as number | null,
+    state: value.state as AttachmentState,
+    failure_code: nullableString(value.failure_code, 'failure_code'),
+  };
+}
+
 export function parseConversationSummary(raw: unknown): ConversationSummary {
   const value = object(raw); exact(value, ['id', 'profile_id', 'title', 'created_at', 'updated_at', 'last_opened_at', 'is_selected']);
-  return {id: uuid(value.id), profile_id: uuid(value.profile_id), title: string(value.title, 'title'), created_at: string(value.created_at, 'created_at'), updated_at: string(value.updated_at, 'updated_at'), last_opened_at: string(value.last_opened_at, 'last_opened_at'), is_selected: value.is_selected === true};
+  if (typeof value.is_selected !== 'boolean') throw new Error('is_selected must be boolean');
+  return {id: uuid(value.id), profile_id: uuid(value.profile_id), title: string(value.title, 'title'), created_at: string(value.created_at, 'created_at'), updated_at: string(value.updated_at, 'updated_at'), last_opened_at: string(value.last_opened_at, 'last_opened_at'), is_selected: value.is_selected};
 }
 export function parseProfileListItem(raw: unknown): ProfileListItem {
-  const value = object(raw); exact(value, ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','is_active','created_at','updated_at','last_opened_at']);
+  const value = object(raw); exact(value, ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','setup_status','is_active','created_at','updated_at','last_opened_at']);
   const tags = value.skill_tags; if (!Array.isArray(tags)) throw new Error('skill_tags must be array');
-  if (!['active','archived','deleting'].includes(String(value.attachment_state))) throw new Error('invalid attachment_state');
-  if (!['ready','deleting'].includes(String(value.state))) throw new Error('invalid profile state');
+  if (!['staged','active','archived','failed','deleting'].includes(String(value.attachment_state))) throw new Error('invalid attachment_state');
+  if (!['pending','ready','deleting'].includes(String(value.state))) throw new Error('invalid profile state');
   if (typeof value.is_active !== 'boolean') throw new Error('is_active must be boolean');
-  return {id: uuid(value.id), display_name: string(value.display_name,'display_name'), cv_filename: string(value.cv_filename,'cv_filename'), attachment_state: value.attachment_state as ProfileListItem['attachment_state'], location: nullableString(value.location,'location'), skill_tags: tags.map((tag) => { const item = object(tag); exact(item,['key','label']); return {key:string(item.key,'key'),label:string(item.label,'label')}; }), skill_count: typeof value.skill_count === 'number' ? value.skill_count : (() => { throw new Error('skill_count must be number'); })(), extraction_version: string(value.extraction_version,'extraction_version'), source_hash: string(value.source_hash,'source_hash'), state: value.state as ProfileListItem['state'], is_active: value.is_active === true, created_at: string(value.created_at,'created_at'), updated_at: string(value.updated_at,'updated_at'), last_opened_at: nullableString(value.last_opened_at,'last_opened_at')};
+  if (typeof value.skill_count !== 'number' || !Number.isInteger(value.skill_count) || value.skill_count < 0) throw new Error('skill_count must be a non-negative integer');
+  const location = nullableString(value.location,'location');
+  const extraction_version = nullableString(value.extraction_version,'extraction_version');
+  const source_hash = nullableString(value.source_hash,'source_hash');
+  const setup_status = value.setup_status === null ? null : string(value.setup_status,'setup_status') as ProfileSetupStatus;
+  if (setup_status !== null && !['awaiting_extraction','awaiting_approval','extraction_failed'].includes(setup_status)) throw new Error('invalid setup_status');
+  const state = value.state as ProfileListItem['state'];
+  const attachment_state = value.attachment_state as ProfileAttachmentState;
+  if (state === 'pending' && (extraction_version !== null || source_hash !== null || location !== null || tags.length !== 0 || value.skill_count !== 0 || setup_status === null || !['staged','failed'].includes(attachment_state))) throw new Error('inconsistent pending profile');
+  if (state === 'pending' && ((attachment_state === 'failed') !== (setup_status === 'extraction_failed'))) throw new Error('inconsistent pending failure status');
+  if (state === 'ready' && (extraction_version === null || source_hash === null || setup_status !== null || !['active','archived'].includes(attachment_state))) throw new Error('inconsistent ready profile');
+  if (state === 'deleting' && (setup_status !== null || attachment_state !== 'deleting')) throw new Error('inconsistent deleting profile');
+  return {id: uuid(value.id), display_name: string(value.display_name,'display_name'), cv_filename: string(value.cv_filename,'cv_filename'), attachment_state, location, skill_tags: tags.map((tag) => { const item = object(tag); exact(item,['key','label']); return {key:string(item.key,'key'),label:string(item.label,'label')}; }), skill_count: value.skill_count, extraction_version, source_hash, state, setup_status, is_active: value.is_active, created_at: string(value.created_at,'created_at'), updated_at: string(value.updated_at,'updated_at'), last_opened_at: string(value.last_opened_at,'last_opened_at')};
 }
 export function parseProfileListResponse(raw: unknown): ProfileListResponse {
   const value = object(raw); exact(value, ['items','active_profile_id']); if (!Array.isArray(value.items)) throw new Error('items must be array');
@@ -90,8 +132,8 @@ export function parseConversationDeleteResponse(raw: unknown): ConversationDelet
 
 export function parseProfileDetail(raw: unknown): ProfileDetail {
   const value = object(raw);
-  exact(value, ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','is_active','created_at','updated_at','last_opened_at','profile','preferences','attachment','selected_conversation_id']);
-  const listKeys = ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','is_active','created_at','updated_at','last_opened_at'] as const;
+  exact(value, ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','setup_status','is_active','created_at','updated_at','last_opened_at','profile','preferences','attachment','selected_conversation_id']);
+  const listKeys = ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','setup_status','is_active','created_at','updated_at','last_opened_at'] as const;
   const listRaw = Object.fromEntries(listKeys.map((key) => [key, value[key]]));
   const profile = object(value.profile);
   exact(profile, ['full_name','location','summary','current_title','total_experience_years','skills','experiences','education','languages','extraction_confidence']);

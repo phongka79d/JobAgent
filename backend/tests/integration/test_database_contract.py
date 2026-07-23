@@ -85,6 +85,22 @@ def _profile(profile_id: str, attachment_id: str) -> str:
     )
 
 
+def _pending_profile(
+    profile_id: str,
+    attachment_id: str,
+    *,
+    location_sql: str = "NULL",
+) -> str:
+    return (
+        "INSERT INTO profiles ("
+        "id, attachment_id, display_name, profile_json, location, "
+        "extraction_version, source_hash, state, created_at, updated_at, "
+        "last_opened_at) VALUES ("
+        f"'{profile_id}', '{attachment_id}', 'Pending', NULL, {location_sql}, "
+        f"NULL, NULL, 'pending', '{TS}', '{TS}', '{TS}')"
+    )
+
+
 def _conversation(conversation_id: str, profile_id: str) -> str:
     return (
         "INSERT INTO conversations ("
@@ -130,6 +146,9 @@ def test_schema_pragmas_and_partial_index_present(db_path: Path) -> None:
             partial = expected_indexes()["uq_attachments__single_active"]
             assert partial["unique"] is True
             assert partial["where"] == "state = 'active'"
+            incomplete = expected_indexes()["uq_profiles__single_incomplete"]
+            assert incomplete["unique"] is True
+            assert incomplete["where"] == "profile_json is null"
         finally:
             await e.dispose()
 
@@ -151,6 +170,53 @@ def test_invalid_rows_rejected_and_partial_unique(db_path: Path) -> None:
                 await _x(s, _att("act1", "h1", "p1", st="active", pages=1))
                 await s.commit()
             await _fail(f, _att("act2", "h2", "p2", st="active", pages=1))
+        finally:
+            await e.dispose()
+
+    run_async(_c())
+
+
+def test_database_rejects_partial_pending_profile(db_path: Path) -> None:
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with f() as s:
+                await _x(s, _att("pending-valid", "hpv", "ppv"))
+                await _x(s, _pending_profile("profile-pending", "pending-valid"))
+                await s.commit()
+
+            async with f() as s:
+                await _x(s, _att("pending-partial", "hpp", "ppp"))
+                await s.commit()
+            await _fail(
+                f,
+                _pending_profile(
+                    "profile-partial",
+                    "pending-partial",
+                    location_sql="'Invented'",
+                ),
+            )
+        finally:
+            await e.dispose()
+
+    run_async(_c())
+
+
+def test_database_allows_only_one_incomplete_profile(db_path: Path) -> None:
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with f() as s:
+                await _x(s, _att("pending-one", "hpo", "ppo"))
+                await _x(s, _pending_profile("profile-one", "pending-one"))
+                await s.commit()
+
+            async with f() as s:
+                await _x(s, _att("pending-two", "hpt", "ppt"))
+                await s.commit()
+            await _fail(f, _pending_profile("profile-two", "pending-two"))
         finally:
             await e.dispose()
 

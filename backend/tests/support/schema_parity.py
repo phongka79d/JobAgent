@@ -109,7 +109,9 @@ def expected_indexes() -> dict[str, dict[str, Any]]:
             out[str(index.name)] = {
                 "table": tname,
                 "unique": bool(index.unique),
-                "columns": tuple(col.name for col in index.columns),
+                "columns": tuple(
+                    col.name for col in index.columns if col.name in table.c
+                ),
                 "where": where_fragment,
             }
     return out

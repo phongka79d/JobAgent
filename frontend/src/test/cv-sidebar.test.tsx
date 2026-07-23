@@ -29,6 +29,9 @@ import {
 import {getApiBaseUrl} from '../lib/api/chat';
 
 const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const PROFILE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const CONVERSATION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const NOW = '2026-07-23T10:00:00Z';
 
 function emptyProfile(): ProfileReadResponse {
   return {
@@ -73,6 +76,7 @@ function activeProfile(
 function uploadResponse(
   name = 'new-cv.pdf',
   id = ATTACHMENT_ID,
+  startExtraction = true,
 ): CvUploadResponse {
   return {
     attachment: {
@@ -84,9 +88,38 @@ function uploadResponse(
       state: 'staged',
       failure_code: null,
     },
-    outcome: 'new',
+    outcome: 'new_pending',
     profile: null,
     draft: null,
+    bootstrap: {
+      profile: {
+        id: PROFILE_ID,
+        display_name: name,
+        cv_filename: name,
+        attachment_state: 'staged',
+        location: null,
+        skill_tags: [],
+        skill_count: 0,
+        extraction_version: null,
+        source_hash: null,
+        state: 'pending',
+        setup_status: 'awaiting_extraction',
+        is_active: true,
+        created_at: NOW,
+        updated_at: NOW,
+        last_opened_at: NOW,
+      },
+      conversation: {
+        id: CONVERSATION_ID,
+        profile_id: PROFILE_ID,
+        title: 'Chat mới',
+        created_at: NOW,
+        updated_at: NOW,
+        last_opened_at: NOW,
+        is_selected: true,
+      },
+      start_extraction: startExtraction,
+    },
   };
 }
 
@@ -164,9 +197,10 @@ describe('profile transport parsers', () => {
           state: 'staged',
           failure_code: null,
         },
-        outcome: 'new',
+        outcome: 'new_pending',
         profile: null,
         draft: null,
+        bootstrap: null,
         storage_path: 'nope',
       }),
     ).toThrow(/storage_path/);
@@ -318,21 +352,25 @@ describe('CvSidebar empty / active states', () => {
 });
 
 describe('shared sidebar upload → chat turn', () => {
-  it('sidebar and composer share uploadCv; sidebar success starts ID-only turn', async () => {
+  it('adopts the server conversation before starting one ID-only turn', async () => {
     const loadHistory = vi.fn().mockResolvedValue({items: [], next_cursor: null});
+    const loadConversationHistory = vi.fn().mockResolvedValue({items: [], next_cursor: null});
     const loadProfile = vi
       .fn()
       .mockResolvedValueOnce(emptyProfile())
       .mockResolvedValue(emptyProfile());
     const upload = vi.fn().mockResolvedValue(uploadResponse('side.pdf'));
-    const sendTurn = vi.fn().mockResolvedValue(undefined);
+    const sendConversationTurn = vi.fn().mockResolvedValue(undefined);
 
     render(
       <Theme theme={neutralTheme}>
         <App
           deps={{
-            chat: {loadHistory, sendTurn, uploadCv: upload},
+            chat: {loadHistory, loadConversationHistory, sendConversationTurn, uploadCv: upload},
             sidebar: {loadProfile, uploadCv: upload},
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({items: [], active_profile_id: null}),
+            },
           }}
         />
       </Theme>,
@@ -357,10 +395,11 @@ describe('shared sidebar upload → chat turn', () => {
     });
 
     await waitFor(() => {
-      expect(sendTurn).toHaveBeenCalled();
+      expect(sendConversationTurn).toHaveBeenCalledTimes(1);
     });
 
-    const body = sendTurn.mock.calls[0]![0] as {
+    expect(sendConversationTurn.mock.calls[0]![0]).toBe(CONVERSATION_ID);
+    const body = sendConversationTurn.mock.calls[0]![1] as {
       message: string;
       attachment_ids?: string[];
     };
@@ -368,5 +407,126 @@ describe('shared sidebar upload → chat turn', () => {
     expect(body.attachment_ids).toEqual([ATTACHMENT_ID]);
     // No File/Blob/PDF body on the turn request.
     expect(JSON.stringify(body)).not.toMatch(/storage_path|%PDF/);
+  });
+
+  it('routes composer upload through bootstrap adoption before extraction', async () => {
+    const upload = vi.fn().mockResolvedValue(uploadResponse('composer.pdf'));
+    const sendConversationTurn = vi.fn().mockResolvedValue(undefined);
+    const readyProfileId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const readyConversationId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const readyProfile = {
+      id: readyProfileId,
+      display_name: 'ready.pdf',
+      cv_filename: 'ready.pdf',
+      attachment_state: 'active' as const,
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: 'fixture-v1',
+      source_hash: 'fixture-source',
+      state: 'ready' as const,
+      setup_status: null,
+      is_active: true,
+      created_at: NOW,
+      updated_at: NOW,
+      last_opened_at: NOW,
+    };
+    const readyConversation = {
+      id: readyConversationId,
+      profile_id: readyProfileId,
+      title: 'Existing chat',
+      created_at: NOW,
+      updated_at: NOW,
+      last_opened_at: NOW,
+      is_selected: true,
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            chat: {
+              loadHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+              loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+              sendConversationTurn,
+              uploadCv: upload,
+            },
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue(emptyProfile()),
+              uploadCv: upload,
+            },
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [readyProfile],
+                active_profile_id: readyProfileId,
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [readyConversation],
+                next_cursor: null,
+              }),
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    const getComposerInput = () => {
+      const composerUpload = screen.getByTestId('jobagent-chat-pdf-upload');
+      return composerUpload instanceof HTMLInputElement
+        ? composerUpload
+        : composerUpload.querySelector('input[type="file"]');
+    };
+    await waitFor(() => expect(getComposerInput()).not.toBeDisabled());
+    const composerUpload = screen.getByTestId('jobagent-chat-pdf-upload');
+    const composerInput =
+      composerUpload instanceof HTMLInputElement
+        ? composerUpload
+        : composerUpload.querySelector('input[type="file"]');
+    expect(composerInput).not.toBeNull();
+    await userEvent.upload(
+      composerInput as HTMLInputElement,
+      new File(['%PDF-1.4'], 'composer.pdf', {type: 'application/pdf'}),
+    );
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sendConversationTurn).toHaveBeenCalledTimes(1));
+    expect(sendConversationTurn.mock.calls[0]![0]).toBe(CONVERSATION_ID);
+    expect(sendConversationTurn.mock.calls[0]![1]).toMatchObject({
+      attachment_ids: [ATTACHMENT_ID],
+    });
+  });
+
+  it('does not restart extraction when an existing pending bootstrap says false', async () => {
+    const upload = vi.fn().mockResolvedValue({
+      ...uploadResponse('pending.pdf', ATTACHMENT_ID, false),
+      outcome: 'existing_pending',
+    });
+    const sendConversationTurn = vi.fn();
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            chat: {
+              loadHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+              loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+              sendConversationTurn,
+            },
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue(emptyProfile()),
+              uploadCv: upload,
+            },
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({items: [], active_profile_id: null}),
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    const file = new File(['%PDF-1.4'], 'pending.pdf', {type: 'application/pdf'});
+    await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), file);
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    expect(sendConversationTurn).not.toHaveBeenCalled();
   });
 });

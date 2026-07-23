@@ -41,7 +41,12 @@ from app.db.models.chat import (
     AgentRun,
     ChatMessage,
 )
-from app.db.models.profiles import Profile
+from app.db.models.profiles import (
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
+    Profile,
+    ProfileDraft,
+)
 from app.db.session import get_session_factory, session_scope
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
@@ -194,7 +199,34 @@ async def create_user_turn(
         )
         if resolved_owner is None:
             raise ChatTurnError("CONVERSATION_NOT_FOUND", "conversation not found")
-        requested = [str(item) for item in (attachment_ids or ())]
+        profile = await session.get(Profile, resolved_owner.profile_id)
+        if profile is None:
+            raise ChatTurnError("PROFILE_NOT_READY", "profile is not ready")
+        requested = [str(item).strip() for item in (attachment_ids or ())]
+        if profile.state == PROFILE_STATE_PENDING:
+            draft = await session.execute(
+                select(Profile.id)
+                .join(
+                    ProfileDraft,
+                    ProfileDraft.target_profile_id == Profile.id,
+                )
+                .where(Profile.id == profile.id)
+            )
+            has_targeted_draft = draft.scalar_one_or_none() is not None
+            is_bootstrap = (
+                requested == [resolved_owner.attachment_id]
+                and not has_targeted_draft
+                and source_owner in {None, resolved_owner.attachment_id}
+            )
+            is_correction = (
+                requested == [] and has_targeted_draft and source_owner is None
+            )
+            if is_bootstrap:
+                source_owner = resolved_owner.attachment_id
+            elif not is_correction:
+                raise ChatTurnError("PROFILE_NOT_READY", "profile is not ready")
+        elif profile.state not in {PROFILE_STATE_PENDING, PROFILE_STATE_READY}:
+            raise ChatTurnError("PROFILE_NOT_READY", "profile is not ready")
         if (
             source_owner is not None
             and source_owner != resolved_owner.attachment_id
@@ -230,9 +262,10 @@ async def create_user_turn(
                 "CONVERSATION_SWITCH_BLOCKED",
                 "conversation has an active run",
             ) from exc
-        await conversations_repo.update_title_from_first_user_message(
-            session, conversation_id=resolved_owner.conversation_id, message=text
-        )
+        if source_owner is None:
+            await conversations_repo.update_title_from_first_user_message(
+                session, conversation_id=resolved_owner.conversation_id, message=text
+            )
         interrupted = await get_interrupted_run(
             session,
             conversation_id=resolved_owner.conversation_id,

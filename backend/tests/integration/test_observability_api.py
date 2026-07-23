@@ -1497,6 +1497,62 @@ def test_graph_no_active_profile_ready_empty(
     assert GraphSnapshot.model_validate(extra.json()).code == ERROR_NO_ACTIVE_PROFILE
 
 
+def test_pending_selected_profile_skips_observability_graph_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path, _files = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+
+    async def _seed() -> str:
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="pending-observability-hash",
+                original_name="pending.pdf",
+                size_bytes=100,
+                storage_path="pending/observability.pdf",
+                page_count=1,
+            )
+            profile = await profile_repo.create_pending_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Pending Profile",
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await session.commit()
+        return await seed_scorable_job(
+            factory, raw_hash="pending-observability-job-hash"
+        )
+
+    try:
+        job_id = run_async(_seed())
+    finally:
+        run_async(engine.dispose())
+
+    fake = GraphApiFakeDriver()
+    install_fake_driver(monkeypatch, fake)  # type: ignore[arg-type]
+
+    with _client() as client:
+        graph = client.get("/api/observability/graph")
+        skill_map = client.get(
+            "/api/observability/skill-map", params={"job_id": job_id}
+        )
+
+    snapshot = GraphSnapshot.model_validate(graph.json())
+    assert graph.status_code == 200
+    assert snapshot.code == ERROR_NO_ACTIVE_PROFILE
+    assert snapshot.candidate is None
+    assert snapshot.cv is None
+    assert snapshot.jobs == []
+    assert snapshot.skills == []
+    assert snapshot.edges == []
+
+    assert skill_map.status_code == 409
+    assert skill_map.json()["detail"]["code"] == "PROFILE_NOT_READY"
+    assert fake.queries == fake.schema_queries
+
+
 def test_graph_unavailable_when_neo4j_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

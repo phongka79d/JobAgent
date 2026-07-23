@@ -36,9 +36,10 @@ from app.db.models.attachments import (
     Attachment,
 )
 from app.db.models.profiles import (
-    CANDIDATE_PROFILE_ID,
     JOB_PREFERENCE_KEYS,
     PROFILE_DRAFT_ID,
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
     Profile,
 )
 from app.db.session import session_scope
@@ -207,6 +208,27 @@ async def propose_profile_from_cv(
         storage_path = attachment.storage_path
         original_name = attachment.original_name
 
+        if target_profile_id is not None:
+            target_profile = await profile_repo.get_profile(
+                session, target_profile_id
+            )
+            required_state = (
+                PROFILE_STATE_READY if reprocess else PROFILE_STATE_PENDING
+            )
+            if (
+                target_profile is None
+                or target_profile.state != required_state
+                or target_profile.attachment_id != attachment_id
+            ):
+                return ProposeFromCvResult(
+                    kind="new_draft",
+                    tool_result=_tool_fail(
+                        "PROFILE_INCONSISTENT",
+                        "target profile does not own the attachment",
+                    ),
+                    attachment_id=attachment_id,
+                )
+
         if reprocess:
             if state not in (
                 ATTACHMENT_STATE_ACTIVE,
@@ -226,7 +248,7 @@ async def propose_profile_from_cv(
             # --- Active: return approved profile without extraction/draft ---
             # Legacy active rows without cv_documents stay usable; no synthesis.
             if state == ATTACHMENT_STATE_ACTIVE:
-                profile_row = await profile_repo.get_active_profile(session)
+                profile_row = await profile_repo.get_selected_ready_profile(session)
                 if (
                     profile_row is None
                     or profile_row.active_attachment_id != attachment_id
@@ -242,7 +264,7 @@ async def propose_profile_from_cv(
                     )
                 profile = parse_candidate_profile(profile_row.profile_json)
                 data = {
-                    "profile_id": CANDIDATE_PROFILE_ID,
+                    "profile_id": profile_row.id,
                     "attachment_id": attachment_id,
                     "reused": True,
                     "kind": "active_profile",
@@ -373,6 +395,27 @@ async def propose_profile_from_cv(
                     ),
                     attachment_id=attachment_id,
                 )
+
+            if target_profile_id is not None:
+                target_profile = await profile_repo.get_profile(
+                    session, target_profile_id
+                )
+                required_state = (
+                    PROFILE_STATE_READY if reprocess else PROFILE_STATE_PENDING
+                )
+                if (
+                    target_profile is None
+                    or target_profile.state != required_state
+                    or target_profile.attachment_id != attachment_id
+                ):
+                    return ProposeFromCvResult(
+                        kind="new_draft",
+                        tool_result=_tool_fail(
+                            "PROFILE_INCONSISTENT",
+                            "target profile no longer owns the attachment",
+                        ),
+                        attachment_id=attachment_id,
+                    )
 
             existing = await profile_repo.get_current_draft(session)
             draft_target_profile_id = target_profile_id
@@ -819,7 +862,7 @@ async def propose_profile_update(
             source_attachment_id = draft_row.source_attachment_id
             base_kind: UpdateBaseKind = "current_draft"
         else:
-            profile_row = await profile_repo.get_active_profile(session)
+            profile_row = await profile_repo.get_selected_ready_profile(session)
             if profile_row is None:
                 return ProposeUpdateResult(
                     base_kind=None,

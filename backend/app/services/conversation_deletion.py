@@ -7,8 +7,10 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.checkpoint import delete_run_checkpoints, open_checkpointer
+from app.db.models.profiles import PROFILE_STATE_READY
 from app.repositories import agent_runs as runs_repo
 from app.repositories import conversations as conversations_repo
+from app.repositories import profiles as profiles_repo
 from app.schemas.chat import ConversationDeleteResponse
 from app.services.activity_gate import ActivityBlockedError, assert_conversation_idle
 from app.services.conversations import project_conversation
@@ -34,6 +36,11 @@ async def delete_conversation(
         if owner is None:
             raise ConversationDeletionError(
                 "CONVERSATION_NOT_FOUND", "conversation not found"
+            )
+        profile = await profiles_repo.get_profile(session, owner.profile_id)
+        if profile is None or profile.state != PROFILE_STATE_READY:
+            raise ConversationDeletionError(
+                "PROFILE_NOT_READY", "profile is not ready"
             )
         try:
             await assert_conversation_idle(

@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text, column
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    column,
+    literal_column,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -14,9 +22,15 @@ from app.core.time import utc_now
 from app.db.base import Base
 
 WORKSPACE_STATE_ID = "main"
+PROFILE_STATE_PENDING = "pending"
 PROFILE_STATE_READY = "ready"
 PROFILE_STATE_DELETING = "deleting"
-PROFILE_STATES = frozenset({PROFILE_STATE_READY, PROFILE_STATE_DELETING})
+PROFILE_STATES = frozenset(
+    {PROFILE_STATE_PENDING, PROFILE_STATE_READY, PROFILE_STATE_DELETING}
+)
+PROFILE_SETUP_STATUS_AWAITING_EXTRACTION = "awaiting_extraction"
+PROFILE_SETUP_STATUS_AWAITING_APPROVAL = "awaiting_approval"
+PROFILE_SETUP_STATUS_EXTRACTION_FAILED = "extraction_failed"
 PROFILE_DISPLAY_NAME_MAX = 120
 CONVERSATION_TITLE_MAX = 120
 PROFILE_SKILL_TAG_LIMIT = 12
@@ -42,8 +56,24 @@ class Profile(Base):
     __tablename__ = "profiles"
     __table_args__ = (
         CheckConstraint(
-            column("state").in_(tuple(PROFILE_STATES)),
+            "(state = 'pending' "
+            "AND profile_json IS NULL AND location IS NULL "
+            "AND extraction_version IS NULL AND source_hash IS NULL) "
+            "OR (state = 'ready' "
+            "AND profile_json IS NOT NULL "
+            "AND extraction_version IS NOT NULL AND source_hash IS NOT NULL) "
+            "OR (state = 'deleting' AND ("
+            "(profile_json IS NULL AND location IS NULL "
+            "AND extraction_version IS NULL AND source_hash IS NULL) "
+            "OR (profile_json IS NOT NULL "
+            "AND extraction_version IS NOT NULL AND source_hash IS NOT NULL)))",
             name="state",
+        ),
+        Index(
+            "uq_profiles__single_incomplete",
+            literal_column("1"),
+            unique=True,
+            sqlite_where=column("profile_json").is_(None),
         ),
     )
 
@@ -55,10 +85,12 @@ class Profile(Base):
         unique=True,
     )
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    profile_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    profile_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
-    extraction_version: Mapped[str] = mapped_column(Text, nullable=False)
-    source_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now

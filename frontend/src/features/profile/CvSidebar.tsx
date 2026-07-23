@@ -256,8 +256,8 @@ function CvSidebarController({
       try {
         const result = await doUpload(file);
         setSelectedFile(null);
-        await reload();
         onSidebarUploadSuccess(result);
+        await reload();
       } catch (err) {
         const code = err instanceof ChatApiError ? err.code : 'UPLOAD_FAILED';
         const summary =

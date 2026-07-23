@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterator
+from copy import deepcopy
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -28,14 +29,17 @@ from app.db.session import build_async_engine, get_session_factory
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.repositories.attachments import (
     AttachmentNotFoundError,
     AttachmentRepositoryError,
     InvalidAttachmentTransitionError,
 )
-from app.schemas.attachments import CvUploadResponse
+from app.schemas.profile_setup import CvUploadResponse
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from pypdf import PdfWriter
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -43,6 +47,7 @@ from sqlalchemy.exc import IntegrityError
 from tests.support.db_migration import (
     cleanup_isolated_sqlite,
     run_async,
+    seed_legacy_test_conversation,
     session_factory,
 )
 from tests.support.health import (
@@ -736,7 +741,8 @@ def test_upload_new_digital_cv_stages_row_and_uuid_file(
         response = _upload(client, payload, filename="My CV (final).pdf")
     assert response.status_code == 200, response.text
     body = CvUploadResponse.model_validate(response.json())
-    assert body.outcome == "new"
+    assert body.outcome == "new_pending"
+    assert body.bootstrap is not None
     assert body.attachment.state == ATTACHMENT_STATE_STAGED
     assert body.attachment.mime_type == ATTACHMENT_MIME_TYPE_PDF
     assert body.attachment.size_bytes == len(payload)
@@ -753,16 +759,334 @@ def test_upload_new_digital_cv_stages_row_and_uuid_file(
     assert _attachment_count() == 1
 
 
+def test_new_upload_bootstraps_pending_profile_and_conversation(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db_path, files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        response = _upload(client, payload, filename="Ada.pdf")
+        listed = client.get("/api/profiles")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "new_pending"
+    bootstrap = body["bootstrap"]
+    assert bootstrap["profile"]["state"] == "pending"
+    assert bootstrap["profile"]["location"] is None
+    assert bootstrap["profile"]["skill_tags"] == []
+    assert bootstrap["profile"]["skill_count"] == 0
+    assert bootstrap["profile"]["extraction_version"] is None
+    assert bootstrap["profile"]["source_hash"] is None
+    assert bootstrap["profile"]["setup_status"] == "awaiting_extraction"
+    assert bootstrap["conversation"]["profile_id"] == bootstrap["profile"]["id"]
+    assert bootstrap["conversation"]["title"] == "Chat mới"
+    assert bootstrap["start_extraction"] is True
+    assert body["attachment"]["state"] == ATTACHMENT_STATE_STAGED
+    assert (files_dir / body["attachment"]["id"]).is_file()
+
+    assert listed.status_code == 200, listed.text
+    item = listed.json()["items"][0]
+    assert item["id"] == bootstrap["profile"]["id"]
+    assert item["state"] == "pending"
+    assert item["location"] is None
+    assert item["skill_tags"] == []
+    assert item["setup_status"] == "awaiting_extraction"
+
+
+def test_different_upload_is_blocked_while_pending(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    with health_client() as client:
+        first = _upload(client, DIGITAL_CV.read_bytes(), filename="first.pdf")
+        second = _upload(client, DIGITAL_CV_B.read_bytes(), filename="second.pdf")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
+    assert _attachment_count() == 1
+
+
+def test_pending_profile_detail_and_ready_mutations_are_rejected(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    with health_client() as client:
+        uploaded = _upload(client, DIGITAL_CV.read_bytes()).json()
+        profile_id = uploaded["bootstrap"]["profile"]["id"]
+        responses = [
+            client.get(f"/api/profiles/{profile_id}"),
+            client.patch(
+                f"/api/profiles/{profile_id}", json={"display_name": "Renamed"}
+            ),
+            client.post(f"/api/profiles/{profile_id}/activate"),
+            client.post(f"/api/profiles/{profile_id}/reextract", json={}),
+        ]
+
+    for response in responses:
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "PROFILE_NOT_READY"
+
+
+def test_ready_profile_activation_is_blocked_while_setup_is_pending(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+
+    async def _seed_ready_profile() -> str:
+        factory = get_session_factory()
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="ready-before-pending",
+                original_name="ready.pdf",
+                size_bytes=100,
+                storage_path=new_uuid(),
+                page_count=1,
+            )
+            await att_repo.mark_active(session, attachment.id, page_count=1)
+            profile = await profile_repo.create_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Ready profile",
+                profile_json={},
+                location=None,
+                extraction_version="fixture-v1",
+                source_hash="fixture-source",
+            )
+            await conversations_repo.create_for_profile(
+                session, profile_id=profile.id
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await session.commit()
+            return profile.id
+
+    ready_profile_id = run_async(_seed_ready_profile())
+    with health_client() as client:
+        uploaded = _upload(client, DIGITAL_CV.read_bytes())
+        assert uploaded.status_code == 200, uploaded.text
+        assert uploaded.json()["outcome"] == "new_pending"
+        activated = client.post(f"/api/profiles/{ready_profile_id}/activate")
+
+    assert activated.status_code == 409, activated.text
+    assert activated.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
+
+
+def test_upload_response_rejects_inconsistent_outcome_bootstrap_coupling(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    with health_client() as client:
+        valid = _upload(client, DIGITAL_CV.read_bytes()).json()
+    CvUploadResponse.model_validate(valid)
+
+    missing = deepcopy(valid)
+    missing["bootstrap"] = None
+    with pytest.raises(ValidationError):
+        CvUploadResponse.model_validate(missing)
+
+    no_start = deepcopy(valid)
+    no_start["bootstrap"]["start_extraction"] = False
+    with pytest.raises(ValidationError):
+        CvUploadResponse.model_validate(no_start)
+
+    ready_with_bootstrap = deepcopy(valid)
+    ready_with_bootstrap["outcome"] = "existing_active"
+    with pytest.raises(ValidationError):
+        CvUploadResponse.model_validate(ready_with_bootstrap)
+
+    failed_without_failure_status = deepcopy(valid)
+    failed_without_failure_status["bootstrap"]["profile"][
+        "attachment_state"
+    ] = "failed"
+    with pytest.raises(ValidationError):
+        CvUploadResponse.model_validate(failed_without_failure_status)
+
+    ready_without_profile = deepcopy(valid)
+    ready_without_profile["outcome"] = "existing_active"
+    ready_without_profile["bootstrap"] = None
+    ready_without_profile["profile"] = None
+    with pytest.raises(ValidationError):
+        CvUploadResponse.model_validate(ready_without_profile)
+
+
+def test_exact_hash_pending_reuse_preserves_bootstrap_identity(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload, filename="first.pdf").json()
+        second_response = _upload(client, payload, filename="again.pdf")
+
+    assert second_response.status_code == 200, second_response.text
+    second = second_response.json()
+    assert second["outcome"] == "existing_pending"
+    assert second["bootstrap"]["profile"]["id"] == first["bootstrap"]["profile"]["id"]
+    assert (
+        second["bootstrap"]["conversation"]["id"]
+        == first["bootstrap"]["conversation"]["id"]
+    )
+    assert second["bootstrap"]["start_extraction"] is True
+    assert _attachment_count() == 1
+
+
+def test_failed_exact_hash_retry_preserves_pending_identity(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload, filename="first.pdf").json()
+
+    async def _fail_pending() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.mark_failed(
+                session,
+                first["attachment"]["id"],
+                failure_code="EXTRACTION_FAILED",
+            )
+            await session.commit()
+
+    run_async(_fail_pending())
+    with health_client() as client:
+        retry_response = _upload(client, payload, filename="retry.pdf")
+
+    assert retry_response.status_code == 200, retry_response.text
+    retry = retry_response.json()
+    assert retry["outcome"] == "retry_pending"
+    assert retry["attachment"]["id"] == first["attachment"]["id"]
+    assert retry["attachment"]["state"] == ATTACHMENT_STATE_STAGED
+    assert retry["bootstrap"]["profile"]["id"] == first["bootstrap"]["profile"]["id"]
+    assert (
+        retry["bootstrap"]["conversation"]["id"]
+        == first["bootstrap"]["conversation"]["id"]
+    )
+    assert retry["bootstrap"]["start_extraction"] is True
+    assert _attachment_count() == 1
+
+
+def test_existing_pending_draft_does_not_restart_extraction(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload).json()
+
+    async def _seed_draft() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await profile_repo.upsert_current_draft(
+                session,
+                draft_json={"candidate_profile": {}, "job_preferences": {}},
+                source_attachment_id=first["attachment"]["id"],
+                target_profile_id=first["bootstrap"]["profile"]["id"],
+            )
+            await session.commit()
+
+    run_async(_seed_draft())
+    with health_client() as client:
+        response = _upload(client, payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "existing_pending"
+    assert body["bootstrap"]["start_extraction"] is False
+    assert body["bootstrap"]["profile"]["setup_status"] == "awaiting_approval"
+
+
+def test_failed_pending_status_wins_over_retained_draft(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload).json()
+
+    async def _seed_failed_draft() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await profile_repo.upsert_current_draft(
+                session,
+                draft_json={"candidate_profile": {}, "job_preferences": {}},
+                source_attachment_id=first["attachment"]["id"],
+                target_profile_id=first["bootstrap"]["profile"]["id"],
+            )
+            await att_repo.mark_failed(
+                session,
+                first["attachment"]["id"],
+                failure_code="PROVIDER_TIMEOUT",
+            )
+            await session.commit()
+
+    run_async(_seed_failed_draft())
+    with health_client() as client:
+        response = _upload(client, payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "existing_pending"
+    assert body["bootstrap"]["start_extraction"] is False
+    assert body["bootstrap"]["profile"]["setup_status"] == "extraction_failed"
+
+
+def test_existing_pending_interrupted_run_does_not_restart_extraction(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload).json()
+
+    async def _seed_interrupted() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            message = await messages_repo.insert_message(
+                session,
+                conversation_id=first["bootstrap"]["conversation"]["id"],
+                role="user",
+                content="extract",
+                source_attachment_id=first["attachment"]["id"],
+            )
+            run = await runs_repo.create_run(
+                session,
+                user_message_id=message.id,
+                source_attachment_id=first["attachment"]["id"],
+            )
+            await runs_repo.interrupt_run(
+                session,
+                run.id,
+                pending_approval_json={"kind": "profile_commit"},
+            )
+            await session.commit()
+
+    run_async(_seed_interrupted())
+    with health_client() as client:
+        response = _upload(client, payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "existing_pending"
+    assert body["bootstrap"]["start_extraction"] is False
+
+
 def test_upload_rejects_interrupted_before_persist(
     cv_api_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    _db, files_dir, _fake = cv_api_env
+    db, files_dir, _fake = cv_api_env
+    seed_legacy_test_conversation(db)
 
     async def _seed_interrupted() -> None:
         factory = get_session_factory()
         async with factory() as session:
             user = await messages_repo.insert_message(
-                session, role="user", content="approve please"
+                session,
+                conversation_id="main",
+                role="user",
+                content="approve please",
             )
             run = await runs_repo.create_run(session, user_message_id=user.id)
             await runs_repo.interrupt_run(
@@ -787,6 +1111,37 @@ def test_upload_rejects_interrupted_before_persist(
     detail = response.json()["detail"]
     assert detail["code"] == "APPROVAL_ACTION_REQUIRED"
     assert _message_count() == before_msg
+    assert _attachment_count() == before_att
+    after_files = list(files_dir.iterdir()) if files_dir.exists() else []
+    assert after_files == before_files
+
+
+def test_upload_rejects_running_workspace_before_file_validation(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    db, files_dir, _fake = cv_api_env
+    seed_legacy_test_conversation(db)
+
+    async def _seed_running() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            user = await messages_repo.insert_message(
+                session,
+                conversation_id="main",
+                role="user",
+                content="still running",
+            )
+            await runs_repo.create_run(session, user_message_id=user.id)
+            await session.commit()
+
+    run_async(_seed_running())
+    before_att = _attachment_count()
+    before_files = list(files_dir.iterdir()) if files_dir.exists() else []
+    with health_client() as client:
+        response = _upload(client, b"not-a-pdf-at-all")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
     assert _attachment_count() == before_att
     after_files = list(files_dir.iterdir()) if files_dir.exists() else []
     assert after_files == before_files
@@ -856,91 +1211,55 @@ def test_upload_rejects_oversized(
         assert list(files_dir.iterdir()) == []
 
 
-def test_exact_hash_active_staged_failed_and_new(
+def test_exact_hash_active_ready_profile_reuse(
     cv_api_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     _db, files_dir, _fake = cv_api_env
-    payload_a = DIGITAL_CV.read_bytes()
-    payload_b = DIGITAL_CV_B.read_bytes()
-    assert payload_a != payload_b
-
+    payload = DIGITAL_CV.read_bytes()
     with health_client() as client:
-        r1 = _upload(client, payload_a, filename="a.pdf")
-        assert r1.status_code == 200
-        first = CvUploadResponse.model_validate(r1.json())
-        assert first.outcome == "new"
-        att_a = first.attachment.id
+        first = CvUploadResponse.model_validate(
+            _upload(client, payload, filename="a.pdf").json()
+        )
+    assert first.bootstrap is not None
 
-        r2 = _upload(client, payload_a, filename="a-again.pdf")
-        assert r2.status_code == 200
-        second = CvUploadResponse.model_validate(r2.json())
-        assert second.outcome == "existing_staged"
-        assert second.attachment.id == att_a
-        assert _attachment_count() == 1
-
-        r3 = _upload(client, payload_b, filename="b.pdf")
-        assert r3.status_code == 200
-        third = CvUploadResponse.model_validate(r3.json())
-        assert third.outcome == "new"
-        att_b = third.attachment.id
-        assert att_b != att_a
-        assert _attachment_count() == 2
-        assert (files_dir / att_a).is_file()
-        assert (files_dir / att_b).is_file()
-
-    async def _fail_a() -> None:
+    async def _promote_for_reuse_fixture() -> None:
         factory = get_session_factory()
         async with factory() as session:
-            await att_repo.mark_failed(
-                session, att_a, failure_code="NO_EXTRACTABLE_TEXT"
+            await att_repo.mark_active(session, first.attachment.id, page_count=1)
+            profile = await profile_repo.get_profile(
+                session, first.bootstrap.profile.id
             )
+            assert profile is not None
+            profile.profile_json = {
+                "summary": "Experienced engineer",
+                "current_title": "Senior Engineer",
+                "total_experience_years": 5.0,
+                "skills": [],
+                "experiences": [],
+                "education": [],
+                "languages": [],
+                "extraction_confidence": 0.9,
+            }
+            profile.extraction_version = "fixture-v1"
+            profile.source_hash = "fixture-source"
+            profile.state = "ready"
             await session.commit()
 
-    run_async(_fail_a())
+    run_async(_promote_for_reuse_fixture())
 
     with health_client() as client:
-        r4 = _upload(client, payload_a, filename="a-retry.pdf")
-        assert r4.status_code == 200
-        fourth = CvUploadResponse.model_validate(r4.json())
-        assert fourth.outcome == "retry"
-        assert fourth.attachment.id == att_a
-        assert fourth.attachment.state == ATTACHMENT_STATE_STAGED
-        assert fourth.attachment.failure_code is None
-        assert _attachment_count() == 2
-
-    async def _activate_b() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            await att_repo.mark_active(session, att_b, page_count=1)
-            await profile_repo.upsert_active_profile(
-                session,
-                active_attachment_id=att_b,
-                profile_json={
-                    "summary": "Experienced engineer",
-                    "current_title": "Senior Engineer",
-                    "total_experience_years": 5.0,
-                    "skills": [],
-                    "experiences": [],
-                    "education": [],
-                    "languages": [],
-                    "extraction_confidence": 0.9,
-                },
-            )
-            await session.commit()
-
-    run_async(_activate_b())
-
-    with health_client() as client:
-        r5 = _upload(client, payload_b, filename="b-active.pdf")
-        assert r5.status_code == 200
-        fifth = CvUploadResponse.model_validate(r5.json())
-        assert fifth.outcome == "existing_active"
-        assert fifth.attachment.id == att_b
-        assert fifth.attachment.state == ATTACHMENT_STATE_ACTIVE
-        assert fifth.profile is not None
-        assert fifth.profile.present is True
-        assert fifth.profile.current_title == "Senior Engineer"
-        assert _attachment_count() == 2
+        response = _upload(client, payload, filename="a-active.pdf")
+    assert response.status_code == 200, response.text
+    reused = CvUploadResponse.model_validate(response.json())
+    assert reused.outcome == "existing_active"
+    assert reused.attachment.id == first.attachment.id
+    assert reused.attachment.state == ATTACHMENT_STATE_ACTIVE
+    assert reused.bootstrap is None
+    assert reused.profile is not None
+    assert reused.profile.present is True
+    assert reused.profile.current_title == "Senior Engineer"
+    assert _attachment_count() == 1
+    assert (files_dir / first.attachment.id).is_file()
 
 
 def test_upload_filename_cannot_escape_or_inject(
@@ -1096,6 +1415,58 @@ def test_get_profile_empty_state(
         assert missing_cv.status_code == 404
         detail = missing_cv.json()["detail"]
         assert detail["code"] == "PROFILE_NOT_FOUND"
+
+
+def test_pending_selected_profile_is_not_exposed_as_approved_compatibility_data(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pending ownership stays durable but compatibility reads remain empty."""
+    prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+
+    async def _seed() -> tuple[str, str]:
+        factory = get_session_factory()
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="pending-compatibility-hash",
+                original_name="pending.pdf",
+                size_bytes=100,
+                storage_path=new_uuid(),
+                page_count=1,
+            )
+            profile = await profile_repo.create_pending_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="pending.pdf",
+            )
+            await conversations_repo.create_bootstrap_for_profile(
+                session, profile_id=profile.id
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await session.commit()
+            return profile.id, attachment.id
+
+    profile_id, attachment_id = run_async(_seed())
+
+    with health_client() as client:
+        response = client.get("/api/profile")
+        assert response.status_code == 200
+        assert response.json() == {
+            "present": False,
+            "profile": None,
+            "preferences": None,
+            "active_attachment": None,
+            "draft_present": False,
+            "pending_attachment": None,
+        }
+
+        cv = client.get("/api/profile/cv")
+        assert cv.status_code == 404
+        assert cv.json()["detail"]["code"] == "PROFILE_NOT_FOUND"
+
+    assert profile_id not in response.text
+    assert attachment_id not in response.text
 
 
 def test_get_profile_active_and_cv_stream_safe_disposition(
@@ -1261,7 +1632,7 @@ def test_profile_routes_have_no_write_crud_and_are_thin() -> None:
     for method, path in routes:
         if path in {"/api/profile", "/api/profile/cv"}:
             assert method == "GET"
-    # Plan 10 expanded public surface (observability + CV manager + saved-JD jobs).
-    # Plan 15 adds POST /api/jobs/{job_id}/reextract.
-    assert len(routes) == 22
+    assert ("POST", "/api/attachments/cv") in routes
+    assert ("GET", "/api/profiles") in routes
+    assert ("POST", "/api/conversations/{conversation_id}/turns") in routes
     assert ("POST", "/api/jobs/{job_id}/reextract") in routes

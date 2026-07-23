@@ -41,6 +41,7 @@ from app.db.models.attachments import (
 )
 from app.db.models.profiles import (
     PROFILE_DRAFT_ID,
+    PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
 )
 from app.db.session import session_scope
@@ -154,6 +155,7 @@ class _Preflight:
     current_prefs: JobPreferences
     document_bundle: DocumentDraftBundle | None
     target_profile_id: str | None
+    target_profile_state: str | None
 
 
 def _activation_to_approval_error(exc: ActivationError) -> ProfileApprovalError:
@@ -198,13 +200,18 @@ async def _load_preflight(
 
     source_id = draft_row.source_attachment_id
     target_profile_id = draft_row.target_profile_id
+    target_profile_state: str | None = None
     if target_profile_id is not None:
         target_profile = await profile_repo.get_profile(session, target_profile_id)
-        if target_profile is None or target_profile.state != PROFILE_STATE_READY:
+        if target_profile is None or target_profile.state not in {
+            PROFILE_STATE_PENDING,
+            PROFILE_STATE_READY,
+        }:
             raise ProfileApprovalError(
                 "Target profile is not ready",
                 code="PROFILE_NOT_READY",
             )
+        target_profile_state = target_profile.state
         if source_id != target_profile.attachment_id:
             raise ProfileApprovalError(
                 "Re-extraction attachment does not belong to target profile",
@@ -251,7 +258,11 @@ async def _load_preflight(
         new_storage_path = new_attachment.storage_path
         active_attachment_id_for_profile = source_id
 
-        if active_profile is not None:
+        if target_profile_state == PROFILE_STATE_PENDING:
+            if active_att is not None and active_att.id != source_id:
+                old_attachment_id = active_att.id
+                old_storage_path = active_att.storage_path
+        elif active_profile is not None:
             old_id = active_profile.active_attachment_id
             if old_id != source_id:
                 old_attachment_id = old_id
@@ -313,6 +324,7 @@ async def _load_preflight(
         current_prefs=current_prefs,
         document_bundle=document_bundle,
         target_profile_id=target_profile_id,
+        target_profile_state=target_profile_state,
     )
 
 
@@ -456,6 +468,36 @@ async def _run_sqlite_approval(
             session, profile_id=profile_id, title=NEW_CONVERSATION_TITLE
         )
         conversation_id = conversation.id
+    elif preflight.target_profile_state == PROFILE_STATE_PENDING:
+        existing_profile = await profile_repo.get_profile(session, profile_id)
+        if existing_profile is None or existing_profile.state != PROFILE_STATE_PENDING:
+            raise ProfileApprovalError(
+                "Target profile is not pending", code="PROFILE_NOT_READY"
+            )
+        if preflight.document_bundle is None:
+            raise ProfileApprovalError(
+                "Pending profile approval requires extracted CV data",
+                code=ERROR_DOCUMENT_DRAFT_NOT_FOUND,
+            )
+        existing_profile.profile_json = profile_json
+        existing_profile.location = guarded_profile.location
+        existing_profile.extraction_version = (
+            preflight.document_bundle.extraction_version
+        )
+        existing_profile.source_hash = preflight.document_bundle.source_hash
+        existing_profile.state = PROFILE_STATE_READY
+        existing_profile.updated_at = utc_now()
+        await session.flush()
+        await workspace_repo.set_active_profile_id(session, profile_id)
+        pending_conversation = await conversations_repo.most_recent_for_profile(
+            session, profile_id=profile_id
+        )
+        if pending_conversation is None:
+            raise ProfileApprovalError(
+                "Pending profile conversation is missing",
+                code="PROFILE_INCONSISTENT",
+            )
+        conversation_id = pending_conversation.id
     else:
         existing_profile = await profile_repo.get_profile(session, profile_id)
         if existing_profile is None or existing_profile.state != PROFILE_STATE_READY:
@@ -476,7 +518,11 @@ async def _run_sqlite_approval(
         raise RuntimeError("failpoint:after_profile_upsert")
 
     # 2. Preferences only when changed.
-    if preflight.preferences_changed or preflight.target_profile_id is None:
+    if (
+        preflight.preferences_changed
+        or preflight.target_profile_id is None
+        or preflight.target_profile_state == PROFILE_STATE_PENDING
+    ):
         if profile_id is not None:
             await profile_repo.upsert_profile_preferences(
                 session,

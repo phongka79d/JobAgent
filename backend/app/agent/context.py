@@ -37,6 +37,7 @@ from app.agent.active_cv_context import (
     project_active_cv_context,
 )
 from app.agent.state import ContextMessage
+from app.db.models.profiles import PROFILE_STATE_READY
 from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
@@ -301,7 +302,7 @@ async def load_candidate_context(
     if owner.profile_id != profile_id:
         raise RuntimeError("conversation/profile ownership mismatch")
     row = await profile_repo.get_profile(session, profile_id)
-    if row is None:
+    if row is None or row.state != PROFILE_STATE_READY:
         return list(empty_candidate_context())
 
     try:
@@ -349,8 +350,9 @@ async def load_profile_working_memory_messages(
     approved = await profile_repo.get_profile(session, profile_id)
     draft_row = await profile_repo.get_current_draft(session)
     if (
-        approved is None
+        (approved is None or approved.state != PROFILE_STATE_READY)
         and draft_row is not None
+        and draft_row.target_profile_id == profile_id
         and draft_row.source_attachment_id == owner.attachment_id
     ):
         try:

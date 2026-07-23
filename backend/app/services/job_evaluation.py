@@ -73,6 +73,7 @@ from app.services.skill_normalization import SkillNormalizer
 logger = logging.getLogger(__name__)
 
 ERROR_ACTIVE_PROFILE_REQUIRED: str = "ACTIVE_PROFILE_REQUIRED"
+ERROR_PROFILE_NOT_READY: str = "PROFILE_NOT_READY"
 ERROR_JOB_NOT_FOUND: str = "JOB_NOT_FOUND"
 ERROR_JOB_NOT_SCORABLE: str = "JOB_NOT_SCORABLE"
 ERROR_EVALUATION_CONTEXT_CHANGED: str = "EVALUATION_CONTEXT_CHANGED"
@@ -205,10 +206,15 @@ async def _resolve_context(
             message=JOB_NOT_FOUND_MESSAGE,
         )
 
-    profile_row = await profiles_repo.get_active_profile(session)
+    profile_row = await profiles_repo.get_selected_ready_profile(session)
     if profile_row is None:
+        selected = await profiles_repo.get_active_profile(session)
         return _failure(
-            error_code=ERROR_ACTIVE_PROFILE_REQUIRED,
+            error_code=(
+                ERROR_PROFILE_NOT_READY
+                if selected is not None
+                else ERROR_ACTIVE_PROFILE_REQUIRED
+            ),
             message=NO_PROFILE_EVAL_MESSAGE,
         )
 
@@ -458,6 +464,7 @@ async def evaluate_job(
 
 __all__ = [
     "ERROR_ACTIVE_PROFILE_REQUIRED",
+    "ERROR_PROFILE_NOT_READY",
     "ERROR_EVALUATION_CONTEXT_CHANGED",
     "ERROR_INVALID_MATCH_RESULT",
     "ERROR_JOB_NOT_FOUND",

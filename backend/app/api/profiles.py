@@ -79,7 +79,13 @@ async def get_profile(
             return await build_profile_detail(session, profile_id=profile_id)
         except ProfileProjectionError as exc:
             raise _http(
-                exc.code, exc.summary, 404 if exc.code == "PROFILE_NOT_FOUND" else 500
+                exc.code,
+                exc.summary,
+                404
+                if exc.code == "PROFILE_NOT_FOUND"
+                else 409
+                if exc.code == "PROFILE_NOT_READY"
+                else 500,
             ) from exc
 
 
@@ -114,7 +120,11 @@ async def patch_profile(
             raise _http("PROFILE_NOT_FOUND", "profile not found", 404) from exc
         except ProfileProjectionError as exc:
             await session.rollback()
-            raise _http(exc.code, exc.summary, 500) from exc
+            raise _http(
+                exc.code,
+                exc.summary,
+                409 if exc.code == "PROFILE_NOT_READY" else 500,
+            ) from exc
 
 
 @router.post("/profiles/{profile_id}/activate", response_model=SelectionResponse)
@@ -134,6 +144,7 @@ async def activate_profile(
         status = {
             "PROFILE_NOT_FOUND": 404,
             "PROFILE_NOT_READY": 409,
+            "PROFILE_SETUP_IN_PROGRESS": 409,
             "PROFILE_SWITCH_BLOCKED": 409,
             "PROFILE_INCONSISTENT": 500,
         }.get(exc.code, 500)

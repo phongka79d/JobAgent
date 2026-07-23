@@ -137,6 +137,21 @@ def build_propose_profile_from_cv_tool(
                 data=None,
             ).model_dump(mode="json")
 
+        target_profile_id = (
+            state.get("profile_id") if isinstance(state, dict) else None
+        )
+        if (
+            not isinstance(target_profile_id, str)
+            or target_profile_id.strip() == ""
+        ):
+            return ToolResult(
+                ok=False,
+                code="PROFILE_INCONSISTENT",
+                summary="propose_profile_from_cv requires profile_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
+        target_profile_id = target_profile_id.strip()
+
         if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
             return ToolResult(
                 ok=False,
@@ -156,6 +171,7 @@ def build_propose_profile_from_cv_tool(
         from app.repositories import agent_runs as runs_repo
 
         owned_attachment_id: str | None = None
+        target_profile_state: str | None = None
         async with factory() as session:
             run = await runs_repo.get_run(session, run_id)
             if (
@@ -164,7 +180,19 @@ def build_propose_profile_from_cv_tool(
                 and run.source_attachment_id.strip() != ""
             ):
                 owned_attachment_id = run.source_attachment_id.strip()
-        do_reprocess = bool(reprocess) or owned_attachment_id is not None
+            from app.repositories import profiles as profile_repo
+
+            target_profile = await profile_repo.get_profile(
+                session, target_profile_id
+            )
+            if target_profile is not None:
+                target_profile_state = target_profile.state
+        from app.db.models.profiles import PROFILE_STATE_READY
+
+        do_reprocess = bool(reprocess) or (
+            owned_attachment_id is not None
+            and target_profile_state == PROFILE_STATE_READY
+        )
         normalized_turn_ids = [
             item.strip()
             for item in turn_ids
@@ -268,6 +296,7 @@ def build_propose_profile_from_cv_tool(
                 normalizer=norm,
                 extract_text_fn=extract_text_fn,
                 reprocess=do_reprocess,
+                target_profile_id=target_profile_id,
             )
             return result.tool_result
 

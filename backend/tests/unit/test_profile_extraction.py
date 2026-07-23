@@ -6,6 +6,7 @@ Fake-backed only — never calls the live ShopAIKey provider.
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -14,12 +15,14 @@ from unittest.mock import MagicMock
 import pytest
 from app.core.ids import new_uuid
 from app.db.models.attachments import ATTACHMENT_STATE_FAILED
-from app.db.models.profiles import CANDIDATE_PROFILE_ID, PROFILE_DRAFT_ID
+from app.db.models.profiles import PROFILE_DRAFT_ID
 from app.db.session import build_async_engine
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.tools import ToolResult
 from app.services.cv_document_extraction import (
     EXTRACTION_VERSION,
@@ -477,6 +480,73 @@ def test_successful_propose_persists_chunks_document_and_profile_atomically(
     run_async(_body())
 
 
+def test_propose_rejects_target_profile_attachment_mismatch_before_provider(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    invoker = CoveringDocumentInvoker()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            pending_attachment_id = new_uuid()
+            pending_rel = storage.write_bytes(
+                pending_attachment_id, pdf.read_bytes()
+            )
+            other_attachment_id = new_uuid()
+            other_rel = storage.write_bytes(other_attachment_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="pending-owner-hash",
+                    original_name="pending.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=pending_rel,
+                    page_count=1,
+                    attachment_id=pending_attachment_id,
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="other-owner-hash",
+                    original_name="other.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=other_rel,
+                    page_count=1,
+                    attachment_id=other_attachment_id,
+                )
+                await att_repo.mark_active(session, other_attachment_id)
+                await att_repo.mark_archived(session, other_attachment_id)
+                other_profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=other_attachment_id,
+                    display_name="Other",
+                    profile_json=_valid_profile().model_dump(mode="json"),
+                    location=None,
+                    extraction_version="test-v1",
+                    source_hash="other-source",
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=pending_attachment_id,
+                target_profile_id=other_profile.id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == "PROFILE_INCONSISTENT"
+            assert invoker.calls == []
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 @pytest.mark.parametrize("failure_stage", ("document", "candidate_skills"))
 def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
     migrated_sqlite: Path,
@@ -782,7 +852,7 @@ def test_propose_active_reuses_profile_without_provider(
                 )
                 await att_repo.mark_active(session, att_id, page_count=1)
                 profile_json = _valid_profile().model_dump(mode="json")
-                await profile_repo.upsert_active_profile(
+                profile = await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=att_id,
                     profile_json=profile_json,
@@ -799,7 +869,7 @@ def test_propose_active_reuses_profile_without_provider(
             assert result.kind == "active_profile"
             assert result.tool_result.ok is True
             assert result.tool_result.data is not None
-            assert result.tool_result.data["profile_id"] == CANDIDATE_PROFILE_ID
+            assert result.tool_result.data["profile_id"] == profile.id
             assert result.tool_result.data["reused"] is True
             assert invoker.calls == []
 
@@ -1078,6 +1148,7 @@ def test_tool_boundary_compact_and_not_production_registered(
         tool_fn: Any,
         *,
         run_id: str,
+        profile_id: str,
         tool_call_id: str,
         attachment_id: str,
         attachment_ids: Sequence[str] | None = None,
@@ -1092,6 +1163,7 @@ def test_tool_boundary_compact_and_not_production_registered(
                     "attachment_id": attachment_id,
                     "state": {
                         "run_id": run_id,
+                        "profile_id": profile_id,
                         "attachment_ids": list(attachment_ids or ()),
                     },
                 },
@@ -1113,14 +1185,6 @@ def test_tool_boundary_compact_and_not_production_registered(
             att_id = new_uuid()
             rel = _write_pdf(storage, att_id, pdf)
             async with factory() as session:
-                user = await messages_repo.insert_message(
-                    session,
-                    role=CHAT_MESSAGE_ROLE_USER,
-                    content="propose from cv",
-                )
-                run = await runs_repo.create_run(
-                    session, user_message_id=user.id
-                )
                 await att_repo.create_staged(
                     session,
                     file_hash="h-tool",
@@ -1130,8 +1194,30 @@ def test_tool_boundary_compact_and_not_production_registered(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                profile = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="cv.pdf",
+                )
+                conversation = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=profile.id
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="propose from cv",
+                    source_attachment_id=att_id,
+                )
+                run = await runs_repo.create_run(
+                    session,
+                    user_message_id=user.id,
+                    source_attachment_id=att_id,
+                )
                 await session.commit()
                 run_id = run.id
+                profile_id = profile.id
 
             tool_fn = build_propose_profile_from_cv_tool(
                 session_factory=factory,
@@ -1160,8 +1246,10 @@ def test_tool_boundary_compact_and_not_production_registered(
             tr = await _ainvoke_with_identity(
                 tool_fn,
                 run_id=run_id,
+                profile_id=profile_id,
                 tool_call_id="call_propose_cv_ok",
                 attachment_id=att_id,
+                attachment_ids=[att_id],
             )
             assert tr.ok is True
             assert tr.data is not None
@@ -1171,6 +1259,7 @@ def test_tool_boundary_compact_and_not_production_registered(
             tr_miss = await _ainvoke_with_identity(
                 tool_fn,
                 run_id=run_id,
+                profile_id=profile_id,
                 tool_call_id="call_propose_cv_miss",
                 attachment_id=new_uuid(),
             )
@@ -1207,12 +1296,6 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
             active_rel = _write_pdf(storage, active_id, pdf)
             staged_rel = _write_pdf(storage, staged_id, pdf)
             async with factory() as session:
-                user = await messages_repo.insert_message(
-                    session,
-                    role=CHAT_MESSAGE_ROLE_USER,
-                    content="upload B",
-                )
-                run = await runs_repo.create_run(session, user_message_id=user.id)
                 await att_repo.create_staged(
                     session,
                     file_hash="active-a",
@@ -1223,7 +1306,7 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                     attachment_id=active_id,
                 )
                 await att_repo.mark_active(session, active_id, page_count=1)
-                await profile_repo.upsert_active_profile(
+                active_profile = await profile_repo.upsert_active_profile(
                     session,
                     active_attachment_id=active_id,
                     profile_json=_valid_profile().model_dump(mode="json"),
@@ -1237,6 +1320,32 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                     page_count=1,
                     attachment_id=staged_id,
                 )
+                pending_profile = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=staged_id,
+                    display_name="b.pdf",
+                )
+                conversation = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=pending_profile.id
+                )
+                await workspace_repo.set_active_profile_id(
+                    session, pending_profile.id
+                )
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="upload B",
+                    source_attachment_id=staged_id,
+                )
+                run = await runs_repo.create_run(
+                    session,
+                    user_message_id=user.id,
+                    source_attachment_id=staged_id,
+                )
+                active_profile_id = active_profile.id
+                pending_profile_id = pending_profile.id
+                run_id = run.id
                 await session.commit()
 
             tool_fn = build_propose_profile_from_cv_tool(
@@ -1253,7 +1362,8 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                     "args": {
                         "attachment_id": active_id,
                         "state": {
-                            "run_id": run.id,
+                            "run_id": run_id,
+                            "profile_id": pending_profile_id,
                             "attachment_ids": [staged_id],
                         },
                     },
@@ -1274,10 +1384,11 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                 draft = await profile_repo.get_current_draft(session)
                 assert draft is not None
                 assert draft.source_attachment_id == staged_id
-                active = await profile_repo.get_active_profile(session)
+                assert draft.target_profile_id == pending_profile_id
+                active = await profile_repo.get_profile(session, active_profile_id)
                 assert active is not None
                 assert active.active_attachment_id == active_id
-                executions = await tool_repo.list_for_run_ids(session, [run.id])
+                executions = await tool_repo.list_for_run_ids(session, [run_id])
                 propose = [
                     item
                     for item in executions
@@ -1291,6 +1402,176 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
                     else raw_summary
                 )
                 assert summary["attachment_id"] == staged_id
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_pending_profile_tool_uses_injected_owner_for_initial_extraction(
+    migrated_sqlite: Path, files_root: Path
+) -> None:
+    import json
+
+    from app.db.models.chat import CHAT_MESSAGE_ROLE_USER
+    from app.repositories import agent_runs as runs_repo
+    from app.repositories import chat_messages as messages_repo
+
+    storage = AttachmentStorage(files_root)
+    invoker = CoveringDocumentInvoker()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            rel = _write_pdf(storage, attachment_id, pdf)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="pending-tool-owner",
+                    original_name="pending.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                profile = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="pending.pdf",
+                )
+                conversation = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=profile.id
+                )
+                message = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="extract",
+                    source_attachment_id=attachment_id,
+                )
+                run = await runs_repo.create_run(
+                    session,
+                    user_message_id=message.id,
+                    source_attachment_id=attachment_id,
+                )
+                await session.commit()
+
+            tool_fn = build_propose_profile_from_cv_tool(
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            raw = await tool_fn.ainvoke(
+                {
+                    "type": "tool_call",
+                    "id": "call-pending-owner",
+                    "name": tool_fn.name,
+                    "args": {
+                        "attachment_id": attachment_id,
+                        "state": {
+                            "run_id": run.id,
+                            "profile_id": profile.id,
+                            "attachment_ids": [attachment_id],
+                        },
+                    },
+                }
+            )
+            content = raw.content if hasattr(raw, "content") else raw
+            payload = json.loads(content) if isinstance(content, str) else content
+            result = ToolResult.model_validate(payload)
+            assert result.ok is True
+            assert invoker.calls
+            async with factory() as session:
+                draft = await profile_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.target_profile_id == profile.id
+                assert draft.source_attachment_id == attachment_id
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_pending_profile_ownership_is_rechecked_after_provider_work(
+    migrated_sqlite: Path, files_root: Path
+) -> None:
+    storage = AttachmentStorage(files_root)
+    pdf = CV_DIR / "digital_cv_01.pdf"
+    attachment_id = new_uuid()
+    relative_path = _write_pdf(storage, attachment_id, pdf)
+    owner_id: str = ""
+
+    class LifecycleChangingInvoker(CoveringDocumentInvoker):
+        changed = False
+
+        def invoke_structured(
+            self,
+            messages: Sequence[Any],
+            *,
+            schema_name: str,
+            is_repair: bool = False,
+        ) -> Any:
+            if not self.changed:
+                with sqlite3.connect(migrated_sqlite) as connection:
+                    connection.execute(
+                        "UPDATE profiles SET state = 'deleting' WHERE id = ?",
+                        (owner_id,),
+                    )
+                self.changed = True
+            return super().invoke_structured(
+                messages,
+                schema_name=schema_name,
+                is_repair=is_repair,
+            )
+
+    invoker = LifecycleChangingInvoker()
+
+    async def _body() -> None:
+        nonlocal owner_id
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="pending-owner-recheck",
+                    original_name="pending.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=relative_path,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                owner = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="pending.pdf",
+                )
+                owner_id = owner.id
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=attachment_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+                target_profile_id=owner_id,
+            )
+
+            assert invoker.calls
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == "PROFILE_INCONSISTENT"
+
+            async with factory() as session:
+                assert await profile_repo.get_current_draft(session) is None
+                assert await cv_doc_repo.get_draft(session, attachment_id) is None
+                assert await chunk_repo.list_for_attachment(
+                    session, attachment_id
+                ) == []
         finally:
             await engine.dispose()
 

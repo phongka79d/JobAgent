@@ -628,7 +628,220 @@ describe('Save Profile refreshes sidebar', () => {
     );
   });
 
+  it('reloads pending setup before enabling Request Changes correction', async () => {
+    const profileId = 'abababab-abab-4bab-8bab-abababababab';
+    const conversationId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+    const awaitingExtraction = {
+      id: profileId,
+      display_name: 'pending.pdf',
+      cv_filename: 'pending.pdf',
+      attachment_state: 'staged' as const,
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: null,
+      source_hash: null,
+      state: 'pending' as const,
+      setup_status: 'awaiting_extraction' as const,
+      is_active: true,
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+    };
+    const awaitingApproval = {
+      ...awaitingExtraction,
+      setup_status: 'awaiting_approval' as const,
+    };
+    const conversation = {
+      id: conversationId,
+      profile_id: profileId,
+      title: 'Chat mới',
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+      is_selected: true,
+    };
+    const fetchProfiles = vi
+      .fn()
+      .mockResolvedValueOnce({
+        items: [],
+        active_profile_id: null,
+      })
+      .mockResolvedValue({
+        items: [awaitingApproval],
+        active_profile_id: profileId,
+      });
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [conversation],
+      next_cursor: null,
+    });
+    const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
+    const uploadCv = vi.fn().mockResolvedValue({
+      attachment: {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        original_name: 'pending.pdf',
+        mime_type: 'application/pdf' as const,
+        size_bytes: 100,
+        page_count: 1,
+        state: 'staged' as const,
+        failure_code: null,
+      },
+      outcome: 'new_pending' as const,
+      profile: null,
+      draft: null,
+      bootstrap: {
+        profile: awaitingExtraction,
+        conversation,
+        start_extraction: true,
+      },
+    });
+    let emitApproval: (() => void) | null = null;
+    const sendConversationTurn = vi.fn(
+      async (
+        _conversationId: string,
+        _body: {message: string; attachment_ids?: string[]},
+        callbacks: StreamCallbacks,
+      ) => {
+        await new Promise<void>((resolve) => {
+          emitApproval = () => {
+            callbacks.onEvent(
+              sse(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+            );
+            callbacks.onEvent(
+              sse(EVENT_B, 'approval_required', {
+                state: 'interrupted',
+                kind: PROFILE_COMMIT_KIND,
+                allowed_actions: [SAVE_PROFILE_ACTION, REQUEST_CHANGES_ACTION],
+                card: profileCommitCard(),
+              }),
+            );
+            resolve();
+          };
+        });
+      },
+    );
+    const resumeRun = vi.fn(
+      async (
+        _runId: string,
+        action: string,
+        callbacks: StreamCallbacks,
+      ) => {
+        expect(action).toBe(REQUEST_CHANGES_ACTION);
+        callbacks.onEvent(
+          sse(EVENT_F, 'run_started', {state: 'running', resumed: true}),
+        );
+        callbacks.onEvent(
+          sse(EVENT_G, 'run_completed', {state: 'completed'}),
+        );
+      },
+    );
+
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            chat: {
+              loadHistory,
+              loadConversationHistory: loadHistory,
+              sendTurn: vi.fn(),
+              sendConversationTurn,
+              resumeRun,
+              uploadCv,
+            },
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue({
+                present: false,
+                profile: null,
+                preferences: null,
+                active_attachment: null,
+                draft_present: true,
+                pending_attachment: null,
+              }),
+              uploadCv,
+              getActiveCvUrl: () => 'http://localhost/api/profile/cv',
+            },
+            workspace: {fetchProfiles, fetchProfileConversations},
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.upload(
+      screen.getByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4'], 'pending.pdf', {type: 'application/pdf'}),
+    );
+    await waitFor(() => expect(uploadCv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sendConversationTurn).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      emitApproval?.();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('jobagent-approval-card')).toBeInTheDocument();
+    });
+    expect(getComposerEditable(container)).toHaveAttribute(
+      'contenteditable',
+      'false',
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', {name: REQUEST_CHANGES_LABEL}),
+    );
+
+    await waitFor(() => expect(resumeRun).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchProfiles.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => {
+      expect(getComposerEditable(container)).toHaveAttribute(
+        'contenteditable',
+        'true',
+      );
+    });
+  });
+
   it('bumps profile reload after save_profile completes', async () => {
+    const profileId = 'abababab-abab-4bab-8bab-abababababab';
+    const conversationId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+    const pendingProfile = {
+      id: profileId,
+      display_name: 'pending.pdf',
+      cv_filename: 'pending.pdf',
+      attachment_state: 'staged' as const,
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: null,
+      source_hash: null,
+      state: 'pending' as const,
+      setup_status: 'awaiting_approval' as const,
+      is_active: true,
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+    };
+    const readyProfile = {
+      ...pendingProfile,
+      attachment_state: 'active' as const,
+      extraction_version: 'cv-document-v1',
+      source_hash: 'approved-source-hash',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const conversation = {
+      id: conversationId,
+      profile_id: profileId,
+      title: 'Chat mới',
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+      is_selected: true,
+    };
+    const fetchProfiles = vi
+      .fn()
+      .mockResolvedValueOnce({items: [pendingProfile], active_profile_id: profileId})
+      .mockResolvedValue({items: [readyProfile], active_profile_id: profileId});
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [conversation],
+      next_cursor: null,
+    });
     let profileCalls = 0;
     const loadProfile = vi.fn(async (): Promise<ProfileReadResponse> => {
       profileCalls += 1;
@@ -700,6 +913,7 @@ describe('Save Profile refreshes sidebar', () => {
           deps={{
             chat: {
               loadHistory,
+              loadConversationHistory: loadHistory,
               sendTurn: vi.fn(),
               resumeRun,
               uploadCv: vi.fn(),
@@ -709,6 +923,7 @@ describe('Save Profile refreshes sidebar', () => {
               uploadCv: vi.fn(),
               getActiveCvUrl: () => 'http://localhost/api/profile/cv',
             },
+            workspace: {fetchProfiles, fetchProfileConversations},
           }}
         />
       </Theme>,
@@ -727,6 +942,9 @@ describe('Save Profile refreshes sidebar', () => {
       expect(loadProfile.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
     await waitFor(() => {
+      expect(fetchProfiles.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    await waitFor(() => {
       expect(screen.getByTestId('jobagent-profile-state')).toHaveTextContent(
         'Senior Backend Engineer',
       );
@@ -737,6 +955,50 @@ describe('Save Profile refreshes sidebar', () => {
     const {cvHistoryPage, mockObservabilityApi} = await import(
       './support/observability'
     );
+    const profileId = 'abababab-abab-4bab-8bab-abababababab';
+    const conversationId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+    const pendingProfile = {
+      id: profileId,
+      display_name: 'pending.pdf',
+      cv_filename: 'pending.pdf',
+      attachment_state: 'staged' as const,
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: null,
+      source_hash: null,
+      state: 'pending' as const,
+      setup_status: 'awaiting_approval' as const,
+      is_active: true,
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+    };
+    const readyProfile = {
+      ...pendingProfile,
+      attachment_state: 'active' as const,
+      extraction_version: 'cv-document-v1',
+      source_hash: 'approved-source-hash',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const conversation = {
+      id: conversationId,
+      profile_id: profileId,
+      title: 'Chat má»›i',
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+      is_selected: true,
+    };
+    const fetchProfiles = vi
+      .fn()
+      .mockResolvedValueOnce({items: [pendingProfile], active_profile_id: profileId})
+      .mockResolvedValue({items: [readyProfile], active_profile_id: profileId});
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [conversation],
+      next_cursor: null,
+    });
     let profileCalls = 0;
     const loadProfile = vi.fn(async (): Promise<ProfileReadResponse> => {
       profileCalls += 1;
@@ -894,6 +1156,7 @@ describe('Save Profile refreshes sidebar', () => {
             deps={{
               chat: {
                 loadHistory,
+                loadConversationHistory: loadHistory,
                 sendTurn: vi.fn(),
                 resumeRun,
                 uploadCv: vi.fn(),
@@ -904,6 +1167,7 @@ describe('Save Profile refreshes sidebar', () => {
                 getActiveCvUrl: () => 'http://localhost/api/profile/cv',
                 observability,
               },
+              workspace: {fetchProfiles, fetchProfileConversations},
             }}
           />
         </Theme>,

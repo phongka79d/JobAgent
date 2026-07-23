@@ -16,11 +16,9 @@ from typing import Any
 
 import pytest
 from app.db.models.profiles import (
-    CANDIDATE_PROFILE_ID,
     JOB_PREFERENCE_KEYS,
-    JOB_PREFERENCES_ID,
     PROFILE_DRAFT_ID,
-    CandidateProfile,
+    Profile,
 )
 from app.db.session import build_async_engine
 from app.repositories import attachments as att_repo
@@ -85,7 +83,7 @@ async def _staged_attachment(
 
 
 def test_active_profile_missing_then_upsert(db_path: Path) -> None:
-    """No profile after seed; upsert creates active singleton and re-upserts."""
+    """Compatibility upsert creates one durable selected profile and reuses it."""
 
     async def _body() -> None:
         engine = build_async_engine(db_path)
@@ -100,7 +98,8 @@ def test_active_profile_missing_then_upsert(db_path: Path) -> None:
                     active_attachment_id=att_id,
                     profile_json=MINIMAL_PROFILE,
                 )
-                assert created.id == CANDIDATE_PROFILE_ID
+                created_id = created.id
+                assert created_id != "active"
                 assert created.active_attachment_id == att_id
                 assert created.profile_json["full_name"] == "Test User"
                 assert created.updated_at.tzinfo is not None
@@ -109,7 +108,7 @@ def test_active_profile_missing_then_upsert(db_path: Path) -> None:
             async with factory() as session:
                 found = await prof_repo.get_active_profile(session)
                 assert found is not None
-                assert found.id == CANDIDATE_PROFILE_ID
+                assert found.id == created_id
 
                 # Second attachment for repoint (replacement shape only).
                 new_att = await _staged_attachment(
@@ -123,7 +122,7 @@ def test_active_profile_missing_then_upsert(db_path: Path) -> None:
                     active_attachment_id=new_att,
                     profile_json=updated_json,
                 )
-                assert updated.id == CANDIDATE_PROFILE_ID
+                assert updated.id == created_id
                 assert updated.active_attachment_id == new_att
                 assert updated.profile_json["full_name"] == "Updated"
                 await session.commit()
@@ -135,7 +134,7 @@ def test_active_profile_missing_then_upsert(db_path: Path) -> None:
                 assert again.profile_json["full_name"] == "Updated"
                 count = (
                     await session.execute(
-                        text("SELECT COUNT(*) FROM candidate_profile")
+                        text("SELECT COUNT(*) FROM profiles")
                     )
                 ).scalar_one()
                 assert int(count) == 1
@@ -169,8 +168,42 @@ def test_upsert_profile_rejects_empty_attachment_id(db_path: Path) -> None:
     run_async(_body())
 
 
-def test_profile_fk_and_singleton_constraint_visible(db_path: Path) -> None:
-    """Missing attachment FK and wrong singleton id surface IntegrityError."""
+def test_compatibility_upsert_never_promotes_selected_pending_profile(
+    db_path: Path,
+) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_id = await _staged_attachment(session)
+                pending = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="pending.pdf",
+                )
+                from app.repositories import workspace_state as workspace_repo
+
+                await workspace_repo.set_active_profile_id(session, pending.id)
+                with pytest.raises(ProfileRepositoryError):
+                    await prof_repo.upsert_active_profile(
+                        session,
+                        active_attachment_id=attachment_id,
+                        profile_json=MINIMAL_PROFILE,
+                    )
+                selected = await prof_repo.get_active_profile(session)
+                assert selected is not None
+                assert selected.id == pending.id
+                assert selected.state == "pending"
+                assert selected.profile_json is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_profile_fk_and_attachment_uniqueness_visible(db_path: Path) -> None:
+    """Missing attachment FK and duplicate attachment ownership are rejected."""
 
     async def _body() -> None:
         engine = build_async_engine(db_path)
@@ -188,15 +221,25 @@ def test_profile_fk_and_singleton_constraint_visible(db_path: Path) -> None:
 
             async with factory() as session:
                 att_id = await _staged_attachment(session)
-                # Direct ORM insert with wrong id must fail CHECK.
-                bad = CandidateProfile(
-                    id="not-active",
-                    active_attachment_id=att_id,
+                await prof_repo.create_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="First",
                     profile_json=MINIMAL_PROFILE,
+                    location=None,
+                    extraction_version="test-v1",
+                    source_hash="source-1",
                 )
-                session.add(bad)
                 with pytest.raises(IntegrityError):
-                    await session.flush()
+                    await prof_repo.create_profile(
+                        session,
+                        attachment_id=att_id,
+                        display_name="Duplicate",
+                        profile_json=MINIMAL_PROFILE,
+                        location=None,
+                        extraction_version="test-v1",
+                        source_hash="source-2",
+                    )
                 await session.rollback()
         finally:
             await engine.dispose()
@@ -232,7 +275,8 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                     session,
                     attachment_id=att_id,
                 )
-                assert draft.id == PROFILE_DRAFT_ID
+                draft_id = draft.id
+                assert draft_id != PROFILE_DRAFT_ID
                 assert draft.source_attachment_id == att_id
                 assert draft.draft_json["profile"]["full_name"] == "Test User"
                 await session.commit()
@@ -240,7 +284,7 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
             async with factory() as session:
                 found = await prof_repo.get_current_draft(session)
                 assert found is not None
-                assert found.id == PROFILE_DRAFT_ID
+                assert found.id == draft_id
 
                 # Preference-only style: clear source attachment.
                 updated = await prof_repo.upsert_current_draft(
@@ -248,7 +292,7 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                     draft_json={**MINIMAL_DRAFT, "note": "ignored-by-shape"},
                     source_attachment_id=None,
                 )
-                assert updated.id == PROFILE_DRAFT_ID
+                assert updated.id == draft_id
                 assert updated.source_attachment_id is None
                 await session.commit()
 
@@ -335,8 +379,8 @@ def test_draft_rejects_non_mapping_json(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_job_preferences_seeded_and_upsert(db_path: Path) -> None:
-    """Seed inserts active preferences; upsert updates JSON and timestamp."""
+def test_job_preferences_are_profile_owned_and_upserted(db_path: Path) -> None:
+    """Preferences are absent without a profile and keyed to the selected row."""
 
     async def _body() -> None:
         engine = build_async_engine(db_path)
@@ -344,18 +388,20 @@ def test_job_preferences_seeded_and_upsert(db_path: Path) -> None:
         try:
             async with factory() as session:
                 prefs = await prof_repo.get_job_preferences(session)
-                assert prefs is not None
-                assert prefs.id == JOB_PREFERENCES_ID
-                assert set(prefs.preferences_json) == set(JOB_PREFERENCE_KEYS)
-                for key in JOB_PREFERENCE_KEYS:
-                    assert prefs.preferences_json[key] == []
-
-                past = datetime(2020, 1, 1, tzinfo=UTC)
-                prefs.updated_at = past
-                await session.flush()
+                assert prefs is None
+                att_id = await _staged_attachment(
+                    session, file_hash="prefs", storage_path="prefs.pdf"
+                )
+                await att_repo.mark_active(session, att_id)
+                profile = await prof_repo.upsert_active_profile(
+                    session,
+                    active_attachment_id=att_id,
+                    profile_json=MINIMAL_PROFILE,
+                )
                 await session.commit()
 
             async with factory() as session:
+                past = datetime(2020, 1, 1, tzinfo=UTC)
                 new_doc = {
                     **EMPTY_PREFS,
                     "target_roles": ["Backend Engineer"],
@@ -363,10 +409,15 @@ def test_job_preferences_seeded_and_upsert(db_path: Path) -> None:
                 updated = await prof_repo.upsert_job_preferences(
                     session, preferences_json=new_doc
                 )
-                assert updated.id == JOB_PREFERENCES_ID
+                assert updated.profile_id == profile.id
                 assert updated.preferences_json["target_roles"] == [
                     "Backend Engineer"
                 ]
+                updated.updated_at = past
+                await session.flush()
+                updated = await prof_repo.upsert_job_preferences(
+                    session, preferences_json=new_doc
+                )
                 assert updated.updated_at > past or (
                     updated.updated_at.replace(tzinfo=UTC) > past
                     if updated.updated_at.tzinfo is None
@@ -382,7 +433,7 @@ def test_job_preferences_seeded_and_upsert(db_path: Path) -> None:
                 ]
                 count = (
                     await session.execute(
-                        text("SELECT COUNT(*) FROM job_preferences")
+                        text("SELECT COUNT(*) FROM profile_preferences")
                     )
                 ).scalar_one()
                 assert int(count) == 1
@@ -454,9 +505,8 @@ def test_profile_repository_source_has_no_commit_or_io() -> None:
     assert "from neo4j" not in src
     assert "import neo4j" not in src
     # Singleton constants only — no alternate IDs.
-    assert "CANDIDATE_PROFILE_ID" in src
-    assert "PROFILE_DRAFT_ID" in src
-    assert "JOB_PREFERENCES_ID" in src
+    assert "create_pending_profile" in src
+    assert "get_selected_ready_profile" in src
     # No JSON shape validation / Pydantic imports in repository.
     assert "parse_candidate_profile" not in src
     assert "parse_job_preferences" not in src
@@ -527,6 +577,7 @@ def test_active_profile_updated_at_on_upsert(db_path: Path) -> None:
                 past = datetime(2019, 6, 1, tzinfo=UTC)
                 row.created_at = past
                 row.updated_at = past
+                row_id = row.id
                 await session.flush()
                 await session.commit()
 
@@ -542,8 +593,8 @@ def test_active_profile_updated_at_on_upsert(db_path: Path) -> None:
                     else row2.updated_at > past
                 )
                 # Singleton identity preserved
-                assert row2.id == CANDIDATE_PROFILE_ID
-                assert isinstance(row2, CandidateProfile)
+                assert row2.id == row_id
+                assert isinstance(row2, Profile)
                 await session.commit()
         finally:
             await engine.dispose()
@@ -757,6 +808,12 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                     page_count=1,
                     attachment_id=new_id,
                 )
+                pending = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=new_id,
+                    display_name="new.pdf",
+                )
+                pending_id = pending.id
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=old_draft.model_dump(mode="json"),
@@ -774,6 +831,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                 storage=storage,
                 invoker=invoker,
                 normalizer=normalizer,
+                target_profile_id=pending_id,
             )
             assert result.tool_result.ok is True
             assert result.tool_result.data is not None
@@ -785,6 +843,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                 draft = await prof_repo.get_current_draft(session)
                 assert draft is not None
                 assert draft.source_attachment_id == new_id
+                assert draft.target_profile_id == pending_id
                 # Full ProfileDraftPayload shape (not repository opaque MINIMAL_DRAFT).
                 assert "candidate_profile" in draft.draft_json
                 assert "job_preferences" in draft.draft_json
@@ -798,8 +857,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                 # No active profile mutation.
                 assert await prof_repo.get_active_profile(session) is None
                 prefs = await prof_repo.get_job_preferences(session)
-                assert prefs is not None
-                assert prefs.preferences_json["target_roles"] == []
+                assert prefs is None
             assert not storage.exists(old_rel)
             assert storage.exists(new_rel)
         finally:
@@ -993,11 +1051,10 @@ def test_propose_update_current_draft_profile_and_skills(
                 skills = draft.draft_json["candidate_profile"]["skills"]
                 assert skills[0]["excluded"] is True
                 assert skills[0]["source"] == "user_correction"
-                # Active singletons untouched.
+                # Approved rows remain absent while only a draft exists.
                 assert await prof_repo.get_active_profile(session) is None
                 prefs = await prof_repo.get_job_preferences(session)
-                assert prefs is not None
-                assert prefs.preferences_json["target_roles"] == []
+                assert prefs is None
         finally:
             await engine.dispose()
 
@@ -1119,10 +1176,9 @@ def test_propose_update_preference_only_null_source(
                 assert draft.draft_json["job_preferences"]["target_roles"] == [
                     "Platform Engineer"
                 ]
-                # Active preferences still empty until approval.
+                # Preferences remain absent until approval creates them.
                 prefs = await prof_repo.get_job_preferences(session)
-                assert prefs is not None
-                assert prefs.preferences_json["target_roles"] == []
+                assert prefs is None
                 active = await prof_repo.get_active_profile(session)
                 assert active is not None
                 assert active.profile_json["summary"] == "Backend engineer"
@@ -1488,12 +1544,64 @@ async def _seed_cv_document_draft(
     return source_hash
 
 
-def test_first_approval_commits_active_profile_no_draft(
+async def _seed_pending_profile_draft_owner(
+    session: Any,
+    *,
+    attachment_id: str,
+    draft_json: dict[str, Any],
+) -> tuple[str, str]:
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import workspace_state as workspace_repo
+
+    pending = await prof_repo.create_pending_profile(
+        session,
+        attachment_id=attachment_id,
+        display_name="cv.pdf",
+    )
+    conversation = await conversations_repo.create_bootstrap_for_profile(
+        session, profile_id=pending.id
+    )
+    await workspace_repo.set_active_profile_id(session, pending.id)
+    await prof_repo.upsert_current_draft(
+        session,
+        draft_json=draft_json,
+        source_attachment_id=attachment_id,
+        target_profile_id=pending.id,
+    )
+    return pending.id, conversation.id
+
+
+async def _seed_ready_profile_conversation(
+    session: Any,
+    *,
+    attachment_id: str,
+) -> tuple[str, str]:
+    from app.repositories import conversations as conversations_repo
+
+    await att_repo.mark_active(session, attachment_id)
+    profile = await prof_repo.upsert_active_profile(
+        session,
+        active_attachment_id=attachment_id,
+        profile_json=_approval_valid_profile_json(),
+    )
+    await prof_repo.upsert_job_preferences(
+        session,
+        preferences_json={key: [] for key in JOB_PREFERENCE_KEYS},
+    )
+    conversation = await conversations_repo.create_for_profile(
+        session, profile_id=profile.id
+    )
+    return profile.id, conversation.id
+
+
+def test_first_approval_promotes_pending_profile_and_preserves_bootstrap_chat(
     db_path: Path, tmp_path: Path
 ) -> None:
-    """First approval: one active attachment, profile, prefs, no draft."""
+    """First approval promotes the bootstrap owner instead of creating another."""
     from app.core.ids import new_uuid
     from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import workspace_state as workspace_repo
     from app.services.profile_approval import commit_approved_draft
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
@@ -1515,6 +1623,8 @@ def test_first_approval_commits_active_profile_no_draft(
                 "acceptable_work_modes": ["remote"],
                 "target_seniority": ["senior"],
             }
+            pending_id: str
+            conversation_id: str
             async with factory() as session:
                 await att_repo.create_staged(
                     session,
@@ -1525,10 +1635,22 @@ def test_first_approval_commits_active_profile_no_draft(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                pending = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="cv.pdf",
+                )
+                bootstrap = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=pending.id
+                )
+                await workspace_repo.set_active_profile_id(session, pending.id)
+                pending_id = pending.id
+                conversation_id = bootstrap.id
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=_approval_draft_json(prefs=prefs),
                     source_attachment_id=att_id,
+                    target_profile_id=pending.id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -1549,18 +1671,21 @@ def test_first_approval_commits_active_profile_no_draft(
             assert result.active_attachment_id == att_id
             assert result.previous_attachment_id is None
             assert result.preferences_updated is True
+            assert result.profile_id == pending_id
+            assert result.conversation_id == conversation_id
             assert result.code is None
             assert driver.runs >= 1
             # Post-commit projects Candidate and active CV branch (05A).
             joined = "\n".join(driver.queries)
-            assert "MERGE (c:Candidate {id: $candidate_id})" in joined
+            assert "MERGE (c:Candidate {profile_id: $profile_id})" in joined
             assert "MERGE (cv:CV {id: $cv_id})" in joined
             assert "PROJECTS_TO" in joined
 
             async with factory() as session:
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
-                assert profile.id == CANDIDATE_PROFILE_ID
+                assert profile.id == pending_id
+                assert profile.state == "ready"
                 assert profile.active_attachment_id == att_id
                 assert profile.profile_json["summary"] == "Backend engineer"
                 assert await prof_repo.get_current_draft(session) is None
@@ -1578,6 +1703,14 @@ def test_first_approval_commits_active_profile_no_draft(
                     )
                 ).scalar_one()
                 assert int(n) == 1
+                profile_count = (
+                    await session.execute(text("SELECT COUNT(*) FROM profiles"))
+                ).scalar_one()
+                conversation_count = (
+                    await session.execute(text("SELECT COUNT(*) FROM conversations"))
+                ).scalar_one()
+                assert int(profile_count) == 1
+                assert int(conversation_count) == 1
             assert storage.exists(rel)
         finally:
             await engine.dispose()
@@ -1595,6 +1728,8 @@ def test_approved_profile_persists_across_engine_restart(
     """
     from app.core.ids import new_uuid
     from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import workspace_state as workspace_repo
     from app.services.profile_approval import commit_approved_draft
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
@@ -1611,7 +1746,7 @@ def test_approved_profile_persists_across_engine_restart(
         "target_seniority": ["senior"],
     }
 
-    async def _approve() -> str:
+    async def _approve() -> tuple[str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -1627,12 +1762,22 @@ def test_approved_profile_persists_across_engine_restart(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                pending = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="cv-restart.pdf",
+                )
+                await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=pending.id
+                )
+                await workspace_repo.set_active_profile_id(session, pending.id)
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=_approval_draft_json(
                         prefs=prefs, exclude_python=True
                     ),
                     source_attachment_id=att_id,
+                    target_profile_id=pending.id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -1649,11 +1794,11 @@ def test_approved_profile_persists_across_engine_restart(
             assert result.ok is True
             assert result.sqlite_committed is True
             assert result.active_attachment_id == att_id
-            return att_id
+            return att_id, pending.id
         finally:
             await engine.dispose()
 
-    att_id = run_async(_approve())
+    att_id, profile_id = run_async(_approve())
     assert storage.exists(att_id)
 
     async def _reopen_and_assert() -> None:
@@ -1664,7 +1809,7 @@ def test_approved_profile_persists_across_engine_restart(
             async with factory() as session:
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
-                assert profile.id == CANDIDATE_PROFILE_ID
+                assert profile.id == profile_id
                 assert profile.active_attachment_id == att_id
                 assert profile.profile_json["summary"] == "Backend engineer"
                 skills = profile.profile_json["skills"]
@@ -2327,6 +2472,7 @@ def test_commit_profile_draft_missing_draft_fails_before_interrupt(
 ) -> None:
     """Missing draft terminalizes failed with no interrupt/side effects."""
     from app.agent.graph import build_agent_graph
+    from app.core.ids import new_uuid
     from app.db.models.chat import (
         AGENT_RUN_STATE_COMPLETED,
         TOOL_EXECUTION_STATUS_FAILED,
@@ -2360,6 +2506,25 @@ def test_commit_profile_draft_missing_draft_fails_before_interrupt(
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="missing-draft-owner",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                _profile_id, conversation_id = (
+                    await _seed_ready_profile_conversation(
+                        session, attachment_id=att_id
+                    )
+                )
+                await session.commit()
+
             tool = build_commit_profile_draft_tool(
                 session_factory=factory,
                 storage=storage,
@@ -2388,6 +2553,7 @@ def test_commit_profile_draft_missing_draft_fails_before_interrupt(
             )
             events = []
             async for event in stream_chat_turn(
+                conversation_id=conversation_id,
                 message="please commit my profile draft",
                 graph_bundle=bundle,
                 session_factory=factory,
@@ -2470,10 +2636,12 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                await prof_repo.upsert_current_draft(
-                    session,
-                    draft_json=_approval_draft_json(),
-                    source_attachment_id=att_id,
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2508,6 +2676,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 registry=ToolRegistry([tool]),
             )
             events = [e async for e in stream_chat_turn(
+                conversation_id=conversation_id,
                 message="commit draft please",
                 graph_bundle=bundle,
                 session_factory=factory,
@@ -2586,7 +2755,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 assert stored.data.get("committed") is False
                 draft = await prof_repo.get_current_draft(session)
                 assert draft is not None
-                assert draft.id == PROFILE_DRAFT_ID
+                assert draft.target_profile_id == _pending_id
                 draft_json_after = draft.draft_json
 
             async with open_checkpointer(db_path) as saver:
@@ -2717,10 +2886,12 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                await prof_repo.upsert_current_draft(
-                    session,
-                    draft_json=_approval_draft_json(),
-                    source_attachment_id=att_id,
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2758,6 +2929,7 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message="save my profile",
                     graph_bundle=bundle,
                     session_factory=factory,
@@ -2773,8 +2945,11 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
                 assert run.state == AGENT_RUN_STATE_INTERRUPTED
                 tools = await tool_repo.list_for_run_ids(session, [run_id])
                 assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
-                # No active profile yet � interrupt before side effects.
-                assert await prof_repo.get_active_profile(session) is None
+                selected = await prof_repo.get_active_profile(session)
+                assert selected is not None
+                assert selected.id == _pending_id
+                assert selected.state == "pending"
+                assert await prof_repo.get_selected_ready_profile(session) is None
 
             tool2 = build_commit_profile_draft_tool(
                 session_factory=factory,
@@ -2891,17 +3066,19 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                await prof_repo.upsert_current_draft(
-                    session,
-                    draft_json=_approval_draft_json(
-                        prefs={
-                            "target_roles": ["Backend"],
-                            "preferred_locations": [],
-                            "acceptable_work_modes": ["remote"],
-                            "target_seniority": [],
-                        }
-                    ),
-                    source_attachment_id=att_id,
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(
+                            prefs={
+                                "target_roles": ["Backend"],
+                                "preferred_locations": [],
+                                "acceptable_work_modes": ["remote"],
+                                "target_seniority": [],
+                            }
+                        ),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2937,6 +3114,7 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message="approve profile",
                     graph_bundle=bundle,
                     session_factory=factory,
@@ -3131,7 +3309,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
     )
     from app.repositories import agent_runs as runs_repo
     from app.repositories import chat_messages as messages_repo
+    from app.repositories import conversations as conversations_repo
     from app.repositories import tool_executions as tool_repo
+    from app.repositories import workspace_state as workspace_repo
     from app.schemas.tools import ToolResult
     from app.services.skill_normalization import SkillNormalizer
     from app.services.tool_execution import tool_status_publication_scope
@@ -3156,6 +3336,8 @@ def test_five_production_tools_durable_status_and_proposal_replay(
     normalizer = SkillNormalizer.from_path(_skills_fixture())
     invoker = _CoveringDocumentInvoker()
     pdf = _cv_fixture("digital_cv_01.pdf")
+    owner_profile_id = ""
+    owner_attachment_id = ""
 
     async def _ainvoke(
         tool_fn: Any,
@@ -3169,7 +3351,14 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                 "type": "tool_call",
                 "id": tool_call_id,
                 "name": tool_fn.name,
-                "args": {**args, "state": {"run_id": run_id}},
+                "args": {
+                    **args,
+                    "state": {
+                        "run_id": run_id,
+                        "profile_id": owner_profile_id,
+                        "attachment_ids": [owner_attachment_id],
+                    },
+                },
             }
         )
         if isinstance(raw, str):
@@ -3184,20 +3373,13 @@ def test_five_production_tools_durable_status_and_proposal_replay(
         return ToolResult.model_validate(payload)
 
     async def _body() -> None:
+        nonlocal owner_profile_id, owner_attachment_id
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
             att_id = new_uuid()
             rel = storage.write_bytes(att_id, pdf.read_bytes())
             async with factory() as session:
-                user = await messages_repo.insert_message(
-                    session,
-                    role=CHAT_MESSAGE_ROLE_USER,
-                    content="five-tool durable status",
-                )
-                run = await runs_repo.create_run(
-                    session, user_message_id=user.id
-                )
                 await att_repo.create_staged(
                     session,
                     file_hash="five-tool-cv",
@@ -3207,6 +3389,29 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                pending = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="cv.pdf",
+                )
+                conversation = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=pending.id
+                )
+                await workspace_repo.set_active_profile_id(session, pending.id)
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="five-tool durable status",
+                    source_attachment_id=att_id,
+                )
+                run = await runs_repo.create_run(
+                    session,
+                    user_message_id=user.id,
+                    source_attachment_id=att_id,
+                )
+                owner_profile_id = pending.id
+                owner_attachment_id = att_id
                 await session.commit()
                 run_id = run.id
 

@@ -37,6 +37,8 @@ const MSG_ASST = '99999999-9999-4999-8999-999999999999';
 const MSG_OLD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TS = '2026-07-13T12:00:00.000Z';
 const TS_OLD = '2026-07-13T11:00:00.000Z';
+const CONVERSATION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const ATTACHMENT_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 /** Capture IntersectionObserver instances so load-older can be fired in tests. */
 type IoCallback = IntersectionObserverCallback;
@@ -201,6 +203,87 @@ function renderChat(deps: ChatPageDeps) {
     </Theme>,
   );
 }
+
+describe('pending profile composer gating', () => {
+  it('blocks ordinary turns while extraction is awaiting or failed', async () => {
+    for (const setupStatus of [
+      'awaiting_extraction',
+      'extraction_failed',
+    ] as const) {
+      const view = render(
+        <Theme theme={neutralTheme}>
+          <ChatPage
+            conversationId={CONVERSATION_ID}
+            selectedProfileState="pending"
+            selectedProfileSetupStatus={setupStatus}
+            deps={{
+              loadConversationHistory: vi.fn().mockResolvedValue(emptyHistory()),
+            }}
+          />
+        </Theme>,
+      );
+
+      await waitFor(() => {
+        expect(
+          getComposerEditable(view.container).getAttribute('contenteditable'),
+        ).toBe('false');
+      });
+      view.unmount();
+    }
+  });
+
+  it('blocks ordinary turns while allowing the owned automatic extraction turn', async () => {
+    const loadConversationHistory = vi.fn().mockResolvedValue(emptyHistory());
+    const sendConversationTurn = vi.fn().mockResolvedValue(undefined);
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          conversationId={CONVERSATION_ID}
+          selectedProfileState="pending"
+          selectedProfileSetupStatus="awaiting_extraction"
+          sidebarAttachmentTurn={{
+            requestKey: 1,
+            attachmentId: ATTACHMENT_ID,
+            message: 'Extract the uploaded CV.',
+          }}
+          deps={{loadConversationHistory, sendConversationTurn}}
+        />
+      </Theme>,
+    );
+
+    await waitFor(() => {
+      expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
+        'false',
+      );
+    });
+    await waitFor(() => expect(sendConversationTurn).toHaveBeenCalledTimes(1));
+    expect(sendConversationTurn.mock.calls[0]?.[0]).toBe(CONVERSATION_ID);
+    expect(sendConversationTurn.mock.calls[0]?.[1]).toMatchObject({
+      attachment_ids: [ATTACHMENT_ID],
+    });
+  });
+
+  it('enables draft-correction turns while awaiting approval', async () => {
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          conversationId={CONVERSATION_ID}
+          selectedProfileState="pending"
+          selectedProfileSetupStatus="awaiting_approval"
+          deps={{
+            loadConversationHistory: vi.fn().mockResolvedValue(emptyHistory()),
+          }}
+        />
+      </Theme>,
+    );
+
+    await waitFor(() => {
+      expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
+        'true',
+      );
+    });
+  });
+});
 
 /** ChatComposer uses a contentEditable surface (not a native textarea). */
 function getComposerEditable(container: HTMLElement): HTMLElement {
@@ -746,12 +829,17 @@ describe('ChatPage PDF attachment token (04A)', () => {
         mime_type: 'application/pdf',
         size_bytes: 100,
         page_count: 1,
-        state: 'staged',
+        state: 'active',
         failure_code: null,
       },
-      outcome: 'new',
-      profile: null,
+      outcome: 'existing_active',
+      profile: {
+        present: true,
+        profile_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        current_title: 'Engineer',
+      },
       draft: null,
+      bootstrap: null,
     });
     const sendTurn = vi.fn().mockResolvedValue(undefined);
 

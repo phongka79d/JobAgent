@@ -8,18 +8,27 @@ from typing import Any
 
 import pytest
 from app.db.session import build_async_engine
+from app.repositories import attachments as att_repo
 from app.repositories import job_evaluations as eval_repo
+from app.repositories import profiles as profiles_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.matching import MatchResult
 from app.services.evaluation_context import (
     MATCHING_CONTRACT_VERSION,
     EvaluationContextFacts,
     evaluation_context_hash,
 )
+from app.services.job_evaluation import evaluate_job
+from app.services.matching import match_jobs
+from app.services.skill_normalization import SkillNormalizer
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from tests.fakes.embeddings import FakeEmbeddingClient
+from tests.fakes.matching import ScriptedReadDriver
 from tests.support.db_migration import run_async, session_factory
+from tests.support.graph_rebuild import seed_scorable_job, skills_fixture
 
 _TS = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 _JOB_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -418,6 +427,73 @@ def test_job_and_profile_delete_cascade_evaluations(db_path: Path) -> None:
             await e.dispose()
 
     run_async(_c())
+
+
+def test_selected_pending_profile_stops_matching_and_evaluation_before_providers(
+    db_path: Path,
+) -> None:
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+
+    async def _seed() -> str:
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="pending-approved-boundary-hash",
+                original_name="pending.pdf",
+                size_bytes=100,
+                storage_path="pending/profile.pdf",
+                page_count=1,
+            )
+            profile = await profiles_repo.create_pending_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="pending.pdf",
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await session.commit()
+        return await seed_scorable_job(
+            factory, raw_hash="pending-evaluation-job-hash"
+        )
+
+    try:
+        job_id = run_async(_seed())
+        matching_embedder = FakeEmbeddingClient()
+        matching_driver = ScriptedReadDriver(())
+        matching_result = run_async(
+            match_jobs(
+                session_factory=factory,
+                graph_driver=matching_driver,
+                embedding_client=matching_embedder,
+                normalizer=SkillNormalizer.from_path(skills_fixture()),
+            )
+        )
+
+        assert matching_result.ok is False
+        assert matching_result.error_code == "PROFILE_NOT_READY"
+        assert matching_embedder.call_count == 0
+        assert matching_driver.session_enter == 0
+        assert matching_driver.queries == []
+
+        evaluation_embedder = FakeEmbeddingClient()
+        evaluation_driver = ScriptedReadDriver(())
+        evaluation_result = run_async(
+            evaluate_job(
+                session_factory=factory,
+                job_id=job_id,
+                graph_driver=evaluation_driver,
+                embedding_client=evaluation_embedder,
+                normalizer=SkillNormalizer.from_path(skills_fixture()),
+            )
+        )
+
+        assert evaluation_result.ok is False
+        assert evaluation_result.error_code == "PROFILE_NOT_READY"
+        assert evaluation_embedder.call_count == 0
+        assert evaluation_driver.session_enter == 0
+        assert evaluation_driver.queries == []
+    finally:
+        run_async(engine.dispose())
 
 
 def test_same_context_second_insert_reuses_without_new_row(

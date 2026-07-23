@@ -7,6 +7,7 @@ import {
   useProfileWorkspaceState,
 } from '../features/profile/workspaceState';
 import type {ConversationMutationResponse} from '../features/profile/conversationTypes';
+import type {PendingProfileBootstrap} from '../features/profile/types';
 
 const PROFILE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CONVERSATION_A = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -19,6 +20,30 @@ const conversation = {
   updated_at: '2026-01-01T00:00:00Z',
   last_opened_at: '2026-01-01T00:00:00Z',
   is_selected: true,
+};
+
+const pendingProfile = {
+  id: PROFILE_A,
+  display_name: 'Ada.pdf',
+  cv_filename: 'Ada.pdf',
+  attachment_state: 'staged' as const,
+  location: null,
+  skill_tags: [],
+  skill_count: 0,
+  extraction_version: null,
+  source_hash: null,
+  state: 'pending' as const,
+  setup_status: 'awaiting_extraction' as const,
+  is_active: true,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  last_opened_at: '2026-01-01T00:00:00Z',
+};
+
+const bootstrap: PendingProfileBootstrap = {
+  profile: pendingProfile,
+  conversation,
+  start_extraction: true,
 };
 
 describe('profile workspace state', () => {
@@ -83,5 +108,33 @@ describe('profile workspace state', () => {
     );
     expect(next.selectedConversationId).toBe(CONVERSATION_A);
     expect(next.conversations[0]?.id).toBe(CONVERSATION_A);
+  });
+
+  it('adopts server bootstrap identity without activation or conversation creation', async () => {
+    const activateProfile = vi.fn();
+    const createProfileConversation = vi.fn();
+    const fetchProfiles = vi.fn().mockResolvedValue({
+      items: [],
+      active_profile_id: null,
+    });
+    const {result} = renderHook(() =>
+      useProfileWorkspaceState({
+        fetchProfiles,
+        activateProfile,
+        createProfileConversation,
+      }),
+    );
+
+    await waitFor(() => expect(fetchProfiles).toHaveBeenCalled());
+    act(() => {
+      result.current.adoptBootstrap(bootstrap);
+    });
+
+    expect(result.current.state.activeProfileId).toBe(PROFILE_A);
+    expect(result.current.state.selectedConversationId).toBe(CONVERSATION_A);
+    expect(result.current.state.profiles).toEqual([pendingProfile]);
+    expect(result.current.state.conversations).toEqual([conversation]);
+    expect(activateProfile).not.toHaveBeenCalled();
+    expect(createProfileConversation).not.toHaveBeenCalled();
   });
 });

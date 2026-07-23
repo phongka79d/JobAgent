@@ -30,7 +30,7 @@ from app.schemas.attachments import AttachmentPublic
 from app.schemas.chat import ConversationSummary
 from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
 from app.schemas.skills import SkillRef
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Exact enum vocabularies from Master §7.2–7.3 (string Literals, not ORM types).
 SkillProficiency = Literal["beginner", "intermediate", "advanced", "unknown"]
@@ -188,7 +188,12 @@ class ProfileSkillTag(BaseModel):
     label: str
 
 
-ProfileAttachmentState = Literal["active", "archived", "deleting"]
+ProfileAttachmentState = Literal[
+    "staged", "active", "archived", "failed", "deleting"
+]
+ProfileSetupStatus = Literal[
+    "awaiting_extraction", "awaiting_approval", "extraction_failed"
+]
 
 
 class ProfileAttachmentMetadata(BaseModel):
@@ -215,13 +220,45 @@ class ProfileListItem(BaseModel):
     location: str | None
     skill_tags: list[ProfileSkillTag]
     skill_count: int
-    extraction_version: str
-    source_hash: str
-    state: Literal["ready", "deleting"]
+    extraction_version: str | None
+    source_hash: str | None
+    state: Literal["pending", "ready", "deleting"]
+    setup_status: ProfileSetupStatus | None
     is_active: bool
     created_at: AwareUtcDatetime
     updated_at: AwareUtcDatetime
     last_opened_at: AwareUtcDatetime
+
+    @model_validator(mode="after")
+    def validate_lifecycle_shape(self) -> ProfileListItem:
+        approved = self.extraction_version is not None and self.source_hash is not None
+        incomplete = self.extraction_version is None and self.source_hash is None
+        if not (approved or incomplete):
+            raise ValueError("profile extraction metadata is inconsistent")
+        if self.state == "pending":
+            if (
+                not incomplete
+                or self.location is not None
+                or self.skill_tags
+                or self.skill_count != 0
+                or self.setup_status is None
+                or self.attachment_state not in {"staged", "failed"}
+            ):
+                raise ValueError("pending profile projection is inconsistent")
+            if (self.attachment_state == "failed") != (
+                self.setup_status == "extraction_failed"
+            ):
+                raise ValueError("pending profile failure status is inconsistent")
+        elif self.state == "ready":
+            if (
+                not approved
+                or self.setup_status is not None
+                or self.attachment_state not in {"active", "archived"}
+            ):
+                raise ValueError("ready profile projection is inconsistent")
+        elif self.setup_status is not None or self.attachment_state != "deleting":
+            raise ValueError("deleting profile projection is inconsistent")
+        return self
 
 
 class ProfileListResponse(BaseModel):

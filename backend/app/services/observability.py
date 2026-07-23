@@ -97,6 +97,7 @@ ERROR_CHUNK_NOT_FOUND: str = "CHUNK_NOT_FOUND"
 ERROR_NO_ACTIVE_PROFILE: str = "NO_ACTIVE_PROFILE"
 ERROR_CV_REPROCESS_REQUIRED: str = "CV_REPROCESS_REQUIRED"
 ERROR_ACTIVE_PROFILE_REQUIRED: str = "ACTIVE_PROFILE_REQUIRED"
+ERROR_PROFILE_NOT_READY: str = "PROFILE_NOT_READY"
 ERROR_JOB_NOT_FOUND: str = "JOB_NOT_FOUND"
 ERROR_JOB_NOT_SCORABLE: str = "JOB_NOT_SCORABLE"
 ERROR_SKILL_MAP_LIMIT_EXCEEDED: str = "SKILL_MAP_LIMIT_EXCEEDED"
@@ -611,10 +612,15 @@ async def get_selected_job_skill_map(
             "The requested Job has no valid scorable extraction.",
         ) from exc
 
-    profile_row = await profile_repo.get_active_profile(session)
-    if profile_row is None or not isinstance(profile_row.profile_json, dict):
+    profile_row = await profile_repo.get_selected_ready_profile(session)
+    if profile_row is None:
+        selected = await profile_repo.get_active_profile(session)
         raise ObservabilityServiceError(
-            ERROR_ACTIVE_PROFILE_REQUIRED,
+            (
+                ERROR_PROFILE_NOT_READY
+                if selected is not None
+                else ERROR_ACTIVE_PROFILE_REQUIRED
+            ),
             "Approve an active CV profile before loading a skill map.",
         )
     try:
@@ -844,7 +850,7 @@ async def get_graph_snapshot(
     * otherwise ``ready`` with the cap-aware allowlisted projection (legacy
       active CV without document emits metadata only + ``CV_REPROCESS_REQUIRED``).
     """
-    profile = await profile_repo.get_active_profile(session)
+    profile = await profile_repo.get_selected_ready_profile(session)
     if profile is None:
         return _empty_graph_snapshot(
             status="ready",

@@ -73,17 +73,27 @@ def _create_profiles() -> None:
         sa.Column("id", sa.Text(), nullable=False),
         sa.Column("attachment_id", sa.Text(), nullable=False),
         sa.Column("display_name", sa.Text(), nullable=False),
-        sa.Column("profile_json", sa.JSON(), nullable=False),
+        sa.Column("profile_json", sa.JSON(), nullable=True),
         sa.Column("location", sa.Text(), nullable=True),
-        sa.Column("extraction_version", sa.Text(), nullable=False),
-        sa.Column("source_hash", sa.Text(), nullable=False),
+        sa.Column("extraction_version", sa.Text(), nullable=True),
+        sa.Column("source_hash", sa.Text(), nullable=True),
         sa.Column("state", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_opened_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_profiles"),
         sa.CheckConstraint(
-            "state IN ('ready', 'deleting')",
+            "(state = 'pending' "
+            "AND profile_json IS NULL AND location IS NULL "
+            "AND extraction_version IS NULL AND source_hash IS NULL) "
+            "OR (state = 'ready' "
+            "AND profile_json IS NOT NULL "
+            "AND extraction_version IS NOT NULL AND source_hash IS NOT NULL) "
+            "OR (state = 'deleting' AND ("
+            "(profile_json IS NULL AND location IS NULL "
+            "AND extraction_version IS NULL AND source_hash IS NULL) "
+            "OR (profile_json IS NOT NULL "
+            "AND extraction_version IS NOT NULL AND source_hash IS NOT NULL)))",
             name="state",
         ),
         sa.ForeignKeyConstraint(
@@ -93,6 +103,13 @@ def _create_profiles() -> None:
             ondelete="RESTRICT",
         ),
         sa.UniqueConstraint("attachment_id", name="uq_profiles__attachment_id"),
+    )
+    op.create_index(
+        "uq_profiles__single_incomplete",
+        "profiles",
+        [sa.literal_column("1")],
+        unique=True,
+        sqlite_where=sa.text("profile_json IS NULL"),
     )
     op.create_table(
         "profile_preferences",

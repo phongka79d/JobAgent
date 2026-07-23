@@ -1188,7 +1188,7 @@ git commit -m "feat: isolate chat by conversation and profile"
 - Test: backend/tests/integration/test_migrations.py, test_database_contract.py, test_cv_api.py, test_profiles_api.py, test_profile_selection.py, test_conversations_api.py, test_chat_persistence.py, test_profile_approval.py, test_job_evaluations.py, test_graph_rebuild_behavior.py
 - Test: frontend/src/test/profile-api.test.ts, profile-workspace-state.test.tsx, chat-page.test.tsx, frontend/src/app/App.test.tsx, frontend/src/test/cv-sidebar.test.tsx
 
-- [ ] **Step 1: Write failing pending-shape schema tests**
+- [x] **Step 1: Write failing pending-shape schema tests**
 
 Extend the model, migration, and database-contract tests with one coherent
 incomplete shape and one coherent ready shape:
@@ -1236,7 +1236,7 @@ index. Add parity assertions for nullable approved fields, the state/shape CHECK
 and `uq_profiles__single_incomplete`. Keep `workspace_state(main, NULL)` and zero
 profiles/conversations after migration.
 
-- [ ] **Step 2: Run schema tests to verify RED**
+- [x] **Step 2: Run schema tests to verify RED**
 
 ~~~powershell
 Set-Location backend
@@ -1246,7 +1246,7 @@ Set-Location backend
 Expected: assertions fail because `pending`, nullable approved fields, the
 state/shape CHECK, and the single-incomplete index do not exist.
 
-- [ ] **Step 3: Implement the pending persistence contract and rerun schema tests**
+- [x] **Step 3: Implement the pending persistence contract and rerun schema tests**
 
 Define the shared state names once in `db/models/profiles.py`:
 
@@ -1299,7 +1299,7 @@ Run:
 
 Expected: the schema tests pass with zero application rows after migration.
 
-- [ ] **Step 4: Write failing upload-bootstrap and safe-projection tests**
+- [x] **Step 4: Write failing upload-bootstrap and safe-projection tests**
 
 Add response/parser contracts for these exact values:
 
@@ -1378,7 +1378,7 @@ Pending list rows must have `location=None`, `skill_tags=[]`, `skill_count=0`,
 `setup_status` values. `GET /api/profiles/{id}`, PATCH, activate, and reextract
 must return `PROFILE_NOT_READY` for pending rows.
 
-- [ ] **Step 5: Run upload/projection tests to verify RED**
+- [x] **Step 5: Run upload/projection tests to verify RED**
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_cv_api.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_conversations_api.py -q
@@ -1387,7 +1387,7 @@ must return `PROFILE_NOT_READY` for pending rows.
 Expected: new upload still returns a staged attachment only; no pending owner,
 bootstrap DTO, setup status, or pending gate exists.
 
-- [ ] **Step 6: Implement atomic upload bootstrap and safe pending reads**
+- [x] **Step 6: Implement atomic upload bootstrap and safe pending reads**
 
 Add these repository boundaries:
 
@@ -1435,7 +1435,7 @@ Allow list and bootstrap-conversation hydration for the selected pending
 profile, but keep detail, rename, activation, re-extraction, new conversation,
 selection, and conversation deletion ready-only.
 
-- [ ] **Step 7: Write failing owned-turn, promotion, and ready-truth tests**
+- [x] **Step 7: Write failing owned-turn, promotion, and ready-truth tests**
 
 Add tests proving the pending profile is a real owner and never approved truth:
 
@@ -1478,7 +1478,7 @@ post-commit graph sync, prior active attachment archival on promotion, pending
 exclusion from active-CV readers/matching/evaluation/observability/rebuild, and
 safe compatibility `GET /api/profile` output.
 
-- [ ] **Step 8: Run owned-turn/promotion tests to verify RED**
+- [x] **Step 8: Run owned-turn/promotion tests to verify RED**
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_chat_persistence.py tests/integration/test_profile_approval.py tests/unit/test_agent_context.py tests/integration/test_job_evaluations.py tests/integration/test_graph_rebuild_behavior.py -q
@@ -1488,7 +1488,7 @@ Expected: the profile tool does not target the injected profile owner,
 approval attempts singleton/new-row behavior, and approved-data readers do not
 consistently reject pending selection.
 
-- [ ] **Step 9: Implement explicit pending ownership and in-place promotion**
+- [x] **Step 9: Implement explicit pending ownership and in-place promotion**
 
 In the profile tool, read the injected graph `profile_id`. Pass it as
 `target_profile_id` only when the row owns the effective attachment and is
@@ -1523,7 +1523,7 @@ attachment, activates the pending attachment, and keeps the existing bootstrap
 conversation. Request Changes preserves the targeted pending draft. Use the
 guarded persisted profile—not the unguarded provider draft—for graph sync.
 
-- [ ] **Step 10: Write failing frontend bootstrap-adoption tests**
+- [x] **Step 10: Write failing frontend bootstrap-adoption tests**
 
 ~~~tsx
 it('adopts server bootstrap IDs before starting one extraction turn', async () => {
@@ -1563,7 +1563,7 @@ Cover reload persistence, request-change correction enablement,
 ordinary-chat lock for awaiting-extraction/extraction-failed, and no second
 reducer/store.
 
-- [ ] **Step 11: Run frontend tests to verify RED**
+- [x] **Step 11: Run frontend tests to verify RED**
 
 ~~~powershell
 Set-Location ..\frontend
@@ -1573,7 +1573,7 @@ npm test -- --run src/test/profile-api.test.ts src/test/profile-workspace-state.
 Expected: upload responses have no bootstrap parser/action and App cannot select
 the server conversation before scheduling the turn.
 
-- [ ] **Step 12: Implement frontend bootstrap adoption and run all Task 5 gates**
+- [x] **Step 12: Implement frontend bootstrap adoption and run all Task 5 gates**
 
 Add `workspace/bootstrapAdopted` to the existing reducer. It applies only the
 server profile/conversation IDs and projections, marks the returned conversation

@@ -13,7 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.core.settings import Settings
 from app.db.session import get_session_factory
-from app.schemas.attachments import CvUploadResponse
+from app.schemas.profile_setup import CvUploadResponse
 from app.services.chat_turns import ERROR_APPROVAL_ACTION_REQUIRED
 from app.services.cv_upload import (
     ERROR_EMPTY_UPLOAD,
@@ -22,6 +22,7 @@ from app.services.cv_upload import (
     ERROR_MALFORMED_PDF,
     ERROR_PDF_TOO_LARGE,
     ERROR_PDF_TOO_MANY_PAGES,
+    ERROR_PROFILE_SETUP_IN_PROGRESS,
     ERROR_STORAGE_FAILURE,
     CvUploadError,
     upload_cv_from_upload_file,
@@ -39,6 +40,7 @@ _UPLOAD_ERROR_STATUS: dict[str, int] = {
     ERROR_PDF_TOO_MANY_PAGES: 422,
     ERROR_MALFORMED_PDF: 422,
     ERROR_STORAGE_FAILURE: 500,
+    ERROR_PROFILE_SETUP_IN_PROGRESS: 409,
 }
 
 

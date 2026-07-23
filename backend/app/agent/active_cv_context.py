@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.profiles import PROFILE_STATE_READY
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
@@ -192,7 +193,7 @@ async def load_active_cv_context(
     if owner.profile_id != profile_id:
         raise RuntimeError("conversation/profile ownership mismatch")
     profile = await profile_repo.get_profile(session, profile_id)
-    if profile is None:
+    if profile is None or profile.state != PROFILE_STATE_READY:
         return empty_active_cv_context()
     attachment_id = profile.active_attachment_id
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":

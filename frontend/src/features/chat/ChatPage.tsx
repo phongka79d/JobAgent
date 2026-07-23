@@ -30,7 +30,15 @@ import {
 } from '../../lib/api/chat';
 import {saveAndEvaluateJob as defaultSaveAndEvaluateJob} from '../jobs/api';
 import {uploadCv as defaultUploadCv} from '../profile/api';
-import type {PendingPdfAttachment} from '../profile/types';
+import {isProfileCommitApproval} from '../profile/ApprovalCard';
+import type {
+  ProfileListItem,
+  ProfileSetupStatus,
+} from '../profile/conversationTypes';
+import type {
+  CvUploadResponse,
+  PendingPdfAttachment,
+} from '../profile/types';
 import {ChatMessages} from './components/ChatMessages';
 import type {ChatApprovalAction} from './components/ChatMessageRow';
 import {
@@ -83,6 +91,8 @@ export type CvReprocessTerminal =
 
 export type ChatPageProps = {
   conversationId?: string | null;
+  selectedProfileState?: ProfileListItem['state'] | null;
+  selectedProfileSetupStatus?: ProfileSetupStatus | null;
   /** Injectable transport for tests; defaults to Plan 3/4 API clients. */
   deps?: ChatPageDeps;
   /** Reflect lock to App/sidebar so upload disables with composer. */
@@ -102,6 +112,10 @@ export type ChatPageProps = {
   ) => void;
   /** After save_profile completes successfully — refresh approved sidebar. */
   onProfileSaved?: () => void;
+  /** Re-read pending setup projection after draft/approval state changes. */
+  onProfileSetupChanged?: () => void | Promise<void>;
+  /** Route composer uploads through the App-owned bootstrap adoption path. */
+  onCvUploadSuccess?: (result: CvUploadResponse) => void;
   /** After zero-result save/evaluate — invalidate saved-JD sidebar caches. */
   onSavedJobsInvalidated?: () => void;
 };
@@ -117,6 +131,8 @@ const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 export function ChatPage({
   conversationId,
+  selectedProfileState,
+  selectedProfileSetupStatus,
   deps,
   onInteractionLockChange,
   sidebarAttachmentTurn,
@@ -125,6 +141,8 @@ export function ChatPage({
   onCvReprocessHandled,
   onCvReprocessTerminal,
   onProfileSaved,
+  onProfileSetupChanged,
+  onCvUploadSuccess,
   onSavedJobsInvalidated,
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
@@ -190,6 +208,8 @@ export function ChatPage({
   stateRef.current = state;
   const onProfileSavedRef = useRef(onProfileSaved);
   onProfileSavedRef.current = onProfileSaved;
+  const onProfileSetupChangedRef = useRef(onProfileSetupChanged);
+  onProfileSetupChangedRef.current = onProfileSetupChanged;
   const onSavedJobsInvalidatedRef = useRef(onSavedJobsInvalidated);
   onSavedJobsInvalidatedRef.current = onSavedJobsInvalidated;
   const onCvReprocessTerminalRef = useRef(onCvReprocessTerminal);
@@ -227,10 +247,19 @@ export function ChatPage({
     }
   }, [state.streamPhase]);
 
-  const locked = isComposerLocked(state) || conversationId === null;
+  const interactionLocked = isComposerLocked(state);
+  const profileAllowsOrdinaryTurn =
+    selectedProfileState === undefined ||
+    selectedProfileState === 'ready' ||
+    (selectedProfileState === 'pending' &&
+      selectedProfileSetupStatus === 'awaiting_approval');
+  const locked =
+    interactionLocked ||
+    conversationId === null ||
+    !profileAllowsOrdinaryTurn;
   useEffect(() => {
-    onInteractionLockChange?.(locked);
-  }, [locked, onInteractionLockChange]);
+    onInteractionLockChange?.(interactionLocked);
+  }, [interactionLocked, onInteractionLockChange]);
 
   // Initial history hydration (newest page) — reconstructs pending approval cards.
   useEffect(() => {
@@ -342,6 +371,14 @@ export function ChatPage({
             void rehydrateDurableHistory();
           } else if (event.event === 'approval_required') {
             inFlightRef.current = false;
+            if (
+              isProfileCommitApproval(
+                event.payload.kind,
+                event.payload.allowed_actions,
+              )
+            ) {
+              void onProfileSetupChangedRef.current?.();
+            }
             opts?.onTerminal?.('interrupted');
           }
         },
@@ -514,7 +551,12 @@ export function ChatPage({
             if (action === 'save_profile') {
               onProfileSavedRef.current?.();
             } else if (action === 'request_changes') {
-              focusComposer();
+              const refresh = onProfileSetupChangedRef.current?.();
+              if (refresh) {
+                void Promise.resolve(refresh).then(focusComposer, focusComposer);
+              } else {
+                focusComposer();
+              }
             }
             // save_job invalidation waits for rehydrateDurableHistory proof.
             // cancel_save_job: no SavedJobCard path and no invalidation arm.
@@ -700,6 +742,15 @@ export function ChatPage({
       setAttachError(null);
       try {
         const result = await doUpload(file);
+        if (onCvUploadSuccess) {
+          setPendingPdf(null);
+          setComposerFile(null);
+          onCvUploadSuccess(result);
+          return;
+        }
+        if (result.bootstrap !== null) {
+          throw new Error('Pending profile upload requires workspace adoption');
+        }
         // Compact PDF token: display name + ID only (no bytes/path).
         setPendingPdf({
           attachmentId: result.attachment.id,
@@ -720,7 +771,7 @@ export function ChatPage({
         setIsAttaching(false);
       }
     },
-    [doUpload, isAttaching, locked],
+    [doUpload, isAttaching, locked, onCvUploadSuccess],
   );
 
   useEffect(() => {

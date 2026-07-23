@@ -66,10 +66,21 @@ export function App({deps}: AppProps = {}) {
    */
   const [savedJobsInvalidateKey, setSavedJobsInvalidateKey] = useState(0);
   const requestKeyRef = useRef(0);
+  const selectedProfile = workspace.state.profiles.find(
+    (profile) => profile.id === workspace.state.activeProfileId,
+  );
 
   const handleSidebarUploadSuccess = useCallback(
     (result: CvUploadResponse) => {
       setProfileRefreshKey((k) => k + 1);
+      if (result.bootstrap === null) {
+        return;
+      }
+      workspace.adoptBootstrap(result.bootstrap);
+      if (!result.bootstrap.start_extraction) {
+        setSidebarTurn(null);
+        return;
+      }
       requestKeyRef.current += 1;
       setSidebarTurn({
         requestKey: requestKeyRef.current,
@@ -77,7 +88,7 @@ export function App({deps}: AppProps = {}) {
         message: SIDEBAR_CV_TURN_MESSAGE,
       });
     },
-    [],
+    [workspace.adoptBootstrap],
   );
 
   const handleSidebarTurnHandled = useCallback((requestKey: number) => {
@@ -127,7 +138,8 @@ export function App({deps}: AppProps = {}) {
     setProfileRefreshKey((k) => k + 1);
     setActivationKey((k) => k + 1);
     setSavedJobsInvalidateKey((k) => k + 1);
-  }, []);
+    void workspace.reload();
+  }, [workspace.reload]);
 
   /** Delete success → profile summary may change if only non-active rows removed. */
   const handleCvDeleted = useCallback(() => {
@@ -160,6 +172,8 @@ export function App({deps}: AppProps = {}) {
       <ChatPage
         key={workspace.state.selectedConversationId ?? 'no-conversation'}
         conversationId={workspace.state.selectedConversationId}
+        selectedProfileState={selectedProfile?.state ?? null}
+        selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
         deps={deps?.chat}
         onInteractionLockChange={setUploadLocked}
         sidebarAttachmentTurn={sidebarTurn}
@@ -168,6 +182,8 @@ export function App({deps}: AppProps = {}) {
         onCvReprocessHandled={handleCvReprocessHandled}
         onCvReprocessTerminal={handleCvReprocessTerminal}
         onProfileSaved={handleProfileSaved}
+        onProfileSetupChanged={workspace.reload}
+        onCvUploadSuccess={handleSidebarUploadSuccess}
         onSavedJobsInvalidated={handleSavedJobsInvalidated}
       />
     </AppShell>

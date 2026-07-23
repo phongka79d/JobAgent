@@ -36,13 +36,23 @@ from app.db.models.attachments import (
 from app.db.models.profiles import Profile
 from app.db.session import get_session_factory, session_scope
 from app.repositories import attachments as att_repo
+from app.repositories import conversations as conversation_repo
 from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.attachments import (
     AttachmentPublic,
-    CvUploadOutcome,
-    CvUploadResponse,
     DraftUploadSummary,
     ProfileUploadSummary,
+)
+from app.schemas.profile_setup import (
+    CvUploadOutcome,
+    CvUploadResponse,
+    PendingProfileBootstrap,
+)
+from app.services.activity_gate import (
+    ActivityBlockedError,
+    assert_profile_idle,
+    assert_workspace_idle,
 )
 from app.services.chat_turns import (
     ERROR_APPROVAL_ACTION_REQUIRED,
@@ -59,6 +69,7 @@ ERROR_PDF_TOO_LARGE: str = "PDF_TOO_LARGE"
 ERROR_PDF_TOO_MANY_PAGES: str = "PDF_TOO_MANY_PAGES"
 ERROR_MALFORMED_PDF: str = "MALFORMED_PDF"
 ERROR_STORAGE_FAILURE: str = "STORAGE_FAILURE"
+ERROR_PROFILE_SETUP_IN_PROGRESS: str = "PROFILE_SETUP_IN_PROGRESS"
 
 PDF_MAGIC: bytes = b"%PDF-"
 _READ_CHUNK: int = 64 * 1024
@@ -130,17 +141,25 @@ def _profile_summary(
     )
 
 
-async def _assert_no_interrupted(
+async def _assert_upload_activity_gate(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Raise APPROVAL_ACTION_REQUIRED before any upload read/persist work."""
+    """Block unrelated workspace activity before reading an upload body."""
     async with factory() as session:
         interrupted = await get_interrupted_run(session)
-        if interrupted is not None:
+        incomplete = await profile_repo.get_incomplete_profile(session)
+        if interrupted is not None and incomplete is None:
             raise CvUploadError(
                 ERROR_APPROVAL_ACTION_REQUIRED,
                 "an interrupted run requires an approval action before a new upload",
             )
+        if incomplete is None:
+            try:
+                await assert_workspace_idle(
+                    session, code=ERROR_PROFILE_SETUP_IN_PROGRESS
+                )
+            except ActivityBlockedError as exc:
+                raise CvUploadError(exc.code, exc.summary) from exc
 
 
 async def _stream_to_temp(
@@ -228,7 +247,7 @@ async def _build_active_response(
     session: AsyncSession,
     row: Attachment,
 ) -> CvUploadResponse:
-    profile = await profile_repo.get_active_profile(session)
+    profile = await profile_repo.get_selected_ready_profile(session)
     summary: ProfileUploadSummary | None = None
     if profile is not None:
         summary = _profile_summary(
@@ -270,12 +289,46 @@ async def _build_existing_profile_response(
     )
 
 
-async def _build_staged_response(
+async def _pending_can_start(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+) -> bool:
+    draft = await profile_repo.get_current_draft(session)
+    if draft is not None and draft.target_profile_id == profile_id:
+        return False
+    try:
+        await assert_profile_idle(
+            session,
+            profile_id=profile_id,
+            code=ERROR_PROFILE_SETUP_IN_PROGRESS,
+        )
+    except ActivityBlockedError:
+        return False
+    return True
+
+
+async def _build_pending_response(
     session: AsyncSession,
     row: Attachment,
     *,
     outcome: CvUploadOutcome,
+    start_extraction: bool,
 ) -> CvUploadResponse:
+    profile = await profile_repo.get_profile_by_attachment_id(session, row.id)
+    if profile is None or profile.state != "pending":
+        raise CvUploadError(
+            ERROR_PROFILE_SETUP_IN_PROGRESS,
+            "pending profile setup is inconsistent",
+        )
+    conversation = await conversation_repo.most_recent_for_profile(
+        session, profile_id=profile.id
+    )
+    if conversation is None:
+        raise CvUploadError(
+            ERROR_PROFILE_SETUP_IN_PROGRESS,
+            "pending profile setup is inconsistent",
+        )
     draft = await profile_repo.get_current_draft(session)
     draft_summary: DraftUploadSummary | None
     if draft is None:
@@ -290,11 +343,22 @@ async def _build_staged_response(
             draft_id="current",
             source_attachment_id=draft.source_attachment_id,
         )
+    from app.services.conversations import project_conversation
+    from app.services.profile_projection import project_profile_list_item
+
+    projected_profile = await project_profile_list_item(
+        session, profile, active_id=profile.id
+    )
     return CvUploadResponse(
         attachment=_attachment_public(row),
         outcome=outcome,
         profile=None,
         draft=draft_summary,
+        bootstrap=PendingProfileBootstrap(
+            profile=projected_profile,
+            conversation=project_conversation(conversation, selected=True),
+            start_extraction=start_extraction,
+        ),
     )
 
 
@@ -318,7 +382,7 @@ async def upload_cv(
     max_pages = int(cfg.MAX_PDF_PAGES)
 
     # 1) Guard before any application read/persist of upload bytes/metadata.
-    await _assert_no_interrupted(factory)
+    await _assert_upload_activity_gate(factory)
 
     # MIME is request metadata (not body bytes); reject early before streaming
     # finalizes anything. Still no temp/final file yet.
@@ -343,6 +407,15 @@ async def upload_cv(
         # 5) Exact-hash resolution.
         async with factory() as session:
             existing = await att_repo.get_by_file_hash(session, file_hash)
+            incomplete = await profile_repo.get_incomplete_profile(session)
+
+            if incomplete is not None and (
+                existing is None or existing.id != incomplete.attachment_id
+            ):
+                raise CvUploadError(
+                    ERROR_PROFILE_SETUP_IN_PROGRESS,
+                    "finish or discard the pending profile setup first",
+                )
 
             if existing is not None:
                 state = existing.state
@@ -353,26 +426,59 @@ async def upload_cv(
                     return response
 
                 if state == ATTACHMENT_STATE_STAGED:
-                    response = await _build_staged_response(
-                        session, existing, outcome="existing_staged"
+                    profile = await profile_repo.get_profile_by_attachment_id(
+                        session, existing.id
+                    )
+                    if profile is None:
+                        raise CvUploadError(
+                            ERROR_PROFILE_SETUP_IN_PROGRESS,
+                            "pending profile setup is inconsistent",
+                        )
+                    response = await _build_pending_response(
+                        session,
+                        existing,
+                        outcome="existing_pending",
+                        start_extraction=await _pending_can_start(
+                            session, profile_id=profile.id
+                        ),
                     )
                     storage.discard_temp(temp_path)
                     temp_path = None
                     return response
 
                 if state == ATTACHMENT_STATE_FAILED:
+                    profile = await profile_repo.get_profile_by_attachment_id(
+                        session, existing.id
+                    )
+                    if profile is None:
+                        raise CvUploadError(
+                            ERROR_PROFILE_SETUP_IN_PROGRESS,
+                            "pending profile setup is inconsistent",
+                        )
+                    if not await _pending_can_start(
+                        session, profile_id=profile.id
+                    ):
+                        response = await _build_pending_response(
+                            session,
+                            existing,
+                            outcome="existing_pending",
+                            start_extraction=False,
+                        )
+                        storage.discard_temp(temp_path)
+                        temp_path = None
+                        return response
                     try:
                         retried = await att_repo.retry_as_staged(
                             session, existing.id
                         )
-                        if (
-                            original_name
-                            and original_name != retried.original_name
-                        ):
+                        if original_name != retried.original_name:
                             retried.original_name = original_name
                             await session.flush()
-                        response = await _build_staged_response(
-                            session, retried, outcome="retry"
+                        response = await _build_pending_response(
+                            session,
+                            retried,
+                            outcome="retry_pending",
+                            start_extraction=True,
                         )
                         await session.commit()
                     except Exception:
@@ -418,6 +524,17 @@ async def upload_cv(
 
         try:
             async with session_scope(factory) as session:
+                if await profile_repo.get_incomplete_profile(session) is not None:
+                    raise CvUploadError(
+                        ERROR_PROFILE_SETUP_IN_PROGRESS,
+                        "finish or discard the pending profile setup first",
+                    )
+                try:
+                    await assert_workspace_idle(
+                        session, code=ERROR_PROFILE_SETUP_IN_PROGRESS
+                    )
+                except ActivityBlockedError as exc:
+                    raise CvUploadError(exc.code, exc.summary) from exc
                 row = await att_repo.create_staged(
                     session,
                     file_hash=file_hash,
@@ -427,8 +544,20 @@ async def upload_cv(
                     page_count=page_count,
                     attachment_id=attachment_id,
                 )
-                return await _build_staged_response(
-                    session, row, outcome="new"
+                profile = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=row.id,
+                    display_name=original_name,
+                )
+                await conversation_repo.create_bootstrap_for_profile(
+                    session, profile_id=profile.id
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                return await _build_pending_response(
+                    session,
+                    row,
+                    outcome="new_pending",
+                    start_extraction=True,
                 )
         except Exception:
             # Row failure: best-effort delete the new UUID file only.
@@ -477,6 +606,7 @@ __all__ = [
     "ERROR_MALFORMED_PDF",
     "ERROR_PDF_TOO_LARGE",
     "ERROR_PDF_TOO_MANY_PAGES",
+    "ERROR_PROFILE_SETUP_IN_PROGRESS",
     "ERROR_STORAGE_FAILURE",
     "PDF_MAGIC",
     "CvUploadError",

@@ -267,6 +267,7 @@ def test_profile_list_and_detail_are_exact_safe_row_keyed_projections(
         "extraction_version",
         "source_hash",
         "state",
+        "setup_status",
         "is_active",
         "created_at",
         "updated_at",
@@ -277,6 +278,7 @@ def test_profile_list_and_detail_are_exact_safe_row_keyed_projections(
     assert item["attachment_state"] == "active"
     assert item["skill_tags"] == [{"key": "python", "label": "Python"}]
     assert item["skill_count"] == 1
+    assert item["setup_status"] is None
     assert item["is_active"] is True
 
     assert detail_response.status_code == 200, detail_response.text
