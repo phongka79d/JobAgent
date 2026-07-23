@@ -28,7 +28,7 @@ The system must let the user:
 13. Keep a compact saved-JD library with detail, explicit evaluation, and complete deletion actions in the existing sidebar.
 14. Persist at most one evaluation for the same JD and active CV/profile/preferences/scoring revision, mark older results as **Cần đánh giá lại**, and recompute only after an explicit user action.
 15. Render Agent answers as readable, conclusion-first Markdown and show an exact active-CV source dialog only when durable `read_active_cv` evidence exists.
-16. Recognize a passively pasted raw JD, show a concise preview, and require an explicit **Lưu JD** or **Không lưu** decision before any persistence, extraction, embedding, evaluation, or graph mutation.
+16. Recognize a passively pasted raw JD, show a concise preview, and require an explicit **Save JD** or **Not save** decision before any persistence, extraction, embedding, evaluation, or graph mutation.
 17. Validate extracted JD facts against their retained source, keep skill labels atomic, render the complete existing extraction contract, and let the user safely re-extract a retained JD without changing its identity or automatically evaluating it.
 18. Extract, normalize, match, synchronize, and display source-grounded skills from any profession without requiring profession-specific code, frontend dictionaries, or seed-taxonomy expansion.
 19. Show a non-technical compatibility map for the active CV and one selected saved JD, while retaining the existing bounded Neo4j snapshot as an explicit technical view.
