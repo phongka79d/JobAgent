@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.time import utc_now
@@ -27,14 +29,20 @@ class ConversationServiceError(Exception):
         self.summary = summary
 
 
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def project_conversation(row: Conversation, *, selected: bool) -> ConversationSummary:
     return ConversationSummary(
         id=row.id,
         profile_id=row.profile_id,
         title=row.title,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        last_opened_at=row.last_opened_at,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+        last_opened_at=_utc(row.last_opened_at),
         is_selected=selected,
     )
 

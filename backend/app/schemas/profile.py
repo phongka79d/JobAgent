@@ -25,8 +25,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from app.db.models.attachments import ATTACHMENT_MIME_TYPE_PDF
+from app.db.models.profiles import PROFILE_DISPLAY_NAME_MAX
 from app.schemas.attachments import AttachmentPublic
-from app.schemas.common import StrictModelConfig
+from app.schemas.chat import ConversationSummary
+from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
 from app.schemas.skills import SkillRef
 from pydantic import BaseModel, Field
 
@@ -186,52 +189,78 @@ class ProfileSkillTag(BaseModel):
     label: str
 
 
+ProfileAttachmentState = Literal["active", "archived", "deleting"]
+
+
+class ProfileAttachmentMetadata(BaseModel):
+    """Safe profile attachment metadata, including retryable deletion state."""
+
+    model_config = StrictModelConfig
+
+    id: UuidStr
+    original_name: str = Field(min_length=1)
+    mime_type: Literal["application/pdf"] = ATTACHMENT_MIME_TYPE_PDF  # type: ignore[assignment]
+    size_bytes: int = Field(gt=0)
+    page_count: int | None = Field(default=None, gt=0)
+    state: ProfileAttachmentState
+    failure_code: str | None = None
+
+
 class ProfileListItem(BaseModel):
     model_config = StrictModelConfig
 
-    id: str
+    id: UuidStr
     display_name: str
+    cv_filename: str
+    attachment_state: ProfileAttachmentState
     location: str | None
-    state: str
-    active: bool
-    attachment: AttachmentPublic
     skill_tags: list[ProfileSkillTag]
     skill_count: int
-    last_opened_at: Any
+    extraction_version: str
+    source_hash: str
+    state: Literal["ready", "deleting"]
+    is_active: bool
+    created_at: AwareUtcDatetime
+    updated_at: AwareUtcDatetime
+    last_opened_at: AwareUtcDatetime
 
 
 class ProfileListResponse(BaseModel):
     model_config = StrictModelConfig
 
     items: list[ProfileListItem]
-    active_profile_id: str | None
+    active_profile_id: UuidStr | None
 
 
-class ProfileDetail(BaseModel):
+class ProfileDetail(ProfileListItem):
     model_config = StrictModelConfig
 
-    id: str
-    display_name: str
-    location: str | None
-    state: str
-    active: bool = False
     profile: CandidateProfile
     preferences: JobPreferences
-    attachment: AttachmentPublic
+    attachment: ProfileAttachmentMetadata
+    selected_conversation_id: UuidStr | None
 
 
 class ProfileUpdateRequest(BaseModel):
     model_config = StrictModelConfig
 
-    display_name: str
+    display_name: str = Field(min_length=1, max_length=PROFILE_DISPLAY_NAME_MAX)
+
+
+class SafeWarning(BaseModel):
+    model_config = StrictModelConfig
+
+    code: str
+    summary: str
+    guidance: str
 
 
 class SelectionResponse(BaseModel):
     model_config = StrictModelConfig
 
     profile: ProfileDetail
-    conversation_id: str | None = None
-    warning: dict[str, str] | None = None
+    conversation: ConversationSummary | None
+    warning: SafeWarning | None
 
 
 def empty_profile_read_response(

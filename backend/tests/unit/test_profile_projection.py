@@ -1,3 +1,4 @@
+from app.db.models.profiles import PROFILE_SKILL_TAG_LIMIT
 from app.schemas.profile import parse_candidate_profile
 from app.services.profile_projection import project_display_name, project_skill_tags
 
@@ -48,3 +49,24 @@ def test_profile_projection_builds_safe_skill_tags() -> None:
     tags, count = project_skill_tags(_profile())
     assert count == 1
     assert tags[0].model_dump() == {"key": "python", "label": "Python"}
+
+
+def test_profile_projection_bounds_tags_but_counts_all_non_excluded_skills() -> None:
+    payload = _profile().model_dump(mode="json")
+    payload["skills"] = [
+        {
+            **payload["skills"][0],
+            "skill": {
+                **payload["skills"][0]["skill"],
+                "canonical_key": f"skill-{index}",
+                "display_name": f"Skill {index}",
+            },
+            "excluded": index == PROFILE_SKILL_TAG_LIMIT + 1,
+        }
+        for index in range(PROFILE_SKILL_TAG_LIMIT + 2)
+    ]
+
+    tags, count = project_skill_tags(parse_candidate_profile(payload))
+
+    assert len(tags) == PROFILE_SKILL_TAG_LIMIT
+    assert count == PROFILE_SKILL_TAG_LIMIT + 1

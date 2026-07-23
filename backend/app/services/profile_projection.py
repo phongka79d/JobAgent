@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.attachments import ATTACHMENT_MIME_TYPE_PDF, Attachment
-from app.db.models.profiles import Profile
+from app.db.models.attachments import (
+    ATTACHMENT_MIME_TYPE_PDF,
+    ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
+    ATTACHMENT_STATE_DELETING,
+    Attachment,
+)
+from app.db.models.profiles import PROFILE_SKILL_TAG_LIMIT, Profile
 from app.repositories import attachments as attachments_repo
+from app.repositories import conversations as conversations_repo
+from app.repositories import cv_documents as cv_documents_repo
 from app.repositories import profiles as profiles_repo
 from app.repositories import workspace_state as workspace_repo
-from app.schemas.attachments import AttachmentPublic, AttachmentState
+from app.schemas.cv_document import parse_cv_document
 from app.schemas.profile import (
     CandidateProfile,
+    JobPreferences,
+    ProfileAttachmentMetadata,
+    ProfileAttachmentState,
     ProfileDetail,
     ProfileListItem,
     ProfileListResponse,
@@ -31,13 +43,28 @@ class ProfileProjectionError(Exception):
         self.summary = summary
 
 
+_PROFILE_ATTACHMENT_STATES = frozenset(
+    {
+        ATTACHMENT_STATE_ACTIVE,
+        ATTACHMENT_STATE_ARCHIVED,
+        ATTACHMENT_STATE_DELETING,
+    }
+)
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def project_skill_tags(profile: CandidateProfile) -> tuple[list[ProfileSkillTag], int]:
     selected = [skill for skill in profile.skills if not skill.excluded]
     tags = [
         ProfileSkillTag(key=skill.skill.canonical_key, label=skill.skill.display_name)
         for skill in selected
     ]
-    return tags[:12], len(tags)
+    return tags[:PROFILE_SKILL_TAG_LIMIT], len(tags)
 
 
 def project_display_name(profile: CandidateProfile, original_name: str) -> str:
@@ -46,21 +73,21 @@ def project_display_name(profile: CandidateProfile, original_name: str) -> str:
     return sanitize_original_name(original_name)
 
 
-def _attachment(row: Attachment) -> AttachmentPublic:
-    return AttachmentPublic(
+def _attachment(row: Attachment) -> ProfileAttachmentMetadata:
+    return ProfileAttachmentMetadata(
         id=row.id,
-        original_name=row.original_name,
+        original_name=sanitize_original_name(row.original_name),
         mime_type=cast("Literal['application/pdf']", ATTACHMENT_MIME_TYPE_PDF),
         size_bytes=row.size_bytes,
         page_count=row.page_count,
-        state=cast(AttachmentState, row.state),
+        state=cast(ProfileAttachmentState, row.state),
         failure_code=row.failure_code,
     )
 
 
 async def _validated(
     session: AsyncSession, row: Profile
-) -> tuple[CandidateProfile, Any, Attachment]:
+) -> tuple[CandidateProfile, JobPreferences, Attachment]:
     try:
         profile = parse_candidate_profile(row.profile_json)
         prefs_row = await profiles_repo.get_profile_preferences(session, row.id)
@@ -76,25 +103,66 @@ async def _validated(
         raise ProfileProjectionError(
             "PROFILE_INCONSISTENT", "profile attachment is missing"
         )
+    document = await cv_documents_repo.get_document(session, row.attachment_id)
+    try:
+        if document is None:
+            raise ValueError("missing profile document")
+        parsed_document = parse_cv_document(document.document_json)
+        if (
+            attachment.state not in _PROFILE_ATTACHMENT_STATES
+            or parsed_document.attachment_id != row.attachment_id
+            or document.extraction_version != row.extraction_version
+            or document.source_hash != row.source_hash
+        ):
+            raise ValueError("profile document ownership or revision mismatch")
+    except Exception as exc:
+        raise ProfileProjectionError(
+            "PROFILE_INCONSISTENT", "profile data is inconsistent"
+        ) from exc
+    if row.location != profile.location:
+        raise ProfileProjectionError(
+            "PROFILE_INCONSISTENT", "profile location projection is inconsistent"
+        )
     return profile, preferences, attachment
+
+
+def _project_list_item(
+    row: Profile,
+    *,
+    profile: CandidateProfile,
+    attachment: Attachment,
+    active_id: str | None,
+) -> ProfileListItem:
+    tags, count = project_skill_tags(profile)
+    safe_filename = sanitize_original_name(attachment.original_name)
+    return ProfileListItem(
+        id=row.id,
+        display_name=(
+            row.display_name.strip()
+            if row.display_name.strip()
+            else project_display_name(profile, safe_filename)
+        ),
+        cv_filename=safe_filename,
+        attachment_state=cast(ProfileAttachmentState, attachment.state),
+        location=profile.location,
+        skill_tags=tags,
+        skill_count=count,
+        extraction_version=row.extraction_version,
+        source_hash=row.source_hash,
+        state=cast("Literal['ready', 'deleting']", row.state),
+        is_active=row.id == active_id,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+        last_opened_at=_utc(row.last_opened_at),
+    )
 
 
 async def project_profile_list_item(
     session: AsyncSession, row: Profile, active_id: str | None
 ) -> ProfileListItem:
     profile, _, attachment = await _validated(session, row)
-    tags, count = project_skill_tags(profile)
-    return ProfileListItem(
-        id=row.id,
-        display_name=row.display_name
-        or project_display_name(profile, attachment.original_name),
-        location=row.location or profile.location,
-        state=row.state,
-        active=row.id == active_id,
-        attachment=_attachment(attachment),
-        skill_tags=tags,
-        skill_count=count,
-        last_opened_at=row.last_opened_at,
+    return _project_list_item(
+        row, profile=profile, attachment=attachment, active_id=active_id
     )
 
 
@@ -102,16 +170,18 @@ async def project_profile_detail(
     session: AsyncSession, row: Profile, active_id: str | None = None
 ) -> ProfileDetail:
     profile, preferences, attachment = await _validated(session, row)
+    selected = await conversations_repo.most_recent_for_profile(
+        session, profile_id=row.id
+    )
+    item = _project_list_item(
+        row, profile=profile, attachment=attachment, active_id=active_id
+    )
     return ProfileDetail(
-        id=row.id,
-        display_name=row.display_name
-        or project_display_name(profile, attachment.original_name),
-        location=row.location or profile.location,
-        state=row.state,
-        active=row.id == active_id,
+        **item.model_dump(),
         profile=profile,
         preferences=preferences,
         attachment=_attachment(attachment),
+        selected_conversation_id=selected.id if selected is not None else None,
     )
 
 
