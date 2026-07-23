@@ -25,6 +25,8 @@ _TS = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 _JOB_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 _ATT_ID = "11111111-2222-4333-8444-555555555555"
 _ATT_OTHER = "22222222-2222-4333-8444-555555555555"
+_PROFILE_ID = "33333333-3333-4333-8333-333333333333"
+_PROFILE_OTHER = "44444444-4444-4444-8444-444444444444"
 
 
 @pytest.fixture
@@ -93,6 +95,22 @@ async def _seed_parents(session: AsyncSession) -> None:
         f"'{_JOB_ID}', 'text', NULL, 'JD body', 'raw-hash-1', NULL, "
         f"'received', NULL, NULL, NULL, NULL, NULL, "
         f"'{_TS.isoformat()}', '{_TS.isoformat()}')",
+        "INSERT INTO profiles ("
+        "id, attachment_id, display_name, profile_json, location, "
+        "extraction_version, source_hash, state, created_at, updated_at, "
+        "last_opened_at) VALUES ("
+        f"'{_PROFILE_ID}', '{_ATT_ID}', 'Profile A', '{{}}', NULL, 'v1', "
+        f"'cv-source-1', 'ready', '{_TS.isoformat()}', '{_TS.isoformat()}', "
+        f"'{_TS.isoformat()}')",
+        "INSERT INTO profiles ("
+        "id, attachment_id, display_name, profile_json, location, "
+        "extraction_version, source_hash, state, created_at, updated_at, "
+        "last_opened_at) VALUES ("
+        f"'{_PROFILE_OTHER}', '{_ATT_OTHER}', 'Profile B', '{{}}', NULL, 'v1', "
+        f"'cv-source-2', 'ready', '{_TS.isoformat()}', '{_TS.isoformat()}', "
+        f"'{_TS.isoformat()}')",
+        f"UPDATE workspace_state SET active_profile_id = '{_PROFILE_ID}' "
+        "WHERE id = 'main'",
     ):
         await session.execute(text(sql))
     await session.commit()
@@ -113,7 +131,7 @@ def test_insert_validates_match_result_and_rejects_invalid(
                 row, created = await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=digest,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,
@@ -135,7 +153,7 @@ def test_insert_validates_match_result_and_rejects_invalid(
                     await eval_repo.insert_evaluation(
                         s,
                         job_id=_JOB_ID,
-                        active_attachment_id=_ATT_ID,
+                        profile_id=_PROFILE_ID,
                         evaluation_context_hash="other-hash",
                         job_revision=facts.job_revision,
                         profile_revision=facts.profile_revision,
@@ -166,7 +184,10 @@ def test_lookup_none_current_stale_without_rewriting_history(
             current_hash = evaluation_context_hash(current_facts)
             async with f() as s:
                 lookup = await eval_repo.lookup_for_job(
-                    s, job_id=_JOB_ID, current_context_hash=current_hash
+                    s,
+                    job_id=_JOB_ID,
+                    profile_id=_PROFILE_ID,
+                    current_context_hash=current_hash,
                 )
                 assert lookup.currentness == "none"
                 assert lookup.evaluation is None
@@ -177,7 +198,7 @@ def test_lookup_none_current_stale_without_rewriting_history(
                 await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=stale_hash,
                     job_revision=stale_facts.job_revision,
                     profile_revision=stale_facts.profile_revision,
@@ -192,7 +213,10 @@ def test_lookup_none_current_stale_without_rewriting_history(
 
             async with f() as s:
                 lookup = await eval_repo.lookup_for_job(
-                    s, job_id=_JOB_ID, current_context_hash=current_hash
+                    s,
+                    job_id=_JOB_ID,
+                    profile_id=_PROFILE_ID,
+                    current_context_hash=current_hash,
                 )
                 assert lookup.currentness == "stale"
                 assert lookup.evaluation is not None
@@ -201,13 +225,15 @@ def test_lookup_none_current_stale_without_rewriting_history(
                     lookup.evaluation.evaluation_context_hash == stale_hash
                 )
                 # Historical row remains; currentness is derived only.
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 1
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_ID
+                ) == 1
 
             async with f() as s:
                 await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=current_hash,
                     job_revision=current_facts.job_revision,
                     profile_revision=current_facts.profile_revision,
@@ -222,12 +248,17 @@ def test_lookup_none_current_stale_without_rewriting_history(
 
             async with f() as s:
                 lookup = await eval_repo.lookup_for_job(
-                    s, job_id=_JOB_ID, current_context_hash=current_hash
+                    s,
+                    job_id=_JOB_ID,
+                    profile_id=_PROFILE_ID,
+                    current_context_hash=current_hash,
                 )
                 assert lookup.currentness == "current"
                 assert lookup.evaluation is not None
                 assert lookup.evaluation.result.summary == "current-result"
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 2
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_ID
+                ) == 2
         finally:
             await e.dispose()
 
@@ -245,7 +276,7 @@ def test_unique_context_race_reloads_committed_winner(db_path: Path) -> None:
             digest = evaluation_context_hash(facts)
             kwargs = {
                 "job_id": _JOB_ID,
-                "active_attachment_id": _ATT_ID,
+                "profile_id": _PROFILE_ID,
                 "evaluation_context_hash": digest,
                 "job_revision": facts.job_revision,
                 "profile_revision": facts.profile_revision,
@@ -273,9 +304,14 @@ def test_unique_context_race_reloads_committed_winner(db_path: Path) -> None:
                 assert second.result_json["summary"] == "winner"
 
             async with f() as s:
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 1
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_ID
+                ) == 1
                 row = await eval_repo.get_by_job_context(
-                    s, job_id=_JOB_ID, evaluation_context_hash=digest
+                    s,
+                    job_id=_JOB_ID,
+                    profile_id=_PROFILE_ID,
+                    evaluation_context_hash=digest,
                 )
                 assert row is not None
                 assert row.result_json["summary"] == "winner"
@@ -285,7 +321,7 @@ def test_unique_context_race_reloads_committed_winner(db_path: Path) -> None:
     run_async(_c())
 
 
-def test_job_and_attachment_delete_cascade_evaluations(db_path: Path) -> None:
+def test_job_and_profile_delete_cascade_evaluations(db_path: Path) -> None:
     async def _c() -> None:
         e = build_async_engine(db_path)
         f: async_sessionmaker[AsyncSession] = session_factory(e)
@@ -298,7 +334,7 @@ def test_job_and_attachment_delete_cascade_evaluations(db_path: Path) -> None:
                 await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=digest,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,
@@ -310,16 +346,20 @@ def test_job_and_attachment_delete_cascade_evaluations(db_path: Path) -> None:
                     result=_match_payload(),
                 )
                 await s.commit()
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 1
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_ID
+                ) == 1
 
             async with f() as s:
                 await s.execute(
                     text(f"DELETE FROM job_posts WHERE id = '{_JOB_ID}'")
                 )
                 await s.commit()
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 0
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_ID
+                ) == 0
 
-            # Re-seed job + evaluation for attachment cascade.
+            # Re-seed job + evaluation for profile cascade.
             async with f() as s:
                 await s.execute(
                     text(
@@ -343,7 +383,7 @@ def test_job_and_attachment_delete_cascade_evaluations(db_path: Path) -> None:
                 await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_OTHER,
+                    profile_id=_PROFILE_OTHER,
                     evaluation_context_hash=other_hash,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,
@@ -358,11 +398,13 @@ def test_job_and_attachment_delete_cascade_evaluations(db_path: Path) -> None:
             async with f() as s:
                 await s.execute(
                     text(
-                        f"DELETE FROM attachments WHERE id = '{_ATT_OTHER}'"
+                        f"DELETE FROM profiles WHERE id = '{_PROFILE_OTHER}'"
                     )
                 )
                 await s.commit()
-                assert await eval_repo.count_for_job(s, _JOB_ID) == 0
+                assert await eval_repo.count_for_job(
+                    s, _JOB_ID, profile_id=_PROFILE_OTHER
+                ) == 0
                 job_left = (
                     await s.execute(
                         text(
@@ -393,7 +435,7 @@ def test_same_context_second_insert_reuses_without_new_row(
                 first, c1 = await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=digest,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,
@@ -410,7 +452,7 @@ def test_same_context_second_insert_reuses_without_new_row(
                 second, c2 = await eval_repo.insert_evaluation(
                     s,
                     job_id=_JOB_ID,
-                    active_attachment_id=_ATT_ID,
+                    profile_id=_PROFILE_ID,
                     evaluation_context_hash=digest,
                     job_revision=facts.job_revision,
                     profile_revision=facts.profile_revision,

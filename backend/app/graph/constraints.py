@@ -5,9 +5,8 @@ required by Master §8.3 / Plan 2 §7.6 / Plan 9 CV projection. No domain nodes,
 relationships, or graph synchronization behavior.
 
 Fixed identities (for later callers; not seeded here):
-- Candidate.id is the singleton key ``active``
-- CV.id is the SQLite attachment UUID
-- CVSection.id / CVEntry.id are attachment-scoped deterministic keys
+- Candidate.profile_id is the SQLite ``profiles.id`` UUID
+- CV/CVSection/CVEntry IDs are profile- and document-scoped keys
 - Job.id is the SQLite ``job_posts.id`` UUID
 - Skill.canonical_key is the normalized skill key
 """
@@ -23,10 +22,12 @@ JOB_EMBEDDING_VECTOR_INDEX_NAME = "job_embedding_vector"
 
 # Fixed, idempotent DDL. Identifiers and options are source constants only —
 # never interpolate runtime values or secrets into these statements.
-CANDIDATE_ID_UNIQUE = (
-    "CREATE CONSTRAINT candidate_id_unique IF NOT EXISTS "
-    "FOR (c:Candidate) REQUIRE c.id IS UNIQUE"
+CANDIDATE_PROFILE_ID_UNIQUE = (
+    "CREATE CONSTRAINT candidate_profile_id_unique IF NOT EXISTS "
+    "FOR (c:Candidate) REQUIRE c.profile_id IS UNIQUE"
 )
+# Transitional export retained until Task 13 removes legacy test imports.
+CANDIDATE_ID_UNIQUE = CANDIDATE_PROFILE_ID_UNIQUE
 CV_ID_UNIQUE = (
     "CREATE CONSTRAINT cv_id_unique IF NOT EXISTS "
     "FOR (cv:CV) REQUIRE cv.id IS UNIQUE"
@@ -57,7 +58,7 @@ JOB_EMBEDDING_VECTOR_INDEX = (
 )
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
-    CANDIDATE_ID_UNIQUE,
+    CANDIDATE_PROFILE_ID_UNIQUE,
     CV_ID_UNIQUE,
     CV_SECTION_ID_UNIQUE,
     CV_ENTRY_ID_UNIQUE,

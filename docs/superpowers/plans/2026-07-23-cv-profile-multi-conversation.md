@@ -1462,7 +1462,7 @@ git commit -m "feat: scope evaluations to profiles"
 - Modify: backend/app/graph/delete_profile.py
 - Test: backend/tests/unit/test_graph_setup.py, test_cv_graph.py, test_observability_graph.py, test_job_graph_deletion.py, backend/tests/integration/test_candidate_sync.py, test_graph_rebuild_behavior.py, test_graph_rebuild_contracts.py, test_observability_api.py, test_job_evaluations.py
 
-- [ ] Step 1: Add failing graph isolation tests
+- [x] Step 1: Add failing graph isolation tests
 
 Extend fake-driver tests with two profile branches:
 
@@ -1479,7 +1479,7 @@ def test_graph_reads_never_choose_first_candidate(graph_context):
 
 Add rebuild assertions that every ready profile is projected, deleted profile branches do not remove global Jobs/Skills, and consistency checks compare only the requested profile revision.
 
-- [ ] Step 2: Run graph tests to verify RED
+- [x] Step 2: Run graph tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -1488,15 +1488,15 @@ Set-Location backend
 
 Expected: graph functions still hard-code active, select the first Candidate, and rebuild one branch.
 
-- [ ] Step 3: Set profile-keyed graph identity
+- [x] Step 3: Set profile-keyed graph identity
 
 Pass profile_id to sync_candidate, sync_cv, payload builders, consistency checks, selected-skill snapshots, and observability loaders. Replace the singleton Candidate constraint with a unique Candidate.profile_id constraint, and use Candidate with profile_id parameter as the merge/read key. Key CV/section/entry node IDs with profile_id plus stable document IDs; preserve source attachment/hash as properties for evidence and stale checks. Ensure profile-scoped Cypher remains allowlisted and parameterized.
 
-- [ ] Step 4: Scope graph reads and rebuild every ready profile
+- [x] Step 4: Scope graph reads and rebuild every ready profile
 
 Change load_bounded_graph_projection, load_active_cv_branch, selected-job skill maps, and evaluation retrieval to require a profile ID. Replace first Candidate and literal active queries with the profile parameter. Make load_rebuild_inputs return all ready profile/document rows and make rebuild_graph loop over them while retaining global Job/Skill seed/rebuild behavior. A graph refresh failure after profile activation leaves SQLite selection committed and returns NEO4J_SYNC_FAILED/safe rebuild guidance.
 
-- [ ] Step 5: Run graph/evaluation gates and commit
+- [x] Step 5: Run graph/evaluation gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_graph_setup.py tests/unit/test_cv_graph.py tests/unit/test_observability_graph.py tests/unit/test_job_graph_deletion.py tests/integration/test_candidate_sync.py tests/integration/test_graph_rebuild_behavior.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_observability_api.py tests/integration/test_job_evaluations.py -q

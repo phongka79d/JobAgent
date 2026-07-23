@@ -58,15 +58,15 @@ GraphEdgeType = Literal[
 
 # Fixed read-only Cypher — unique RETURN shapes for test fakes and review.
 _COUNT_CANDIDATES_CYPHER: str = (
-    "MATCH (c:Candidate) RETURN count(c) AS total"
+    "MATCH (c:Candidate {profile_id: $profile_id}) RETURN count(c) AS total"
 )
 _COUNT_JOBS_CYPHER: str = "MATCH (j:Job) RETURN count(j) AS total"
 _COUNT_SKILLS_CYPHER: str = "MATCH (s:Skill) RETURN count(s) AS total"
 
 _CANDIDATES_CYPHER: str = (
-    "MATCH (c:Candidate) "
-    "RETURN c.id AS id, c.source_updated_at AS revision "
-    "ORDER BY c.id ASC "
+    "MATCH (c:Candidate {profile_id: $profile_id}) "
+    "RETURN c.profile_id AS id, c.source_updated_at AS revision "
+    "ORDER BY c.profile_id ASC "
     f"LIMIT {CAP_CANDIDATES}"
 )
 _JOBS_CYPHER: str = (
@@ -88,18 +88,20 @@ _SKILLS_CYPHER: str = (
 _EDGES_CYPHER: str = (
     "MATCH (a)-[r:HAS_SKILL|REQUIRES|PREFERS|RELATED_TO]->(b) "
     "WHERE ("
-    "  (a:Candidate AND a.id IN $candidate_ids) OR "
+    "  (a:Candidate AND a.profile_id IN $candidate_ids) OR "
     "  (a:Job AND a.id IN $job_ids) OR "
     "  (a:Skill AND a.canonical_key IN $skill_keys)"
     ") AND ("
-    "  (b:Candidate AND b.id IN $candidate_ids) OR "
+    "  (b:Candidate AND b.profile_id IN $candidate_ids) OR "
     "  (b:Job AND b.id IN $job_ids) OR "
     "  (b:Skill AND b.canonical_key IN $skill_keys)"
     ") "
     "RETURN "
-    "CASE WHEN 'Skill' IN labels(a) THEN a.canonical_key ELSE a.id END "
+    "CASE WHEN 'Skill' IN labels(a) THEN a.canonical_key "
+    "WHEN 'Candidate' IN labels(a) THEN a.profile_id ELSE a.id END "
     "AS source_id, "
-    "CASE WHEN 'Skill' IN labels(b) THEN b.canonical_key ELSE b.id END "
+    "CASE WHEN 'Skill' IN labels(b) THEN b.canonical_key "
+    "WHEN 'Candidate' IN labels(b) THEN b.profile_id ELSE b.id END "
     "AS target_id, "
     "type(r) AS type"
 )
@@ -249,8 +251,12 @@ def _as_nonneg_int(value: object) -> int:
     return 0
 
 
-async def _scalar_total(session: _AsyncReadSession, query: str) -> int:
-    result = await session.run(query)
+async def _scalar_total(
+    session: _AsyncReadSession,
+    query: str,
+    parameters: Mapping[str, Any] | None = None,
+) -> int:
+    result = await session.run(query, parameters)
     rows = await result.data()
     if not rows:
         return 0
@@ -313,6 +319,8 @@ def _sort_edges(edges: Sequence[ProjectedEdge]) -> list[ProjectedEdge]:
 
 async def load_bounded_graph_projection(
     driver: AsyncGraphObservabilityDriver,
+    *,
+    profile_id: str = "active",
 ) -> BoundedGraphProjection:
     """Load one allowlisted, cap-aware active-CV + Candidate/Job/Skill snapshot.
 
@@ -323,11 +331,14 @@ async def load_bounded_graph_projection(
     """
     try:
         async with driver.session() as session:
-            total_candidates = await _scalar_total(session, _COUNT_CANDIDATES_CYPHER)
+            profile_params = {"profile_id": profile_id}
+            total_candidates = await _scalar_total(
+                session, _COUNT_CANDIDATES_CYPHER, profile_params
+            )
             total_jobs = await _scalar_total(session, _COUNT_JOBS_CYPHER)
             total_skills = await _scalar_total(session, _COUNT_SKILLS_CYPHER)
 
-            cand_result = await session.run(_CANDIDATES_CYPHER)
+            cand_result = await session.run(_CANDIDATES_CYPHER, profile_params)
             cand_rows = await cand_result.data()
             job_result = await session.run(_JOBS_CYPHER)
             job_rows = await job_result.data()
@@ -369,7 +380,7 @@ async def load_bounded_graph_projection(
 
             try:
                 cv_branch: ActiveCvBranchProjection = await load_active_cv_branch(
-                    session
+                    session, profile_id=profile_id
                 )
             except CvProjectionError as exc:
                 raise GraphProjectionError(str(exc)) from exc

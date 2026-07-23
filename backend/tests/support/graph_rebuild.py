@@ -13,6 +13,7 @@ from app.db.models.jobs import JobPost
 from app.repositories import attachments as att_repo
 from app.repositories import jobs as jobs_repo
 from app.repositories import profiles as prof_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.embeddings import LOCKED_EMBEDDING_DIMENSIONS, LOCKED_EMBEDDING_MODEL
 from app.schemas.jobs import parse_job_post_extraction
 from app.schemas.profile import parse_candidate_profile
@@ -217,24 +218,38 @@ async def seed_unscorable_job(factory: Any, *, raw_hash: str) -> str:
     return job_id
 
 
-async def seed_candidate(factory: Any) -> None:
+async def seed_candidate(
+    factory: Any,
+    *,
+    file_hash: str = "rebuild-cv-hash",
+    display_name: str = "Rebuild Candidate",
+) -> str:
     profile = parse_candidate_profile(profile_payload())
     async with factory() as session:
+        previous = await att_repo.get_active(session)
+        if previous is not None:
+            await att_repo.mark_archived(session, previous.id)
         att = await att_repo.create_staged(
             session,
-            file_hash="rebuild-cv-hash",
+            file_hash=file_hash,
             original_name="cv.pdf",
             size_bytes=100,
-            storage_path="rebuild/cv.pdf",
+            storage_path=f"rebuild/{file_hash}.pdf",
             page_count=1,
         )
         await att_repo.mark_active(session, att.id)
-        await prof_repo.upsert_active_profile(
+        row = await prof_repo.create_profile(
             session,
-            active_attachment_id=att.id,
+            attachment_id=att.id,
+            display_name=display_name,
             profile_json=profile.model_dump(mode="json"),
+            location=None,
+            extraction_version="rebuild-test-v1",
+            source_hash=file_hash,
         )
+        await workspace_repo.set_active_profile_id(session, row.id)
         await session.commit()
+        return row.id
 
 
 async def snapshot_sqlite(factory: Any) -> list[tuple[Any, ...]]:
@@ -254,8 +269,8 @@ async def snapshot_sqlite(factory: Any) -> list[tuple[Any, ...]]:
         ).all()
         profile = await session.execute(
             text(
-                "SELECT id, active_attachment_id, updated_at "
-                "FROM candidate_profile ORDER BY id"
+                "SELECT id, attachment_id, updated_at "
+                "FROM profiles ORDER BY id"
             )
         )
         return list(jobs) + list(profile.all())

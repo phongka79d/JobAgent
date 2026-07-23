@@ -219,10 +219,11 @@ def test_payload_allowlist_order_and_no_raw_content() -> None:
     )
     assert_payload_safe(payload)
 
-    assert payload["cv_id"] == _ATTACHMENT
+    assert payload["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
     assert payload["original_name"] == "cv.pdf"
     assert payload["extraction_version"] == "cv-document-v1"
-    assert payload["candidate_id"] == CANDIDATE_PROFILE_ID
+    assert payload["profile_id"] == CANDIDATE_PROFILE_ID
+    assert payload["source_attachment_id"] == _ATTACHMENT
     assert "2024-07-01" in payload["source_updated_at"]
 
     sections = payload["sections"]
@@ -230,14 +231,15 @@ def test_payload_allowlist_order_and_no_raw_content() -> None:
     assert sections[0]["heading"] == "Experience"
     assert sections[0]["kind"] == "experience"
     assert sections[0]["entry_count"] == 2
-    assert sections[0]["id"] == scoped_section_id(_ATTACHMENT, _SECTION_ID)
+    profile_scope = f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
+    assert sections[0]["id"] == scoped_section_id(profile_scope, _SECTION_ID)
     assert "source_chunk_ordinals" not in sections[0]
 
     entries = payload["entries"]
     # Section 0 entries by ordinal, then section 1.
     assert [e["ordinal"] for e in entries[:2]] == [0, 1]
     first = entries[0]
-    assert first["id"] == scoped_entry_id(_ATTACHMENT, _SECTION_ID, "e0")
+    assert first["id"] == scoped_entry_id(profile_scope, _SECTION_ID, "e0")
     assert first["preview"] == _LONG_BODY[:CV_ENTRY_PREVIEW_MAX_CHARS]
     assert len(first["preview"]) == CV_ENTRY_PREVIEW_MAX_CHARS
     for forbidden in ("body", "bullets", "attributes", "location"):
@@ -257,6 +259,25 @@ def test_payload_rejects_non_document() -> None:
             extraction_version="v1",
             source_updated_at=_updated(),
         )
+
+
+def test_payload_scopes_cv_branch_to_profile_identity() -> None:
+    doc = _document()
+    payload = build_cv_graph_payload(
+        doc,
+        profile_id="33333333-3333-4333-8333-333333333333",
+        original_name="cv.pdf",
+        extraction_version="v1",
+        source_updated_at=_updated(),
+        source_hash="profile-scoped-source-hash",
+    )
+    assert payload["profile_id"] == "33333333-3333-4333-8333-333333333333"
+    assert payload["source_attachment_id"] == _ATTACHMENT
+    assert payload["source_hash"] == "profile-scoped-source-hash"
+    assert payload["cv_id"].startswith("33333333-3333-4333-8333-333333333333:")
+    assert payload["sections"][0]["id"].startswith(
+        "33333333-3333-4333-8333-333333333333:"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +314,7 @@ def test_sync_active_creates_branch_and_single_projects_to() -> None:
     assert any("MERGE (cv)-[:PROJECTS_TO]->(c)" in q for q in driver.queries)
 
     first = driver.parameters[0]
-    assert first["cv_id"] == _ATTACHMENT
+    assert first["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
     assert first["original_name"] == "resume.pdf"
     assert first["sections"][0]["heading"] == "Experience"
     assert "body" not in str(first["entries"])
@@ -392,8 +413,8 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
         for p, q in zip(driver.parameters, driver.queries, strict=True)
         if "MERGE (cv)-[:PROJECTS_TO]->(c)" in q
     ]
-    assert last_params[-1]["cv_id"] == active_id
-    assert last_params[-2]["cv_id"] == active_id
+    assert last_params[-1]["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{active_id}"
+    assert last_params[-2]["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{active_id}"
 
 
 def test_sync_failure_maps_to_neo4j_sync_failed() -> None:
@@ -530,8 +551,8 @@ def test_rebuild_owner_calls_sync_cv_and_clears_cv_labels() -> None:
 
     src = inspect.getsource(rebuild_mod.rebuild_graph)
     assert "sync_cv" in src
-    assert "approved_cvs" in src
-    assert "legacy_active" in src
+    assert "ready_profiles" in src
+    assert "legacy_cv" in src
     assert ops.CLEAR_CV_CYPHER in ops.CLEAR_STATEMENTS
     assert ops.CLEAR_CV_SECTION_CYPHER in ops.CLEAR_STATEMENTS
     assert ops.CLEAR_CV_ENTRY_CYPHER in ops.CLEAR_STATEMENTS

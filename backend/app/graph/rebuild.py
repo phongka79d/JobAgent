@@ -22,7 +22,6 @@ from typing import Any, TextIO
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.settings import Settings, get_settings
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.db.session import get_session_factory
 from app.graph.constraints import ensure_base_schema
 from app.graph.driver import close_driver, open_driver
@@ -80,18 +79,20 @@ MERGE_LEGACY_CV_CYPHER: str = (
     "MERGE (cv:CV {id: $cv_id}) "
     "SET cv.original_name = $original_name, "
     "    cv.extraction_version = $extraction_version, "
+    "    cv.source_attachment_id = $source_attachment_id, "
+    "    cv.source_hash = $source_hash, "
     "    cv.source_updated_at = $source_updated_at "
     "RETURN cv.id AS id"
 )
 
 CLEAR_ALL_PROJECTS_TO_CYPHER: str = (
-    "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "DELETE r"
 )
 
 MERGE_PROJECTS_TO_CYPHER: str = (
     "MATCH (cv:CV {id: $cv_id}) "
-    "MATCH (c:Candidate {id: $candidate_id}) "
+    "MATCH (c:Candidate {profile_id: $profile_id}) "
     "MERGE (cv)-[:PROJECTS_TO]->(c)"
 )
 
@@ -99,14 +100,19 @@ MERGE_PROJECTS_TO_CYPHER: str = (
 async def _project_legacy_active_cv(
     driver: AsyncGraphDriver,
     legacy: LegacyActiveCvRow,
+    *,
+    profile_id: str,
+    source_hash: str,
 ) -> None:
     """Emit metadata-only active CV (no sections/entries) for reprocess-required."""
     params = {
-        "cv_id": legacy.attachment_id,
+        "cv_id": f"{profile_id}:{legacy.attachment_id}",
+        "source_attachment_id": legacy.attachment_id,
+        "source_hash": source_hash,
         "original_name": legacy.original_name,
         "extraction_version": _LEGACY_EXTRACTION_VERSION,
         "source_updated_at": iso_utc(legacy.source_updated_at),
-        "candidate_id": CANDIDATE_PROFILE_ID,
+        "profile_id": profile_id,
     }
     async with driver.session() as session:
         result = await session.run(MERGE_LEGACY_CV_CYPHER, params)
@@ -155,13 +161,7 @@ async def rebuild_graph(
 
     # Preflight reads only — complete before any DETACH DELETE.
     async with session_factory() as session:
-        (
-            profile,
-            profile_updated_at,
-            scorable,
-            approved_cvs,
-            legacy_active,
-        ) = await load_rebuild_inputs(
+        ready_profiles, scorable = await load_rebuild_inputs(
             session,
             expected_model=expected_model,
             expected_dimensions=expected_dimensions,
@@ -171,11 +171,12 @@ async def rebuild_graph(
         await clear_jobagent_graph(driver)
         await ensure_base_schema(driver)  # type: ignore[arg-type]
 
-        if profile is not None and profile_updated_at is not None:
+        for ready in ready_profiles:
             await sync_candidate(
                 driver,
-                profile=profile,
-                source_updated_at=profile_updated_at,
+                profile_id=ready.profile_id,
+                profile=ready.profile,
+                source_updated_at=ready.source_updated_at,
                 normalizer=normalizer,
             )
         for job in scorable:
@@ -189,20 +190,28 @@ async def rebuild_graph(
                 normalizer=normalizer,
             )
 
-        for cv_row in approved_cvs:
-            await sync_cv(
-                driver,
-                document=cv_row.document,
-                original_name=cv_row.original_name,
-                extraction_version=cv_row.extraction_version,
-                source_updated_at=cv_row.source_updated_at,
-                is_active=cv_row.is_active,
-            )
-        if legacy_active is not None:
-            await _project_legacy_active_cv(driver, legacy_active)
+        for ready in ready_profiles:
+            if ready.cv is not None:
+                await sync_cv(
+                    driver,
+                    profile_id=ready.profile_id,
+                    document=ready.cv.document,
+                    original_name=ready.cv.original_name,
+                    extraction_version=ready.cv.extraction_version,
+                    source_updated_at=ready.cv.source_updated_at,
+                    source_hash=ready.cv.source_hash,
+                    is_active=True,
+                )
+            elif ready.legacy_cv is not None:
+                await _project_legacy_active_cv(
+                    driver,
+                    ready.legacy_cv,
+                    profile_id=ready.profile_id,
+                    source_hash=ready.source_hash,
+                )
 
         # Seed Skills/RELATED_TO when no Candidate and no Jobs still rebuild.
-        if profile is None and not scorable:
+        if not ready_profiles and not scorable:
             seed_skills = seed_skill_param_rows(normalizer)
             related = related_to_param_rows(normalizer)
             async with driver.session() as session:

@@ -197,7 +197,7 @@ def test_with_candidate_reuses_sync_candidate_owner(
     assert any("MERGE (c:Candidate" in q for q in driver.queries)
     assert any("HAS_SKILL" in q for q in driver.queries)
     has_skill_params = [
-        p for p in driver.parameters if "skills" in p and "candidate_id" in p
+        p for p in driver.parameters if "skills" in p and "profile_id" in p
     ]
     assert has_skill_params
     keys = {
@@ -208,6 +208,48 @@ def test_with_candidate_reuses_sync_candidate_owner(
     assert "react" not in keys
     after = run_async(snapshot_sqlite(factory))
     assert after == before
+
+
+def test_rebuild_projects_every_ready_profile(
+    migrated_sqlite: Path,
+) -> None:
+    engine = build_async_engine(migrated_sqlite)
+    factory = session_factory(engine)
+    normalizer = SkillNormalizer.from_path(skills_fixture())
+    driver = FakeNeo4jDriver()
+
+    async def _setup() -> tuple[str, str]:
+        profile_a = await seed_candidate(
+            factory,
+            file_hash="hash-profile-a",
+            display_name="Profile A",
+        )
+        profile_b = await seed_candidate(
+            factory,
+            file_hash="hash-profile-b",
+            display_name="Profile B",
+        )
+        return profile_a, profile_b
+
+    profile_a, profile_b = run_async(_setup())
+
+    async def _body() -> Any:
+        return await rebuild_graph(
+            driver,
+            session_factory=factory,
+            normalizer=normalizer,
+            settings=settings(),
+        )
+
+    counts = run_async(_body())
+    assert counts.Candidate == 2
+    assert driver.candidates == {profile_a, profile_b}
+    candidate_params = [
+        params["profile_id"]
+        for params in driver.parameters
+        if "profile_id" in params and "skills" in params
+    ]
+    assert set(candidate_params) == {profile_a, profile_b}
 
 
 def test_rebuild_repeat_safe(

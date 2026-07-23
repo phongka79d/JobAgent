@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
-
 # Master §14.1 hard caps for the active CV branch.
 CAP_CV: int = 1
 CAP_CV_SECTIONS: int = 20
@@ -27,22 +25,22 @@ CV_EDGE_TYPES: frozenset[str] = frozenset(
 CvGraphEdgeType = Literal["PROJECTS_TO", "HAS_SECTION", "HAS_ENTRY"]
 
 _COUNT_ACTIVE_CV_CYPHER: str = (
-    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "RETURN count(cv) AS total"
 )
 _COUNT_ACTIVE_SECTIONS_CYPHER: str = (
-    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "MATCH (cv)-[:HAS_SECTION]->(sec:CVSection) "
     "RETURN count(sec) AS total"
 )
 _COUNT_ACTIVE_ENTRIES_CYPHER: str = (
-    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "MATCH (cv)-[:HAS_SECTION]->(sec:CVSection)-[:HAS_ENTRY]->(entry:CVEntry) "
     "RETURN count(entry) AS total"
 )
 
 _ACTIVE_CV_CYPHER: str = (
-    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "RETURN cv.id AS id, cv.original_name AS original_name, "
     "cv.extraction_version AS extraction_version, "
     "cv.source_updated_at AS revision "
@@ -72,20 +70,20 @@ _ACTIVE_CV_EDGES_CYPHER: str = (
     "  (a:CV AND a.id IN $cv_ids) OR "
     "  (a:CVSection AND a.id IN $section_ids) OR "
     "  (a:CVEntry AND a.id IN $entry_ids) OR "
-    "  (a:Candidate AND a.id IN $candidate_ids)"
+    "  (a:Candidate AND a.profile_id IN $candidate_ids)"
     ") AND ("
     "  (b:CV AND b.id IN $cv_ids) OR "
     "  (b:CVSection AND b.id IN $section_ids) OR "
     "  (b:CVEntry AND b.id IN $entry_ids) OR "
-    "  (b:Candidate AND b.id IN $candidate_ids)"
+    "  (b:Candidate AND b.profile_id IN $candidate_ids)"
     ") "
     "RETURN "
     "CASE "
-    "  WHEN 'Candidate' IN labels(a) THEN a.id "
+    "  WHEN 'Candidate' IN labels(a) THEN a.profile_id "
     "  ELSE a.id "
     "END AS source_id, "
     "CASE "
-    "  WHEN 'Candidate' IN labels(b) THEN b.id "
+    "  WHEN 'Candidate' IN labels(b) THEN b.profile_id "
     "  ELSE b.id "
     "END AS target_id, "
     "type(r) AS type"
@@ -322,7 +320,7 @@ def _sort_cv_edges(edges: Sequence[ProjectedCvEdge]) -> list[ProjectedCvEdge]:
 async def load_active_cv_branch(
     session: _AsyncReadSession,
     *,
-    candidate_id: str = CANDIDATE_PROFILE_ID,
+    profile_id: str,
 ) -> ActiveCvBranchProjection:
     """Load the single active CV branch under Master caps/order.
 
@@ -330,7 +328,7 @@ async def load_active_cv_branch(
     Raises :class:`CvProjectionError` on driver/parse failure.
     """
     try:
-        cand_params = {"candidate_id": candidate_id}
+        cand_params = {"profile_id": profile_id}
         total_cv = await _scalar_total(
             session, _COUNT_ACTIVE_CV_CYPHER, cand_params
         )
@@ -371,7 +369,7 @@ async def load_active_cv_branch(
         cv_ids = [cv.id] if cv is not None else []
         section_ids = [s.id for s in sections]
         entry_ids = [e.id for e in entries]
-        candidate_ids = [candidate_id] if cv is not None else []
+        candidate_ids = [profile_id] if cv is not None else []
 
         edge_result = await session.run(
             _ACTIVE_CV_EDGES_CYPHER,

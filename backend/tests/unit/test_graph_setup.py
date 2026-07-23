@@ -178,8 +178,8 @@ def test_schema_statements_exact_constraints_and_vector_index() -> None:
     assert len(SCHEMA_STATEMENTS) == 7
 
     assert CANDIDATE_ID_UNIQUE == (
-        "CREATE CONSTRAINT candidate_id_unique IF NOT EXISTS "
-        "FOR (c:Candidate) REQUIRE c.id IS UNIQUE"
+        "CREATE CONSTRAINT candidate_profile_id_unique IF NOT EXISTS "
+        "FOR (c:Candidate) REQUIRE c.profile_id IS UNIQUE"
     )
     assert CV_ID_UNIQUE == (
         "CREATE CONSTRAINT cv_id_unique IF NOT EXISTS "

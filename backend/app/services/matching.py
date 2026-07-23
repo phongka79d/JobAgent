@@ -118,7 +118,7 @@ def _validate_limit(limit: int) -> None:
 
 async def _load_approved_profile_and_preferences(
     session: AsyncSession,
-) -> tuple[CandidateProfile, JobPreferences] | None:
+) -> tuple[str, CandidateProfile, JobPreferences] | None:
     """Load approved profile/preferences only (never a pending draft)."""
     profile_row = await profiles_repo.get_active_profile(session)
     if profile_row is None:
@@ -130,7 +130,7 @@ async def _load_approved_profile_and_preferences(
         preferences = parse_job_preferences(empty_job_preferences_document())
     else:
         preferences = parse_job_preferences(prefs_row.preferences_json)
-    return profile, preferences
+    return profile_row.id, profile, preferences
 
 
 def _consistency_failure(
@@ -182,12 +182,12 @@ async def match_jobs(
             error_code=ERROR_ACTIVE_PROFILE_MISSING,
             message=NO_PROFILE_MATCH_MESSAGE,
         )
-    profile, preferences = loaded
+    profile_id, profile, preferences = loaded
 
     # 2) Revision consistency — delegated owner; zero results on failure.
     async with session_scope(session_factory) as session:
         consistency = await check_graph_revision_consistency(
-            session, graph_driver
+            session, graph_driver, profile_id=profile_id
         )
     if not consistency.is_consistent:
         return _consistency_failure(consistency, limit=limit)

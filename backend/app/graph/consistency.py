@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph.rebuild_snapshot import (
     ActiveCvConsistencyFacts,
     SourceRevision,
@@ -31,9 +30,8 @@ REBUILD_REQUIRED_INSTRUCTION: str = (
 )
 
 _CANDIDATE_REVISIONS_CYPHER: str = (
-    "MATCH (c:Candidate) "
-    "RETURN c.id AS id, c.source_updated_at AS source_updated_at "
-    "ORDER BY id"
+    "MATCH (c:Candidate {profile_id: $profile_id}) "
+    "RETURN c.profile_id AS id, c.source_updated_at AS source_updated_at"
 )
 _JOB_REVISIONS_CYPHER: str = (
     "MATCH (j:Job) "
@@ -41,8 +39,8 @@ _JOB_REVISIONS_CYPHER: str = (
     "ORDER BY id"
 )
 _ACTIVE_CV_REVISION_CYPHER: str = (
-    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
-    "RETURN cv.id AS id, cv.source_updated_at AS source_updated_at "
+    "MATCH (cv:CV)-[:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
+    "RETURN cv.source_attachment_id AS id, cv.source_updated_at AS source_updated_at "
     "ORDER BY id"
 )
 
@@ -172,9 +170,13 @@ def _graph_revisions(rows: list[dict[str, Any]]) -> dict[str, datetime] | None:
 
 async def _load_graph_revision_snapshot(
     driver: AsyncGraphReadDriver,
+    *,
+    profile_id: str,
 ) -> GraphRevisionSnapshot:
     async with driver.session() as session:
-        candidate_result = await session.run(_CANDIDATE_REVISIONS_CYPHER)
+        candidate_result = await session.run(
+            _CANDIDATE_REVISIONS_CYPHER, {"profile_id": profile_id}
+        )
         candidate_revisions = _graph_revisions(await candidate_result.data())
         job_result = await session.run(_JOB_REVISIONS_CYPHER)
         job_revisions = _graph_revisions(await job_result.data())
@@ -200,11 +202,24 @@ def _snapshots_match(
 async def check_graph_revision_consistency(
     session: Any,
     driver: AsyncGraphReadDriver,
+    *,
+    profile_id: str | None = None,
 ) -> GraphConsistencyResult:
     """Compare SQLite source revisions with complete Neo4j revision sets."""
-    sqlite_snapshot = await load_source_revision_snapshot(session)
+    sqlite_snapshot = await load_source_revision_snapshot(
+        session, profile_id=profile_id
+    )
+    requested_profile_id = (
+        sqlite_snapshot.candidate.id
+        if sqlite_snapshot.candidate is not None
+        else profile_id
+    )
+    if requested_profile_id is None:
+        return _rebuild_required()
     try:
-        graph_snapshot = await _load_graph_revision_snapshot(driver)
+        graph_snapshot = await _load_graph_revision_snapshot(
+            driver, profile_id=requested_profile_id
+        )
     except Exception:
         return _unavailable()
 
@@ -223,11 +238,13 @@ class ActiveCvGraphRevision:
 
 async def _load_active_cv_graph_revision(
     driver: AsyncGraphReadDriver,
+    *,
+    profile_id: str,
 ) -> ActiveCvGraphRevision | None:
     async with driver.session() as session:
         result = await session.run(
             _ACTIVE_CV_REVISION_CYPHER,
-            {"candidate_id": CANDIDATE_PROFILE_ID},
+            {"profile_id": profile_id},
         )
         rows = await result.data()
     if not rows:
@@ -274,14 +291,27 @@ def _active_cv_matches(
 async def check_active_cv_consistency(
     session: Any,
     driver: AsyncGraphReadDriver,
+    *,
+    profile_id: str | None = None,
 ) -> GraphConsistencyResult:
     """Compare SQLite active CV id/document revision with Neo4j PROJECTS_TO branch.
 
     Used by graph observability only; matching still uses Candidate/Job checks.
     """
-    sqlite_facts = await load_active_cv_consistency_facts(session)
+    sqlite_facts = await load_active_cv_consistency_facts(
+        session, profile_id=profile_id
+    )
+    if profile_id is None:
+        snapshot = await load_source_revision_snapshot(session)
+        profile_id = (
+            snapshot.candidate.id if snapshot.candidate is not None else None
+        )
+    if profile_id is None:
+        return _rebuild_required()
     try:
-        graph_rev = await _load_active_cv_graph_revision(driver)
+        graph_rev = await _load_active_cv_graph_revision(
+            driver, profile_id=profile_id
+        )
     except Exception:
         return _unavailable()
 

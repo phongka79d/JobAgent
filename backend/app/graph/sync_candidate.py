@@ -2,8 +2,7 @@
 
 After SQLite profile commit, projects the approved Candidate Profile into Neo4j:
 
-* ``MERGE`` ``Candidate{id:'active'}`` with ``source_updated_at`` from SQLite
-  ``candidate_profile.updated_at``
+* ``MERGE`` ``Candidate{profile_id:<profiles.id>}`` with ``source_updated_at``
 * Rebuild only this Candidate's ``HAS_SKILL`` edges from non-excluded skills
 * ``MERGE`` canonical ``Skill`` nodes (display name, aliases, category)
 * Idempotently load seed ``RELATED_TO{weight, source}`` via shared seed projection
@@ -84,18 +83,19 @@ def non_excluded_skills(profile: CandidateProfile) -> list[CandidateSkill]:
 async def sync_candidate(
     driver: AsyncGraphDriver,
     *,
+    profile_id: str = CANDIDATE_PROFILE_ID,
     profile: CandidateProfile,
     source_updated_at: datetime,
     normalizer: SkillNormalizer,
 ) -> None:
-    """Project *profile* onto the singleton Candidate graph identity.
+    """Project *profile* onto its durable profile-keyed Candidate identity.
 
     Parameterized, idempotent Cypher only. Raises :class:`CandidateSyncError`
     on any driver/session failure without mutating SQLite.
     """
     if not isinstance(source_updated_at, datetime):
         raise CandidateSyncError(
-            "source_updated_at must be a datetime from candidate_profile.updated_at"
+            "source_updated_at must be a datetime from profiles.updated_at"
         )
 
     skills = non_excluded_skills(profile)
@@ -104,19 +104,18 @@ async def sync_candidate(
     seed_skills = seed_skill_param_rows(normalizer)
 
     params: dict[str, Any] = {
-        # Singleton identity from the SQLite profile model owner (Master §8.1).
-        "candidate_id": CANDIDATE_PROFILE_ID,
+        "profile_id": profile_id,
         "source_updated_at": iso_utc(source_updated_at),
         "skills": skill_rows,
     }
 
     merge_candidate = (
-        "MERGE (c:Candidate {id: $candidate_id}) "
+        "MERGE (c:Candidate {profile_id: $profile_id}) "
         "SET c.source_updated_at = $source_updated_at "
-        "RETURN c.id AS id"
+        "RETURN c.profile_id AS profile_id"
     )
     clear_has_skill = (
-        "MATCH (c:Candidate {id: $candidate_id})-[r:HAS_SKILL]->() "
+        "MATCH (c:Candidate {profile_id: $profile_id})-[r:HAS_SKILL]->() "
         "DELETE r"
     )
     merge_has_skills = (
@@ -126,7 +125,7 @@ async def sync_candidate(
         "    s.aliases = row.skill.aliases, "
         "    s.category = row.skill.category "
         "WITH s, row "
-        "MATCH (c:Candidate {id: $candidate_id}) "
+        "MATCH (c:Candidate {profile_id: $profile_id}) "
         "MERGE (c)-[r:HAS_SKILL]->(s) "
         "SET r.confidence = row.rel.confidence, "
         "    r.years = row.rel.years, "
@@ -159,8 +158,8 @@ async def sync_candidate(
 def cypher_statement_templates() -> Sequence[str]:
     """Return fixed Cypher templates for static review (no runtime values)."""
     return (
-        "MERGE (c:Candidate {id: $candidate_id})",
-        "MATCH (c:Candidate {id: $candidate_id})-[r:HAS_SKILL]->()",
+        "MERGE (c:Candidate {profile_id: $profile_id})",
+        "MATCH (c:Candidate {profile_id: $profile_id})-[r:HAS_SKILL]->()",
         "MERGE (s:Skill {canonical_key: row.skill.canonical_key})",
         "MERGE (c)-[r:HAS_SKILL]->(s)",
         *shared_seed_cypher_templates(),

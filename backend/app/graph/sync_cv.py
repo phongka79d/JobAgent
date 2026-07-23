@@ -3,7 +3,7 @@
 After SQLite approval of a retained CV document, projects one fixed-label
 branch into Neo4j:
 
-* ``MERGE`` ``CV{id=<attachment UUID>}`` with allowlisted metadata only
+* ``MERGE`` a profile-scoped ``CV`` key with allowlisted source metadata only
 * Replace only that CV's ``CVSection`` / ``CVEntry`` owned nodes
 * Stable ordinal order; entry ``preview`` is a bounded safe prefix
 * When *is_active*, clear all ``PROJECTS_TO`` edges and attach this CV once
@@ -138,9 +138,11 @@ def _entry_row(
 def build_cv_graph_payload(
     document: CVDocument,
     *,
+    profile_id: str = CANDIDATE_PROFILE_ID,
     original_name: str,
     extraction_version: str,
     source_updated_at: datetime,
+    source_hash: str | None = None,
 ) -> dict[str, Any]:
     """Build parameterized Cypher payload for one approved CV document.
 
@@ -158,20 +160,30 @@ def build_cv_graph_payload(
             "source_updated_at must be a datetime from cv_documents.updated_at"
         )
 
+    if not isinstance(profile_id, str) or profile_id.strip() == "":
+        raise CvSyncError("profile_id must be a non-empty string")
+    if source_hash is not None and (
+        not isinstance(source_hash, str) or source_hash.strip() == ""
+    ):
+        raise CvSyncError("source_hash must be non-empty when provided")
+
     attachment_id = str(document.attachment_id)
+    profile_scope = f"{profile_id}:{attachment_id}"
     sections_sorted = sorted(document.sections, key=lambda s: s.ordinal)
-    section_rows = [_section_row(attachment_id, s) for s in sections_sorted]
+    section_rows = [_section_row(profile_scope, s) for s in sections_sorted]
     entry_rows: list[dict[str, Any]] = []
     for section in sections_sorted:
         for entry in sorted(section.entries, key=lambda e: e.ordinal):
-            entry_rows.append(_entry_row(attachment_id, section, entry))
+            entry_rows.append(_entry_row(profile_scope, section, entry))
 
     return {
-        "cv_id": attachment_id,
+        "cv_id": profile_scope,
+        "source_attachment_id": attachment_id,
+        "source_hash": source_hash,
         "original_name": original_name,
         "extraction_version": extraction_version,
         "source_updated_at": iso_utc(source_updated_at),
-        "candidate_id": CANDIDATE_PROFILE_ID,
+        "profile_id": profile_id,
         "sections": section_rows,
         "entries": entry_rows,
     }
@@ -200,6 +212,8 @@ MERGE_CV_CYPHER: str = (
     "MERGE (cv:CV {id: $cv_id}) "
     "SET cv.original_name = $original_name, "
     "    cv.extraction_version = $extraction_version, "
+    "    cv.source_attachment_id = $source_attachment_id, "
+    "    cv.source_hash = $source_hash, "
     "    cv.source_updated_at = $source_updated_at "
     "RETURN cv.id AS id"
 )
@@ -235,13 +249,13 @@ MERGE_ENTRIES_CYPHER: str = (
 )
 
 CLEAR_ALL_PROJECTS_TO_CYPHER: str = (
-    "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {id: $candidate_id}) "
+    "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id}) "
     "DELETE r"
 )
 
 MERGE_PROJECTS_TO_CYPHER: str = (
     "MATCH (cv:CV {id: $cv_id}) "
-    "MATCH (c:Candidate {id: $candidate_id}) "
+    "MATCH (c:Candidate {profile_id: $profile_id}) "
     "MERGE (cv)-[:PROJECTS_TO]->(c)"
 )
 
@@ -254,10 +268,12 @@ CLEAR_THIS_CV_PROJECTS_TO_CYPHER: str = (
 async def sync_cv(
     driver: AsyncGraphDriver,
     *,
+    profile_id: str = CANDIDATE_PROFILE_ID,
     document: CVDocument,
     original_name: str,
     extraction_version: str,
     source_updated_at: datetime,
+    source_hash: str | None = None,
     is_active: bool,
 ) -> None:
     """Project one approved CV document onto Neo4j with fixed identities.
@@ -269,9 +285,11 @@ async def sync_cv(
     """
     params = build_cv_graph_payload(
         document,
+        profile_id=profile_id,
         original_name=original_name,
         extraction_version=extraction_version,
         source_updated_at=source_updated_at,
+        source_hash=source_hash,
     )
     assert_payload_safe(params)
 
@@ -312,7 +330,7 @@ def cypher_statement_templates() -> Sequence[str]:
         "MERGE (cv)-[:HAS_SECTION]->(sec)",
         "MERGE (entry:CVEntry {id: row.id})",
         "MERGE (sec)-[:HAS_ENTRY]->(entry)",
-        "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {id: $candidate_id})",
+        "MATCH (:CV)-[r:PROJECTS_TO]->(c:Candidate {profile_id: $profile_id})",
         "MERGE (cv)-[:PROJECTS_TO]->(c)",
         "MATCH (cv:CV {id: $cv_id})-[r:PROJECTS_TO]->()",
     )

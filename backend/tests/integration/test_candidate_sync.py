@@ -206,7 +206,7 @@ def test_sync_merges_candidate_has_skill_and_seed_related() -> None:
     run_async(_body())
 
     joined = "\n".join(driver.queries)
-    assert "MERGE (c:Candidate {id: $candidate_id})" in joined
+    assert "MERGE (c:Candidate {profile_id: $profile_id})" in joined
     assert "HAS_SKILL" in joined
     assert "RELATED_TO" in joined
     assert "source_updated_at" in joined
@@ -215,8 +215,8 @@ def test_sync_merges_candidate_has_skill_and_seed_related() -> None:
     assert driver.parameters
     first = driver.parameters[0]
     # Identity must come from the SQLite profile constant owner, not a local literal.
-    assert first["candidate_id"] == CANDIDATE_PROFILE_ID
-    assert first["candidate_id"] == "active"
+    assert first["profile_id"] == CANDIDATE_PROFILE_ID
+    assert first["profile_id"] == "active"
     assert "2024-06-01" in first["source_updated_at"]
 
     # Collect skill rows from any params payload that includes them.
@@ -242,6 +242,28 @@ def test_sync_merges_candidate_has_skill_and_seed_related() -> None:
     assert ("typescript", "react") in pairs
     # Unknown skill never invents RELATED_TO.
     assert not any(e["from_key"] == "obscure_lib" for e in related_payload)
+
+
+def test_sync_candidate_binds_requested_profile_identity() -> None:
+    driver = FakeNeo4jDriver()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    profile = _profile_with_skills(include_excluded=False)
+
+    async def _body() -> None:
+        await sync_candidate(
+            driver,
+            profile_id="22222222-2222-4222-8222-222222222222",
+            profile=profile,
+            source_updated_at=datetime(2024, 6, 1, tzinfo=UTC),
+            normalizer=normalizer,
+        )
+
+    from tests.support.db_migration import run_async
+
+    run_async(_body())
+    assert driver.parameters[0]["profile_id"] == (
+        "22222222-2222-4222-8222-222222222222"
+    )
 
 
 def test_sync_omits_excluded_skills_only_in_sqlite_json() -> None:
@@ -315,7 +337,7 @@ def test_sync_source_has_no_raw_cv_and_uses_parameters() -> None:
     assert "source_updated_at" in src
     assert "session.run" in src
     # Parameter markers present; no f-string Cypher with profile fields.
-    assert "$candidate_id" in src or "$candidate_id" in "".join(
+    assert "$profile_id" in src or "$profile_id" in "".join(
         sync_mod.cypher_statement_templates()
     )
     assert "raw_cv" not in src
@@ -352,6 +374,6 @@ def test_candidate_sync_reuses_profile_id_constant_owner() -> None:
 
     run_async(_body())
     assert driver.parameters
-    bound_id = driver.parameters[0]["candidate_id"]
+    bound_id = driver.parameters[0]["profile_id"]
     assert bound_id == CANDIDATE_PROFILE_ID
     assert sync_mod.CANDIDATE_PROFILE_ID is CANDIDATE_PROFILE_ID

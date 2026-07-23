@@ -317,7 +317,7 @@ async def evaluate_job(
     # 3) Full Candidate/Job consistency gate — no repair.
     async with session_scope(session_factory) as session:
         consistency = await check_graph_revision_consistency(
-            session, graph_driver
+            session, graph_driver, profile_id=resolved.profile_id
         )
     if not consistency.is_consistent:
         return _consistency_failure(consistency)

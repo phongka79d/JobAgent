@@ -112,7 +112,7 @@ class FakeNeo4jDriver:
             self.schema_statements += 1
             return
         if "MERGE (c:Candidate" in q:
-            self.candidates.add(str(params.get("candidate_id", "active")))
+            self.candidates.add(str(params.get("profile_id", "")))
             return
         if "MERGE (j:Job" in q:
             self.jobs.add(str(params.get("job_id", "")))

@@ -368,6 +368,26 @@ async def test_projection_empty_graph() -> None:
 
 
 @pytest.mark.asyncio
+async def test_projection_binds_requested_profile_to_all_candidate_reads() -> None:
+    profile_id = "22222222-2222-4222-8222-222222222222"
+    fake = GraphObservabilityFake(candidates=[_cand(profile_id)])
+
+    projection = await load_bounded_graph_projection(
+        fake, profile_id=profile_id
+    )
+
+    assert projection.candidate is not None
+    assert projection.candidate.id == profile_id
+    scoped = [
+        params
+        for query, params in zip(fake.queries, fake.parameters, strict=True)
+        if "$profile_id" in query
+    ]
+    assert scoped
+    assert all(params == {"profile_id": profile_id} for params in scoped)
+
+
+@pytest.mark.asyncio
 async def test_projection_driver_failure_raises() -> None:
     fake = GraphObservabilityFake(fail_on_run=True)
     with pytest.raises(Exception):
@@ -439,16 +459,18 @@ def test_empty_snapshot_statuses() -> None:
 
 def test_ready_snapshot_maps_projection() -> None:
     att = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    profile_id = "22222222-2222-4222-8222-222222222222"
+    cv_id = f"{profile_id}:{att}"
     projection = BoundedGraphProjection(
         cv=ProjectedCv(
-            id=att,
+            id=cv_id,
             original_name="cv.pdf",
             extraction_version="cv-document-v1",
             revision=REV,
         ),
         sections=(
             ProjectedCvSection(
-                id=f"{att}:s0",
+                id=f"{cv_id}:s0",
                 heading="Experience",
                 kind="experience",
                 ordinal=0,
@@ -457,8 +479,8 @@ def test_ready_snapshot_maps_projection() -> None:
         ),
         entries=(
             ProjectedCvEntry(
-                id=f"{att}:s0:e0",
-                section_id=f"{att}:s0",
+                id=f"{cv_id}:s0:e0",
+                section_id=f"{cv_id}:s0",
                 ordinal=0,
                 title="Engineer",
                 subtitle="Acme",
@@ -466,7 +488,7 @@ def test_ready_snapshot_maps_projection() -> None:
                 preview="Built APIs",
             ),
         ),
-        candidate=ProjectedCandidate(id="active", revision=REV),
+        candidate=ProjectedCandidate(id=profile_id, revision=REV),
         jobs=(
             ProjectedJob(
                 id="j1", title="SRE", company="Acme", revision=REV
@@ -482,10 +504,10 @@ def test_ready_snapshot_maps_projection() -> None:
         ),
         edges=(
             ProjectedEdge(
-                source_id="active", target_id="python", type="HAS_SKILL"
+                source_id=profile_id, target_id="python", type="HAS_SKILL"
             ),
             ProjectedEdge(
-                source_id=att, target_id="active", type="PROJECTS_TO"
+                source_id=cv_id, target_id=profile_id, type="PROJECTS_TO"
             ),
         ),
         nodes_truncated=False,
@@ -497,11 +519,11 @@ def test_ready_snapshot_maps_projection() -> None:
     assert snap.status == "ready"
     assert snap.code is None
     assert snap.cv is not None
-    assert snap.cv.id == att
+    assert snap.cv.id == cv_id
     assert len(snap.sections) == 1
     assert len(snap.entries) == 1
     assert snap.candidate is not None
-    assert snap.candidate.id == "active"
+    assert snap.candidate.id == profile_id
     assert len(snap.jobs) == 1
     assert snap.jobs[0].title == "SRE"
     assert snap.skills[0].canonical_name == "python"

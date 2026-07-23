@@ -345,7 +345,7 @@ class SkillCompatibilityCounts(BaseModel):
 class SkillMapCandidate(BaseModel):
     model_config = StrictModelConfig
 
-    id: Literal["active"]
+    id: UuidStr
     attachment_id: UuidStr
     current_title: str | None
     revision: AwareUtcDatetime
@@ -427,7 +427,7 @@ class GraphCvNode(BaseModel):
 
     model_config = StrictModelConfig
 
-    id: UuidStr
+    id: str = Field(min_length=1)
     original_name: str = Field(min_length=1)
     extraction_version: str = Field(min_length=1)
     revision: str = Field(min_length=1)

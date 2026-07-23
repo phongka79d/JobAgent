@@ -25,7 +25,7 @@ from app.schemas.profile import CandidateProfile, CandidateSkill
 SelectedRelationshipType = Literal["HAS_SKILL", "REQUIRES", "PREFERS"]
 
 _CANDIDATE_SKILLS_CYPHER: Final[str] = (
-    "MATCH (c:Candidate {id: $candidate_id})-[r:HAS_SKILL]->(s:Skill) "
+    "MATCH (c:Candidate {profile_id: $profile_id})-[r:HAS_SKILL]->(s:Skill) "
     "RETURN type(r) AS relationship_type, "
     "s.canonical_key AS canonical_key, r.confidence AS confidence, "
     "r.years AS years, r.proficiency AS proficiency, r.evidence AS evidence "
@@ -165,11 +165,12 @@ async def _load_actual_snapshot(
     driver: AsyncGraphReadDriver,
     *,
     job_id: str,
+    profile_id: str = CANDIDATE_PROFILE_ID,
 ) -> SelectedSkillRelationshipSnapshot:
     async with driver.session() as session:
         candidate_result = await session.run(
             _CANDIDATE_SKILLS_CYPHER,
-            {"candidate_id": CANDIDATE_PROFILE_ID},
+            {"profile_id": profile_id},
         )
         job_result = await session.run(_JOB_SKILLS_CYPHER, {"job_id": job_id})
         candidate_rows = await candidate_result.data()
@@ -203,13 +204,16 @@ async def check_selected_skill_relationship_integrity(
     driver: AsyncGraphReadDriver,
     *,
     job_id: str,
+    profile_id: str = CANDIDATE_PROFILE_ID,
     profile: CandidateProfile,
     extraction: JobPostExtraction,
 ) -> SelectedSkillIntegrityResult:
     """Compare complete selected relationships; never write or repair Neo4j."""
     expected = build_expected_selected_skill_snapshot(profile, extraction)
     try:
-        actual = await _load_actual_snapshot(driver, job_id=job_id)
+        actual = await _load_actual_snapshot(
+            driver, job_id=job_id, profile_id=profile_id
+        )
     except ValueError:
         return SelectedSkillIntegrityResult(
             is_consistent=False,

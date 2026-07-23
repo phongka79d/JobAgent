@@ -626,7 +626,7 @@ async def get_selected_job_skill_map(
         ) from exc
 
     candidate_meta = SkillMapCandidate(
-        id=profile_row.id,  # type: ignore[arg-type]
+        id=profile_row.id,
         attachment_id=profile_row.active_attachment_id,
         current_title=profile.current_title,
         revision=_require_aware_utc(profile_row.updated_at),
@@ -638,7 +638,9 @@ async def get_selected_job_skill_map(
         revision=_require_aware_utc(job_row.updated_at),
     )
 
-    revision = await check_graph_revision_consistency(session, driver)
+    revision = await check_graph_revision_consistency(
+        session, driver, profile_id=profile_row.id
+    )
     if revision.error_code == NEO4J_UNAVAILABLE:
         return _empty_selected_skill_map(
             status="unavailable",
@@ -673,6 +675,7 @@ async def get_selected_job_skill_map(
     integrity = await check_selected_skill_relationship_integrity(
         driver,
         job_id=job_row.id,
+        profile_id=profile_row.id,
         profile=profile,
         extraction=extraction,
     )
@@ -849,7 +852,9 @@ async def get_graph_snapshot(
             summary="No active candidate profile is available for graph inspection.",
         )
 
-    consistency = await check_graph_revision_consistency(session, driver)
+    consistency = await check_graph_revision_consistency(
+        session, driver, profile_id=profile.id
+    )
     if consistency.error_code == NEO4J_UNAVAILABLE:
         return _empty_graph_snapshot(
             status="unavailable",
@@ -872,7 +877,9 @@ async def get_graph_snapshot(
             ),
         )
 
-    cv_consistency = await check_active_cv_consistency(session, driver)
+    cv_consistency = await check_active_cv_consistency(
+        session, driver, profile_id=profile.id
+    )
     if cv_consistency.error_code == NEO4J_UNAVAILABLE:
         return _empty_graph_snapshot(
             status="unavailable",
@@ -896,7 +903,9 @@ async def get_graph_snapshot(
         )
 
     try:
-        projection = await load_bounded_graph_projection(driver)
+        projection = await load_bounded_graph_projection(
+            driver, profile_id=profile.id
+        )
     except GraphProjectionError:
         return _empty_graph_snapshot(
             status="unavailable",

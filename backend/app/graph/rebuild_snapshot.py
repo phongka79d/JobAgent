@@ -26,6 +26,7 @@ from app.db.models.jobs import (
     JOB_PROCESSING_STATUS_PROCESSED,
     JobPost,
 )
+from app.db.models.profiles import PROFILE_STATE_READY, Profile
 from app.graph.rebuild_target import RebuildError
 from app.repositories import profiles as profile_repo
 from app.schemas.cv_document import CVDocument as CVDocumentModel
@@ -104,6 +105,18 @@ class ApprovedCvRebuildRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadyProfileRebuildRow:
+    """One ready profile and its current source-backed CV projection inputs."""
+
+    profile_id: str
+    profile: CandidateProfile
+    source_updated_at: datetime
+    cv: ApprovedCvRebuildRow | None
+    legacy_cv: LegacyActiveCvRow | None
+    source_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class LegacyActiveCvRow:
     """Active attachment without ``cv_documents`` (pre-Phase-9 / reprocess-required)."""
 
@@ -169,9 +182,15 @@ def validate_stored_embedding(
 
 async def load_source_revision_snapshot(
     session: AsyncSession,
+    *,
+    profile_id: str | None = None,
 ) -> SourceRevisionSnapshot:
-    """Read active Candidate and all scorable Job ID/revisions from SQLite."""
-    profile_row = await profile_repo.get_active_profile(session)
+    """Read one requested Candidate and all scorable Job revisions from SQLite."""
+    profile_row = (
+        await profile_repo.get_profile(session, profile_id)
+        if profile_id is not None
+        else await profile_repo.get_active_profile(session)
+    )
     candidate = (
         SourceRevision(profile_row.id, profile_row.updated_at)
         if profile_row is not None
@@ -187,9 +206,15 @@ async def load_source_revision_snapshot(
 
 async def load_active_cv_consistency_facts(
     session: AsyncSession,
+    *,
+    profile_id: str | None = None,
 ) -> ActiveCvConsistencyFacts:
     """Load active attachment ID and approved document hash/revision for staleness."""
-    profile_row = await profile_repo.get_active_profile(session)
+    profile_row = (
+        await profile_repo.get_profile(session, profile_id)
+        if profile_id is not None
+        else await profile_repo.get_active_profile(session)
+    )
     if profile_row is None:
         return ActiveCvConsistencyFacts(
             active_attachment_id=None,
@@ -317,33 +342,71 @@ async def load_rebuild_inputs(
     *,
     expected_model: str,
     expected_dimensions: int,
-) -> tuple[
-    CandidateProfile | None,
-    Any | None,
-    list[ScorableJobRow],
-    list[ApprovedCvRebuildRow],
-    LegacyActiveCvRow | None,
-]:
-    """Read Candidate, scorable Jobs, approved CVs; preflight embeddings.
+) -> tuple[list[ReadyProfileRebuildRow], list[ScorableJobRow]]:
+    """Read every ready profile/current CV and scorable Jobs.
 
     Read-only: no flush/commit of mutations. Preflight runs before any graph
     clear so mismatch never issues a destructive Cypher statement.
     """
-    profile_row = await profile_repo.get_active_profile(session)
-    profile: CandidateProfile | None = None
-    profile_updated_at: Any | None = None
-    active_attachment_id: str | None = None
-    if profile_row is not None:
+    profile_result = await session.execute(
+        select(Profile)
+        .where(Profile.state == PROFILE_STATE_READY)
+        .order_by(Profile.id.asc())
+    )
+    ready_profiles: list[ReadyProfileRebuildRow] = []
+    for profile_row in profile_result.scalars().all():
         try:
             profile = parse_candidate_profile(profile_row.profile_json)
         except Exception as exc:
             raise RebuildError(
-                "Active Candidate profile_json failed validation; fix SQLite "
+                f"Profile {profile_row.id}: profile_json failed validation; fix SQLite "
                 "profile data before rebuild.",
                 code="CANDIDATE_INVALID",
             ) from exc
-        profile_updated_at = profile_row.updated_at
-        active_attachment_id = profile_row.active_attachment_id
+
+        attachment = await session.get(Attachment, profile_row.attachment_id)
+        if attachment is None:
+            raise RebuildError(
+                f"Profile {profile_row.id}: source attachment is missing.",
+                code="CV_ACTIVE_MISSING",
+            )
+        doc_row = await session.get(CVDocument, profile_row.attachment_id)
+        cv: ApprovedCvRebuildRow | None = None
+        legacy_cv: LegacyActiveCvRow | None = None
+        if doc_row is None:
+            legacy_cv = LegacyActiveCvRow(
+                attachment_id=profile_row.attachment_id,
+                original_name=attachment.original_name,
+                source_updated_at=attachment.updated_at,
+            )
+        else:
+            try:
+                document = parse_cv_document(doc_row.document_json)
+            except ValidationError as exc:
+                raise RebuildError(
+                    f"CV {doc_row.attachment_id}: document_json failed validation; "
+                    "fix SQLite cv_documents before rebuild.",
+                    code="CV_INVALID",
+                ) from exc
+            cv = ApprovedCvRebuildRow(
+                attachment_id=profile_row.attachment_id,
+                document=document,
+                original_name=attachment.original_name,
+                extraction_version=doc_row.extraction_version,
+                source_hash=doc_row.source_hash,
+                source_updated_at=doc_row.updated_at,
+                is_active=True,
+            )
+        ready_profiles.append(
+            ReadyProfileRebuildRow(
+                profile_id=profile_row.id,
+                profile=profile,
+                source_updated_at=profile_row.updated_at,
+                cv=cv,
+                legacy_cv=legacy_cv,
+                source_hash=profile_row.source_hash,
+            )
+        )
 
     result = await session.execute(_scorable_jobs_stmt())
     rows = list(result.scalars().all())
@@ -379,11 +442,7 @@ async def load_rebuild_inputs(
             )
         )
 
-    approved_cvs, legacy_active = await load_approved_cv_rebuild_rows(
-        session,
-        active_attachment_id=active_attachment_id,
-    )
-    return profile, profile_updated_at, scorable, approved_cvs, legacy_active
+    return ready_profiles, scorable
 
 
 __all__ = [
@@ -391,6 +450,7 @@ __all__ = [
     "ActiveCvConsistencyFacts",
     "ApprovedCvRebuildRow",
     "LegacyActiveCvRow",
+    "ReadyProfileRebuildRow",
     "ScorableJobFacts",
     "ScorableJobRow",
     "SourceRevision",

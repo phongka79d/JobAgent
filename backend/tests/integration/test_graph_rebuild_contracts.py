@@ -6,6 +6,7 @@ import inspect
 import re
 
 from app.db.models.profiles import CANDIDATE_PROFILE_ID
+from app.graph import consistency as consistency_mod
 from app.graph import rebuild as rebuild_mod
 from app.graph import rebuild_ops as rebuild_ops_mod
 from app.graph import rebuild_snapshot as rebuild_snapshot_mod
@@ -176,11 +177,18 @@ def test_sync_owners_still_exported_for_reuse() -> None:
     assert CANDIDATE_PROFILE_ID == "active"
 
 
+def test_consistency_reads_only_the_requested_candidate_revision() -> None:
+    query = consistency_mod._CANDIDATE_REVISIONS_CYPHER  # noqa: SLF001
+    assert "{profile_id: $profile_id}" in query
+    assert "c.profile_id AS id" in query
+    assert "MATCH (c:Candidate)" not in query
+
+
 def test_sole_rebuild_path_projects_approved_cvs() -> None:
     src = inspect.getsource(rebuild_mod.rebuild_graph)
     assert "sync_cv" in src
-    assert "approved_cvs" in src
-    assert "legacy_active" in src
+    assert "ready_profiles" in src
+    assert "legacy_cv" in src
     public = inspect.getsource(rebuild_mod)
     assert "PROJECTS_TO" in public
     # Sole public rebuild service entry remains rebuild_graph.

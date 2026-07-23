@@ -37,8 +37,10 @@ from app.repositories import agent_runs as runs_repo
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
+from app.repositories import workspace_state as workspace_repo
 from app.repositories.attachment_text_chunks import build_chunk_write
 from app.schemas.observability import (
     FILE_HASH_ABBREV_CHARS,
@@ -211,11 +213,13 @@ async def _seed_chunks(
 async def _seed_run_with_tools(
     session: AsyncSession,
     *,
+    conversation_id: str,
     created_at: datetime,
     attachment_id: str | None = None,
 ) -> str:
     msg = await messages_repo.insert_message(
         session,
+        conversation_id=conversation_id,
         role=CHAT_MESSAGE_ROLE_USER,
         content="observability seed turn",
     )
@@ -250,6 +254,27 @@ async def _seed_run_with_tools(
         run.completed_at = created_at
     await session.flush()
     return run.id
+
+
+async def _seed_profile_conversation(
+    session: AsyncSession,
+    *,
+    attachment_id: str,
+) -> str:
+    profile = await profile_repo.create_profile(
+        session,
+        attachment_id=attachment_id,
+        display_name="Observability Profile",
+        profile_json=profile_payload(),
+        location=None,
+        extraction_version="observability-test-v1",
+        source_hash=f"source-{attachment_id}",
+    )
+    await workspace_repo.set_active_profile_id(session, profile.id)
+    conversation = await conversations_repo.create_for_profile(
+        session, profile_id=profile.id
+    )
+    return conversation.id
 
 
 # ---------------------------------------------------------------------------
@@ -660,10 +685,14 @@ def test_run_history_redaction_pagination_and_related_ids(
                     created_at=T0,
                     file_hash="run-att-hash" + "f" * 49,
                 )
+                conversation_id = await _seed_profile_conversation(
+                    session, attachment_id=att_id
+                )
                 run_ids: list[str] = []
                 for i in range(3):
                     rid = await _seed_run_with_tools(
                         session,
+                        conversation_id=conversation_id,
                         created_at=T0 + timedelta(minutes=i),
                         attachment_id=att_id if i == 2 else None,
                     )
@@ -777,9 +806,15 @@ def test_observability_reads_do_not_mutate(
                     created_at=T0,
                     file_hash="mut-hash" + "1" * 54,
                 )
+                conversation_id = await _seed_profile_conversation(
+                    session, attachment_id=aid
+                )
                 await _seed_chunks(session, aid, ["only chunk"])
                 await _seed_run_with_tools(
-                    session, created_at=T0, attachment_id=aid
+                    session,
+                    conversation_id=conversation_id,
+                    created_at=T0,
+                    attachment_id=aid,
                 )
                 await session.commit()
 
