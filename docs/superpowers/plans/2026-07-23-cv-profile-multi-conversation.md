@@ -4,7 +4,7 @@
 
 **Goal:** Replace the singleton CV/profile/conversation workflow with durable CV-backed profiles, persisted extraction reuse, and isolated selectable/deletable conversations per profile.
 
-**Architecture:** SQLite remains the authoritative owner of profiles, retained CV attachments, extracted documents/chunks, preferences, conversations, messages, runs, tools, and profile-scoped evaluations. A singleton `workspace_state` row selects the active profile; every chat request resolves its profile and CV context from the conversation ID, while Neo4j remains a rebuildable, profile-keyed projection. The React shell owns profile/conversation selection above the existing single ChatPage/SSE reducer, using Astryx navigation rows, tags, menus, and confirmation dialogs.
+**Architecture:** SQLite remains the authoritative owner of pending/ready profiles, retained CV attachments, extracted documents/chunks, preferences, conversations, messages, runs, tools, and profile-scoped evaluations. A new upload atomically creates one pending profile and bootstrap conversation before extraction; approval promotes that same identity to ready. A singleton `workspace_state` row selects the workspace profile, while every approved-data consumer separately requires ready state and every chat request resolves its profile/CV ownership from the conversation ID. Neo4j remains a rebuildable, ready-profile-keyed projection. The React shell owns profile/conversation selection above the existing single ChatPage/SSE reducer, using Astryx navigation rows, tags, menus, and confirmation dialogs.
 
 **Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy/aiosqlite, Alembic, LangGraph checkpoints, Neo4j, Pytest, Ruff, Mypy, React 19, TypeScript, Vite, Vitest, Astryx 0.1.4, PowerShell, Docker Compose.
 
@@ -14,8 +14,9 @@
 
 - This remains one plan because no subsystem is independently shippable: the profile/conversation IDs are introduced by one destructive schema, and backend ownership, graph identity, frontend hydration, and deletion semantics must change together to prevent cross-profile data exposure. The tasks are still independently committed and testable in dependency order.
 - The approved design at `docs/superpowers/specs/2026-07-23-cv-profile-conversation-design.md` is the authority for this plan. Existing singleton-oriented README text and tests are replaced as part of the implementation; no compatibility migration is added.
-- A retained CV attachment belongs to exactly one profile. A profile owns one persisted extraction revision and many conversations. Selecting a profile or conversation performs SQLite reads/selection only: zero extraction, LLM, embedding, scoring, filesystem-write, or provider calls.
-- First approval of a new CV creates a new profile, profile preferences, and one empty `Chat mới` conversation, then activates it. Explicit re-extraction targets an existing profile, preserves its conversation IDs, and is approval-gated.
+- A retained CV attachment belongs to exactly one profile. A pending profile owns no approved extraction; a ready profile owns one persisted extraction revision. Every profile owns its durable conversations. Selecting a ready profile or conversation performs SQLite reads/selection only: zero extraction, LLM, embedding, scoring, filesystem-write, or provider calls.
+- A new unique CV upload creates one pending profile and one empty `Chat mới` bootstrap conversation before extraction. First approval promotes that same row, adds profile preferences and approved extraction facts, preserves the conversation ID, and activates the attachment. Explicit re-extraction targets an existing ready profile, preserves all conversation IDs, and is approval-gated.
+- `workspace_state.active_profile_id` is the selected profile pointer and may temporarily reference the one pending profile. Approved context, matching, evaluation, observability, and graph code must also require `Profile.state == "ready"`.
 - `POST /api/profiles/{profile_id}/reextract` is the profile-owned re-extraction route. It uses the existing SSE vocabulary and the existing ChatPage stream owner; the server derives the attachment and selected conversation and never accepts client CV/profile JSON.
 - Conversation and profile deletion are permanent. Every UI delete uses an Astryx `AlertDialog`; the backend repeats ownership/activity checks and never trusts a client confirmation string.
 - A running or interrupted run blocks profile switching, conversation switching/creation/deletion, and profile deletion. The backend gate is authoritative; the frontend lock is only an affordance.
@@ -30,8 +31,16 @@ Define these names once in the first implementation tasks and reuse them in ever
 ~~~python
 # backend/app/db/models/profiles.py
 PROFILE_STATE_READY = "ready"
+PROFILE_STATE_PENDING = "pending"
 PROFILE_STATE_DELETING = "deleting"
-PROFILE_STATES = frozenset({PROFILE_STATE_READY, PROFILE_STATE_DELETING})
+PROFILE_STATES = frozenset({
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
+    PROFILE_STATE_DELETING,
+})
+PROFILE_SETUP_STATUS_AWAITING_EXTRACTION = "awaiting_extraction"
+PROFILE_SETUP_STATUS_AWAITING_APPROVAL = "awaiting_approval"
+PROFILE_SETUP_STATUS_EXTRACTION_FAILED = "extraction_failed"
 WORKSPACE_STATE_ID = "main"
 PROFILE_DISPLAY_NAME_MAX = 120
 CONVERSATION_TITLE_MAX = 120
@@ -54,9 +63,15 @@ The public profile projection contains only safe, persisted fields:
 ProfileListItem:
   id, display_name, cv_filename, attachment_state, location,
   skill_tags[{key, label}], skill_count, extraction_version,
-  source_hash, state, is_active, created_at, updated_at, last_opened_at
+  source_hash, state, setup_status, is_active,
+  created_at, updated_at, last_opened_at
+  pending rows: location/extraction_version/source_hash null,
+                skill_tags [], skill_count 0,
+                setup_status awaiting_extraction | awaiting_approval |
+                             extraction_failed
+  ready rows: setup_status null
 ProfileDetail:
-  ProfileListItem fields + profile (validated CandidateProfile),
+  ready ProfileListItem fields + profile (validated CandidateProfile),
   preferences (validated JobPreferences), attachment metadata,
   selected_conversation_id
 ConversationSummary:
@@ -69,7 +84,7 @@ Stable error codes are defined in one backend module and mirrored as a TypeScrip
 
 ~~~text
 PROFILE_NOT_FOUND, PROFILE_NOT_READY, PROFILE_SWITCH_BLOCKED,
-PROFILE_DELETE_BLOCKED, CONVERSATION_NOT_FOUND,
+PROFILE_DELETE_BLOCKED, PROFILE_SETUP_IN_PROGRESS, CONVERSATION_NOT_FOUND,
 CONVERSATION_PROFILE_MISMATCH, CONVERSATION_SWITCH_BLOCKED,
 CONVERSATION_DELETE_BLOCKED, RUN_PROFILE_MISMATCH,
 NO_ACTIVE_PROFILE, INVALID_DISPLAY_NAME, PROFILE_INCONSISTENT
@@ -99,6 +114,27 @@ class SelectionResponse(BaseModel):
     profile: ProfileDetail
     conversation: ConversationSummary | None
     warning: SafeWarning | None = None
+~~~
+
+Upload bootstrap uses the same server-owned profile/conversation identifiers:
+
+~~~python
+class PendingProfileBootstrap(BaseModel):
+    model_config = StrictModelConfig
+    profile: ProfileListItem
+    conversation: ConversationSummary
+    start_extraction: bool
+
+class CvUploadResponse(BaseModel):
+    model_config = StrictModelConfig
+    attachment: AttachmentPublic
+    outcome: Literal[
+        "new_pending", "retry_pending", "existing_pending",
+        "existing_active", "existing_profile",
+    ]
+    profile: ProfileUploadSummary | None = None
+    draft: DraftUploadSummary | None = None
+    bootstrap: PendingProfileBootstrap | None = None
 ~~~
 
 Define the remaining shared types before implementing repositories/routes so later tasks use the same names:
@@ -148,9 +184,9 @@ ConversationListPage, ConversationOwner, and ConversationDeleteResult are intern
 
 | Area | Files to create or modify | Responsibility |
 | --- | --- | --- |
-| Schema/persistence | backend/app/db/models/profiles.py, chat.py, job_evaluations.py, db/seed.py, migrations/versions/0005_cv_profiles_multi_conversation.py | Multi-row profile/preferences/conversation tables, workspace selection, destructive fresh-schema reset |
+| Schema/persistence | backend/app/db/models/profiles.py, chat.py, job_evaluations.py, db/seed.py, migrations/versions/0005_cv_profiles_multi_conversation.py | Pending/ready profile shapes, multi-row preferences/conversations, workspace selection, destructive fresh-schema reset |
 | Repositories/gates | backend/app/repositories/profiles.py, new workspace_state.py, new conversations.py, chat_messages.py, agent_runs.py, job_evaluations.py, new services/activity_gate.py, new services/conversation_titles.py | ID-scoped reads/writes, ownership resolution, deterministic selection, run activity checks |
-| Profile lifecycle | new backend/app/api/profiles.py, new backend/app/api/conversations.py, existing api/profile.py, main.py, services/profile_approval.py, profile_drafts.py, profile_activation.py, cv_upload.py | Safe profile DTOs, activation, rename, approval, re-extraction, staged upload |
+| Profile lifecycle | new backend/app/api/profiles.py, new backend/app/api/conversations.py, existing api/profile.py, main.py, schemas/profile_setup.py, services/profile_approval.py, profile_drafts.py, profile_activation.py, cv_upload.py | Safe pending bootstrap/list DTOs, activation, rename, in-place approval promotion, re-extraction, staged upload |
 | Chat ownership | backend/app/services/chat_turns.py, chat_history.py, job_save_confirmation.py, agent/state.py, agent/graph.py, agent/context.py, agent/active_cv_context.py, services/active_cv_reader.py | Conversation/profile context, title update, run resume, no cross-owner history |
 | Deletion | new backend/app/services/conversation_deletion.py, new profile_deletion.py, graph/delete_profile.py, existing CV cleanup modules | Checkpoint/file/graph/SQLite ordering and retryable state |
 | Evaluation/graph | services/evaluation_context.py, job_evaluation.py, saved_jobs.py, matching.py, graph/sync_candidate.py, sync_cv.py, consistency.py, observability*.py, rebuild*.py, selected_skill_projection.py | Profile-keyed evaluations and Candidate/CV graph branches |
@@ -683,7 +719,7 @@ def test_activate_profile_does_not_call_provider_stack(
     assert provider_spies.calls == []
 ~~~
 
-Cover GET /api/profiles, GET /api/profiles/{id}, PATCH, and POST /activate routing/error mapping, including PROFILE_NOT_FOUND, PROFILE_NOT_READY, and PROFILE_SWITCH_BLOCKED. Task 6 adds DELETE only after its external-cleanup coordinator exists.
+Cover GET /api/profiles, GET /api/profiles/{id}, PATCH, and POST /activate routing/error mapping, including PROFILE_NOT_FOUND, PROFILE_NOT_READY, and PROFILE_SWITCH_BLOCKED. Task 7 adds DELETE only after its external-cleanup coordinator exists.
 
 - [x] Step 2: Run the API tests to verify RED
 
@@ -842,7 +878,7 @@ Keep GET /api/profile and /api/profile/cv as compatibility reads for the upload/
 
 - [x] Step 5: Register routes and update public API tests
 
-Include profiles_router in main.py, expose PATCH, and replace the old “exactly seven singleton routes” assertion with route tests for the implemented profile routes and compatibility reads. Assert that route handlers never call extraction, embedding, scoring, or graph writes before the SQLite selection commit. Reserve DELETE /profiles/{profile_id} for Task 6.
+Include profiles_router in main.py, expose PATCH, and replace the old “exactly seven singleton routes” assertion with route tests for the implemented profile routes and compatibility reads. Assert that route handlers never call extraction, embedding, scoring, or graph writes before the SQLite selection commit. Reserve DELETE /profiles/{profile_id} for Task 7.
 
 - [x] Step 6: Run focused profile gates and commit
 
@@ -1054,7 +1090,7 @@ async def select_owned_conversation(
         )
 ~~~
 
-Each handler maps stable errors without message/CV/provider text. Task 6 adds DELETE only after its checkpoint coordinator exists.
+Each handler maps stable errors without message/CV/provider text. Task 7 adds DELETE only after its checkpoint coordinator exists.
 
 - [x] Step 4: Thread IDs through turn creation and context
 
@@ -1132,7 +1168,451 @@ git commit -m "feat: isolate chat by conversation and profile"
 
 ---
 
-### Task 5: Make approval, persisted extraction, rename, and explicit re-extraction profile-aware
+### Task 5: Bootstrap a pending profile and owned conversation before extraction
+
+**Files:**
+- Modify: backend/app/db/models/profiles.py
+- Modify: backend/migrations/versions/0005_cv_profiles_multi_conversation.py
+- Modify: backend/app/schemas/profile.py, attachments.py
+- Create: backend/app/schemas/profile_setup.py
+- Modify: backend/app/repositories/profiles.py, conversations.py, workspace_state.py
+- Modify: backend/app/services/activity_gate.py, cv_upload.py, profile_projection.py, conversations.py
+- Modify: backend/app/services/chat_turns.py, profile_drafts.py, profile_approval.py, profile_activation.py
+- Modify: backend/app/tools/profile.py, backend/app/agent/context.py, active_cv_context.py
+- Modify: backend/app/api/attachments.py, profile.py, profiles.py, conversations.py
+- Modify: backend/app/services/job_evaluation.py, matching.py, saved_jobs.py, observability.py
+- Modify: backend/app/graph/rebuild_snapshot.py
+- Modify: frontend/src/features/profile/types.ts, conversationTypes.ts, api.ts, workspaceState.ts, CvSidebar.tsx
+- Modify: frontend/src/features/chat/ChatPage.tsx, frontend/src/app/App.tsx
+- Test: backend/tests/unit/test_attachment_profile_models.py, test_agent_context.py
+- Test: backend/tests/integration/test_migrations.py, test_database_contract.py, test_cv_api.py, test_profiles_api.py, test_profile_selection.py, test_conversations_api.py, test_chat_persistence.py, test_profile_approval.py, test_job_evaluations.py, test_graph_rebuild_behavior.py
+- Test: frontend/src/test/profile-api.test.ts, profile-workspace-state.test.tsx, chat-page.test.tsx, frontend/src/app/App.test.tsx, frontend/src/test/cv-sidebar.test.tsx
+
+- [ ] **Step 1: Write failing pending-shape schema tests**
+
+Extend the model, migration, and database-contract tests with one coherent
+incomplete shape and one coherent ready shape:
+
+~~~python
+def test_pending_profile_requires_null_approved_fields() -> None:
+    table = Profile.__table__
+    assert table.c.profile_json.nullable is True
+    assert table.c.extraction_version.nullable is True
+    assert table.c.source_hash.nullable is True
+    assert PROFILE_STATE_PENDING == "pending"
+    assert PROFILE_STATES == frozenset({"pending", "ready", "deleting"})
+
+
+def test_database_rejects_partial_pending_profile(migrated_sqlite: Path) -> None:
+    async def body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment = await _seed_staged_attachment(session, marker="partial")
+                session.add(Profile(
+                    id=new_uuid(),
+                    attachment_id=attachment.id,
+                    display_name="partial.pdf",
+                    profile_json=None,
+                    location="Invented",
+                    extraction_version=None,
+                    source_hash=None,
+                    state="pending",
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                    last_opened_at=utc_now(),
+                ))
+                with pytest.raises(IntegrityError):
+                    await session.flush()
+        finally:
+            await engine.dispose()
+    run_async(body())
+~~~
+
+Add a database test that inserts one pending profile, then proves a second
+profile with `profile_json IS NULL` fails the named unique incomplete-profile
+index. Add parity assertions for nullable approved fields, the state/shape CHECK,
+and `uq_profiles__single_incomplete`. Keep `workspace_state(main, NULL)` and zero
+profiles/conversations after migration.
+
+- [ ] **Step 2: Run schema tests to verify RED**
+
+~~~powershell
+Set-Location backend
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_attachment_profile_models.py tests/integration/test_migrations.py tests/integration/test_database_contract.py -q
+~~~
+
+Expected: assertions fail because `pending`, nullable approved fields, the
+state/shape CHECK, and the single-incomplete index do not exist.
+
+- [ ] **Step 3: Implement the pending persistence contract and rerun schema tests**
+
+Define the shared state names once in `db/models/profiles.py`:
+
+~~~python
+PROFILE_STATE_PENDING = "pending"
+PROFILE_STATE_READY = "ready"
+PROFILE_STATE_DELETING = "deleting"
+PROFILE_STATES = frozenset({
+    PROFILE_STATE_PENDING,
+    PROFILE_STATE_READY,
+    PROFILE_STATE_DELETING,
+})
+PROFILE_SETUP_STATUS_AWAITING_EXTRACTION = "awaiting_extraction"
+PROFILE_SETUP_STATUS_AWAITING_APPROVAL = "awaiting_approval"
+PROFILE_SETUP_STATUS_EXTRACTION_FAILED = "extraction_failed"
+~~~
+
+Make `profile_json`, `extraction_version`, and `source_hash` nullable. Add one
+named CHECK equivalent to:
+
+~~~sql
+(state = 'pending'
+ AND profile_json IS NULL AND location IS NULL
+ AND extraction_version IS NULL AND source_hash IS NULL)
+OR
+(state = 'ready'
+ AND profile_json IS NOT NULL
+ AND extraction_version IS NOT NULL AND source_hash IS NOT NULL)
+OR
+(state = 'deleting' AND (
+    (profile_json IS NULL AND location IS NULL
+     AND extraction_version IS NULL AND source_hash IS NULL)
+ OR (profile_json IS NOT NULL
+     AND extraction_version IS NOT NULL AND source_hash IS NOT NULL)
+))
+~~~
+
+Add a SQLite unique expression index named
+`uq_profiles__single_incomplete` over constant `1` with
+`WHERE profile_json IS NULL`; this also prevents a new pending row while failed
+cleanup retains a deleting incomplete row. Mirror the ORM metadata and explicit
+0005 migration. Do not add placeholder profile JSON or reuse
+`attachments.file_hash` as `profiles.source_hash`.
+
+Run:
+
+~~~powershell
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_attachment_profile_models.py tests/integration/test_migrations.py tests/integration/test_database_contract.py -q
+~~~
+
+Expected: the schema tests pass with zero application rows after migration.
+
+- [ ] **Step 4: Write failing upload-bootstrap and safe-projection tests**
+
+Add response/parser contracts for these exact values:
+
+~~~python
+ProfileSetupStatus = Literal[
+    "awaiting_extraction", "awaiting_approval", "extraction_failed"
+]
+CvUploadOutcome = Literal[
+    "new_pending", "retry_pending", "existing_pending",
+    "existing_active", "existing_profile",
+]
+
+class PendingProfileBootstrap(BaseModel):
+    model_config = StrictModelConfig
+    profile: ProfileListItem
+    conversation: ConversationSummary
+    start_extraction: bool
+
+class CvUploadResponse(BaseModel):
+    model_config = StrictModelConfig
+    attachment: AttachmentPublic
+    outcome: CvUploadOutcome
+    profile: ProfileUploadSummary | None = None
+    draft: DraftUploadSummary | None = None
+    bootstrap: PendingProfileBootstrap | None = None
+~~~
+
+Add model validation for the frozen coupling: every pending outcome requires a
+bootstrap whose pending profile owns the returned conversation and top-level
+attachment; `new_pending` and `retry_pending` require
+`start_extraction=True`; `existing_pending` derives the flag from the absence
+of a draft or active/interrupted run; `existing_active` and `existing_profile`
+require `bootstrap=None` and a safe ready-profile reference. Reject every
+inconsistent combination in backend model tests and mirror those cases in the
+frontend parser tests.
+
+Move `CvUploadResponse` into the new `schemas/profile_setup.py` so it may reuse
+`ProfileListItem` and `ConversationSummary` without making `profile.py` import a
+schema that imports it back. Update API/service imports; keep `AttachmentPublic`
+in `attachments.py`.
+
+Add integration tests:
+
+~~~python
+def test_new_upload_bootstraps_one_pending_profile_and_conversation(
+    health_env, provider_spies
+) -> None:
+    with health_client() as client:
+        response = client.post(
+            "/api/attachments/cv",
+            files={"file": ("Ada.pdf", PDF_BYTES, "application/pdf")},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["outcome"] == "new_pending"
+    assert body["bootstrap"]["profile"]["state"] == "pending"
+    assert body["bootstrap"]["profile"]["setup_status"] == "awaiting_extraction"
+    assert body["bootstrap"]["conversation"]["profile_id"] == body["bootstrap"]["profile"]["id"]
+    assert body["bootstrap"]["start_extraction"] is True
+    assert provider_spies.calls == []
+
+
+def test_different_upload_is_blocked_while_pending(health_env) -> None:
+    first = _upload_pdf("first.pdf", PDF_BYTES)
+    second = _upload_pdf("second.pdf", OTHER_PDF_BYTES)
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
+~~~
+
+Cover `retry_pending`, `existing_pending`, `start_extraction=False` when a draft
+or running/interrupted run exists, exact-hash reuse with stable profile and
+conversation IDs, rollback file cleanup, and `GET /api/profiles` pending output.
+Pending list rows must have `location=None`, `skill_tags=[]`, `skill_count=0`,
+`extraction_version=None`, `source_hash=None`, and one of the three fixed
+`setup_status` values. `GET /api/profiles/{id}`, PATCH, activate, and reextract
+must return `PROFILE_NOT_READY` for pending rows.
+
+- [ ] **Step 5: Run upload/projection tests to verify RED**
+
+~~~powershell
+& '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_cv_api.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_conversations_api.py -q
+~~~
+
+Expected: new upload still returns a staged attachment only; no pending owner,
+bootstrap DTO, setup status, or pending gate exists.
+
+- [ ] **Step 6: Implement atomic upload bootstrap and safe pending reads**
+
+Add these repository boundaries:
+
+~~~python
+async def create_pending_profile(
+    session: AsyncSession, *, attachment_id: str, display_name: str
+) -> Profile: ...
+
+async def get_incomplete_profile(session: AsyncSession) -> Profile | None: ...
+
+async def create_bootstrap_for_profile(
+    session: AsyncSession, *, profile_id: str
+) -> Conversation: ...
+~~~
+
+`create_pending_profile` writes only the attachment ID, sanitized filename
+display name, null approved fields, `pending`, and timestamps.
+`create_bootstrap_for_profile` is the only conversation creator allowed for a
+pending profile; the existing public `create_for_profile` remains ready-only.
+
+In `cv_upload.py`, enforce workspace idleness and the single-incomplete gate
+before file reads, then recheck them in the write transaction. For a new hash,
+promote the UUID file outside SQLite and use one `session_scope` to insert the
+staged attachment, pending profile, bootstrap conversation, and
+`workspace_state.active_profile_id`. On transaction failure remove only that
+new UUID file. Keep a previous ready attachment active until promotion.
+
+Derive `start_extraction` from durable rows: it is false when a targeted draft
+or running/interrupted run exists, otherwise true for staged new/retried pending
+rows. A different hash while an incomplete row exists raises
+`PROFILE_SETUP_IN_PROGRESS`; exact-hash reuse returns the existing bootstrap.
+
+Update `profile_projection.py` to derive setup status in this precedence:
+
+~~~python
+if attachment.state == ATTACHMENT_STATE_FAILED:
+    setup_status = PROFILE_SETUP_STATUS_EXTRACTION_FAILED
+elif draft is not None and draft.target_profile_id == profile.id:
+    setup_status = PROFILE_SETUP_STATUS_AWAITING_APPROVAL
+else:
+    setup_status = PROFILE_SETUP_STATUS_AWAITING_EXTRACTION
+~~~
+
+Allow list and bootstrap-conversation hydration for the selected pending
+profile, but keep detail, rename, activation, re-extraction, new conversation,
+selection, and conversation deletion ready-only.
+
+- [ ] **Step 7: Write failing owned-turn, promotion, and ready-truth tests**
+
+Add tests proving the pending profile is a real owner and never approved truth:
+
+~~~python
+def test_pending_extraction_turn_and_resume_keep_bootstrap_owner(
+    pending_setup_context,
+) -> None:
+    turn = pending_setup_context.start_extraction()
+    assert turn.profile_id == pending_setup_context.profile_id
+    assert turn.conversation_id == pending_setup_context.conversation_id
+    assert turn.attachment_id == pending_setup_context.attachment_id
+    draft = pending_setup_context.current_draft()
+    assert draft.target_profile_id == pending_setup_context.profile_id
+
+
+def test_approval_promotes_in_place_without_second_conversation(
+    pending_setup_context,
+) -> None:
+    before = pending_setup_context.conversation_ids()
+    result = pending_setup_context.approve()
+    assert result.profile_id == pending_setup_context.profile_id
+    assert result.conversation_id == pending_setup_context.conversation_id
+    assert pending_setup_context.profile_state() == "ready"
+    assert pending_setup_context.conversation_ids() == before
+
+
+def test_pending_selection_never_loads_approved_truth(
+    pending_setup_context, provider_spies
+) -> None:
+    assert pending_setup_context.candidate_context() == []
+    assert pending_setup_context.evaluate_saved_job().code == "PROFILE_NOT_READY"
+    assert pending_setup_context.graph_snapshot_profile_ids() == []
+    assert provider_spies.calls == []
+~~~
+
+Cover the bootstrap turn's exact staged attachment requirement, unrelated
+attachment rejection before message/run insert, draft-correction turns after
+Request Changes, synthetic bootstrap title exclusion, guarded identity used by
+post-commit graph sync, prior active attachment archival on promotion, pending
+exclusion from active-CV readers/matching/evaluation/observability/rebuild, and
+safe compatibility `GET /api/profile` output.
+
+- [ ] **Step 8: Run owned-turn/promotion tests to verify RED**
+
+~~~powershell
+& '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_chat_persistence.py tests/integration/test_profile_approval.py tests/unit/test_agent_context.py tests/integration/test_job_evaluations.py tests/integration/test_graph_rebuild_behavior.py -q
+~~~
+
+Expected: the profile tool does not target the injected profile owner,
+approval attempts singleton/new-row behavior, and approved-data readers do not
+consistently reject pending selection.
+
+- [ ] **Step 9: Implement explicit pending ownership and in-place promotion**
+
+In the profile tool, read the injected graph `profile_id`. Pass it as
+`target_profile_id` only when the row owns the effective attachment and is
+pending, or when the run is an explicit ready-profile re-extraction. In
+`propose_profile_from_cv`, repeat the state/attachment ownership check before
+provider work and again before publishing chunks/document/draft.
+
+In `create_user_turn`, allow a pending owner only when either:
+
+~~~python
+bootstrap = requested_attachment_ids == [owner.attachment_id] and draft is None
+correction = not requested_attachment_ids and draft is not None and (
+    draft.target_profile_id == owner.profile_id
+)
+~~~
+
+Stamp the bootstrap message/run with `source_attachment_id=owner.attachment_id`.
+Exclude source-owned synthetic turns when deriving the first ordinary
+conversation title. Candidate context for pending is empty; working-memory
+draft context is allowed only for the exact pending owner.
+
+Replace ambiguous compatibility reads with a repository boundary named
+`get_selected_ready_profile`. Use it in active-CV readers, matching, evaluation,
+Saved Job currentness, and graph/observability inputs. Pending returns
+`PROFILE_NOT_READY` before provider/scoring/graph work. Rebuild includes only
+ready rows.
+
+Refactor approval into explicit pending-promotion and ready-re-extraction
+branches. Pending promotion updates the existing row, creates its preferences,
+promotes the document/chunks, archives the independently loaded prior active
+attachment, activates the pending attachment, and keeps the existing bootstrap
+conversation. Request Changes preserves the targeted pending draft. Use the
+guarded persisted profile—not the unguarded provider draft—for graph sync.
+
+- [ ] **Step 10: Write failing frontend bootstrap-adoption tests**
+
+~~~tsx
+it('adopts server bootstrap IDs before starting one extraction turn', async () => {
+  const upload = vi.fn().mockResolvedValue(pendingUploadResponse);
+  const sendTurn = vi.fn().mockResolvedValue(undefined);
+  render(<App deps={{sidebar: {uploadCv: upload}, chat: {sendConversationTurn: sendTurn}}} />);
+  await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), pdfFile);
+  await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(1));
+  expect(sendTurn.mock.calls[0][0]).toBe(pendingUploadResponse.bootstrap.conversation.id);
+});
+
+
+it('does not restart an existing pending draft', async () => {
+  render(<App deps={depsFor(existingPendingResponse({start_extraction: false}))} />);
+  await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), pdfFile);
+  expect(sendConversationTurn).not.toHaveBeenCalled();
+});
+
+it('retries the failed exact hash through the shared picker with stable IDs', async () => {
+  const upload = vi.fn().mockResolvedValue(retryPendingResponse);
+  render(<App deps={depsFor({uploadCv: upload})} />);
+  await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), samePdfFile);
+  expect(upload).toHaveBeenCalledWith(samePdfFile, expect.anything());
+  expect(retryPendingResponse.outcome).toBe('retry_pending');
+  expect(retryPendingResponse.bootstrap.profile.id).toBe(pendingProfile.id);
+  expect(retryPendingResponse.bootstrap.conversation.id).toBe(bootstrapConversation.id);
+  expect(retryPendingResponse.bootstrap.start_extraction).toBe(true);
+  await waitFor(() => expect(sendConversationTurn).toHaveBeenCalledTimes(1));
+});
+~~~
+
+Add strict parser tests for the five outcomes, bootstrap coupling, nullable
+pending profile fields, fixed setup status values, and rejection of extra/raw
+fields. Assert `workspace/bootstrapAdopted` invokes neither activate nor create,
+and that Save Profile reloads workspace state so pending metadata is replaced.
+Cover reload persistence, request-change correction enablement,
+ordinary-chat lock for awaiting-extraction/extraction-failed, and no second
+reducer/store.
+
+- [ ] **Step 11: Run frontend tests to verify RED**
+
+~~~powershell
+Set-Location ..\frontend
+npm test -- --run src/test/profile-api.test.ts src/test/profile-workspace-state.test.tsx src/test/chat-page.test.tsx src/app/App.test.tsx src/test/cv-sidebar.test.tsx
+~~~
+
+Expected: upload responses have no bootstrap parser/action and App cannot select
+the server conversation before scheduling the turn.
+
+- [ ] **Step 12: Implement frontend bootstrap adoption and run all Task 5 gates**
+
+Add `workspace/bootstrapAdopted` to the existing reducer. It applies only the
+server profile/conversation IDs and projections, marks the returned conversation
+selected, and clears prior profile/conversation selection without inventing
+replacement IDs. `App.handleSidebarUploadSuccess` dispatches this action before
+setting `sidebarAttachmentTurn`, and sets a turn only when
+`bootstrap.start_extraction` is true.
+
+Pass the selected profile state/setup status to ChatPage. Ordinary composer use
+is allowed for ready profiles and pending `awaiting_approval` correction turns;
+it is disabled for pending `awaiting_extraction` and `extraction_failed`.
+The sidebar-owned automatic turn may still start for an adopted pending
+conversation because it uses the dedicated effect and the same ChatPage reducer.
+On Save Profile, reload workspace profiles/conversations so the promoted ready
+projection replaces pending metadata.
+
+Run:
+
+~~~powershell
+Set-Location ..\backend
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_attachment_profile_models.py tests/unit/test_agent_context.py tests/integration/test_migrations.py tests/integration/test_database_contract.py tests/integration/test_cv_api.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_conversations_api.py tests/integration/test_chat_persistence.py tests/integration/test_profile_approval.py tests/integration/test_job_evaluations.py tests/integration/test_graph_rebuild_behavior.py -q
+& '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache
+& '..\.venv\Scripts\python.exe' -m mypy app --no-incremental
+Set-Location ..\frontend
+npm test -- --run src/test/profile-api.test.ts src/test/profile-workspace-state.test.tsx src/test/chat-page.test.tsx src/app/App.test.tsx src/test/cv-sidebar.test.tsx
+npm run lint
+npm run typecheck
+Set-Location ..
+git add backend/app/db/models/profiles.py backend/migrations/versions/0005_cv_profiles_multi_conversation.py backend/app/schemas/profile.py backend/app/schemas/attachments.py backend/app/schemas/profile_setup.py backend/app/repositories/profiles.py backend/app/repositories/conversations.py backend/app/repositories/workspace_state.py backend/app/services/activity_gate.py backend/app/services/cv_upload.py backend/app/services/profile_projection.py backend/app/services/conversations.py backend/app/services/chat_turns.py backend/app/services/profile_drafts.py backend/app/services/profile_approval.py backend/app/services/profile_activation.py backend/app/tools/profile.py backend/app/agent/context.py backend/app/agent/active_cv_context.py backend/app/api/attachments.py backend/app/api/profile.py backend/app/api/profiles.py backend/app/api/conversations.py backend/app/services/job_evaluation.py backend/app/services/matching.py backend/app/services/saved_jobs.py backend/app/services/observability.py backend/app/graph/rebuild_snapshot.py backend/tests/unit/test_attachment_profile_models.py backend/tests/unit/test_agent_context.py backend/tests/integration/test_migrations.py backend/tests/integration/test_database_contract.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_profile_selection.py backend/tests/integration/test_conversations_api.py backend/tests/integration/test_chat_persistence.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_job_evaluations.py backend/tests/integration/test_graph_rebuild_behavior.py frontend/src/features/profile/types.ts frontend/src/features/profile/conversationTypes.ts frontend/src/features/profile/api.ts frontend/src/features/profile/workspaceState.ts frontend/src/features/profile/CvSidebar.tsx frontend/src/features/chat/ChatPage.tsx frontend/src/app/App.tsx frontend/src/test/profile-api.test.ts frontend/src/test/profile-workspace-state.test.tsx frontend/src/test/chat-page.test.tsx frontend/src/app/App.test.tsx frontend/src/test/cv-sidebar.test.tsx
+git commit -m "feat: bootstrap pending CV profiles"
+~~~
+
+Expected: all focused backend/frontend tests and static gates pass; upload and
+selection paths record zero provider calls; the worktree is clean after the
+single Task 5 commit.
+
+---
+
+### Task 6: Make approval, persisted extraction, rename, and explicit re-extraction profile-aware
 
 **Files:**
 - Modify: backend/app/services/profile_drafts.py, profile_approval.py, profile_activation.py, cv_upload.py
@@ -1147,12 +1627,16 @@ git commit -m "feat: isolate chat by conversation and profile"
 Use ScriptedStructuredInvoker, FakeEmbeddingClient, and the existing _seed_cv_document_draft fixture:
 
 ~~~python
-def test_first_approval_creates_profile_preferences_and_empty_chat(
+def test_first_approval_promotes_pending_profile_and_preserves_bootstrap_chat(
     approval_context,
 ):
+    pending_id = approval_context.profile_id
+    conversation_id = approval_context.conversation_id
     result = commit_approved_draft(**approval_context.arguments)
-    assert result.profile_id != "active"
-    assert result.conversation_id is not None
+    assert result.profile_id == pending_id
+    assert result.conversation_id == conversation_id
+    assert approval_context.profile_state() == "ready"
+    assert approval_context.conversation_ids() == [conversation_id]
     assert approval_context.provider.calls == 1
 
 def test_activate_existing_profile_reads_persisted_extraction_without_provider_calls(
@@ -1187,48 +1671,54 @@ Set-Location backend
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py tests/integration/test_profiles_api.py tests/integration/test_profile_reextraction.py -q
 ~~~
 
-Expected: approval still upserts the singleton row, draft rows have no target profile, and the profile re-extraction route is absent.
+Expected: extracted identity fields and the profile re-extraction route remain incomplete; stale singleton-oriented approval tests still fail until they are migrated to durable pending/ready IDs.
 
 - [ ] Step 3: Stamp draft ownership and guard extracted identity
 
-Add target_profile_id to every draft read/write path. A new upload sets it to None; a profile re-extraction sets it to the requested ready profile ID and verifies that the staged attachment matches that profile. Extend the structured profile-extraction schema/prompt and synthetic golden fixtures to emit nullable full_name/location, project only direct document evidence into those fields, then run guard_optional_identity_fields over the source fragments before persisting profile_json; persist location from the guarded profile, never from an unvalidated projection. A missing or unsupported value remains null.
+Add target_profile_id to every draft read/write path. Initial extraction uses the injected pending owner created in Task 5; profile re-extraction uses the requested ready profile ID. Both paths verify that the target owns the attachment before provider work and before publication. Extend the structured profile-extraction schema/prompt and synthetic golden fixtures to emit nullable full_name/location, project only direct document evidence into those fields, then run guard_optional_identity_fields over the source fragments before persisting draft/document-draft profile_json and again before approved profile persistence; persist location from the guarded profile, never from an unvalidated projection. A missing or unsupported value remains null.
 
-- [ ] Step 4: Split first approval from same-profile replacement
+- [ ] Step 4: Split pending promotion from ready-profile replacement
 
 Refactor _run_sqlite_approval into two explicit branches:
 
 ~~~python
-if draft.target_profile_id is None:
-    profile = await profiles_repo.create_profile(
-        session,
-        attachment_id=attachment.id,
-        display_name=project_display_name(guarded_profile, attachment.original_name),
-        profile_json=guarded_profile.model_dump(mode="json"),
-        location=guarded_profile.location,
-        extraction_version=document.extraction_version,
-        source_hash=document.source_hash,
+profile = await profiles_repo.get_profile(session, draft.target_profile_id)
+if profile is None:
+    raise ProfileApprovalError("PROFILE_NOT_FOUND", "profile not found")
+if profile.state == PROFILE_STATE_PENDING:
+    if profile.attachment_id != attachment.id:
+        raise ProfileApprovalError("PROFILE_INCONSISTENT", "profile ownership mismatch")
+    profile.display_name = project_display_name(
+        guarded_profile, attachment.original_name
     )
+    profile.profile_json = guarded_profile.model_dump(mode="json")
+    profile.location = guarded_profile.location
+    profile.extraction_version = document.extraction_version
+    profile.source_hash = document.source_hash
+    profile.state = PROFILE_STATE_READY
+    profile.updated_at = utc_now()
     await profiles_repo.upsert_profile_preferences(
         session,
         profile_id=profile.id,
         preferences_json=preferences.model_dump(mode="json"),
     )
-    conversation = await conversations_repo.create_for_profile(
-        session, profile_id=profile.id, title=NEW_CONVERSATION_TITLE
+    conversation = await conversations_repo.most_recent_for_profile(
+        session, profile_id=profile.id
     )
-else:
-    profile = await profiles_repo.get_profile(session, draft.target_profile_id)
-    if profile is None or profile.state != PROFILE_STATE_READY:
-        raise ProfileApprovalError("PROFILE_NOT_READY", "profile is not ready")
+    if conversation is None:
+        raise ProfileApprovalError("PROFILE_INCONSISTENT", "bootstrap conversation missing")
+elif profile.state == PROFILE_STATE_READY:
     profile.profile_json = guarded_profile.model_dump(mode="json")
     profile.location = guarded_profile.location
     profile.extraction_version = document.extraction_version
     profile.source_hash = document.source_hash
     profile.updated_at = utc_now()
     # Preserve preferences and every conversation ID.
+else:
+    raise ProfileApprovalError("PROFILE_NOT_READY", "profile is not ready")
 ~~~
 
-Only the first branch changes workspace selection and attachment active/archive states. Both branches atomically replace the persisted document/chunks after provider/embedding work completes outside SQLite. Preserve source_hash revision checks and let existing evaluation currentness mark old evidence stale.
+Only pending promotion archives the independently loaded prior active ready attachment and activates the pending attachment; workspace selection and the bootstrap conversation ID already belong to the pending profile. Both branches atomically replace the persisted document/chunks after provider/embedding work completes outside SQLite. Preserve source_hash revision checks and let existing evaluation currentness mark old evidence stale. Graph sync must receive the guarded profile reloaded from committed SQLite truth.
 
 - [ ] Step 5: Add profile-owned re-extraction SSE route
 
@@ -1236,7 +1726,7 @@ Implement POST /api/profiles/{profile_id}/reextract as a strict empty-body route
 
 - [ ] Step 6: Handle exact-hash upload reuse without duplicate profiles
 
-When cv_upload.py finds an exact-hash attachment already owned by a ready/archived profile, return a safe existing-profile reference and skip extraction; do not create a second profile for the same attachment. A staged/failed unowned attachment continues through the existing upload flow. Add tests proving no extractor/embedding calls on archived exact-hash reuse.
+When cv_upload.py finds an exact-hash attachment already owned by a ready/archived profile, return a safe existing-profile reference and skip extraction; do not create a pending duplicate for the same attachment. Pending exact-hash new/retry behavior belongs to Task 5. Add tests proving no extractor/embedding calls on archived ready-profile reuse.
 
 - [ ] Step 7: Run lifecycle gates and commit
 
@@ -1251,7 +1741,7 @@ git commit -m "feat: persist profile extraction revisions"
 
 ---
 
-### Task 6: Implement conversation and profile deletion coordinators with checkpoint safety
+### Task 7: Implement conversation and profile deletion coordinators with checkpoint safety
 
 **Files:**
 - Create: backend/app/services/conversation_deletion.py, backend/app/services/profile_deletion.py
@@ -1289,9 +1779,19 @@ def test_profile_delete_preserves_other_profile_and_global_job(
     assert deletion_context.job_exists(GLOBAL_JOB)
     assert deletion_context.evaluation_exists(GLOBAL_JOB, PROFILE_B)
     assert not deletion_context.evaluation_exists(GLOBAL_JOB, PROFILE_A)
+
+
+def test_pending_profile_discard_skips_graph_and_restores_ready_fallback(
+    pending_deletion_context,
+):
+    result = pending_deletion_context.delete_pending()
+    assert result.active_profile.id == pending_deletion_context.ready_profile_id
+    assert pending_deletion_context.pending_profile_exists() is False
+    assert pending_deletion_context.pending_file_exists() is False
+    assert pending_deletion_context.graph_delete_calls == []
 ~~~
 
-Add fault-injection tests proving retained-file or graph cleanup failure leaves profiles.state == deleting, returns a safe retryable error, and never reports success.
+Add fault-injection tests proving retained-file or graph cleanup failure leaves profiles.state == deleting, returns a safe retryable error, and never reports success. Cover a pending-shape deleting retry, which remains the unique incomplete profile and continues to block new upload until finalization.
 
 - [ ] Step 2: Run deletion tests to verify RED
 
@@ -1347,9 +1847,9 @@ Implement delete_and_select so the final transaction cascades messages/runs/tool
 
 - [ ] Step 4: Implement retryable profile deletion
 
-Create profile_deletion.py with these phases: owner/activity validation; mark a ready profile and attachment deleting (or resume idempotently when both are already deleting); enumerate all profile run IDs regardless of source_attachment_id; open the existing AsyncSqliteSaver through open_checkpointer(sqlite_path) and delete those threads; delete the retained file idempotently; call exact profile graph branch deletion idempotently; final transaction selects the most recently opened remaining ready profile or clears workspace state, archives every other attachment, activates the fallback attachment when one exists, then deletes conversations, preferences, evaluations, chunks/documents/drafts, profile, and attachment. If any external phase fails, leave deleting markers and return PROFILE_DELETE_RETRYABLE with no raw path/error.
+Create profile_deletion.py with these phases: owner/activity validation; classify the profile as approved-shape or incomplete-shape; mark a ready or pending profile and its attachment deleting (or resume idempotently when both are already deleting); enumerate all profile run IDs regardless of source_attachment_id; open the existing AsyncSqliteSaver through open_checkpointer(sqlite_path) and delete those threads; delete the retained file idempotently; call exact profile graph branch deletion idempotently only for an approved-shape profile; final transaction selects the most recently opened remaining ready profile or clears workspace state, archives every other ready attachment, activates the fallback attachment when one exists, then deletes conversations, preferences, evaluations, chunks/documents/drafts, profile, and attachment. If any external phase fails, leave the original approved/incomplete field shape with deleting markers and return PROFILE_DELETE_RETRYABLE with no raw path/error.
 
-Add delete_profile_branch(driver, profile_id) in graph/delete_profile.py. Its Cypher must match only Candidate with profile_id parameter and its owned CV/section/entry nodes, preserve Job/Skill nodes, and pass the existing allowlist assertion. Do not reuse delete_cv_branch, which intentionally preserves Candidate nodes.
+Add delete_profile_branch(driver, profile_id) in graph/delete_profile.py. Its Cypher must match only Candidate with profile_id parameter and its owned CV/section/entry nodes, preserve Job/Skill nodes, and pass the existing allowlist assertion. Do not reuse delete_cv_branch, which intentionally preserves Candidate nodes, and never call this graph boundary for an incomplete pending/deleting profile.
 
 - [ ] Step 5: Replace old attachment-delete API semantics
 
@@ -1392,7 +1892,7 @@ git commit -m "feat: add retryable profile and conversation deletion"
 
 ---
 
-### Task 7: Make Saved Jobs and evaluations profile-specific while keeping Jobs global
+### Task 8: Make Saved Jobs and evaluations profile-specific while keeping Jobs global
 
 **Files:**
 - Modify: backend/app/db/models/job_evaluations.py, backend/app/schemas/job_evaluations.py
@@ -1453,7 +1953,7 @@ git commit -m "feat: scope evaluations to profiles"
 
 ---
 
-### Task 8: Key Neo4j Candidate/CV projections, reads, rebuilds, and profile deletion by profile ID
+### Task 9: Key Neo4j Candidate/CV projections, reads, rebuilds, and profile deletion by profile ID
 
 **Files:**
 - Modify: backend/app/graph/constraints.py, sync_candidate.py, sync_cv.py, consistency.py, selected_skill_projection.py
@@ -1509,7 +2009,7 @@ git commit -m "feat: key graph projections by profile"
 
 ---
 
-### Task 9: Add strict frontend profile/conversation DTOs and typed transports
+### Task 10: Add strict frontend profile/conversation DTOs and typed transports
 
 **Files:**
 - Modify: frontend/src/features/profile/types.ts, api.ts
@@ -1532,10 +2032,11 @@ it('parses bounded profile metadata and rejects raw CV fields', () => {
       location: 'London',
       skill_tags: [{key: 'python', label: 'Python'}],
       skill_count: 1,
-      extraction_version: 'cv-v2',
-      source_hash: 'hash-a',
-      state: 'ready',
-      is_active: true,
+       extraction_version: 'cv-v2',
+       source_hash: 'hash-a',
+       state: 'ready',
+       setup_status: null,
+       is_active: true,
       created_at: NOW,
       updated_at: NOW,
       last_opened_at: NOW,
@@ -1559,7 +2060,7 @@ it('sends profile and conversation IDs in paths', async () => {
 });
 ~~~
 
-Cover every endpoint method, stable error parsing, cursor query, empty replacement selection, and rejection of unknown/raw fields.
+Cover every endpoint method, stable error parsing, cursor query, empty replacement selection, and rejection of unknown/raw fields. Add ready/pending/deleting shape fixtures: ready requires `setup_status=null` and non-null approved fields, pending requires a fixed non-null setup status plus null location/extraction/source fields and empty skill metadata, and deleting preserves either coherent shape.
 
 - [x] Step 2: Run frontend transport tests to verify RED
 
@@ -1609,13 +2110,14 @@ export type ProfileListItem = {
   id: string;
   display_name: string;
   cv_filename: string;
-  attachment_state: 'active' | 'archived' | 'deleting';
+  attachment_state: 'staged' | 'active' | 'archived' | 'failed' | 'deleting';
   location: string | null;
   skill_tags: ProfileSkillTag[];
   skill_count: number;
-  extraction_version: string;
-  source_hash: string;
-  state: 'ready' | 'deleting';
+  extraction_version: string | null;
+  source_hash: string | null;
+  state: 'pending' | 'ready' | 'deleting';
+  setup_status: 'awaiting_extraction' | 'awaiting_approval' | 'extraction_failed' | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -1663,9 +2165,33 @@ export type SelectionResponse = {
   conversation: ConversationSummary | null;
   warning: SafeWarning | null;
 };
+
+export type PendingProfileBootstrap = {
+  profile: ProfileListItem;
+  conversation: ConversationSummary;
+  start_extraction: boolean;
+};
+
+export type CvUploadResponse = {
+  attachment: AttachmentPublic;
+  outcome: 'new_pending' | 'retry_pending' | 'existing_pending' | 'existing_active' | 'existing_profile';
+  profile: ProfileUploadSummary | null;
+  draft: DraftUploadSummary | null;
+  bootstrap: PendingProfileBootstrap | null;
+};
 ~~~
 
-Parsers must enforce UUID v4, exact keys, bounded strings, safe attachment metadata, and no storage path, contact details, raw CV text, or provider payloads. Keep the existing ChatApiError safe status/code/summary mapping.
+The backend model and frontend parser enforce this outcome/field coupling matrix:
+
+| outcome | bootstrap | start_extraction | identity rule |
+| --- | --- | --- | --- |
+| `new_pending` | required | true | new server profile/conversation IDs |
+| `retry_pending` | required | true | same pending profile/conversation IDs |
+| `existing_pending` | required | false when a draft or active/interrupted run exists; otherwise server-derived | same pending profile/conversation IDs |
+| `existing_active` | null | n/a | safe active ready-profile reference only |
+| `existing_profile` | null | n/a | safe archived ready-profile reference only |
+
+Pending outcomes reject a missing bootstrap, non-pending profile, mismatched profile/conversation ownership, or mismatched top-level attachment. Ready reuse outcomes reject a non-null bootstrap. Parsers must enforce UUID v4, exact keys, bounded strings, safe attachment metadata, this lifecycle/outcome matrix, and no storage path, contact details, raw CV text, or provider payloads. Keep the existing ChatApiError safe status/code/summary mapping.
 
 - [x] Step 4: Implement typed profile and conversation clients
 
@@ -1684,7 +2210,7 @@ git commit -m "feat(frontend): add profile conversation transports"
 
 ---
 
-### Task 10: Lift workspace selection and key the single ChatPage reducer by conversation
+### Task 11: Lift workspace selection and key the single ChatPage reducer by conversation
 
 **Files:**
 - Create: frontend/src/features/profile/workspaceState.ts
@@ -1756,6 +2282,7 @@ export type ProfileWorkspaceState = {
 
 export type ProfileWorkspaceController = {
   state: ProfileWorkspaceState;
+  adoptBootstrap: (bootstrap: PendingProfileBootstrap) => void;
   activate: (profileId: string) => Promise<void>;
   createConversation: (profileId: string) => Promise<void>;
   selectConversation: (conversationId: string) => Promise<void>;
@@ -1776,6 +2303,7 @@ export type ProfileWorkspaceApi = Pick<
 export type ProfileWorkspaceAction =
   | {type: 'profiles/loaded'; response: ProfileListResponse}
   | {type: 'conversations/loaded'; response: ConversationListResponse}
+  | {type: 'workspace/bootstrapAdopted'; bootstrap: PendingProfileBootstrap}
   | {type: 'profile/activated'; response: SelectionResponse}
   | {type: 'conversation/created'; response: ConversationMutationResponse}
   | {type: 'conversation/selected'; response: ConversationMutationResponse}
@@ -1801,6 +2329,13 @@ export function profileWorkspaceReducer(
     const selected = action.response.items.find((item) => item.is_selected) ?? null;
     return {...state, conversations: action.response.items,
       selectedConversationId: selected?.id ?? null, error: null};
+  }
+  if (action.type === 'workspace/bootstrapAdopted') {
+    const {profile, conversation} = action.bootstrap;
+    const profiles = [profile, ...state.profiles.filter((item) => item.id !== profile.id)];
+    return {...state, profiles, activeProfileId: profile.id,
+      selectedConversationId: conversation.id, conversations: [conversation],
+      error: null};
   }
   if (action.type === 'profile/activated') {
     return {...state, activeProfileId: action.response.profile.id,
@@ -1925,6 +2460,9 @@ export function useProfileWorkspaceState(
 
   return {
     state,
+    adoptBootstrap: (bootstrap) => dispatch({
+      type: 'workspace/bootstrapAdopted', bootstrap,
+    }),
     activate,
     createConversation,
     selectConversation,
@@ -1934,15 +2472,15 @@ export function useProfileWorkspaceState(
 }
 ~~~
 
-The implementation must include concrete actions for profiles loaded, conversations loaded, activation started/succeeded/failed, conversation created/selected/deleted, and reset error. Apply only server response IDs; never optimistically invent a replacement conversation or active profile.
+The implementation must include concrete actions for profiles loaded, conversations loaded, activation started/succeeded/failed, conversation created/selected/deleted, and reset error. Task 5 extends this completed ready-profile baseline with `workspace/bootstrapAdopted`; that action must apply only the server-returned pending profile and conversation IDs, and it must not issue an activation or conversation-create request. Apply only server response IDs; never optimistically invent a replacement conversation or active profile.
 
 - [x] Step 4: Key ChatPage without creating a second chat store
 
-Move client DTO interfaces used by history.ts/reducer.ts into features/chat/model.ts and keep type-only compatibility re-exports. Add conversationId: string | null to ChatPageProps. On ID change, abort the previous controller, dispatch history/reset with an empty page, and hydrate through fetchConversationHistory(conversationId, query, signal). Disable composer when ID is null or the profile is not ready. Pass the same ID to turn/reprocess transports; keep all SSE events in chatReducer.
+Move client DTO interfaces used by history.ts/reducer.ts into features/chat/model.ts and keep type-only compatibility re-exports. Add conversationId: string | null to ChatPageProps. On ID change, abort the previous controller, dispatch history/reset with an empty page, and hydrate through fetchConversationHistory(conversationId, query, signal). The completed baseline disables the composer when ID is null. Task 5 replaces the ready-only profile gate with the frozen setup-state matrix: enable ordinary messages for ready profiles and pending `awaiting_approval` correction turns; disable them for pending `awaiting_extraction` and `extraction_failed`; still allow the sidebar-owned automatic extraction turn for an adopted bootstrap with `start_extraction=true`. Pass the same ID to turn/reprocess transports; keep automatic extraction, correction, approval resume, and all SSE events in `chatReducer`.
 
 - [x] Step 5: Wire App and workspace-wide interaction lock
 
-In App.tsx, render workspace state above ChatPage, pass selectedConversationId into ChatPage, and combine onInteractionLockChange with workspace pending state. Pass the resulting lock to every profile/conversation selector, menu, dialog, upload, re-extract, and observability mutation. A profile switch first calls POST /api/profiles/{id}/activate, then replaces profile/conversation state from the response and bumps saved-job/observability invalidation keys.
+In App.tsx, render workspace state above ChatPage, pass selectedConversationId into ChatPage, and combine onInteractionLockChange with workspace pending state. Pass the resulting lock to every profile/conversation selector, menu, dialog, upload, re-extract, and observability mutation. A ready-profile switch first calls POST /api/profiles/{id}/activate, then replaces profile/conversation state from the response and bumps saved-job/observability invalidation keys. A Task 5 upload bootstrap instead dispatches `workspace/bootstrapAdopted` before setting the sidebar turn, uses the returned `start_extraction` flag, and never activates or creates an owner client-side.
 
 - [x] Step 6: Run frontend state gates and commit
 
@@ -1957,7 +2495,7 @@ git commit -m "feat(frontend): key chat state by conversation"
 
 ---
 
-### Task 11: Build Astryx profile/conversation navigation and confirmation dialogs
+### Task 12: Build Astryx profile/conversation navigation and confirmation dialogs
 
 **Files:**
 - Create: frontend/src/features/profile/ProfileConversationSidebar.tsx
@@ -1996,6 +2534,7 @@ it('renders location, bounded skill tokens, and overflow without inference', () 
       onActivate={vi.fn()}
       onRename={vi.fn()}
       onReextract={vi.fn()}
+      onRetrySetup={vi.fn()}
       onDelete={vi.fn()}
     />,
   );
@@ -2004,6 +2543,27 @@ it('renders location, bounded skill tokens, and overflow without inference', () 
   expect(screen.getByText('+3')).toBeInTheDocument();
   expect(screen.getByText('Location unavailable')).toBeInTheDocument();
   expect(screen.getByText('No extracted skills')).toBeInTheDocument();
+});
+
+it('renders pending setup status and exposes retry/discard only', async () => {
+  const retry = vi.fn();
+  render(<ProfileListPanel
+    profiles={[pendingProfile]}
+    activeProfileId={pendingProfile.id}
+    isInteractionLocked={false}
+    onActivate={vi.fn()}
+    onRename={vi.fn()}
+    onReextract={vi.fn()}
+    onRetrySetup={retry}
+    onDelete={vi.fn()}
+  />);
+  expect(screen.getByText('Awaiting extraction')).toBeInTheDocument();
+  expect(screen.queryByText('Location unavailable')).toBeInTheDocument();
+  expect(screen.queryByRole('button', {name: /Rename/})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', {name: /Re-extract/})).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name: /Retry/})).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', {name: /Retry/}));
+  expect(retry).toHaveBeenCalledWith(pendingProfile);
 });
 
 it('requires confirmation and performs one conversation delete request', async () => {
@@ -2023,7 +2583,7 @@ it('requires confirmation and performs one conversation delete request', async (
 });
 ~~~
 
-Cover profile rename (only display_name changes), profile delete warning naming CV/profile, conversation delete warning, cancel/no-request, loading/focus return, Escape, keyboard visibility, and mobile drawer rendering.
+Cover profile rename (only display_name changes), profile delete warning naming CV/profile, pending retry/discard actions, conversation delete warning, cancel/no-request, loading/focus return, Escape, keyboard visibility, and mobile drawer rendering. A pending row must never offer rename or re-extract, and its setup status must be rendered from the server value without inferring approved metadata.
 
 - [ ] Step 3: Run UI tests to verify RED
 
@@ -2046,11 +2606,12 @@ type ProfileListPanelProps = {
   onActivate: (profileId: string) => void;
   onRename: (profile: ProfileListItem) => void;
   onReextract: (profile: ProfileListItem) => void;
+  onRetrySetup: (profile: ProfileListItem) => void;
   onDelete: (profile: ProfileListItem) => void;
 };
 ~~~
 
-Use SideNavSection/SideNavItem for profile groups and List/ListItem for dense rows. A profile row displays display_name, sanitized cv_filename, persisted location or the neutral text Location unavailable, and at most four Token components followed by +N when skill_count exceeds the rendered tags. Show No extracted skills when skill_count is zero. Use the server skill_tags order; do not lowercase, deduplicate, or invent tags in React. Put row actions in an adjacent Astryx DropdownMenu rather than nesting interactive controls inside ListItem.
+Use SideNavSection/SideNavItem for profile groups and List/ListItem for dense rows. A profile row displays display_name, sanitized cv_filename, persisted location or the neutral text Location unavailable, and at most four Token components followed by +N when skill_count exceeds the rendered tags. Show No extracted skills when skill_count is zero. Use the server skill_tags order; do not lowercase, deduplicate, or invent tags in React. Render the server setup_status for pending rows (`Awaiting extraction`, `Awaiting approval`, or `Extraction failed`) and keep their location/tags empty. Put row actions in an adjacent Astryx DropdownMenu rather than nesting interactive controls inside ListItem. Ready rows may rename, re-extract, or delete; pending rows may retry or discard only, and deleting a pending row is labeled as discarding setup. Retry opens the existing shared PDF picker and sends the selected `File` through `POST /api/attachments/cv`; it does not invent a retry endpoint. The response must be `retry_pending`, preserve the same bootstrap profile/conversation IDs, and set `start_extraction=true` before App schedules one extraction turn. Discard uses the normal profile-delete coordinator.
 
 - [ ] Step 5: Implement conversation rows and dialogs
 
@@ -2076,7 +2637,7 @@ type ConversationDeleteDialogProps = {
 };
 ~~~
 
-Render a Chat mới action above the selected profile’s conversation list. Conversation rows show server title, localized last activity, selected state, and a delete menu. ProfileRenameDialog uses Astryx Dialog/TextInput and sends exactly one PATCH; ProfileDeleteDialog and ConversationDeleteDialog use AlertDialog with the target name, irreversible warning, loading lock, cancel/no-op, and focus restoration. Disable all selection/create/delete/re-extract controls when isInteractionLocked is true.
+Render a Chat mới action above the selected ready profile’s conversation list. Conversation rows show server title, localized last activity, selected state, and a delete menu. A pending profile exposes only its bootstrap conversation; it cannot create/select/delete conversations, while the correction composer is governed by Task 5’s setup-state matrix. ProfileRenameDialog uses Astryx Dialog/TextInput and sends exactly one PATCH; ProfileDeleteDialog and ConversationDeleteDialog use AlertDialog with the target name, irreversible warning, loading lock, cancel/no-op, and focus restoration. Disable all selection/create/delete/re-extract controls when isInteractionLocked is true, and disable rename/re-extract for pending rows regardless of lock state.
 
 - [ ] Step 6: Preserve responsive shell and upload/observability seams
 
@@ -2096,7 +2657,7 @@ git commit -m "feat(frontend): add Astryx profile chat navigation"
 
 ---
 
-### Task 12: Re-scope observability, CV actions, and Saved Job invalidation to the selected profile
+### Task 13: Re-scope observability, CV actions, and Saved Job invalidation to the selected profile
 
 **Files:**
 - Modify: frontend/src/features/observability/api.ts, state.ts, types.ts, ObservabilitySidebar.tsx, CvManagerPanel.tsx, CvDeleteDialog.tsx
@@ -2119,6 +2680,17 @@ it('marks evaluations stale on profile switch without evaluating', async () => {
   expect(evaluateJob).not.toHaveBeenCalled();
   expect(screen.getByText('Evaluation stale')).toBeInTheDocument();
 });
+
+it('renders a pending profile safe state without observability or evaluation calls', async () => {
+  const state = renderWithProfileSwitch(PENDING_PROFILE, PROFILE_A);
+  await state.selectProfile(PENDING_PROFILE.id);
+  expect(state.fetchChunks).not.toHaveBeenCalled();
+  expect(state.fetchRuns).not.toHaveBeenCalled();
+  expect(state.fetchGraph).not.toHaveBeenCalled();
+  expect(state.fetchCurrentness).not.toHaveBeenCalled();
+  expect(state.evaluateJob).not.toHaveBeenCalled();
+  expect(screen.getByText('Profile setup in progress')).toBeInTheDocument();
+});
 ~~~
 
 - [ ] Step 2: Run focused tests to verify RED
@@ -2132,7 +2704,7 @@ Expected: observability calls still use global/active attachment state and saved
 
 - [ ] Step 3: Parameterize observability and CV manager clients
 
-Add profileId to profile-owned observability requests and cache keys. On profile activation, abort/invalidate CV/chunk/run/graph requests before applying the new server response. Re-extract/delete actions use profile IDs and the selected profile attachment only after the backend ownership check. Keep global Saved Job list/detail data in one useSavedJobsState owner, but include active profile ID in currentness lookup and call invalidateCurrentness after profile/revision changes.
+Add profileId to profile-owned observability requests and cache keys. On profile activation, abort/invalidate CV/chunk/run/graph requests before applying the new server response. If the selected profile is pending, abort in-flight ready-profile requests, clear all cached CV/chunk/run/graph detail before render, show the safe setup state, and make zero profile-owned observability, graph, currentness, or evaluation requests; global Saved Job rows may remain visible, but no scorer runs. Re-extract/delete actions use profile IDs and the selected profile attachment only after the backend ownership check. Keep global Saved Job list/detail data in one useSavedJobsState owner, but include active ready profile ID in currentness lookup and call invalidateCurrentness after profile/revision changes.
 
 - [ ] Step 4: Run profile-switch regressions and commit
 
@@ -2147,7 +2719,7 @@ git commit -m "fix(frontend): invalidate profile-scoped caches"
 
 ---
 
-### Task 13: Document destructive rollout, run integrated gates, and perform browser acceptance
+### Task 14: Document destructive rollout, run integrated gates, and perform browser acceptance
 
 **Files:**
 - Create: docs/operations/cv-profile-multi-conversation-rollout.md
@@ -2168,7 +2740,7 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project 
 docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project down -v --remove-orphans
 ~~~
 
-The checklist must record migration head 0005_cv_profiles_multi_conversation, zero profile/conversation/job rows before smoke data, no retained files from the prior volume, only static graph seed data, and a safe warning before every destructive command. Add a browser matrix for upload/approval of two CVs, profile switch with zero provider calls, location/skill tags, new chat/select/reload, cancel/confirm conversation deletion, profile deletion fallback, and no cross-profile history/evaluation.
+The checklist must record migration head 0005_cv_profiles_multi_conversation, zero profile/conversation/job rows before smoke data, no retained files from the prior volume, only static graph seed data, and a safe warning before every destructive command. Add a browser matrix for a new upload creating one pending profile and one bootstrap conversation before exactly one extraction turn, approval promoting the same profile/conversation IDs, failed exact-hash retry preserving those IDs without duplicate rows, Request Changes correction in the same conversation, pending discard restoring the ready fallback, upload blocking for a different file while setup is pending, upload/approval of two CVs, profile switch with zero provider calls, location/skill tags, new chat/select/reload, cancel/confirm conversation deletion, profile deletion fallback, and no pending candidate/evaluation/graph leakage.
 
 - [ ] Step 2: Update e2e fixtures and controllable browser-test shims
 
@@ -2209,7 +2781,7 @@ Expected services are exactly neo4j, backend, and frontend; backend startup runs
 
 - [ ] Step 6: Execute the in-app browser smoke test and record evidence
 
-Use the browser skill against the running Compose project. Create CV profile A, approve it, confirm its persisted name/location/skill tags and first conversation; create profile B and approve it; switch A -> B -> A while observing network/provider diagnostics remain idle; create two chats, send distinct messages, switch/reload, delete one with cancel then confirm, delete the last and verify replacement; delete profile B and verify profile A/global Saved Jobs remain. Check keyboard focus, Escape, focus restoration, mobile drawer, disabled controls during a streaming/approval state, and absence of cross-profile history/evaluation. Record routes/statuses and screenshots in docs/acceptance/cv-profile-multi-conversation-checklist.md without storing CV text, secrets, or provider payloads.
+Use the browser skill against the running Compose project. Upload CV A and record the returned pending profile and bootstrap conversation IDs; verify the automatic extraction turn uses those IDs, approve it, and confirm the same IDs are now ready/approved. Exercise Request Changes and correction on that bootstrap conversation, retry the same failed hash without duplicates, and verify a different-file upload is blocked while setup is pending. Upload CV B, approve it, discard a pending setup once, and verify the ready fallback is restored. Switch A -> B -> A while observing network/provider diagnostics remain idle; create two chats for a ready profile, send distinct messages, switch/reload, delete one with cancel then confirm, delete the last and verify replacement; delete profile B and verify profile A/global Saved Jobs remain. Check keyboard focus, Escape, focus restoration, mobile drawer, disabled controls during a streaming/approval state, and absence of pending candidate/evaluation/graph leakage or cross-profile history/evaluation. Record routes/statuses and screenshots in docs/acceptance/cv-profile-multi-conversation-checklist.md without storing CV text, secrets, or provider payloads.
 
 - [ ] Step 7: Review scope and commit release documentation
 
@@ -2228,8 +2800,10 @@ Expected: the search returns only intentional workspace seed/compatibility comme
 
 ## Final self-review checklist
 
-- [ ] Every approved spec section maps to a task: data model (1–2), persisted extraction/approval (5), APIs/activity gate (3–4), deletion (6), evaluations (7), graph (8), Astryx UI (9–12), rollout/tests (13).
+- [ ] Every approved spec section maps to a task: data model (1–2), pending bootstrap (5), persisted extraction/approval (6), APIs/activity gate (3–5), deletion (7), evaluations (8), graph (9), Astryx UI (10–13), rollout/tests (14).
 - [ ] No task introduces a second chat reducer/SSE store, a client-owned profile extraction, automatic evaluation, LLM conversation titles, soft delete, or legacy-data backfill.
+- [ ] A new upload has one durable pending profile/bootstrap conversation, and approval promotes that same profile and conversation identity; no nullable onboarding owner, parallel onboarding store, fake ready profile, or default profile JSON exists.
+- [ ] Pending rows expose only server-derived setup status and safe empty metadata; pending data never enters candidate context, matching/evaluation, observability, or graph projection.
 - [ ] profile_id, conversation_id, attachment_id, source_hash, and extraction_version names remain identical across ORM, repository, service, API, and TypeScript contracts.
 - [ ] Every destructive action has both a backend activity/ownership check and a named Astryx confirmation dialog; cancellation has zero network mutation.
 - [ ] Selection paths are proven with fake extractor/LLM/embedder/scorer call counters at backend and browser smoke levels.
