@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from app.db.models.profiles import CANDIDATE_PROFILE_ID
 from app.graph import constraints as constraints_mod
 from app.graph import delete_cv as delete_mod
 from app.graph import sync_cv as sync_mod
@@ -45,6 +44,7 @@ from app.schemas.cv_document import parse_cv_document
 from tests.support.db_migration import run_async
 
 _ATTACHMENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+_PROFILE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 _SECTION_ID = "cv-document-v1:s0:experience"
 _ENTRY_ID = "cv-document-v1:s0:e0:role"
 _LONG_BODY = "X" * (CV_ENTRY_PREVIEW_MAX_CHARS + 80)
@@ -213,16 +213,17 @@ def test_payload_allowlist_order_and_no_raw_content() -> None:
     doc = _document(sections=[sec_a, sec_b])
     payload = build_cv_graph_payload(
         doc,
+        profile_id=_PROFILE_ID,
         original_name="cv.pdf",
         extraction_version="cv-document-v1",
         source_updated_at=_updated(),
     )
     assert_payload_safe(payload)
 
-    assert payload["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
+    assert payload["cv_id"] == f"{_PROFILE_ID}:{_ATTACHMENT}"
     assert payload["original_name"] == "cv.pdf"
     assert payload["extraction_version"] == "cv-document-v1"
-    assert payload["profile_id"] == CANDIDATE_PROFILE_ID
+    assert payload["profile_id"] == _PROFILE_ID
     assert payload["source_attachment_id"] == _ATTACHMENT
     assert "2024-07-01" in payload["source_updated_at"]
 
@@ -231,7 +232,7 @@ def test_payload_allowlist_order_and_no_raw_content() -> None:
     assert sections[0]["heading"] == "Experience"
     assert sections[0]["kind"] == "experience"
     assert sections[0]["entry_count"] == 2
-    profile_scope = f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
+    profile_scope = f"{_PROFILE_ID}:{_ATTACHMENT}"
     assert sections[0]["id"] == scoped_section_id(profile_scope, _SECTION_ID)
     assert "source_chunk_ordinals" not in sections[0]
 
@@ -255,6 +256,7 @@ def test_payload_rejects_non_document() -> None:
     with pytest.raises(CvSyncError):
         build_cv_graph_payload(
             object(),  # type: ignore[arg-type]
+            profile_id=_PROFILE_ID,
             original_name="cv.pdf",
             extraction_version="v1",
             source_updated_at=_updated(),
@@ -292,6 +294,7 @@ def test_sync_active_creates_branch_and_single_projects_to() -> None:
     async def _body() -> None:
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=doc,
             original_name="resume.pdf",
             extraction_version="cv-document-v1",
@@ -314,7 +317,7 @@ def test_sync_active_creates_branch_and_single_projects_to() -> None:
     assert any("MERGE (cv)-[:PROJECTS_TO]->(c)" in q for q in driver.queries)
 
     first = driver.parameters[0]
-    assert first["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{_ATTACHMENT}"
+    assert first["cv_id"] == f"{_PROFILE_ID}:{_ATTACHMENT}"
     assert first["original_name"] == "resume.pdf"
     assert first["sections"][0]["heading"] == "Experience"
     assert "body" not in str(first["entries"])
@@ -329,6 +332,7 @@ def test_sync_archived_clears_own_projects_to_only() -> None:
     async def _body() -> None:
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=doc,
             original_name="old.pdf",
             extraction_version="cv-document-v1",
@@ -369,6 +373,7 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
     async def _body() -> None:
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=archived,
             original_name="old.pdf",
             extraction_version="v1",
@@ -377,6 +382,7 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
         )
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=archived,
             original_name="old.pdf",
             extraction_version="v1",
@@ -385,6 +391,7 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
         )
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=active,
             original_name="new.pdf",
             extraction_version="v1",
@@ -394,6 +401,7 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
         # Repeat active sync converges.
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=active,
             original_name="new.pdf",
             extraction_version="v1",
@@ -413,8 +421,8 @@ def test_active_switch_is_idempotent_single_projects_to() -> None:
         for p, q in zip(driver.parameters, driver.queries, strict=True)
         if "MERGE (cv)-[:PROJECTS_TO]->(c)" in q
     ]
-    assert last_params[-1]["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{active_id}"
-    assert last_params[-2]["cv_id"] == f"{CANDIDATE_PROFILE_ID}:{active_id}"
+    assert last_params[-1]["cv_id"] == f"{_PROFILE_ID}:{active_id}"
+    assert last_params[-2]["cv_id"] == f"{_PROFILE_ID}:{active_id}"
 
 
 def test_sync_failure_maps_to_neo4j_sync_failed() -> None:
@@ -425,6 +433,7 @@ def test_sync_failure_maps_to_neo4j_sync_failed() -> None:
         with pytest.raises(CvSyncError) as ei:
             await sync_cv(
                 driver,
+            profile_id=_PROFILE_ID,
                 document=doc,
                 original_name="cv.pdf",
                 extraction_version="v1",
@@ -444,6 +453,7 @@ def test_sync_empty_sections_still_merges_cv_and_projects_to() -> None:
     async def _body() -> None:
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=doc,
             original_name="empty.pdf",
             extraction_version="v1",
@@ -471,6 +481,7 @@ def test_exact_delete_compatible_with_synced_branch() -> None:
     async def _body() -> None:
         await sync_cv(
             driver,
+            profile_id=_PROFILE_ID,
             document=doc,
             original_name="cv.pdf",
             extraction_version="v1",

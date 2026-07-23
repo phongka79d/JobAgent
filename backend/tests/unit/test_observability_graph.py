@@ -329,7 +329,7 @@ async def test_projection_orders_and_caps_nodes_and_edges() -> None:
         skills=skills,
         edges=edges,
     )
-    projection = await load_bounded_graph_projection(fake)
+    projection = await load_bounded_graph_projection(fake, profile_id="active")
 
     assert projection.candidate is not None
     assert projection.candidate.id == "active"
@@ -356,7 +356,7 @@ async def test_projection_orders_and_caps_nodes_and_edges() -> None:
 @pytest.mark.asyncio
 async def test_projection_empty_graph() -> None:
     fake = GraphObservabilityFake()
-    projection = await load_bounded_graph_projection(fake)
+    projection = await load_bounded_graph_projection(fake, profile_id="active")
     assert projection.candidate is None
     assert projection.jobs == ()
     assert projection.skills == ()
@@ -391,7 +391,7 @@ async def test_projection_binds_requested_profile_to_all_candidate_reads() -> No
 async def test_projection_driver_failure_raises() -> None:
     fake = GraphObservabilityFake(fail_on_run=True)
     with pytest.raises(Exception):
-        await load_bounded_graph_projection(fake)
+        await load_bounded_graph_projection(fake, profile_id="active")
 
 
 @pytest.mark.asyncio
@@ -409,7 +409,7 @@ async def test_projection_ignores_edges_outside_selected_nodes() -> None:
             _edge("active", "golang", "HAS_SKILL"),
         ],
     )
-    projection = await load_bounded_graph_projection(fake)
+    projection = await load_bounded_graph_projection(fake, profile_id="active")
     pairs = {(e.source_id, e.target_id, e.type) for e in projection.edges}
     assert pairs == {
         ("active", "python", "HAS_SKILL"),
@@ -553,7 +553,7 @@ async def test_revision_datetime_normalized_in_projection() -> None:
             }
         ],
     )
-    projection = await load_bounded_graph_projection(fake)
+    projection = await load_bounded_graph_projection(fake, profile_id="active")
     assert projection.candidate is not None
     assert "2024-07-01" in projection.candidate.revision
     assert projection.jobs[0].revision.endswith("Z") or "+" in projection.jobs[
@@ -623,7 +623,7 @@ async def test_active_cv_branch_caps_order_and_allowlist() -> None:
         entries=entries,
         edges=edges,
     )
-    projection = await load_bounded_graph_projection(fake)
+    projection = await load_bounded_graph_projection(fake, profile_id="active")
     assert projection.cv is not None
     assert projection.cv.id == att
     assert len(projection.sections) == CAP_CV_SECTIONS
