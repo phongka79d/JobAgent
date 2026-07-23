@@ -8,7 +8,7 @@ from app.schemas.profile import CandidateProfile
 from app.services.skill_assertion_guard import normalize_assertion_text
 
 
-def guard_profile_identity(
+def guard_optional_identity_fields(
     profile: CandidateProfile,
     *,
     source_fragments: Sequence[str],
@@ -30,3 +30,8 @@ def guard_profile_identity(
             "location": grounded(profile.location),
         }
     )
+
+
+# Transitional spelling retained for focused Task 1 callers; new code uses the
+# frozen contract name above.
+guard_profile_identity = guard_optional_identity_fields
