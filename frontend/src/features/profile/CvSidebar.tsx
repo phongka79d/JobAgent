@@ -325,6 +325,7 @@ function CvSidebarController({
           cvName: displayCvName,
         }}
         observability={observability}
+        isInteractionLocked={isUploadDisabled}
         savedJobsInvalidateKey={savedJobsInvalidateKey}
         onCvReprocess={onCvReprocess}
         onCvDeleted={onCvDeleted}

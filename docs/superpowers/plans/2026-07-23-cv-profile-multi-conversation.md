@@ -1693,7 +1693,7 @@ git commit -m "feat(frontend): add profile conversation transports"
 - Modify: frontend/src/features/observability/ObservabilitySidebar.tsx
 - Test: frontend/src/test/profile-workspace-state.test.tsx, frontend/src/test/chat-page.test.tsx, frontend/src/app/App.test.tsx
 
-- [ ] Step 1: Add failing workspace and keyed-hydration tests
+- [x] Step 1: Add failing workspace and keyed-hydration tests
 
 Use injected transports and deferred promises:
 
@@ -1731,7 +1731,7 @@ it('applies the server-selected conversation after create', async () => {
 
 Test that the workspace reducer applies server IDs after activation/create/delete, keeps stale data on failed reads, and disables mutations when interactionLocked is true.
 
-- [ ] Step 2: Run keyed-hydration tests to verify RED
+- [x] Step 2: Run keyed-hydration tests to verify RED
 
 ~~~powershell
 Set-Location frontend
@@ -1740,7 +1740,7 @@ npm test -- --run src/test/profile-workspace-state.test.tsx src/test/chat-page.t
 
 Expected: current ChatPage has no conversation ID prop and only calls the singleton history endpoint.
 
-- [ ] Step 3: Create the workspace state owner
+- [x] Step 3: Create the workspace state owner
 
 Create workspaceState.ts with a reducer/hook shaped as follows:
 
@@ -1936,15 +1936,15 @@ export function useProfileWorkspaceState(
 
 The implementation must include concrete actions for profiles loaded, conversations loaded, activation started/succeeded/failed, conversation created/selected/deleted, and reset error. Apply only server response IDs; never optimistically invent a replacement conversation or active profile.
 
-- [ ] Step 4: Key ChatPage without creating a second chat store
+- [x] Step 4: Key ChatPage without creating a second chat store
 
 Move client DTO interfaces used by history.ts/reducer.ts into features/chat/model.ts and keep type-only compatibility re-exports. Add conversationId: string | null to ChatPageProps. On ID change, abort the previous controller, dispatch history/reset with an empty page, and hydrate through fetchConversationHistory(conversationId, query, signal). Disable composer when ID is null or the profile is not ready. Pass the same ID to turn/reprocess transports; keep all SSE events in chatReducer.
 
-- [ ] Step 5: Wire App and workspace-wide interaction lock
+- [x] Step 5: Wire App and workspace-wide interaction lock
 
 In App.tsx, render workspace state above ChatPage, pass selectedConversationId into ChatPage, and combine onInteractionLockChange with workspace pending state. Pass the resulting lock to every profile/conversation selector, menu, dialog, upload, re-extract, and observability mutation. A profile switch first calls POST /api/profiles/{id}/activate, then replaces profile/conversation state from the response and bumps saved-job/observability invalidation keys.
 
-- [ ] Step 6: Run frontend state gates and commit
+- [x] Step 6: Run frontend state gates and commit
 
 ~~~powershell
 npm test -- --run src/test/profile-workspace-state.test.tsx src/test/chat-page.test.tsx src/app/App.test.tsx src/test/sse-reducer.test.ts
