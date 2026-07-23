@@ -748,7 +748,7 @@ async def build_profile_detail(
 
 Implement project_profile_list_item(session, row, active_id) and project_profile_detail(session, row) in the same module; both load the attachment/document/preferences by the row’s attachment/profile IDs, call parse_candidate_profile and parse_job_preferences, and raise PROFILE_INCONSISTENT on validation or ownership failure. They never read the active workspace row as a substitute for the requested row.
 
-- [x] Step 4: Implement list/detail/rename/activate routes
+- [ ] Step 4: Implement list/detail/rename/activate routes
 
 Create backend/app/api/profiles.py with these thin route implementations; build_profile_list_response/build_profile_detail are read-only functions in profile_projection.py and activate_profile_by_id owns the transaction plus post-commit graph refresh:
 
@@ -844,7 +844,7 @@ Keep GET /api/profile and /api/profile/cv as compatibility reads for the upload/
 
 Include profiles_router in main.py, expose PATCH, and replace the old “exactly seven singleton routes” assertion with route tests for the implemented profile routes and compatibility reads. Assert that route handlers never call extraction, embedding, scoring, or graph writes before the SQLite selection commit. Reserve DELETE /profiles/{profile_id} for Task 6.
 
-- [x] Step 6: Run focused profile gates and commit
+- [ ] Step 6: Run focused profile gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_profile_projection.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_chat_api.py -q
