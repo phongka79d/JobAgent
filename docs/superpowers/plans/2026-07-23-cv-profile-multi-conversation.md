@@ -539,7 +539,7 @@ async def update_title_from_first_user_message(
 
 Use an opaque URL-safe cursor containing the ordering timestamp pair and ID; malformed cursors go through the existing Pydantic 422 boundary.
 
-- [x] Step 5: Require conversation IDs in message, run, and evaluation repositories
+- [ ] Step 5: Require conversation IDs in message, run, and evaluation repositories
 
 Change the message repository interface from implicit main to explicit arguments:
 
@@ -636,7 +636,7 @@ async def assert_profile_idle(
 
 Implement `_has_activity` as `select(AgentRun.id).join(ChatMessage, AgentRun.user_message_id == ChatMessage.id).join(Conversation, ChatMessage.conversation_id == Conversation.id).where(AgentRun.state.in_(("running", "interrupted")), *owner_predicates).limit(1)`. Replace ensure_singleton_seeds with ensure_workspace_seed, inserting only workspace_state(id='main', active_profile_id=NULL). Stop calling the old seed helper from main.py and add PATCH to CORS allow_methods.
 
-- [x] Step 7: Run repository/static gates and commit
+- [ ] Step 7: Run repository/static gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_conversation_titles.py tests/unit/test_activity_gate.py tests/integration/test_profile_selection.py tests/integration/test_chat_persistence.py -q
@@ -659,7 +659,7 @@ git commit -m "refactor: scope repositories to profile conversations"
 - Modify: backend/app/services/profile_activation.py
 - Test: backend/tests/integration/test_profiles_api.py, backend/tests/unit/test_profile_projection.py, backend/tests/integration/test_profile_selection.py
 
-- [x] Step 1: Write failing API/projection tests
+- [ ] Step 1: Write failing API/projection tests
 
 Add tests for safe list/detail output, fallback naming, rename scope, activation, and zero-provider selection:
 
@@ -685,7 +685,7 @@ def test_activate_profile_does_not_call_provider_stack(
 
 Cover GET /api/profiles, GET /api/profiles/{id}, PATCH, and POST /activate routing/error mapping, including PROFILE_NOT_FOUND, PROFILE_NOT_READY, and PROFILE_SWITCH_BLOCKED. Task 6 adds DELETE only after its external-cleanup coordinator exists.
 
-- [x] Step 2: Run the API tests to verify RED
+- [ ] Step 2: Run the API tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -694,7 +694,7 @@ Set-Location backend
 
 Expected: routes and projection module are absent, and old /api/profile is the only profile read surface.
 
-- [x] Step 3: Implement safe profile projection and response schemas
+- [ ] Step 3: Implement safe profile projection and response schemas
 
 Create profile_projection.py with a pure mapper that validates profile_json and preferences before exposing them. Use these rules:
 
@@ -840,7 +840,7 @@ Define build_selection_response(session, profile, selected) as a thin call to pr
 
 Keep GET /api/profile and /api/profile/cv as compatibility reads for the upload/draft surface, but resolve them through workspace_state.active_profile_id; they must not reintroduce singleton rows.
 
-- [x] Step 5: Register routes and update public API tests
+- [ ] Step 5: Register routes and update public API tests
 
 Include profiles_router in main.py, expose PATCH, and replace the old “exactly seven singleton routes” assertion with route tests for the implemented profile routes and compatibility reads. Assert that route handlers never call extraction, embedding, scoring, or graph writes before the SQLite selection commit. Reserve DELETE /profiles/{profile_id} for Task 6.
 
@@ -1056,7 +1056,7 @@ async def select_owned_conversation(
 
 Each handler maps stable errors without message/CV/provider text. Task 6 adds DELETE only after its checkpoint coordinator exists.
 
-- [x] Step 4: Thread IDs through turn creation and context
+- [ ] Step 4: Thread IDs through turn creation and context
 
 Change create_user_turn to accept conversation_id and resolve the owning profile_id, attachment_id, and preferences inside its transaction:
 
@@ -1119,7 +1119,7 @@ state = build_initial_agent_state(
 
 Change get_history_page(session, conversation_id=conversation_id, limit=limit, before=before) and every repository query to include conversation_id. Keep the response cursor shape unchanged. In stream_resume, call resolve_run_owner before claiming the run, reject deleted or mismatched owners with RUN_PROFILE_MISMATCH, and pass the owner’s conversation/profile context to the graph. Remove the message conversation singleton check in job_save_confirmation.py; replace it with durable owner lookup and preserve the existing exact initiating-message check.
 
-- [x] Step 6: Run chat/context gates and commit
+- [ ] Step 6: Run chat/context gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_conversations_api.py tests/integration/test_chat_history.py tests/integration/test_chat_persistence.py tests/integration/test_chat_api.py tests/integration/test_interrupt_resume.py tests/integration/test_agent_runner.py tests/integration/test_active_cv_tool.py tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/unit/test_active_cv_reader.py -q
@@ -1462,7 +1462,7 @@ git commit -m "feat: scope evaluations to profiles"
 - Modify: backend/app/graph/delete_profile.py
 - Test: backend/tests/unit/test_graph_setup.py, test_cv_graph.py, test_observability_graph.py, test_job_graph_deletion.py, backend/tests/integration/test_candidate_sync.py, test_graph_rebuild_behavior.py, test_graph_rebuild_contracts.py, test_observability_api.py, test_job_evaluations.py
 
-- [x] Step 1: Add failing graph isolation tests
+- [ ] Step 1: Add failing graph isolation tests
 
 Extend fake-driver tests with two profile branches:
 
@@ -1496,7 +1496,7 @@ Pass profile_id to sync_candidate, sync_cv, payload builders, consistency checks
 
 Change load_bounded_graph_projection, load_active_cv_branch, selected-job skill maps, and evaluation retrieval to require a profile ID. Replace first Candidate and literal active queries with the profile parameter. Make load_rebuild_inputs return all ready profile/document rows and make rebuild_graph loop over them while retaining global Job/Skill seed/rebuild behavior. A graph refresh failure after profile activation leaves SQLite selection committed and returns NEO4J_SYNC_FAILED/safe rebuild guidance.
 
-- [x] Step 5: Run graph/evaluation gates and commit
+- [ ] Step 5: Run graph/evaluation gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_graph_setup.py tests/unit/test_cv_graph.py tests/unit/test_observability_graph.py tests/unit/test_job_graph_deletion.py tests/integration/test_candidate_sync.py tests/integration/test_graph_rebuild_behavior.py tests/integration/test_graph_rebuild_contracts.py tests/integration/test_observability_api.py tests/integration/test_job_evaluations.py -q
