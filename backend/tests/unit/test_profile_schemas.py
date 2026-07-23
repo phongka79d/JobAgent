@@ -46,6 +46,8 @@ _EXPERIENCE_FIELDS = {
 _EDUCATION_FIELDS = {"institution", "degree", "field", "graduation_year"}
 _LANGUAGE_FIELDS = {"name", "proficiency"}
 _PROFILE_FIELDS = {
+    "full_name",
+    "location",
     "summary",
     "current_title",
     "total_experience_years",
@@ -120,6 +122,8 @@ def _language(**overrides: Any) -> dict[str, Any]:
 
 def _profile(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
+        "full_name": "Ada Lovelace",
+        "location": "London",
         "summary": "Backend engineer",
         "current_title": "Senior Engineer",
         "total_experience_years": 6.5,
@@ -214,12 +218,33 @@ def test_education_and_language_nullability() -> None:
     assert lang.proficiency is None
 
 
-def test_profile_nullable_title_and_years() -> None:
+def test_profile_nullable_identity_title_and_years() -> None:
     profile = CandidateProfile.model_validate(
-        _profile(current_title=None, total_experience_years=None)
+        _profile(
+            full_name=None,
+            location=None,
+            current_title=None,
+            total_experience_years=None,
+        )
     )
+    assert profile.full_name is None
+    assert profile.location is None
     assert profile.current_title is None
     assert profile.total_experience_years is None
+
+
+def test_profile_identity_fields_default_to_none_and_are_length_bounded() -> None:
+    payload = _profile()
+    payload.pop("full_name")
+    payload.pop("location")
+    profile = CandidateProfile.model_validate(payload)
+    assert profile.full_name is None
+    assert profile.location is None
+
+    with pytest.raises(ValidationError):
+        CandidateProfile.model_validate(_profile(full_name="x" * 201))
+    with pytest.raises(ValidationError):
+        CandidateProfile.model_validate(_profile(location="x" * 201))
 
 
 def test_empty_lists_valid_on_profile_and_preferences() -> None:

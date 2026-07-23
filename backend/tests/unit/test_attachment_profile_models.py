@@ -9,7 +9,13 @@ import pytest
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
-from app.db.models import Attachment, CandidateProfile, JobPreferences, ProfileDraft
+from app.db.models import (
+    Attachment,
+    Profile,
+    ProfileDraft,
+    ProfilePreference,
+    WorkspaceState,
+)
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
@@ -21,29 +27,28 @@ from app.db.models.attachments import (
     ATTACHMENT_STATES,
 )
 from app.db.models.profiles import (
-    CANDIDATE_PROFILE_ID,
-    JOB_PREFERENCE_KEYS,
-    JOB_PREFERENCES_ID,
-    PROFILE_DRAFT_ID,
-    _empty_job_preferences,
+    WORKSPACE_STATE_ID,
 )
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.sql.schema import Column, Table
 
-_MODELS = (Attachment, CandidateProfile, ProfileDraft, JobPreferences)
+_MODELS = (Attachment, Profile, ProfileDraft, ProfilePreference, WorkspaceState)
 _ATTACHMENT_COLS = {
     "id", "file_hash", "original_name", "mime_type", "size_bytes", "page_count",
     "storage_path", "state", "failure_code", "created_at", "updated_at",
 }
 _ATTACHMENT_NOT_NULL = _ATTACHMENT_COLS - {"page_count", "failure_code"}
-_CANDIDATE_COLS = {
-    "id", "active_attachment_id", "profile_json", "created_at", "updated_at",
+_PROFILE_COLS = {
+    "id", "attachment_id", "display_name", "profile_json", "location",
+    "extraction_version", "source_hash", "state", "created_at", "updated_at",
+    "last_opened_at",
 }
 _DRAFT_COLS = {
-    "id", "source_attachment_id", "draft_json", "created_at", "updated_at",
+    "id", "source_attachment_id", "target_profile_id", "draft_json", "created_at",
+    "updated_at",
 }
-_PREF_COLS = {"id", "preferences_json", "created_at", "updated_at"}
+_PREF_COLS = {"profile_id", "preferences_json", "created_at", "updated_at"}
 
 
 def _t(name: str) -> Table:
@@ -73,10 +78,12 @@ def _uq(table: Table) -> set[str | None]:
     return {c.name for c in table.constraints if isinstance(c, UniqueConstraint)}
 
 
-def _fk(table: Table) -> ForeignKeyConstraint:
-    fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
-    assert len(fks) == 1
-    return fks[0]
+def _fk(table: Table, name: str) -> ForeignKeyConstraint:
+    return next(
+        c
+        for c in table.constraints
+        if isinstance(c, ForeignKeyConstraint) and c.name == name
+    )
 
 
 def _default_name(col: Column[Any]) -> str:
@@ -114,7 +121,7 @@ def _assert_singleton(table: Table, table_name: str, value: str) -> None:
 def _assert_att_fk(
     table: Table, *, name: str, column: str, ondelete: str, uq: str
 ) -> None:
-    fk = _fk(table)
+    fk = _fk(table, name)
     assert fk.name == name
     el = list(fk.elements)
     assert len(el) == 1
@@ -127,7 +134,8 @@ def _assert_att_fk(
 
 def test_registry_and_shared_base() -> None:
     expected = {
-        "attachments", "candidate_profile", "profile_drafts", "job_preferences",
+        "attachments", "profiles", "profile_drafts", "profile_preferences",
+        "workspace_state",
     }
     assert expected.issubset(set(Base.metadata.tables))
     for model in _MODELS:
@@ -217,19 +225,23 @@ def test_attachment_pk_constants_and_construct_defaults() -> None:
     _assert_utc(Attachment.__table__, "created_at", "updated_at")
 
 
-def test_candidate_profile_contract() -> None:
-    table = _t("candidate_profile")
-    _assert_cols(table, _CANDIDATE_COLS)
+def test_profile_contract() -> None:
+    table = _t("profiles")
+    _assert_cols(
+        table,
+        _PROFILE_COLS,
+        not_null=_PROFILE_COLS - {"location"},
+        nullable={"location"},
+    )
     assert _c(table, "id").primary_key
-    assert CANDIDATE_PROFILE_ID == "active"
-    _assert_singleton(table, "candidate_profile", CANDIDATE_PROFILE_ID)
+    assert _default_name(_c(table, "id")) == "new_uuid"
     assert "JSON" in str(_c(table, "profile_json").type).upper()
     _assert_att_fk(
         table,
-        name="fk_candidate_profile__active_attachment_id",
-        column="active_attachment_id",
+        name="fk_profiles__attachment_id",
+        column="attachment_id",
         ondelete="RESTRICT",
-        uq="uq_candidate_profile__active_attachment_id",
+        uq="uq_profiles__attachment_id",
     )
 
 
@@ -238,10 +250,9 @@ def test_profile_drafts_contract() -> None:
     _assert_cols(
         table, _DRAFT_COLS,
         not_null={"id", "draft_json", "created_at", "updated_at"},
-        nullable={"source_attachment_id"},
+        nullable={"source_attachment_id", "target_profile_id"},
     )
-    assert PROFILE_DRAFT_ID == "current"
-    _assert_singleton(table, "profile_drafts", PROFILE_DRAFT_ID)
+    assert _default_name(_c(table, "id")) == "new_uuid"
     assert "JSON" in str(_c(table, "draft_json").type).upper()
     _assert_att_fk(
         table,
@@ -250,30 +261,46 @@ def test_profile_drafts_contract() -> None:
         ondelete="CASCADE",
         uq="uq_profile_drafts__source_attachment_id",
     )
+    target_fk = _fk(table, "fk_profile_drafts__target_profile_id")
+    target = list(target_fk.elements)[0]
+    assert target.column.table.name == "profiles"
+    assert target.ondelete == "CASCADE"
 
 
-def test_job_preferences_contract() -> None:
-    table = _t("job_preferences")
+def test_profile_preferences_contract() -> None:
+    table = _t("profile_preferences")
     _assert_cols(table, _PREF_COLS)
-    assert JOB_PREFERENCES_ID == "active"
-    _assert_singleton(table, "job_preferences", JOB_PREFERENCES_ID)
+    assert _c(table, "profile_id").primary_key
     assert "JSON" in str(_c(table, "preferences_json").type).upper()
-    assert _default_name(_c(table, "preferences_json")) == "_empty_job_preferences"
-    empty = _empty_job_preferences()
-    assert list(empty) == list(JOB_PREFERENCE_KEYS)
-    assert all(v == [] for v in empty.values())
-    a, b = _empty_job_preferences(), _empty_job_preferences()
-    assert a is not b
-    a["target_roles"].append("x")
-    assert b["target_roles"] == []
+    fk = _fk(table, "fk_profile_preferences__profile_id")
+    element = list(fk.elements)[0]
+    assert element.column.table.name == "profiles"
+    assert element.ondelete == "CASCADE"
+
+
+def test_workspace_state_contract() -> None:
+    table = _t("workspace_state")
+    _assert_cols(
+        table,
+        {"id", "active_profile_id", "updated_at"},
+        not_null={"id", "updated_at"},
+        nullable={"active_profile_id"},
+    )
+    assert WORKSPACE_STATE_ID == "main"
+    _assert_singleton(table, "workspace_state", WORKSPACE_STATE_ID)
+    fk = _fk(table, "fk_workspace_state__active_profile_id")
+    element = list(fk.elements)[0]
+    assert element.column.table.name == "profiles"
+    assert element.ondelete == "SET NULL"
 
 
 @pytest.mark.parametrize(
     ("table_name", "pk_name"),
     [
-        ("candidate_profile", "pk_candidate_profile"),
+        ("profiles", "pk_profiles"),
         ("profile_drafts", "pk_profile_drafts"),
-        ("job_preferences", "pk_job_preferences"),
+        ("profile_preferences", "pk_profile_preferences"),
+        ("workspace_state", "pk_workspace_state"),
     ],
 )
 def test_profile_family_pk_names(table_name: str, pk_name: str) -> None:
@@ -283,7 +310,7 @@ def test_profile_family_pk_names(table_name: str, pk_name: str) -> None:
 
 @pytest.mark.parametrize(
     "table_name",
-    ["candidate_profile", "profile_drafts", "job_preferences"],
+    ["profiles", "profile_drafts", "profile_preferences"],
 )
 def test_profile_family_timestamps_use_utc_now(table_name: str) -> None:
     _assert_utc(_t(table_name), "created_at", "updated_at")

@@ -1,102 +1,79 @@
-"""Idempotent singleton seeds for conversation and job_preferences.
+"""Application table registry and idempotent workspace-state seed."""
 
-Owns the startup safeguard that inserts missing ``conversation('main')`` and
-``job_preferences('active')`` rows after migrations. Never seeds
-``candidate_profile``, never runs migrations, and never invokes metadata
-schema creation helpers reserved for Alembic only.
-"""
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Connection, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import utc_now
-from app.db.models.chat import CONVERSATION_ID
-from app.db.models.profiles import JOB_PREFERENCE_KEYS, JOB_PREFERENCES_ID
+from app.db.models.profiles import WORKSPACE_STATE_ID
 
-# Application tables owned by Alembic (Master §6.2) — twelve exact names.
 APPLICATION_TABLE_NAMES: frozenset[str] = frozenset(
     {
         "attachments",
         "attachment_text_chunks",
         "cv_documents",
         "cv_document_drafts",
-        "candidate_profile",
+        "profiles",
         "profile_drafts",
-        "job_preferences",
+        "profile_preferences",
+        "workspace_state",
         "job_posts",
-        "conversation",
+        "conversations",
         "chat_messages",
         "agent_runs",
         "tool_executions",
+        "job_evaluations",
     }
-)
-
-# Single owned seed SQL (sync Alembic path and async startup path).
-_CONVERSATION_SEED_SQL = (
-    "INSERT OR IGNORE INTO conversation (id, created_at, updated_at) "
-    "VALUES (:id, :created_at, :updated_at)"
-)
-_JOB_PREFERENCES_SEED_SQL = (
-    "INSERT OR IGNORE INTO job_preferences "
-    "(id, preferences_json, created_at, updated_at) "
-    "VALUES (:id, :preferences_json, :created_at, :updated_at)"
 )
 
 
 def empty_job_preferences_document() -> dict[str, list[Any]]:
-    """Return the approved empty preferences document (four empty lists)."""
-    return {key: [] for key in JOB_PREFERENCE_KEYS}
-
-
-def _preferences_json_text() -> str:
-    return json.dumps(empty_job_preferences_document(), separators=(",", ":"))
-
-
-def _singleton_seed_statements() -> Sequence[tuple[str, dict[str, Any]]]:
-    """Return the two seed (SQL, params) pairs with one shared construction."""
-    now = utc_now()
-    return (
-        (
-            _CONVERSATION_SEED_SQL,
-            {
-                "id": CONVERSATION_ID,
-                "created_at": now,
-                "updated_at": now,
-            },
-        ),
-        (
-            _JOB_PREFERENCES_SEED_SQL,
-            {
-                "id": JOB_PREFERENCES_ID,
-                "preferences_json": _preferences_json_text(),
-                "created_at": now,
-                "updated_at": now,
-            },
-        ),
-    )
+    """Return the legacy empty document used only by historical revision 0001."""
+    return {
+        "target_roles": [],
+        "preferred_locations": [],
+        "acceptable_work_modes": [],
+        "target_seniority": [],
+    }
 
 
 def ensure_singleton_seeds_on_connection(connection: Connection) -> None:
-    """Insert missing singleton rows using a sync SQLAlchemy connection.
-
-    Safe for Alembic upgrade transactions and test helpers. Idempotent via
-    ``INSERT OR IGNORE`` on primary keys.
-    """
-    for sql, params in _singleton_seed_statements():
-        connection.execute(text(sql), params)
+    """Seed tables owned by historical revision 0001 before revision 0005."""
+    now = utc_now()
+    connection.execute(
+        text(
+            "INSERT OR IGNORE INTO conversation (id, created_at, updated_at) "
+            "VALUES ('main', :created_at, :updated_at)"
+        ),
+        {"created_at": now, "updated_at": now},
+    )
+    connection.execute(
+        text(
+            "INSERT OR IGNORE INTO job_preferences "
+            "(id, preferences_json, created_at, updated_at) "
+            "VALUES ('active', :preferences_json, :created_at, :updated_at)"
+        ),
+        {
+            "preferences_json": json.dumps(
+                empty_job_preferences_document(), separators=(",", ":")
+            ),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
 
 
 async def ensure_singleton_seeds(session: AsyncSession) -> None:
-    """Insert missing singleton rows on an async session (startup safeguard).
-
-    Caller owns the surrounding transaction (e.g. ``session_scope``). Does not
-    commit independently. Never touches ``candidate_profile``.
-    """
-    for sql, params in _singleton_seed_statements():
-        await session.execute(text(sql), params)
+    """Idempotently ensure only ``workspace_state('main')`` exists."""
+    await session.execute(
+        text(
+            "INSERT OR IGNORE INTO workspace_state (id, active_profile_id, updated_at) "
+            "VALUES (:id, NULL, :updated_at)"
+        ),
+        {"id": WORKSPACE_STATE_ID, "updated_at": utc_now()},
+    )
     await session.flush()

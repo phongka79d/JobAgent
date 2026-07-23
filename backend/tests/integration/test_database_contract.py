@@ -74,6 +74,25 @@ def _att(
     )
 
 
+def _profile(profile_id: str, attachment_id: str) -> str:
+    return (
+        "INSERT INTO profiles ("
+        "id, attachment_id, display_name, profile_json, location, "
+        "extraction_version, source_hash, state, created_at, updated_at, "
+        "last_opened_at) VALUES ("
+        f"'{profile_id}', '{attachment_id}', 'Profile', '{{}}', NULL, "
+        f"'v1', 'hash-{profile_id}', 'ready', '{TS}', '{TS}', '{TS}')"
+    )
+
+
+def _conversation(conversation_id: str, profile_id: str) -> str:
+    return (
+        "INSERT INTO conversations ("
+        "id, profile_id, title, created_at, updated_at, last_opened_at) VALUES ("
+        f"'{conversation_id}', '{profile_id}', 'Chat', '{TS}', '{TS}', '{TS}')"
+    )
+
+
 def test_migrated_schema_exact_model_parity(db_path: Path) -> None:
     """Every table/column/type/null/constraint/index/FK matches accepted models."""
 
@@ -89,9 +108,9 @@ def test_migrated_schema_exact_model_parity(db_path: Path) -> None:
                     )
 
                 await c.run_sync(_check)
-            # Programmatic completeness: none of the 67/9 expected missing.
-            assert len(expected_named_constraints()) == 67
-            assert len(expected_indexes()) == 9
+            # Programmatic completeness: none of the accepted metadata missing.
+            assert len(expected_named_constraints()) == 69
+            assert len(expected_indexes()) == 10
         finally:
             await e.dispose()
 
@@ -123,8 +142,8 @@ def test_invalid_rows_rejected_and_partial_unique(db_path: Path) -> None:
         try:
             await _fail(
                 f,
-                f"INSERT INTO conversation (id, created_at, updated_at) "
-                f"VALUES ('other', '{TS}', '{TS}')",
+                f"INSERT INTO workspace_state (id, updated_at) "
+                f"VALUES ('other', '{TS}')",
             )
             await _fail(f, _att("a1", "h1", "p1", mime="text/plain"))
             async with f() as s:
@@ -144,44 +163,48 @@ def test_fk_restrict_and_cascade_chains(db_path: Path) -> None:
         try:
             async with f() as s:
                 await _x(s, _att("att-r", "hr", "pr", st="active", pages=2))
+                await _x(s, _profile("profile-r", "att-r"))
+                await _x(s, _conversation("conv-r", "profile-r"))
                 await _x(
                     s,
-                    "INSERT INTO candidate_profile "
-                    "(id, active_attachment_id, profile_json, "
-                    f"created_at, updated_at) VALUES "
-                    f"('active', 'att-r', '{{}}', '{TS}', '{TS}')",
-                )
-                await s.commit()
-            await _fail(f, "DELETE FROM attachments WHERE id = 'att-r'")
-            async with f() as s:
-                await _x(s, _att("att-d", "hd", "pd"))
-                for sql in (
-                    "INSERT INTO profile_drafts "
-                    "(id, source_attachment_id, draft_json, created_at, updated_at) "
-                    f"VALUES ('current', 'att-d', '{{}}', '{TS}', '{TS}')",
                     "INSERT INTO chat_messages "
                     "(id, conversation_id, role, content, created_at, updated_at) "
-                    f"VALUES ('msg1', 'main', 'user', 'hello', '{TS}', '{TS}')",
+                    f"VALUES ('msg1', 'conv-r', 'user', 'hello', '{TS}', '{TS}')",
+                )
+                await _x(
+                    s,
                     "INSERT INTO agent_runs "
                     "(id, user_message_id, state, created_at, updated_at) "
                     f"VALUES ('run1', 'msg1', 'running', '{TS}', '{TS}')",
+                )
+                await _x(
+                    s,
                     "INSERT INTO tool_executions "
                     "(id, run_id, tool_call_id, tool_name, status, "
                     "created_at, updated_at) VALUES "
                     f"('tool1', 'run1', 'tc1', 'demo', 'pending', '{TS}', '{TS}')",
-                ):
-                    await _x(s, sql)
+                )
+                await s.commit()
+            await _fail(f, "DELETE FROM attachments WHERE id = 'att-r'")
+            async with f() as s:
+                await _x(s, "DELETE FROM conversations WHERE id = 'conv-r'")
+                await s.commit()
+                assert await _cnt(s, "chat_messages") == 0
+                assert await _cnt(s, "agent_runs") == 0
+                assert await _cnt(s, "tool_executions") == 0
+            async with f() as s:
+                await _x(s, _att("att-d", "hd", "pd"))
+                await _x(
+                    s,
+                    "INSERT INTO profile_drafts "
+                    "(id, source_attachment_id, draft_json, created_at, updated_at) "
+                    f"VALUES ('draft-1', 'att-d', '{{}}', '{TS}', '{TS}')",
+                )
                 await s.commit()
             async with f() as s:
                 await _x(s, "DELETE FROM attachments WHERE id = 'att-d'")
                 await s.commit()
                 assert await _cnt(s, "profile_drafts") == 0
-            async with f() as s:
-                await _x(s, "DELETE FROM conversation WHERE id = 'main'")
-                await s.commit()
-                assert await _cnt(s, "chat_messages") == 0
-                assert await _cnt(s, "agent_runs") == 0
-                assert await _cnt(s, "tool_executions") == 0
         finally:
             await e.dispose()
 
@@ -198,6 +221,8 @@ def test_cv_ownership_cascade_and_set_null(db_path: Path) -> None:
             async with f() as s:
                 await _x(s, _att("att-own", "hown", "pown"))
                 await _x(s, _att("att-keep", "hkeep", "pkeep"))
+                await _x(s, _profile("profile-keep", "att-keep"))
+                await _x(s, _conversation("conv-keep", "profile-keep"))
                 for sql in (
                     "INSERT INTO attachment_text_chunks ("
                     "id, attachment_id, ordinal, text, preview, "
@@ -216,12 +241,12 @@ def test_cv_ownership_cascade_and_set_null(db_path: Path) -> None:
                     "INSERT INTO chat_messages ("
                     "id, conversation_id, role, content, source_attachment_id, "
                     f"created_at, updated_at) VALUES "
-                    f"('msg-own', 'main', 'user', 'cv note', 'att-own', "
+                    f"('msg-own', 'conv-keep', 'user', 'cv note', 'att-own', "
                     f"'{TS}', '{TS}')",
                     "INSERT INTO chat_messages ("
                     "id, conversation_id, role, content, "
                     f"created_at, updated_at) VALUES "
-                    f"('msg-plain', 'main', 'user', 'plain', '{TS}', '{TS}')",
+                    f"('msg-plain', 'conv-keep', 'user', 'plain', '{TS}', '{TS}')",
                     "INSERT INTO agent_runs ("
                     "id, user_message_id, source_attachment_id, state, "
                     f"created_at, updated_at) VALUES "
@@ -288,30 +313,26 @@ def test_no_create_all_in_app_or_migrations() -> None:
     assert hits == [] and "create_all(" not in inspect.getsource(seed_module)
 
 
-def test_seeded_preferences_json_shape(db_path: Path) -> None:
+def test_workspace_seed_and_profile_tables_start_empty(db_path: Path) -> None:
     async def _c() -> None:
         e = build_async_engine(db_path)
         try:
             async with e.connect() as c:
-                raw = (
+                row = (
                     await c.execute(
-                        text("SELECT preferences_json FROM job_preferences")
+                        text("SELECT id, active_profile_id FROM workspace_state")
                     )
-                ).scalar_one()
-                n = (
-                    await c.execute(
-                        text("SELECT COUNT(*) FROM candidate_profile")
+                ).one()
+                counts = [
+                    int(
+                        (
+                            await c.execute(text(f"SELECT COUNT(*) FROM {name}"))
+                        ).scalar_one()
                     )
-                ).scalar_one()
-            prefs = json.loads(raw) if isinstance(raw, str) else raw
-            assert set(prefs) == {
-                "target_roles",
-                "preferred_locations",
-                "acceptable_work_modes",
-                "target_seniority",
-            }
-            assert all(prefs[k] == [] for k in prefs)
-            assert int(n) == 0
+                    for name in ("profiles", "profile_preferences", "conversations")
+                ]
+            assert row == ("main", None)
+            assert counts == [0, 0, 0]
         finally:
             await e.dispose()
 
@@ -334,7 +355,7 @@ def _eval_insert(
     *,
     eval_id: str,
     job_id: str,
-    att_id: str,
+    profile_id: str,
     ctx: str,
 ) -> str:
     result = json.dumps(
@@ -365,18 +386,18 @@ def _eval_insert(
     ).replace("'", "''")
     return (
         "INSERT INTO job_evaluations ("
-        "id, job_id, active_attachment_id, evaluation_context_hash, "
+        "id, job_id, profile_id, evaluation_context_hash, "
         "job_revision, profile_revision, preferences_revision, "
         "cv_source_hash, matching_contract_version, result_json, "
         "created_at, updated_at) VALUES ("
-        f"'{eval_id}', '{job_id}', '{att_id}', '{ctx}', "
+        f"'{eval_id}', '{job_id}', '{profile_id}', '{ctx}', "
         f"'{TS}', '{TS}', '{TS}', 'cvhash', 'match_v1', '{result}', "
         f"'{TS}', '{TS}')"
     )
 
 
 def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
-    """Named unique/index and CASCADE from job_posts and attachments."""
+    """Named unique/index and CASCADE from job_posts and profiles."""
 
     async def _c() -> None:
         e = build_async_engine(db_path)
@@ -386,7 +407,7 @@ def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
 
                 def _check(sync_conn: object) -> None:
                     observed = observe_schema(sync_conn)  # type: ignore[arg-type]
-                    assert "uq_job_evaluations__job_context" in (
+                    assert "uq_job_evaluations__job_profile_context" in (
                         observed["named_constraints"]
                     )
                     assert "ix_job_evaluations__job_created_at" in (
@@ -407,8 +428,8 @@ def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
                     ) in fks
                     assert (
                         "job_evaluations",
-                        "active_attachment_id",
-                        "attachments",
+                        "profile_id",
+                        "profiles",
                         "id",
                         "CASCADE",
                     ) in fks
@@ -417,25 +438,26 @@ def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
 
             async with f() as s:
                 await _x(s, _att("att-e1", "he1", "pe1"))
+                await _x(s, _profile("profile-e1", "att-e1"))
                 await _x(s, _job_insert("job-e1"))
                 await _x(
                     s,
                     _eval_insert(
                         eval_id="eval-1",
                         job_id="job-e1",
-                        att_id="att-e1",
+                        profile_id="profile-e1",
                         ctx="ctx-a",
                     ),
                 )
                 await s.commit()
 
-            # Unique (job_id, evaluation_context_hash).
+            # Unique (job_id, profile_id, evaluation_context_hash).
             await _fail(
                 f,
                 _eval_insert(
                     eval_id="eval-dup",
                     job_id="job-e1",
-                    att_id="att-e1",
+                    profile_id="profile-e1",
                     ctx="ctx-a",
                 ),
             )
@@ -447,18 +469,20 @@ def test_job_evaluations_named_schema_and_cascades(db_path: Path) -> None:
 
             async with f() as s:
                 await _x(s, _att("att-e2", "he2", "pe2"))
+                await _x(s, _profile("profile-e2", "att-e2"))
                 await _x(s, _job_insert("job-e2"))
                 await _x(
                     s,
                     _eval_insert(
                         eval_id="eval-2",
                         job_id="job-e2",
-                        att_id="att-e2",
+                        profile_id="profile-e2",
                         ctx="ctx-b",
                     ),
                 )
                 await s.commit()
             async with f() as s:
+                await _x(s, "DELETE FROM profiles WHERE id = 'profile-e2'")
                 await _x(s, "DELETE FROM attachments WHERE id = 'att-e2'")
                 await s.commit()
                 assert await _cnt(s, "job_evaluations") == 0

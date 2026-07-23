@@ -1,4 +1,4 @@
-"""SQLAlchemy contracts for conversation, messages, runs, and tool executions.
+"""SQLAlchemy contracts for conversations, messages, runs, and tool executions.
 
 Static column, CHECK, unique, index, and CASCADE FK invariants only. Chat
 endpoints, SSE, LangGraph checkpoints, tool execution services, approval
@@ -26,9 +26,6 @@ from sqlalchemy.types import JSON
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
-
-# Fixed singleton conversation primary key (Master §6.1 / §6.2).
-CONVERSATION_ID = "main"
 
 # Single production owners for message/run/tool immutable status values.
 CHAT_MESSAGE_ROLE_USER = "user"
@@ -75,29 +72,30 @@ _TERMINAL_TOOL = column("status").in_(
 
 
 class Conversation(Base):
-    """Exactly one conversation row after seed (singleton id ``main``)."""
+    """One independently addressable conversation belonging to a profile."""
 
-    __tablename__ = "conversation"
-    __table_args__ = (
-        CheckConstraint(column("id") == CONVERSATION_ID, name="singleton_id"),
-    )
+    __tablename__ = "conversations"
 
-    id: Mapped[str] = mapped_column(
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
+    profile_id: Mapped[str] = mapped_column(
         Text,
-        primary_key=True,
-        default=CONVERSATION_ID,
-        server_default=CONVERSATION_ID,
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False,
     )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+    last_opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
 
 
 class ChatMessage(Base):
-    """One user, assistant, or system message in the singleton conversation."""
+    """One user, assistant, or system message in a profile conversation."""
 
     __tablename__ = "chat_messages"
     __table_args__ = (
@@ -127,7 +125,7 @@ class ChatMessage(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
     conversation_id: Mapped[str] = mapped_column(
         Text,
-        ForeignKey("conversation.id", ondelete="CASCADE"),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
     )
     role: Mapped[str] = mapped_column(Text, nullable=False)

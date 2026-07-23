@@ -26,14 +26,16 @@ class JobEvaluation(Base):
     __table_args__ = (
         UniqueConstraint(
             "job_id",
+            "profile_id",
             "evaluation_context_hash",
-            name="uq_job_evaluations__job_context",
+            name="uq_job_evaluations__job_profile_context",
         ),
         Index(
             "ix_job_evaluations__job_created_at",
             "job_id",
             "created_at",
         ),
+        Index("ix_job_evaluations__profile_id", "profile_id"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -46,9 +48,9 @@ class JobEvaluation(Base):
         ForeignKey("job_posts.id", ondelete="CASCADE"),
         nullable=False,
     )
-    active_attachment_id: Mapped[str] = mapped_column(
+    profile_id: Mapped[str] = mapped_column(
         Text,
-        ForeignKey("attachments.id", ondelete="CASCADE"),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
     evaluation_context_hash: Mapped[str] = mapped_column(Text, nullable=False)

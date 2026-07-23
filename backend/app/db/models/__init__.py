@@ -13,7 +13,12 @@ from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecutio
 from app.db.models.cv_documents import CVDocument, CVDocumentDraft
 from app.db.models.job_evaluations import JobEvaluation
 from app.db.models.jobs import JobPost
-from app.db.models.profiles import CandidateProfile, JobPreferences, ProfileDraft
+from app.db.models.profiles import (
+    Profile,
+    ProfileDraft,
+    ProfilePreference,
+    WorkspaceState,
+)
 
 __all__ = [
     "AgentRun",
@@ -21,12 +26,13 @@ __all__ = [
     "AttachmentTextChunk",
     "CVDocument",
     "CVDocumentDraft",
-    "CandidateProfile",
     "ChatMessage",
     "Conversation",
     "JobEvaluation",
     "JobPost",
-    "JobPreferences",
+    "Profile",
     "ProfileDraft",
+    "ProfilePreference",
     "ToolExecution",
+    "WorkspaceState",
 ]

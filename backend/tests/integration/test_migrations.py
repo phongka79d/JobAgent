@@ -6,11 +6,11 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from app.db.models.chat import CONVERSATION_ID
-from app.db.models.profiles import JOB_PREFERENCE_KEYS, JOB_PREFERENCES_ID
+from app.db.models.profiles import WORKSPACE_STATE_ID
 from app.db.seed import APPLICATION_TABLE_NAMES, ensure_singleton_seeds
 from app.db.session import (
     build_async_engine,
@@ -67,9 +67,10 @@ async def _counts(e: AsyncEngine) -> dict[str, int]:
     out: dict[str, int] = {}
     async with e.connect() as c:
         for name in (
-            "conversation",
-            "job_preferences",
-            "candidate_profile",
+            "workspace_state",
+            "profiles",
+            "profile_preferences",
+            "conversations",
             "profile_drafts",
         ):
             out[name] = int(
@@ -80,7 +81,7 @@ async def _counts(e: AsyncEngine) -> dict[str, int]:
     return out
 
 
-def test_fresh_upgrade_creates_application_tables_and_singleton_seeds(
+def test_fresh_upgrade_creates_application_tables_and_workspace_seed(
     isolated_sqlite: Path,
 ) -> None:
     db = isolated_sqlite
@@ -98,18 +99,16 @@ def test_fresh_upgrade_creates_application_tables_and_singleton_seeds(
             assert "cv_document_drafts" in names
             assert "job_evaluations" in names
             counts = await _counts(e)
-            assert counts["conversation"] == 1
-            assert counts["job_preferences"] == 1
-            assert counts["candidate_profile"] == 0
+            assert counts["workspace_state"] == 1
+            assert counts["profiles"] == 0
+            assert counts["profile_preferences"] == 0
+            assert counts["conversations"] == 0
             assert counts["profile_drafts"] == 0
             async with e.connect() as c:
-                assert (
-                    await c.execute(text("SELECT id FROM conversation"))
-                ).scalar_one() == CONVERSATION_ID
                 row = (
                     await c.execute(
                         text(
-                            "SELECT id, preferences_json FROM job_preferences"
+                            "SELECT id, active_profile_id FROM workspace_state"
                         )
                     )
                 ).one()
@@ -203,10 +202,7 @@ def test_fresh_upgrade_creates_application_tables_and_singleton_seeds(
                     )
                 ).scalar_one()
                 assert int(n_docs) == 0 and int(n_drafts) == 0
-            assert row[0] == JOB_PREFERENCES_ID
-            prefs = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-            assert set(prefs) == set(JOB_PREFERENCE_KEYS)
-            assert all(prefs[k] == [] for k in JOB_PREFERENCE_KEYS)
+            assert row == (WORKSPACE_STATE_ID, None)
         finally:
             await e.dispose()
 
@@ -225,9 +221,10 @@ def test_upgrade_at_head_is_noop_and_does_not_duplicate_seeds(
         e = build_async_engine(db)
         try:
             counts = await _counts(e)
-            assert counts["conversation"] == 1
-            assert counts["job_preferences"] == 1
-            assert counts["candidate_profile"] == 0
+            assert counts["workspace_state"] == 1
+            assert counts["profiles"] == 0
+            assert counts["profile_preferences"] == 0
+            assert counts["conversations"] == 0
             names = await _names(e)
             assert names == set(EXPECTED_FRESH_TABLES)
         finally:
@@ -297,7 +294,7 @@ def test_upgrade_preserves_unrelated_checkpoint_like_tables(
     run_async(_c())
 
 
-def test_startup_singleton_safeguard_is_idempotent(
+def test_startup_workspace_safeguard_is_idempotent(
     isolated_sqlite: Path,
 ) -> None:
     db = isolated_sqlite
@@ -310,26 +307,26 @@ def test_startup_singleton_safeguard_is_idempotent(
             await ensure_singleton_seeds(s)
         factory = get_session_factory()
         async with factory() as s:
-            conv = int(
+            workspace = int(
                 (
-                    await s.execute(text("SELECT COUNT(*) FROM conversation"))
+                    await s.execute(text("SELECT COUNT(*) FROM workspace_state"))
                 ).scalar_one()
             )
             prefs = int(
                 (
                     await s.execute(
-                        text("SELECT COUNT(*) FROM job_preferences")
+                        text("SELECT COUNT(*) FROM profile_preferences")
                     )
                 ).scalar_one()
             )
             profile = int(
                 (
                     await s.execute(
-                        text("SELECT COUNT(*) FROM candidate_profile")
+                        text("SELECT COUNT(*) FROM profiles")
                     )
                 ).scalar_one()
             )
-        assert (conv, prefs, profile) == (1, 1, 0)
+        assert (workspace, prefs, profile) == (1, 0, 0)
 
     run_async(_c())
 
@@ -449,8 +446,9 @@ def test_upgrade_from_0002_preserves_rows_without_document_synthesis(
             await e.dispose()
 
     run_async(_plant())
-    upgrade_to_head(db)
-    assert _current(db) == MIGRATION_HEAD
+    with pytest.raises(RuntimeError, match="Reset.*SQLite"):
+        upgrade_to_head(db)
+    assert _current(db) == "0004_add_job_evaluations"
 
     async def _c() -> None:
         e = build_async_engine(db)
@@ -544,11 +542,6 @@ def test_upgrade_from_0002_preserves_rows_without_document_synthesis(
                 ).scalar_one()
                 assert payload == "checkpoint-keep"
 
-                def _parity(sc: object) -> None:
-                    assert_migrated_matches_accepted_models(sc)  # type: ignore[arg-type]
-
-                await c.run_sync(_parity)
-
                 # Chunk FK is CASCADE after upgrade.
                 fk_rows = (
                     await c.execute(
@@ -627,6 +620,24 @@ def test_migration_0004_has_no_external_call_imports_or_backfill() -> None:
     assert path.read_text(encoding="utf-8").count("create_table") == 1
 
 
+def test_migration_0005_is_guarded_explicit_and_provider_free() -> None:
+    path = (
+        BACKEND_ROOT
+        / "migrations"
+        / "versions"
+        / "0005_cv_profiles_multi_conversation.py"
+    )
+    _assert_migration_has_no_external_call_imports(path)
+    src = path.read_text(encoding="utf-8")
+    assert "op.get_bind()" in src
+    assert "Reset the local SQLite database" in src
+    assert "op.create_table" in src
+    assert "Base.metadata" not in src
+    assert "create_all" not in src
+    assert 'op.drop_table("checkpoint' not in src
+    assert 'op.drop_table("langgraph_' not in src
+
+
 def test_upgrade_from_0003_preserves_rows_without_evaluation_synthesis(
     isolated_sqlite: Path,
 ) -> None:
@@ -701,8 +712,9 @@ def test_upgrade_from_0003_preserves_rows_without_evaluation_synthesis(
             await e.dispose()
 
     run_async(_plant())
-    upgrade_to_head(db)
-    assert _current(db) == MIGRATION_HEAD
+    with pytest.raises(RuntimeError, match="Reset.*SQLite"):
+        upgrade_to_head(db)
+    assert _current(db) == "0004_add_job_evaluations"
 
     async def _c() -> None:
         e = build_async_engine(db)
@@ -749,11 +761,6 @@ def test_upgrade_from_0003_preserves_rows_without_evaluation_synthesis(
                     )
                 ).scalar_one()
                 assert payload == "checkpoint-keep-0003"
-
-                def _parity(sc: object) -> None:
-                    assert_migrated_matches_accepted_models(sc)  # type: ignore[arg-type]
-
-                await c.run_sync(_parity)
 
                 fk_rows = (
                     await c.execute(

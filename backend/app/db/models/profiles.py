@@ -1,10 +1,4 @@
-"""SQLAlchemy contracts for profile-family application tables.
-
-Defines ``candidate_profile``, ``profile_drafts``, and ``job_preferences`` with
-singleton ID checks, attachment foreign keys/delete actions, and JSON columns.
-JSON document shape, approval writes, and attachment cross-row state are
-enforced by services, not this module.
-"""
+"""SQLAlchemy contracts for multi-profile workspace state."""
 
 from __future__ import annotations
 
@@ -15,119 +9,106 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text, column
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
+from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
 
-# Fixed singleton primary keys (Master §6.1 / §6.2) — single production owners.
-CANDIDATE_PROFILE_ID = "active"
-PROFILE_DRAFT_ID = "current"
-JOB_PREFERENCES_ID = "active"
-
-# Preference document keys (lists only; service validates writes).
-JOB_PREFERENCE_KEYS: tuple[str, ...] = (
-    "target_roles",
-    "preferred_locations",
-    "acceptable_work_modes",
-    "target_seniority",
-)
+WORKSPACE_STATE_ID = "main"
 
 
-def _empty_job_preferences() -> dict[str, list[Any]]:
-    """Return a fresh empty preferences document (four empty lists)."""
-    return {key: [] for key in JOB_PREFERENCE_KEYS}
+class Profile(Base):
+    """One source-backed candidate profile owned by one attachment."""
 
+    __tablename__ = "profiles"
 
-class CandidateProfile(Base):
-    """Zero-or-one approved candidate profile row (singleton id ``active``)."""
-
-    __tablename__ = "candidate_profile"
-    __table_args__ = (
-        CheckConstraint(
-            column("id") == CANDIDATE_PROFILE_ID,
-            name="singleton_id",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    active_attachment_id: Mapped[str] = mapped_column(
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
+    attachment_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("attachments.id", ondelete="RESTRICT"),
         nullable=False,
         unique=True,
     )
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
     profile_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_version: Mapped[str] = mapped_column(Text, nullable=False)
+    source_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+        DateTime(timezone=True), nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    last_opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
     )
 
 
 class ProfileDraft(Base):
-    """Zero-or-one pending profile/preferences draft (singleton id ``current``)."""
+    """Pending candidate/profile-preference draft for an attachment."""
 
     __tablename__ = "profile_drafts"
-    __table_args__ = (
-        CheckConstraint(
-            column("id") == PROFILE_DRAFT_ID,
-            name="singleton_id",
-        ),
-    )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
     source_attachment_id: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey("attachments.id", ondelete="CASCADE"),
         nullable=True,
         unique=True,
     )
+    target_profile_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     draft_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+        DateTime(timezone=True), nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+        DateTime(timezone=True), nullable=False, default=utc_now
     )
 
 
-class JobPreferences(Base):
-    """Exactly one preferences row after seed (singleton id ``active``)."""
+class ProfilePreference(Base):
+    """Job preferences belonging to exactly one profile."""
 
-    __tablename__ = "job_preferences"
+    __tablename__ = "profile_preferences"
+
+    profile_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    preferences_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class WorkspaceState(Base):
+    """Singleton pointer to the active profile for the local workspace."""
+
+    __tablename__ = "workspace_state"
     __table_args__ = (
-        CheckConstraint(
-            column("id") == JOB_PREFERENCES_ID,
-            name="singleton_id",
-        ),
+        CheckConstraint(column("id") == WORKSPACE_STATE_ID, name="singleton_id"),
     )
 
     id: Mapped[str] = mapped_column(
         Text,
         primary_key=True,
-        default=JOB_PREFERENCES_ID,
-        server_default=JOB_PREFERENCES_ID,
+        default=WORKSPACE_STATE_ID,
+        server_default=WORKSPACE_STATE_ID,
     )
-    preferences_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON,
-        nullable=False,
-        default=_empty_job_preferences,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+    active_profile_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=utc_now,
+        DateTime(timezone=True), nullable=False, default=utc_now
     )

@@ -16,13 +16,17 @@ from sqlalchemy.sql.schema import Column, Table
 
 _MODELS = (m.Conversation, m.ChatMessage, m.AgentRun, m.ToolExecution)
 _NAMES = {
-    m.Conversation: "conversation",
+    m.Conversation: "conversations",
     m.ChatMessage: "chat_messages",
     m.AgentRun: "agent_runs",
     m.ToolExecution: "tool_executions",
 }
 _COLS: dict[str, tuple[set[str], set[str], str]] = {
-    "conversation": ({"id", "created_at", "updated_at"}, set(), "pk_conversation"),
+    "conversations": (
+        {"id", "profile_id", "title", "created_at", "updated_at", "last_opened_at"},
+        set(),
+        "pk_conversations",
+    ),
     "chat_messages": (
         {
             "id", "conversation_id", "role", "content", "structured_payload",
@@ -57,7 +61,7 @@ _COLS: dict[str, tuple[set[str], set[str], str]] = {
     ),
 }
 _CHECKS: dict[str, dict[str, tuple[str, ...]]] = {
-    "conversation": {"ck_conversation__singleton_id": (m.CONVERSATION_ID,)},
+    "conversations": {},
     "chat_messages": {
         "ck_chat_messages__role": tuple(m.CHAT_MESSAGE_ROLES),
         "ck_chat_messages__content_payload_coupling": ("content", "structured_payload"),
@@ -85,7 +89,9 @@ _CHECKS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 _FKS = (
     ("chat_messages", "fk_chat_messages__conversation_id", "conversation_id",
-     "conversation", "id", "CASCADE"),
+     "conversations", "id", "CASCADE"),
+    ("conversations", "fk_conversations__profile_id", "profile_id",
+     "profiles", "id", "CASCADE"),
     ("chat_messages", "fk_chat_messages__source_attachment_id",
      "source_attachment_id", "attachments", "id", "SET NULL"),
     ("agent_runs", "fk_agent_runs__user_message_id", "user_message_id",
@@ -197,11 +203,12 @@ def test_chat_table_columns_pk_utc_and_checks(table_name: str) -> None:
     _assert_checks(table, _CHECKS[table_name])
 
 
-def test_conversation_singleton_id_default() -> None:
-    table = _t("conversation")
+def test_conversation_profile_scope_and_uuid_default() -> None:
+    table = _t("conversations")
     assert _c(table, "id").primary_key
-    assert m.CONVERSATION_ID == "main"
-    _assert_const_default(_c(table, "id"), m.CONVERSATION_ID)
+    assert _default_name(_c(table, "id")) == "new_uuid"
+    assert _c(table, "profile_id").nullable is False
+    assert not hasattr(m, "CONVERSATION_ID")
 
 
 def test_chat_messages_role_payload_and_uuid() -> None:
@@ -287,6 +294,7 @@ def test_chat_family_fks_and_indexes() -> None:
         assert el[0].column.table.name == parent
         assert el[0].column.name == parent_col
         assert el[0].ondelete == ondelete
+    assert len(by_table["conversations"]) == 1
     assert len(by_table["chat_messages"]) == 2
     assert len(by_table["agent_runs"]) == 2
     assert len(by_table["tool_executions"]) == 2
@@ -296,6 +304,32 @@ def test_chat_family_fks_and_indexes() -> None:
         ix = matches[0]
         assert isinstance(ix, Index) and ix.unique is False
         assert [c.name for c in ix.columns] == columns
+
+
+def test_job_evaluation_unique_contract_includes_profile() -> None:
+    table = _t("job_evaluations")
+    unique = next(
+        constraint
+        for constraint in table.constraints
+        if isinstance(constraint, UniqueConstraint)
+        and constraint.name == "uq_job_evaluations__job_profile_context"
+    )
+    assert [column.name for column in unique.columns] == [
+        "job_id",
+        "profile_id",
+        "evaluation_context_hash",
+    ]
+    assert _c(table, "profile_id").nullable is False
+    fk = next(
+        constraint
+        for constraint in table.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+        and constraint.name == "fk_job_evaluations__profile_id"
+    )
+    assert list(fk.elements)[0].column.table.name == "profiles"
+    assert "ix_job_evaluations__profile_id" in {
+        index.name for index in table.indexes
+    }
 
 
 def test_chat_models_no_checkpoint_tool_role_or_service_behavior() -> None:

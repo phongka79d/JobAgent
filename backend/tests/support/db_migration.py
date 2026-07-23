@@ -30,8 +30,7 @@ from tests.support.schema_parity import (  # noqa: F401
 T = TypeVar("T")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_HEAD = "0004_add_job_evaluations"
-# Seed owner still lists pre-evaluation tables; parity includes job_evaluations.
+MIGRATION_HEAD = "0005_cv_profiles_multi_conversation"
 EXPECTED_FRESH_TABLES: frozenset[str] = PARITY_APPLICATION_TABLE_NAMES | {
     "alembic_version"
 }

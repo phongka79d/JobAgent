@@ -98,6 +98,8 @@ class CandidateProfile(BaseModel):
 
     model_config = StrictModelConfig
 
+    full_name: str | None = Field(default=None, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
     summary: str
     current_title: str | None
     total_experience_years: float | None
