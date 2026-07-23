@@ -139,6 +139,7 @@ class SavedJobsServiceError(Exception):
 class _SharedContextRevisions:
     """Active profile/CV/prefs facts shared across Jobs for context hashing."""
 
+    profile_id: str
     active_attachment_id: str
     cv_source_hash: str
     profile_revision: datetime
@@ -211,6 +212,7 @@ async def _load_shared_context(
     if cv_doc.source_hash.strip() == "":
         return None
     return _SharedContextRevisions(
+        profile_id=profile_row.id,
         active_attachment_id=attachment_id,
         cv_source_hash=cv_doc.source_hash,
         profile_revision=_as_aware_utc(profile_row.updated_at),
@@ -240,6 +242,7 @@ async def _lookup_state(
     session: AsyncSession,
     *,
     job_id: str,
+    profile_id: str | None,
     current_context_hash: str | None,
 ) -> tuple[EvaluationCurrentnessLiteral, JobEvaluationRecord | None]:
     """Derive none|current|stale and the relevant evaluation without writes.
@@ -247,15 +250,20 @@ async def _lookup_state(
     Without a current context hash (no active profile/CV), exact-current is
     impossible: any stored evaluation is ``stale``; otherwise ``none``.
     """
-    if current_context_hash is not None:
+    if current_context_hash is not None and profile_id is not None:
         lookup = await eval_repo.lookup_for_job(
             session,
             job_id=job_id,
+            profile_id=profile_id,
             current_context_hash=current_context_hash,
         )
         return lookup.currentness, lookup.evaluation
 
-    latest = await eval_repo.get_latest_for_job(session, job_id)
+    if profile_id is None:
+        return "none", None
+    latest = await eval_repo.get_latest_for_job(
+        session, job_id, profile_id=profile_id
+    )
     if latest is None:
         return "none", None
     return "stale", _record_from_orm(latest)
@@ -349,6 +357,7 @@ async def get_saved_jobs_page(
         state, evaluation = await _lookup_state(
             session,
             job_id=row.id,
+            profile_id=shared.profile_id if shared is not None else None,
             current_context_hash=context_hash,
         )
         items.append(
@@ -380,6 +389,7 @@ async def get_saved_job_detail(
     state, evaluation = await _lookup_state(
         session,
         job_id=row.id,
+        profile_id=shared.profile_id if shared is not None else None,
         current_context_hash=context_hash,
     )
     compact = _list_item(row, evaluation_state=state, evaluation=evaluation)
@@ -510,6 +520,7 @@ async def _project_job_item(
     state, evaluation = await _lookup_state(
         session,
         job_id=row.id,
+        profile_id=shared.profile_id if shared is not None else None,
         current_context_hash=context_hash,
     )
     item = _list_item(row, evaluation_state=state, evaluation=evaluation)

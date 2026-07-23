@@ -117,6 +117,7 @@ class _ResolvedContext:
     """Server-loaded facts for one evaluation attempt."""
 
     job_id: str
+    profile_id: str
     profile: CandidateProfile
     preferences: JobPreferences
     facts: EvaluationContextFacts
@@ -263,6 +264,7 @@ async def _resolve_context(
     )
     return _ResolvedContext(
         job_id=job.id,
+        profile_id=profile_row.id,
         profile=profile,
         preferences=preferences,
         facts=facts,
@@ -298,6 +300,7 @@ async def evaluate_job(
         existing = await eval_repo.get_by_job_context(
             session,
             job_id=resolved.job_id,
+            profile_id=resolved.profile_id,
             evaluation_context_hash=resolved.context_hash,
         )
         if existing is not None:
@@ -426,6 +429,7 @@ async def evaluate_job(
         existing_after = await eval_repo.get_by_job_context(
             session,
             job_id=resolved_job_id,
+            profile_id=rechecked.profile_id,
             evaluation_context_hash=context_hash,
         )
         if existing_after is not None:
@@ -437,7 +441,7 @@ async def evaluate_job(
         row, created = await eval_repo.insert_evaluation(
             session,
             job_id=facts.job_id,
-            active_attachment_id=facts.active_attachment_id,
+            profile_id=rechecked.profile_id,
             evaluation_context_hash=context_hash,
             job_revision=facts.job_revision,
             profile_revision=facts.profile_revision,
