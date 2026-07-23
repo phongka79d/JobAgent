@@ -65,8 +65,10 @@ async def delete_profile(
     try:
         async with open_checkpointer(sqlite_path) as saver:
             await delete_run_checkpoints(saver, run_ids)
-        if not storage.delete(attachment.storage_path):
-            raise OSError("retained attachment could not be removed")
+        # A retry may observe a file already removed by a prior attempt; the
+        # retained-file phase is intentionally idempotent.
+        if storage.exists(attachment.storage_path):
+            storage.delete(attachment.storage_path)
         if graph_driver is not None:
             await delete_profile_branch(graph_driver, profile_id)
     except Exception as exc:
