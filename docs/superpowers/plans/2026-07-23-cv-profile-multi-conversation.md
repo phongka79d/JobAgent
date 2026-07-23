@@ -172,7 +172,7 @@ ConversationListPage, ConversationOwner, and ConversationDeleteResult are intern
 - Modify: backend/tests/support/db_migration.py, backend/tests/support/schema_parity.py
 - Test: backend/tests/unit/test_profile_schemas.py, backend/tests/unit/test_profile_identity_guard.py, backend/tests/unit/test_attachment_profile_models.py, backend/tests/unit/test_chat_models.py, backend/tests/integration/test_migrations.py, backend/tests/integration/test_database_contract.py
 
-- [ ] **Step 1: Write failing identity and model-contract tests**
+- [x] **Step 1: Write failing identity and model-contract tests**
 
 Add backend/tests/unit/test_profile_identity_guard.py with a source-grounding matrix:
 
@@ -201,7 +201,7 @@ def test_identity_guard_nulls_inferred_or_unsupported_values() -> None:
 
 Extend the exact-field tests so `CandidateProfile` includes optional `full_name` and `location`, rejects unknown fields, accepts `None`, and preserves strict validation. Add model tests asserting `Profile.attachment_id` is unique/non-null, `WorkspaceState.id` is fixed to `main`, `Conversation.profile_id` is non-null, and `JobEvaluation.profile_id` participates in the named unique constraint.
 
-- [ ] **Step 2: Run the new tests to verify RED**
+- [x] **Step 2: Run the new tests to verify RED**
 
 ~~~powershell
 Set-Location backend
@@ -210,7 +210,7 @@ Set-Location backend
 
 Expected: collection or assertions fail because the new models, fields, and guard do not yet exist.
 
-- [ ] **Step 3: Extend the validated profile contract and add the pure guard**
+- [x] **Step 3: Extend the validated profile contract and add the pure guard**
 
 In backend/app/schemas/profile.py, add the fields before the existing summary fields:
 
@@ -258,7 +258,7 @@ def guard_optional_identity_fields(
 
 Call this guard only after the document extractor has supplied direct source fragments; never derive a name/location from filename, email, phone, or street-address fields.
 
-- [ ] **Step 4: Replace singleton ORM contracts with first-class rows**
+- [x] **Step 4: Replace singleton ORM contracts with first-class rows**
 
 Replace the singleton `CandidateProfile` ORM class with `Profile(__tablename__="profiles")`, add `ProfilePreference(__tablename__="profile_preferences")` and `WorkspaceState(__tablename__="workspace_state")` in profiles.py, and replace `Conversation` in chat.py with `__tablename__ = "conversations"` and a UUID default. Keep `ProfileDraft` as the one pending approval row but add nullable `target_profile_id` with `ondelete="CASCADE"`. Remove `CONVERSATION_ID`, `CANDIDATE_PROFILE_ID`, and `JOB_PREFERENCES_ID` from production callers; retain only `WORKSPACE_STATE_ID = "main"` for the workspace singleton.
 
@@ -275,7 +275,7 @@ conversations: id, profile_id, title, created_at, updated_at, last_opened_at
 
 Keep the existing message/run/tool status checks and indexes, but point `chat_messages.conversation_id` to `conversations.id`. Change evaluation uniqueness to `(job_id, profile_id, evaluation_context_hash)` and add `profile_id` to its index/FK set.
 
-- [ ] **Step 5: Create the guarded 0005 migration**
+- [x] **Step 5: Create the guarded 0005 migration**
 
 Create backend/migrations/versions/0005_cv_profiles_multi_conversation.py with revision `0005_cv_profiles_multi_conversation` and down revision `0004_add_job_evaluations`. Before any drop, run this exact preflight pattern through `op.get_bind()`:
 
@@ -307,7 +307,7 @@ def _assert_reset_workspace(bind: sa.Connection) -> None:
 
 After the guard, drop the actual 0004 table names in dependency order (`tool_executions`, `agent_runs`, `chat_messages`, `job_evaluations`, `conversation`, `job_preferences`, `candidate_profile`, `profile_drafts`) and recreate the accepted metadata with explicit `op.create_table`/`op.create_index` calls for `profiles`, `profile_preferences`, `workspace_state`, `conversations`, and the dependent chat/evaluation tables. Do not call `Base.metadata.create_all()` and do not touch tables whose names start with `checkpoint` or `langgraph_`. Create `workspace_state(main, NULL, CURRENT_TIMESTAMP)` and no profile/conversation rows; startup seeds only the workspace row idempotently.
 
-- [ ] **Step 6: Update migration/parity harnesses and run schema tests**
+- [x] **Step 6: Update migration/parity harnesses and run schema tests**
 
 Set `MIGRATION_HEAD = "0005_cv_profiles_multi_conversation"`, replace `APPLICATION_TABLE_NAMES` with the new table set, update expected constraint/index counts from the metadata oracle rather than hard-coded old values, and replace singleton assertions with:
 
@@ -330,7 +330,7 @@ Run:
 
 Expected: all focused tests pass, parity covers the replacement tables, and no migration creates profile data or calls a provider.
 
-- [ ] **Step 7: Commit the schema foundation**
+- [x] **Step 7: Commit the schema foundation**
 
 ~~~powershell
 Set-Location ..
