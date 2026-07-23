@@ -350,7 +350,7 @@ git commit -m "feat: add profile and conversation schema"
 - Modify: backend/app/db/seed.py, backend/app/main.py
 - Test: backend/tests/unit/test_conversation_titles.py, backend/tests/unit/test_activity_gate.py, backend/tests/integration/test_profile_selection.py, backend/tests/integration/test_chat_persistence.py
 
-- [ ] Step 1: Add failing repository and gate tests
+- [x] Step 1: Add failing repository and gate tests
 
 Seed two profiles, three conversations, and one running/interrupted run, then assert all operations are scoped:
 
@@ -369,7 +369,7 @@ async def test_gate_rejects_running_and_interrupted_runs(session):
 
 Add a message repository test showing that list_messages_before with conversation B never returns conversation A rows, and a run ownership test resolving run ID -> message -> conversation -> profile.
 
-- [ ] Step 2: Run the tests to verify RED
+- [x] Step 2: Run the tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -378,7 +378,7 @@ Set-Location backend
 
 Expected: missing-module/signature failures and singleton rows prevent the new tests from passing.
 
-- [ ] Step 3: Add deterministic title and profile repository primitives
+- [x] Step 3: Add deterministic title and profile repository primitives
 
 Create conversation_titles.py with the frozen derive_conversation_title implementation from the contract. Refactor profiles.py to expose these exact operations without opening or committing sessions:
 
@@ -427,7 +427,7 @@ async def create_profile(
 
 Add update_display_name, get_profile_preferences, and upsert_profile_preferences with the same session/flush ownership. Reject whitespace-only IDs/names before SQL.
 
-- [ ] Step 4: Add workspace and conversation repositories
+- [x] Step 4: Add workspace and conversation repositories
 
 Create workspace_state.py with get_state, get_active_profile_id, and set_active_profile_id. Create conversations.py with these exact implementations; encode/decode uses a strict Pydantic cursor containing last_opened_at, updated_at, and id:
 
@@ -539,7 +539,7 @@ async def update_title_from_first_user_message(
 
 Use an opaque URL-safe cursor containing the ordering timestamp pair and ID; malformed cursors go through the existing Pydantic 422 boundary.
 
-- [ ] Step 5: Require conversation IDs in message, run, and evaluation repositories
+- [x] Step 5: Require conversation IDs in message, run, and evaluation repositories
 
 Change the message repository interface from implicit main to explicit arguments:
 
@@ -602,7 +602,7 @@ async def list_messages(
 
 Remove all implicit singleton filters. Add resolve_run_owner(session, run_id) -> ConversationOwner, list_run_ids_for_conversation, and list_run_ids_for_profile to agent_runs.py. Add profile_id to every evaluation repository lookup/insert/latest method and require it in the query predicate.
 
-- [ ] Step 6: Centralize the activity gate and workspace seed
+- [x] Step 6: Centralize the activity gate and workspace seed
 
 Create activity_gate.py with one joined predicate reused by these exact functions:
 
@@ -636,7 +636,7 @@ async def assert_profile_idle(
 
 Implement `_has_activity` as `select(AgentRun.id).join(ChatMessage, AgentRun.user_message_id == ChatMessage.id).join(Conversation, ChatMessage.conversation_id == Conversation.id).where(AgentRun.state.in_(("running", "interrupted")), *owner_predicates).limit(1)`. Replace ensure_singleton_seeds with ensure_workspace_seed, inserting only workspace_state(id='main', active_profile_id=NULL). Stop calling the old seed helper from main.py and add PATCH to CORS allow_methods.
 
-- [ ] Step 7: Run repository/static gates and commit
+- [x] Step 7: Run repository/static gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_conversation_titles.py tests/unit/test_activity_gate.py tests/integration/test_profile_selection.py tests/integration/test_chat_persistence.py -q
