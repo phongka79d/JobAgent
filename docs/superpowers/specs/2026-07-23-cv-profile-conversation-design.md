@@ -1,8 +1,10 @@
 # CV Profiles and Multi-Conversation Design
 
 **Date:** 2026-07-23
-**Status:** Approved design
-**Scope:** Replace the singleton CV/profile/conversation model with one durable profile per CV and multiple independently selectable conversations per profile.
+**Status:** Approved design, including pending-profile bootstrap revision
+**Scope:** Replace the singleton CV/profile/conversation model with one durable
+profile identity per accepted CV upload and multiple independently selectable
+conversations per ready profile.
 
 ## 1. Context
 
@@ -31,7 +33,8 @@ provider calls.
 
 ## 2. Goals
 
-- Create one durable profile for every approved CV.
+- Create one durable profile identity when a new CV upload is accepted, then
+  promote that same identity when the CV is approved.
 - Preserve multiple profiles and allow exactly one to be selected at a time.
 - Store the complete extracted CV document, chunks, source hash, extraction
   version, candidate profile, location, and skills for each profile.
@@ -69,19 +72,30 @@ Replace the singleton approved-profile model with a multi-row `profiles` table:
 | `id` | UUID primary key |
 | `attachment_id` | Unique, non-null FK to one retained CV attachment |
 | `display_name` | User-editable, non-empty, bounded string |
-| `profile_json` | Complete validated extracted candidate profile |
+| `profile_json` | Null while pending; otherwise the complete validated extracted candidate profile |
 | `location` | Nullable normalized display projection from `profile_json` |
-| `extraction_version` | Non-empty version of the persisted extraction |
-| `source_hash` | Hash of the persisted canonical CV source |
-| `state` | `ready` or `deleting`; deletion failures remain retryable |
+| `extraction_version` | Null while pending; otherwise the non-empty persisted extraction version |
+| `source_hash` | Null while pending; otherwise the persisted canonical CV source hash |
+| `state` | `pending`, `ready`, or `deleting`; deletion failures remain retryable |
 | `created_at` / `updated_at` | Aware timestamps |
 | `last_opened_at` | Updated when the profile is selected |
 
-`attachment_id` is the one-to-one CV constraint. Profile JSON remains the
-authoritative candidate fact document. `location` is a query/display
-projection and must equal the validated profile value. Skill tags are read
-from validated persisted profile skills; the frontend does not infer or
-normalize them.
+`attachment_id` is the one-to-one CV constraint. A pending profile has a real
+UUID, attachment, sanitized filename-derived display name, timestamps, and one
+conversation, but it has no candidate facts, extraction revision, preferences,
+or graph projection. A database check couples state and extraction fields:
+
+- `pending` requires `profile_json`, `location`, `extraction_version`, and
+  `source_hash` to be null;
+- `ready` requires all three fields to be non-null; and
+- `deleting` preserves one of those two coherent shapes so failed cleanup is
+  retryable without creating partially approved truth.
+
+At most one pending-shape profile may exist because the application retains one
+current draft/approval flow. Profile JSON remains authoritative only for ready
+profiles. `location` must equal the validated ready-profile value. Skill tags
+come only from validated persisted ready-profile skills; the frontend does not
+infer or normalize them.
 
 The validated candidate-profile contract gains optional `full_name` and
 `location` fields. The document/profile extractor may populate them only from
@@ -90,9 +104,10 @@ identity or location. Phone numbers, email addresses, street addresses, and
 other contact details are neither required nor exposed by the profile-list
 contract. The semantic guard covers these two fields before persistence.
 
-The default `display_name` is the extracted candidate name. If no usable name
-exists, it falls back to the sanitized original CV filename. Renaming changes
-only `display_name`, never extracted facts or source identity.
+The pending display name is the sanitized original filename. Approval replaces
+it with the extracted candidate name when one is supported, otherwise it keeps
+the sanitized filename. Pending profiles cannot be renamed. Renaming a ready
+profile changes only `display_name`, never extracted facts or source identity.
 
 ### 4.2 Persisted extraction ownership
 
@@ -102,10 +117,16 @@ profile-owned through the profile's unique attachment:
 - `cv_documents` stores the approved structured document, extraction version,
   and source hash.
 - `attachment_text_chunks` stores ordered source chunks.
-- `profiles.profile_json` stores approved candidate facts and skills.
+- `profiles.profile_json` stores approved candidate facts and skills only after
+  pending-to-ready promotion.
 - The retained PDF remains in attachment storage.
 
-Selecting a profile reads these records only. It makes zero provider,
+`attachments.file_hash` identifies exact uploaded bytes and is available while
+pending. `profiles.source_hash` identifies the validated canonical extracted
+source and remains null until approval; the two hashes are never substituted
+for one another.
+
+Selecting a ready profile reads these records only. It makes zero provider,
 extraction, embedding, filesystem-write, or scoring calls.
 
 Explicit **Re-extract CV** operates on the same profile and attachment. It
@@ -122,7 +143,7 @@ Replace singleton job preferences with `profile_preferences`:
 
 | Field | Contract |
 | --- | --- |
-| `profile_id` | Primary key and FK to `profiles.id` |
+| `profile_id` | Primary key and FK to a ready `profiles.id` |
 | `preferences_json` | Existing validated preference document |
 | timestamps | Aware creation/update timestamps |
 
@@ -134,10 +155,17 @@ Add a singleton `workspace_state` row:
 | `active_profile_id` | Nullable FK to `profiles.id` |
 | `updated_at` | Selection timestamp |
 
-Only `workspace_state` identifies the active profile. Attachment `active` and
-`archived` states continue to mirror that selection for compatibility with
-retained-file and CV lifecycle services: the selected profile's attachment is
-`active`, and other ready profile attachments are `archived`.
+`workspace_state.active_profile_id` is the selected workspace profile and may
+temporarily point to the one pending profile. Every consumer of approved
+candidate truth must additionally require `Profile.state == "ready"`; workspace
+selection alone is not approval evidence.
+
+Attachment `active` and `archived` states mirror ready-profile selection for
+compatibility with retained-file and CV lifecycle services. A pending profile's
+attachment remains `staged`. If a ready profile existed before a new upload,
+its attachment remains the sole `active` attachment until the pending profile
+is approved or discarded. Approval archives that prior attachment and activates
+the promoted profile's attachment.
 
 ### 4.4 Conversations
 
@@ -156,11 +184,18 @@ longer forced to `main`. A conversation title starts as **Chat mới** and is
 updated from the first non-empty user message by whitespace normalization and
 bounded truncation. No provider call is used.
 
-The selected conversation for a profile is the non-deleting conversation with
+The selected conversation for a profile is the conversation with
 the greatest `last_opened_at`, then `updated_at`, then stable ID. Selecting an
 older conversation updates `last_opened_at`, so switching away and back opens
-the user's last selection. Every new profile receives one empty conversation
-after approval.
+the user's last selection. Every new profile receives one empty bootstrap
+conversation in the upload transaction, before extraction starts. Approval
+preserves that conversation and never creates a second one.
+
+The pending profile's bootstrap conversation supports the owned extraction
+turn, approval resume, and draft-correction turns after **Request Changes**. It
+does not support new-conversation creation, arbitrary profile switching, or
+conversation deletion. The synthetic upload/extraction turn does not set the
+conversation title; the first ordinary user message derives the bounded title.
 
 Run and tool ownership remains normalized:
 
@@ -182,7 +217,45 @@ Deleting a profile deletes its evaluations but never deletes a Saved Job.
 
 ## 5. Backend services and API
 
-### 5.1 Profile APIs
+### 5.1 Upload bootstrap and pending promotion
+
+For a genuinely new file hash, `POST /api/attachments/cv` performs no provider
+work and uses this order:
+
+1. Enforce the workspace activity/pending gate, validate and hash the PDF, and
+   promote the temporary file outside a database transaction.
+2. In one short SQLite transaction, create the staged attachment, pending
+   profile, one **Chat mới** conversation, and select the pending profile in
+   `workspace_state`.
+3. If the transaction fails, remove only the newly promoted UUID file.
+4. Return safe bootstrap metadata so the frontend applies the server-created
+   profile/conversation IDs before starting the existing chat SSE turn.
+
+The upload outcomes are `new_pending`, `retry_pending`, `existing_pending`,
+`existing_active`, and `existing_profile`. Pending outcomes include a
+`PendingProfileBootstrap` containing the safe pending profile projection, the
+server-created `ConversationSummary`, and `start_extraction`. The flag is true
+for a new/retried pending upload and for an existing pending upload only when
+the server proves that no draft or active/interrupted run already owns it.
+
+While a pending profile exists, a different upload is rejected with
+`PROFILE_SETUP_IN_PROGRESS`. Exact-hash reuse targets the existing pending
+identity. Extraction failures keep the pending profile/conversation and durable
+failed run history; exact-hash re-upload moves the failed attachment back to
+staged and retries without duplicating profile or conversation rows.
+
+The profile tool receives the durable conversation owner's `profile_id`. It may
+target a draft only when that profile owns the attachment and is either pending
+for initial extraction or ready for explicit re-extraction. Ownership mismatch
+is rejected before draft/document/chunk writes.
+
+Approval promotes the same pending row to ready, writes validated profile facts,
+preferences, document/chunks, extraction version, and source hash, activates its
+attachment, archives the previously active ready attachment when one exists,
+and preserves its conversation. **Request Changes** preserves the same pending
+profile, attachment, targeted draft, and conversation.
+
+### 5.2 Profile APIs
 
 ```text
 GET    /api/profiles
@@ -192,20 +265,29 @@ POST   /api/profiles/{profile_id}/activate
 DELETE /api/profiles/{profile_id}
 ```
 
-- List/detail responses expose safe profile metadata, CV filename/state,
-  location, bounded ordered skill tags, current extraction revision, and
-  whether the profile is active.
-- `PATCH` changes only `display_name` and rejects extra fields.
+- List responses expose ready/deleting metadata and a discriminated pending
+  projection. Pending rows expose filename, attachment state, setup status, and
+  timestamps, but no candidate JSON, location, skills, preferences, extraction
+  version, or source hash.
+- Detail, `PATCH`, activation, and re-extraction require a ready profile.
+  `PATCH` changes only `display_name` and rejects extra fields.
 - Activation derives all context from the stored profile. It never accepts
   profile JSON, attachment ownership, or extracted text from the client.
 - Delete delegates to a retryable profile-deletion coordinator.
 
 CV upload/extraction keeps the current staged-draft and explicit Save Profile
-flow. Successful first approval creates a new profile rather than replacing a
-singleton profile, persists its extraction artifacts, creates preferences and
-the first conversation, and activates it.
+flow. Approval promotes a pending identity rather than replacing a singleton or
+creating a second profile/conversation.
 
-### 5.2 Conversation APIs
+`ProfileListItem.setup_status` is server-derived and is one of
+`awaiting_extraction`, `awaiting_approval`, `extraction_failed`, or null. It is
+non-null only for a pending profile: a targeted current draft yields
+`awaiting_approval`, a failed attachment yields `extraction_failed`, and the
+remaining pending state yields `awaiting_extraction`. Pending skill tags are an
+empty list and `skill_count` is zero; these are empty-state facts, not inferred
+candidate metadata.
+
+### 5.3 Conversation APIs
 
 ```text
 GET    /api/profiles/{profile_id}/conversations
@@ -229,11 +311,17 @@ POST   /api/chat/runs/{run_id}/resume
   rejects mismatches or deleted owners.
 - SSE event names and payloads remain unchanged.
 
+The active pending profile may list and hydrate its single bootstrap
+conversation. Creating, selecting, or deleting conversations remains ready-only.
+Pending turns are accepted only for the exact staged owner attachment or for
+draft correction after a targeted draft exists. Matching, evaluation, graph,
+and unrelated chat paths fail closed until promotion.
+
 Deleting the last conversation leaves the profile with no durable messages and
 returns a replacement empty conversation ID created in the same service
 operation. The frontend immediately renders that blank conversation.
 
-### 5.3 Switching profiles
+### 5.4 Switching profiles
 
 Activation follows this sequence:
 
@@ -247,11 +335,17 @@ Activation follows this sequence:
    persisted data only.
 
 The graph stores profile/CV branches keyed by profile identity. Matching and
-evaluation queries include the active profile ID, preventing cross-profile
+evaluation queries include the selected ready profile ID, preventing cross-profile
 Candidate/CV reads. Switching performs no provider work. A graph refresh
 failure preserves SQLite selection and returns safe rebuild guidance.
 
-### 5.4 Activity gate
+A pending profile is selected by its upload transaction, not by the activation
+route. It blocks switching until it is approved or discarded, preventing a
+single current draft or approval from becoming detached from the visible
+workspace. All matching/evaluation/graph consumers return a safe setup
+precondition with zero provider, scoring, or graph calls while pending.
+
+### 5.5 Activity and pending gates
 
 Profile switch, conversation switch, conversation creation, conversation
 deletion, and profile deletion are rejected while a run is `running` or
@@ -259,12 +353,18 @@ deletion, and profile deletion are rejected while a run is `running` or
 authority. This avoids moving the visible context away from an SSE stream or
 approval that still belongs to another conversation.
 
+The presence of a pending-shape profile also blocks profile switching,
+additional different-file uploads, extra conversation mutations, and deletion
+of other profiles. Its own retry, approval/correction flow, and server-checked
+discard remain available.
+
 Stable errors include:
 
 - `PROFILE_NOT_FOUND`
 - `PROFILE_NOT_READY`
 - `PROFILE_SWITCH_BLOCKED`
 - `PROFILE_DELETE_BLOCKED`
+- `PROFILE_SETUP_IN_PROGRESS`
 - `CONVERSATION_NOT_FOUND`
 - `CONVERSATION_PROFILE_MISMATCH`
 - `CONVERSATION_SWITCH_BLOCKED`
@@ -309,6 +409,12 @@ coordinator:
 External cleanup failure leaves a retryable `deleting` profile and never
 reports false success. Global Saved Jobs and unrelated profiles remain intact.
 
+Deleting a pending profile uses the same retryable coordinator but skips
+Candidate/CV graph deletion because no approved branch exists. It removes owned
+checkpoints, draft/chunks/document draft, conversation history, retained file,
+profile, and attachment, then restores the most recently opened ready profile
+or clears workspace selection.
+
 ## 7. Frontend composition with Astryx
 
 Astryx is mandatory for all new UI. Implementation must inspect the installed
@@ -323,6 +429,8 @@ The sidebar has two coordinated levels:
    - Sanitized CV filename and persisted location.
    - Bounded skill tags; overflow is represented as `+N`.
    - Rename, explicit re-extract, and delete actions in an Astryx menu/dialog.
+   - Pending rows show setup progress or extraction failure without invented
+     location, skills, or candidate facts; only retry/discard actions apply.
 
 2. **Conversation list for the selected profile**
    - **Chat mới** action.
@@ -334,6 +442,8 @@ The chat view remains the sole owner of SSE/reducer state. Profile and
 conversation selection live above it in App composition and cause a keyed
 history reset, not a second chat store. While the chat reducer is connecting,
 streaming, or awaiting approval, profile/conversation actions are disabled.
+Upload bootstrap applies only server-returned profile/conversation IDs before
+the existing ChatPage starts the extraction stream.
 
 On mobile, the same profile and conversation lists render in the Astryx
 navigation drawer. Keyboard navigation, focus visibility, dialog focus trap,
@@ -343,6 +453,10 @@ Empty states cover:
 
 - No profiles: prompt to upload a CV.
 - Profile with no messages: blank selected conversation with composer.
+- Pending profile without a draft: show setup/retry status and disable ordinary
+  chat while allowing the owned automatic extraction turn.
+- Pending profile after **Request Changes**: keep the same conversation and
+  enable draft-correction turns.
 - Profile extraction unavailable/deleting: disable chat and show a safe status.
 - No location or skills: explicit neutral metadata fallback, never fabricated
   tags.
@@ -353,19 +467,20 @@ Empty states cover:
 
 ```text
 Upload PDF
-  → staged attachment
+  → staged attachment + pending profile + first conversation
+  → apply server bootstrap IDs to workspace state
   → extract document/chunks/profile once
-  → durable draft
+  → durable draft targeted to the pending profile
   → user approves Save Profile
-  → persist profile + extraction + preferences + first conversation
-  → activate profile
+  → promote the same profile to ready + persist extraction/preferences
+  → activate attachment; preserve conversation ID
   → project persisted branch to Neo4j
 ```
 
 ### 8.2 Returning to a profile
 
 ```text
-Select profile
+Select ready profile
   → activity gate
   → SQLite selection transaction
   → load persisted profile/document/chunks
@@ -376,6 +491,8 @@ Select profile
 This path has zero extraction, LLM, embedding, or scoring calls.
 
 ### 8.3 New chat
+
+New-chat creation is available only after the selected profile is ready.
 
 ```text
 Chat mới
@@ -412,6 +529,12 @@ chain. Documentation must not imply that legacy user rows are transformed.
 
 - Schema constraints enforce one profile per attachment and conversation
   ownership.
+- Schema constraints enforce coherent pending/ready/deleting extraction fields
+  and at most one pending setup flow.
+- New upload atomically creates a pending profile/conversation with zero
+  extraction, embedding, evaluation, or graph calls.
+- Pending extraction, correction, retry, approval, and deletion preserve exact
+  profile/conversation ownership; approval promotes in place.
 - Profile activation selects exact persisted data and records zero provider,
   extraction, embedding, or scoring calls.
 - Context/history cannot cross profile or conversation boundaries.
@@ -424,11 +547,16 @@ chain. Documentation must not imply that legacy user rows are transformed.
 - Re-extraction replaces the persisted profile revision while preserving
   conversations and marking old evidence stale.
 - Graph reads and matching are scoped by profile identity.
+- Pending selection is excluded from approved context, matching, evaluation,
+  observability, rebuild, and graph projection.
 - Migration tests validate the new schema from an empty database.
 
 ### Frontend
 
 - Profile cards display persisted name, filename, location, and skill tags.
+- Pending cards display only safe setup metadata and preserve reload identity.
+- Upload bootstrap adopts server IDs before starting exactly one extraction
+  turn through the existing ChatPage reducer.
 - Rename changes only display metadata.
 - Switching profiles/chat lists resets and hydrates the correct reducer state.
 - **Chat mới** creates one conversation and handles double clicks.
@@ -446,13 +574,16 @@ chain. Documentation must not imply that legacy user rows are transformed.
 - Alembic upgrade on a fresh reset database.
 - Docker Compose config/build/health.
 - Browser smoke test for profile creation, switching, chat creation/selection,
-  confirm deletion, reload persistence, and zero visible cross-profile history.
+  pending upload/reload/promotion/retry, confirm deletion, reload persistence,
+  and zero visible cross-profile history.
 
 ## 11. Acceptance summary
 
-The design is complete when a user can maintain multiple CV-backed profiles,
-switch instantly between persisted extractions, see attractive Astryx metadata
-tags, maintain multiple isolated chats per profile, and permanently delete a
+The design is complete when a new upload immediately has one durable pending
+profile/conversation owner, approval promotes that same identity without
+duplication, and a user can maintain multiple ready CV-backed profiles, switch
+instantly between persisted extractions, see attractive Astryx metadata tags,
+maintain multiple isolated chats per ready profile, and permanently delete a
 chat or profile only after confirmation. No selection action may trigger CV
-extraction, and no operation may expose or mutate another profile's chat or
-evaluation state.
+extraction, pending state may never be treated as approved candidate truth, and
+no operation may expose or mutate another profile's chat or evaluation state.
