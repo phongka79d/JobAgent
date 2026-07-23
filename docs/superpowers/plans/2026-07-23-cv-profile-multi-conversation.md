@@ -1056,7 +1056,7 @@ async def select_owned_conversation(
 
 Each handler maps stable errors without message/CV/provider text. Task 6 adds DELETE only after its checkpoint coordinator exists.
 
-- [ ] Step 4: Thread IDs through turn creation and context
+- [x] Step 4: Thread IDs through turn creation and context
 
 Change create_user_turn to accept conversation_id and resolve the owning profile_id, attachment_id, and preferences inside its transaction:
 
