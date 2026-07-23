@@ -33,9 +33,11 @@ from app.graph.retrieval import (
 )
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import jobs as jobs_repo
 from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tool_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.embeddings import (
     LOCKED_EMBEDDING_DIMENSIONS,
     LOCKED_EMBEDDING_MODEL,
@@ -411,6 +413,9 @@ async def _seed_match_profile(
             session,
             preferences_json=prefs,
         )
+        profile = await prof_repo.get_active_profile(session)
+        assert profile is not None
+        await conversations_repo.create_for_profile(session, profile_id=profile.id)
         await session.commit()
 
 
@@ -459,7 +464,11 @@ async def _revision_rows(
     factory: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     async with factory() as session:
-        snapshot = await load_source_revision_snapshot(session)
+        profile_id = await workspace_repo.get_active_profile_id(session)
+        assert profile_id is not None
+        snapshot = await load_source_revision_snapshot(
+            session, profile_id=profile_id
+        )
     candidates: list[dict[str, Any]] = []
     if snapshot.candidate is not None:
         candidates.append(
@@ -1031,10 +1040,24 @@ def test_match_jobs_orchestrator_delegates_and_is_read_only() -> None:
 
 
 async def _seed_run(session: Any, content: str = "match tool turn") -> str:
+    profile_id = await workspace_repo.get_active_profile_id(session)
+    if profile_id is None:
+        profiles = await prof_repo.list_profiles(session)
+        if not profiles:
+            raise AssertionError("a durable profile is required to own a run")
+        profile_id = profiles[0].id
+    conversation = await conversations_repo.most_recent_for_profile(
+        session, profile_id=profile_id
+    )
+    if conversation is None:
+        conversation = await conversations_repo.create_for_profile(
+            session, profile_id=profile_id
+        )
     user = await messages_repo.insert_message(
         session,
         role=CHAT_MESSAGE_ROLE_USER,
         content=content,
+        conversation_id=conversation.id,
     )
     run = await runs_repo.create_run(session, user_message_id=user.id)
     await session.flush()
@@ -1087,7 +1110,9 @@ def test_production_registry_includes_match_jobs_sixth() -> None:
 
 def test_match_jobs_tool_no_profile_terminal_failed(sqlite_factory: Any) -> None:
     async def _body() -> None:
+        await seed_candidate(sqlite_factory)
         async with sqlite_factory() as session:
+            await workspace_repo.set_active_profile_id(session, None)
             run_id = await _seed_run(session, "no profile match")
             await session.commit()
 
@@ -1278,7 +1303,18 @@ def test_match_jobs_tool_provider_failure_terminal_and_history(
             await session.commit()
 
         async with sqlite_factory() as session:
-            page = await get_history_page(session, limit=50, before=None)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            conversation = await conversations_repo.most_recent_for_profile(
+                session, profile_id=profile_id
+            )
+            assert conversation is not None
+            page = await get_history_page(
+                session,
+                conversation_id=conversation.id,
+                limit=50,
+                before=None,
+            )
             hist = history_page_as_dict(page)
         hist_blob = json.dumps(hist, default=str)
         assert "embedding_json" not in hist_blob

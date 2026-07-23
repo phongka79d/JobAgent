@@ -1400,7 +1400,7 @@ git commit -m "feat: add retryable profile and conversation deletion"
 - Modify: backend/app/repositories/job_evaluations.py, backend/app/api/jobs.py
 - Test: backend/tests/unit/test_evaluation_context.py, test_job_evaluation.py, backend/tests/integration/test_job_evaluations.py, test_saved_jobs_api.py, test_match_jobs.py
 
-- [ ] Step 1: Write failing two-profile evaluation tests
+- [x] Step 1: Write failing two-profile evaluation tests
 
 Extend existing _seed_parents, _facts, and _match_payload fixtures:
 
@@ -1423,7 +1423,7 @@ def test_delete_profile_removes_only_its_evaluations(evaluation_context):
 
 Add a zero-provider activation test showing switching profiles changes list/detail currentness only through context lookup and does not evaluate automatically.
 
-- [ ] Step 2: Run evaluation tests to verify RED
+- [x] Step 2: Run evaluation tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -1432,15 +1432,15 @@ Set-Location backend
 
 Expected: the current uniqueness key omits profile_id, and services read the singleton active profile/preferences.
 
-- [ ] Step 3: Add profile identity to context and persistence
+- [x] Step 3: Add profile identity to context and persistence
 
 Change EvaluationContextFacts to require profile_id and include it in canonical JSON/hash bytes before active_attachment_id. Change JobEvaluationRecord, repository filters, service _resolve_context, and API response currentness to carry the profile ID. Use the active workspace profile only when the API caller omits an explicit profile; never accept a client profile ID that is not the workspace owner.
 
-- [ ] Step 4: Preserve global Saved Job behavior
+- [x] Step 4: Preserve global Saved Job behavior
 
 Refactor saved_jobs.py and matching.py shared-context loaders to resolve (profile, preferences, attachment) from workspace_state. Keep Job list/detail global and preserve exact no-provider/no-mutation GET behavior. Add profile ID to cache/currentness keys, invalidate currentness after activation/re-extraction, and never auto-call evaluate_job.
 
-- [ ] Step 5: Run evaluation/static gates and commit
+- [x] Step 5: Run evaluation/static gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_evaluation_context.py tests/unit/test_job_evaluation.py tests/integration/test_job_evaluations.py tests/integration/test_saved_jobs_api.py tests/integration/test_match_jobs.py -q

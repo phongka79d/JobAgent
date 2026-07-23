@@ -26,9 +26,11 @@ from app.graph.retrieval import (
     retrieve_exact_job_candidate,
 )
 from app.repositories import attachments as att_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import job_evaluations as eval_repo
 from app.repositories import profiles as prof_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.jobs import parse_job_post_extraction
 from app.schemas.matching import MatchResult, parse_match_result
 from app.schemas.profile import parse_candidate_profile, parse_job_preferences
@@ -445,6 +447,11 @@ async def _seed_eval_profile(
             session,
             preferences_json=prefs,
         )
+        active_profile = await prof_repo.get_active_profile(session)
+        assert active_profile is not None
+        await conversations_repo.create_for_profile(
+            session, profile_id=active_profile.id
+        )
         await session.commit()
         return att.id
 
@@ -453,7 +460,11 @@ async def _revision_rows(
     factory: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     async with factory() as session:
-        snapshot = await load_source_revision_snapshot(session)
+        profile_id = await workspace_repo.get_active_profile_id(session)
+        assert profile_id is not None
+        snapshot = await load_source_revision_snapshot(
+            session, profile_id=profile_id
+        )
     candidates: list[dict[str, Any]] = []
     if snapshot.candidate is not None:
         candidates.append(
@@ -478,7 +489,7 @@ def _eval_driver(
     fail_on_query_contains: str | None = None,
 ) -> ScriptedReadDriver:
     scripts: list[ScriptedRead] = [
-        ScriptedRead("MATCH (c:Candidate)", candidates),
+        ScriptedRead("MATCH (c:Candidate", candidates),
         ScriptedRead("MATCH (j:Job)", jobs),
     ]
     if exact_rows is not None:
@@ -620,7 +631,9 @@ def test_evaluate_job_creates_then_reuses_with_zero_repeat_calls(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 1
 
@@ -666,6 +679,7 @@ def test_evaluate_job_context_change_discards_without_new_row(
             )
             return job_evaluation_mod._ResolvedContext(
                 job_id=resolved.job_id,
+                profile_id=resolved.profile_id,
                 profile=resolved.profile,
                 preferences=resolved.preferences,
                 facts=drifted_facts,
@@ -690,7 +704,9 @@ def test_evaluate_job_context_change_discards_without_new_row(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 0
 
@@ -726,7 +742,7 @@ def test_evaluate_job_uniqueness_race_reloads_winner(
             row, created = await real_insert(
                 session,
                 job_id=resolved.job_id,
-                active_attachment_id=resolved.facts.active_attachment_id,
+                profile_id=resolved.profile_id,
                 evaluation_context_hash=resolved.context_hash,
                 job_revision=resolved.facts.job_revision,
                 profile_revision=resolved.facts.profile_revision,
@@ -779,7 +795,9 @@ def test_evaluate_job_uniqueness_race_reloads_winner(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 1
 
@@ -809,7 +827,9 @@ def test_evaluate_job_graph_unavailable_no_false_success(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 0
 
@@ -867,7 +887,9 @@ def test_evaluate_job_embedding_failure_no_persist(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 0
 
@@ -904,7 +926,9 @@ def test_evaluate_job_invalid_result_not_persisted(
 
     async def _count() -> int:
         async with sqlite_factory() as session:
-            return await eval_repo.count_for_job(session, job_id)
+            profile_id = await workspace_repo.get_active_profile_id(session)
+            assert profile_id is not None
+            return await eval_repo.count_for_job(session, job_id, profile_id=profile_id)
 
     assert run_async(_count()) == 0
 

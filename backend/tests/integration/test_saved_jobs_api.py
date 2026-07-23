@@ -29,11 +29,13 @@ from app.main import create_app
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import job_evaluations as eval_repo
 from app.repositories import jobs as jobs_repo
 from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tools_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.job_evaluations import (
     EvaluateJobResponse,
     ReextractJobRequest,
@@ -220,6 +222,11 @@ async def _seed_profile(
         source_hash=source_hash,
     )
     await prof_repo.upsert_job_preferences(session, preferences_json=prefs)
+    active_profile = await prof_repo.get_active_profile(session)
+    assert active_profile is not None
+    await conversations_repo.create_for_profile(
+        session, profile_id=active_profile.id
+    )
     return att.id
 
 
@@ -272,10 +279,12 @@ async def _insert_evaluation(
     final_score: float = 0.81,
     summary: str = "eval",
 ) -> None:
+    profile = await prof_repo.get_active_profile(session)
+    assert profile is not None
     await eval_repo.insert_evaluation(
         session,
         job_id=job_id,
-        active_attachment_id=attachment_id,
+        profile_id=profile.id,
         evaluation_context_hash=context_hash,
         job_revision=job_revision,
         profile_revision=profile_revision,
@@ -286,6 +295,16 @@ async def _insert_evaluation(
             job_id, summary=summary, final_score=final_score
         ),
     )
+
+
+async def _active_conversation_id(session: AsyncSession) -> str:
+    profile_id = await workspace_repo.get_active_profile_id(session)
+    assert profile_id is not None
+    conversation = await conversations_repo.most_recent_for_profile(
+        session, profile_id=profile_id
+    )
+    assert conversation is not None
+    return conversation.id
 
 
 async def _current_hash_for_job(
@@ -466,8 +485,20 @@ async def _seed_zero_result_source(
     role: str = CHAT_MESSAGE_ROLE_USER,
 ) -> str:
     """Insert user message + run + match_jobs tool result; return message id."""
+    profile = await prof_repo.get_active_profile(session)
+    assert profile is not None
+    conversation = await conversations_repo.most_recent_for_profile(
+        session, profile_id=profile.id
+    )
+    if conversation is None:
+        conversation = await conversations_repo.create_for_profile(
+            session, profile_id=profile.id
+        )
     user = await messages_repo.insert_message(
-        session, role=role, content=content
+        session,
+        role=role,
+        content=content,
+        conversation_id=conversation.id,
     )
     run = await runs_repo.create_run(session, user_message_id=user.id)
     if match_ok:
@@ -1060,7 +1091,7 @@ def test_api_module_is_thin_transport() -> None:
 def test_list_without_profile_marks_existing_eval_stale(
     jobs_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Without active profile context, stored evals cannot be current."""
+    """Without active profile context, saved-job currentness is unavailable."""
     db_path, _, _ = jobs_env
 
     async def _seed() -> str:
@@ -1085,9 +1116,8 @@ def test_list_without_profile_marks_existing_eval_stale(
                     preferences_revision=T0,
                     final_score=0.55,
                 )
-                # Remove active profile so reads have no current context.
-                await session.execute(text("DELETE FROM candidate_profile"))
-                await session.execute(text("DELETE FROM job_preferences"))
+                # Clear workspace selection so reads have no current context.
+                await workspace_repo.set_active_profile_id(session, None)
                 await session.commit()
                 return job_id
         finally:
@@ -1099,8 +1129,8 @@ def test_list_without_profile_marks_existing_eval_stale(
             client.get("/api/jobs").json()
         )
         item = next(i for i in page.items if i.id == job_id)
-        assert item.evaluation_state == "stale"
-        assert item.latest_score == pytest.approx(0.55)
+        assert item.evaluation_state == "none"
+        assert item.latest_score is None
 
 
 # ---------------------------------------------------------------------------
@@ -1124,7 +1154,10 @@ def test_save_and_evaluate_rejects_invalid_source_relationships(
                 session, content=_FULL_EXTRACTED_SOURCE
             )
             missing_run = await messages_repo.insert_message(
-                session, role=CHAT_MESSAGE_ROLE_USER, content="no run"
+                session,
+                role=CHAT_MESSAGE_ROLE_USER,
+                content="no run",
+                conversation_id=await _active_conversation_id(session),
             )
             nonzero = await _seed_zero_result_source(
                 session,
@@ -1287,6 +1320,7 @@ def test_save_and_evaluate_url_vs_text_and_no_latest_message_inference(
                 session,
                 role=CHAT_MESSAGE_ROLE_USER,
                 content="LATEST COMPOSER TEXT MUST NOT BE USED AS JD",
+                conversation_id=await _active_conversation_id(session),
             )
             mixed = await _seed_zero_result_source(
                 session,
