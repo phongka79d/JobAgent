@@ -78,7 +78,7 @@ from tests.support.public_api import (
 def test_public_routes_are_exactly_seven_master_endpoints(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Public inventory after Plan 8/9: chat + CV manager + observability."""
+    """Public inventory after profile lifecycle routes are registered."""
     del chat_env
     expected = [
         ("DELETE", "/api/cvs/{attachment_id}"),
@@ -94,8 +94,12 @@ def test_public_routes_are_exactly_seven_master_endpoints(
             ("GET", "/api/observability/graph"),
             ("GET", "/api/observability/runs"),
             ("GET", "/api/observability/skill-map"),
-            ("GET", "/api/profile"),
+        ("GET", "/api/profile"),
         ("GET", "/api/profile/cv"),
+        ("GET", "/api/profiles"),
+        ("GET", "/api/profiles/{profile_id}"),
+        ("PATCH", "/api/profiles/{profile_id}"),
+        ("POST", "/api/profiles/{profile_id}/activate"),
         ("POST", "/api/attachments/cv"),
         ("POST", "/api/chat/runs/{run_id}/resume"),
         ("POST", "/api/chat/turns"),
@@ -107,10 +111,6 @@ def test_public_routes_are_exactly_seven_master_endpoints(
     with health_client() as client:
         routes = sorted(public_api_routes(client.app))
     assert routes == sorted(expected)
-    # No profile write CRUD.
-    for method, path in routes:
-        if path.startswith("/api/profile"):
-            assert method == "GET"
 
 
 def test_route_handlers_are_transport_thin() -> None:

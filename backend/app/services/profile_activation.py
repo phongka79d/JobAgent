@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.time import utc_now
 from app.db.models.attachments import (
@@ -33,6 +33,13 @@ class ActivationError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class ProfileActivationError(Exception):
+    def __init__(self, code: str, summary: str) -> None:
+        super().__init__(summary)
+        self.code = code
+        self.summary = summary
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +81,7 @@ async def load_document_draft_bundle(
             code="DOCUMENT_DRAFT_INVALID",
         )
     canonical = tuple(
-        CanonicalChunk(ordinal=int(row.ordinal), text=str(row.text))
-        for row in rows
+        CanonicalChunk(ordinal=int(row.ordinal), text=str(row.text)) for row in rows
     )
     try:
         expected = compute_canonical_source_hash(canonical)
@@ -210,11 +216,64 @@ async def promote_document_draft(
     await cv_doc_repo.delete_draft(session, bundle.attachment_id)
 
 
+async def activate_profile_by_id(
+    *,
+    profile_id: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    graph_driver: Any | None = None,
+) -> Any:
+    """Commit workspace/profile selection before any optional derived refresh."""
+    from app.db.models.profiles import PROFILE_STATE_READY
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import profiles as profiles_repo
+    from app.repositories import workspace_state as workspace_repo
+    from app.schemas.profile import SelectionResponse
+    from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
+    from app.services.profile_projection import build_profile_detail
+
+    async with session_factory() as session:
+        try:
+            await assert_workspace_idle(session)
+        except ActivityBlockedError as exc:
+            raise ProfileActivationError(exc.code, exc.summary) from exc
+        profile = await profiles_repo.get_profile(session, profile_id)
+        if profile is None:
+            raise ProfileActivationError("PROFILE_NOT_FOUND", "profile not found")
+        if profile.state != PROFILE_STATE_READY:
+            raise ProfileActivationError("PROFILE_NOT_READY", "profile is not ready")
+        current_id = await workspace_repo.get_active_profile_id(session)
+        current = (
+            await profiles_repo.get_profile(session, current_id) if current_id else None
+        )
+        if current_id != profile_id:
+            await activate_selected_attachment(
+                session,
+                attachment_id=profile.attachment_id,
+                old_attachment_id=current.attachment_id if current else None,
+            )
+        await workspace_repo.set_active_profile_id(session, profile_id)
+        profile.last_opened_at = utc_now()
+        selected = await conversations_repo.most_recent_for_profile(
+            session, profile_id=profile_id
+        )
+        await session.commit()
+        detail = await build_profile_detail(session, profile_id=profile_id)
+    # Graph refresh is intentionally post-commit; later lifecycle task supplies
+    # the profile-branch projector and safe warning adapter.
+    del graph_driver
+    return SelectionResponse(
+        profile=detail,
+        conversation_id=selected.id if selected else None,
+    )
+
+
 __all__ = [
     "ActivationError",
+    "ProfileActivationError",
     "DocumentDraftBundle",
     "activate_selected_attachment",
     "assert_source_attachment_eligible",
     "load_document_draft_bundle",
     "promote_document_draft",
+    "activate_profile_by_id",
 ]

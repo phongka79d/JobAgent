@@ -179,6 +179,61 @@ class ProfileReadResponse(BaseModel):
     pending_attachment: AttachmentPublic | None = None
 
 
+class ProfileSkillTag(BaseModel):
+    model_config = StrictModelConfig
+
+    key: str
+    label: str
+
+
+class ProfileListItem(BaseModel):
+    model_config = StrictModelConfig
+
+    id: str
+    display_name: str
+    location: str | None
+    state: str
+    active: bool
+    attachment: AttachmentPublic
+    skill_tags: list[ProfileSkillTag]
+    skill_count: int
+    last_opened_at: Any
+
+
+class ProfileListResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    items: list[ProfileListItem]
+    active_profile_id: str | None
+
+
+class ProfileDetail(BaseModel):
+    model_config = StrictModelConfig
+
+    id: str
+    display_name: str
+    location: str | None
+    state: str
+    active: bool = False
+    profile: CandidateProfile
+    preferences: JobPreferences
+    attachment: AttachmentPublic
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_config = StrictModelConfig
+
+    display_name: str
+
+
+class SelectionResponse(BaseModel):
+    model_config = StrictModelConfig
+
+    profile: ProfileDetail
+    conversation_id: str | None = None
+    warning: dict[str, str] | None = None
+
+
 def empty_profile_read_response(
     *,
     draft_present: bool = False,

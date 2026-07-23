@@ -659,7 +659,7 @@ git commit -m "refactor: scope repositories to profile conversations"
 - Modify: backend/app/services/profile_activation.py
 - Test: backend/tests/integration/test_profiles_api.py, backend/tests/unit/test_profile_projection.py, backend/tests/integration/test_profile_selection.py
 
-- [ ] Step 1: Write failing API/projection tests
+- [x] Step 1: Write failing API/projection tests
 
 Add tests for safe list/detail output, fallback naming, rename scope, activation, and zero-provider selection:
 
@@ -685,7 +685,7 @@ def test_activate_profile_does_not_call_provider_stack(
 
 Cover GET /api/profiles, GET /api/profiles/{id}, PATCH, and POST /activate routing/error mapping, including PROFILE_NOT_FOUND, PROFILE_NOT_READY, and PROFILE_SWITCH_BLOCKED. Task 6 adds DELETE only after its external-cleanup coordinator exists.
 
-- [ ] Step 2: Run the API tests to verify RED
+- [x] Step 2: Run the API tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -694,7 +694,7 @@ Set-Location backend
 
 Expected: routes and projection module are absent, and old /api/profile is the only profile read surface.
 
-- [ ] Step 3: Implement safe profile projection and response schemas
+- [x] Step 3: Implement safe profile projection and response schemas
 
 Create profile_projection.py with a pure mapper that validates profile_json and preferences before exposing them. Use these rules:
 
@@ -748,7 +748,7 @@ async def build_profile_detail(
 
 Implement project_profile_list_item(session, row, active_id) and project_profile_detail(session, row) in the same module; both load the attachment/document/preferences by the row’s attachment/profile IDs, call parse_candidate_profile and parse_job_preferences, and raise PROFILE_INCONSISTENT on validation or ownership failure. They never read the active workspace row as a substitute for the requested row.
 
-- [ ] Step 4: Implement list/detail/rename/activate routes
+- [x] Step 4: Implement list/detail/rename/activate routes
 
 Create backend/app/api/profiles.py with these thin route implementations; build_profile_list_response/build_profile_detail are read-only functions in profile_projection.py and activate_profile_by_id owns the transaction plus post-commit graph refresh:
 
@@ -840,11 +840,11 @@ Define build_selection_response(session, profile, selected) as a thin call to pr
 
 Keep GET /api/profile and /api/profile/cv as compatibility reads for the upload/draft surface, but resolve them through workspace_state.active_profile_id; they must not reintroduce singleton rows.
 
-- [ ] Step 5: Register routes and update public API tests
+- [x] Step 5: Register routes and update public API tests
 
 Include profiles_router in main.py, expose PATCH, and replace the old “exactly seven singleton routes” assertion with route tests for the implemented profile routes and compatibility reads. Assert that route handlers never call extraction, embedding, scoring, or graph writes before the SQLite selection commit. Reserve DELETE /profiles/{profile_id} for Task 6.
 
-- [ ] Step 6: Run focused profile gates and commit
+- [x] Step 6: Run focused profile gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_profile_projection.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_chat_api.py -q

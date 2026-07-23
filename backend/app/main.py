@@ -31,6 +31,7 @@ from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
 from app.api.observability import router as observability_router
 from app.api.profile import router as profile_router
+from app.api.profiles import router as profiles_router
 from app.core.settings import Settings, get_settings
 from app.db.seed import ensure_workspace_seed
 from app.db.session import dispose_engine, get_engine, session_scope
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     application.include_router(attachments_router, prefix="/api")
     application.include_router(cvs_router, prefix="/api")
     application.include_router(profile_router, prefix="/api")
+    application.include_router(profiles_router, prefix="/api")
     application.include_router(chat_router, prefix="/api")
     application.include_router(jobs_router, prefix="/api")
     application.include_router(observability_router, prefix="/api")
