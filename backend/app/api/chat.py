@@ -25,7 +25,11 @@ from app.schemas.chat import (
     ResumeRequest,
 )
 from app.schemas.common import UuidStr
-from app.services.chat_history import get_history_page, history_page_as_dict
+from app.services.chat_history import (
+    ChatHistoryServiceError,
+    get_history_page,
+    history_page_as_dict,
+)
 from app.services.chat_turns import (
     ERROR_APPROVAL_ACTION_REQUIRED,
     ERROR_INVALID_APPROVAL_ACTION,
@@ -60,10 +64,11 @@ def _http_for_chat_error(exc: ChatTurnError) -> HTTPException:
 def _history_query(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     before: Annotated[str | None, Query()] = None,
+    conversation_id: Annotated[str | None, Query()] = None,
 ) -> HistoryQuery:
     """Validate history query params (malformed cursor → 422)."""
     try:
-        return HistoryQuery(limit=limit, before=before)
+        return HistoryQuery(limit=limit, before=before, conversation_id=conversation_id)
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
 
@@ -75,11 +80,18 @@ async def get_chat_history(
     """Return one hydrated chronological history page ``{items, next_cursor}``."""
     factory = get_session_factory()
     async with factory() as session:
-        page = await get_history_page(
-            session,
-            limit=query.limit,
-            before=query.before,
-        )
+        try:
+            page = await get_history_page(
+                session,
+                limit=query.limit,
+                before=query.before,
+                conversation_id=query.conversation_id,
+            )
+        except ChatHistoryServiceError as exc:
+            raise HTTPException(
+                status_code=404 if "not found" in str(exc) else 422,
+                detail={"code": "CONVERSATION_NOT_FOUND", "summary": str(exc)},
+            ) from exc
         # Read-only unit of work; close before returning JSON (no open txn).
         await session.commit()
     return history_page_as_dict(page)
@@ -94,6 +106,7 @@ async def post_chat_turn(
     events = stream_chat_turn(
         message=body.message,
         attachment_ids=body.attachment_ids,
+        conversation_id=body.conversation_id,
         model=deps.model,
         registry=deps.registry,
         sqlite_path=deps.sqlite_path,

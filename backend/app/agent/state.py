@@ -81,6 +81,7 @@ def agent_state_field_names() -> frozenset[str]:
 def build_initial_agent_state(
     *,
     run_id: str,
+    conversation_id: str = AGENT_CONVERSATION_ID,
     messages_for_this_turn: list[ContextMessage] | None = None,
     recent_context: list[ContextMessage] | None = None,
     candidate_context: list[dict[str, Any]] | None = None,
@@ -103,7 +104,7 @@ def build_initial_agent_state(
         raise ValueError("tool_iteration_count must be >= 0")
 
     state: AgentState = {
-        "conversation_id": AGENT_CONVERSATION_ID,
+        "conversation_id": conversation_id,
         "run_id": run_id,
         "messages_for_this_turn": list(messages_for_this_turn or ()),
         "recent_context": list(recent_context or ()),

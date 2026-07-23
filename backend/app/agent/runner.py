@@ -43,6 +43,7 @@ from app.agent.graph import (
     build_agent_graph,
     initial_graph_state,
 )
+from app.agent.state import AGENT_CONVERSATION_ID
 from app.core.settings import Settings
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.tool_execution import (
@@ -201,6 +202,7 @@ def _compile_with_checkpointer(
 async def stream_agent_run(
     *,
     run_id: str,
+    conversation_id: str = AGENT_CONVERSATION_ID,
     user_text: str | None = None,
     resumed: bool = False,
     resume_value: Any | None = None,
@@ -296,6 +298,7 @@ async def stream_agent_run(
             stream_input = initial_graph_state(
                 run_id=run_id,
                 user_text=user_text,
+                conversation_id=conversation_id,
                 recent_context=recent_context,
                 candidate_context=candidate_context,
                 active_cv_context=active_cv_context,

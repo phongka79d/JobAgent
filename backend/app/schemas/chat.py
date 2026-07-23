@@ -99,6 +99,7 @@ class ChatTurnRequest(BaseModel):
 
     message: str
     attachment_ids: list[UuidStr] = Field(default_factory=list)
+    conversation_id: UuidStr | None = None
 
     @field_validator("message")
     @classmethod
@@ -115,6 +116,7 @@ class HistoryQuery(BaseModel):
 
     limit: int = Field(default=50, ge=1, le=100)
     before: str | None = None
+    conversation_id: UuidStr | None = None
 
     @field_validator("before")
     @classmethod

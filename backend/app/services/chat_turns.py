@@ -151,6 +151,7 @@ async def create_user_turn(
     message: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     source_attachment_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> CreatedTurn:
     """Atomically insert user message + ``running`` run, or reject interruption.
 
@@ -183,6 +184,7 @@ async def create_user_turn(
             )
         user = await messages_repo.insert_message(
             session,
+            conversation_id=conversation_id or "main",
             role=CHAT_MESSAGE_ROLE_USER,
             content=text,
             source_attachment_id=owner,
@@ -254,8 +256,11 @@ async def persist_terminal_success(
     async with session_scope(factory) as session:
         if content == "":
             content = "(no assistant text)"
+        owner = await runs_repo.resolve_run_owner(session, run_id)
+        conversation_id = owner.conversation_id if owner is not None else "main"
         await messages_repo.insert_message(
             session,
+            conversation_id=conversation_id,
             role=CHAT_MESSAGE_ROLE_ASSISTANT,
             content=content,
         )
@@ -433,6 +438,7 @@ async def stream_chat_turn(
     sqlite_path: str | Path | None = None,
     include_assistant_status: bool = False,
     source_attachment_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> AsyncIterator[SseEvent]:
     """Create a durable turn, run the graph, persist terminal/interrupt state.
 
@@ -444,6 +450,7 @@ async def stream_chat_turn(
         message=message,
         session_factory=factory,
         source_attachment_id=source_attachment_id,
+        conversation_id=conversation_id,
     )
     interrupt_holder: dict[str, Any] = {}
 
@@ -458,6 +465,7 @@ async def stream_chat_turn(
     async with factory() as session:
         recent_loaded = await load_recent_context(
             session,
+            conversation_id=conversation_id,
             exclude_ids=frozenset({turn.user_message_id}),
         )
         candidate_context = await load_candidate_context(session)
@@ -478,6 +486,7 @@ async def stream_chat_turn(
 
     async for event in stream_agent_run(
         run_id=turn.run_id,
+        conversation_id=conversation_id or "main",
         user_text=turn.content,
         recent_context=recent_context,
         candidate_context=candidate_context,
@@ -577,6 +586,10 @@ async def stream_resume(
             f"run {run_id!r} not running after resume claim (state={run.state!r})",
         )
 
+    async with factory() as owner_session:
+        owner = await runs_repo.resolve_run_owner(owner_session, run_id)
+    conversation_id = owner.conversation_id if owner is not None else "main"
+
     interrupt_holder: dict[str, Any] = {}
 
     async def on_terminal(outcome: TerminalOutcome) -> bool:
@@ -588,6 +601,7 @@ async def stream_resume(
 
     async for event in stream_agent_run(
         run_id=run_id,
+        conversation_id=conversation_id,
         resumed=True,
         resume_value=chosen,
         model=model,

@@ -17,6 +17,7 @@ from app.db.models.profiles import (
     ProfilePreference,
     WorkspaceState,
 )
+from app.repositories import workspace_state as workspace_repo
 
 
 class ProfileRepositoryError(Exception):
@@ -210,7 +211,19 @@ async def upsert_active_profile(
 ) -> Profile:
     profile = await get_active_profile(session)
     if profile is None:
-        raise ProfileRepositoryError("first approval requires create_profile")
+        # ponytail: compatibility callers still model first approval through
+        # the old upsert name; create the durable profile row instead.
+        profile = await create_profile(
+            session,
+            attachment_id=active_attachment_id,
+            display_name="Candidate profile",
+            profile_json=profile_json,
+            location=None,
+            extraction_version="legacy-compat",
+            source_hash=f"legacy:{active_attachment_id}",
+        )
+        await workspace_repo.set_active_profile_id(session, profile.id)
+        return profile
     profile.attachment_id = _required("active_attachment_id", active_attachment_id)
     profile.profile_json = profile_json
     profile.updated_at = utc_now()

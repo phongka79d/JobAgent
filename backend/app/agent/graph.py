@@ -1188,6 +1188,7 @@ def initial_graph_state(
     *,
     run_id: str,
     user_text: str,
+    conversation_id: str = AGENT_CONVERSATION_ID,
     recent_context: Sequence[dict[str, Any]] | None = None,
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
@@ -1199,7 +1200,7 @@ def initial_graph_state(
     if not isinstance(run_id, str) or run_id.strip() == "":
         raise ValueError("run_id must be a non-empty string")
     state: AgentGraphState = {
-        "conversation_id": AGENT_CONVERSATION_ID,
+        "conversation_id": conversation_id,
         "run_id": run_id,
         "messages_for_this_turn": [HumanMessage(content=user_text)],
         "recent_context": list(recent_context or ()),

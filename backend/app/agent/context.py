@@ -140,6 +140,7 @@ def apply_recent_context_budget(
 async def load_recent_context(
     session: AsyncSession,
     *,
+    conversation_id: str | None = None,
     exclude_ids: frozenset[str] | None = None,
     max_messages: int = RECENT_CONTEXT_MAX_MESSAGES,
     char_budget: int = RECENT_CONTEXT_CHAR_BUDGET,
@@ -156,12 +157,13 @@ async def load_recent_context(
     # Bounded newest-first fetch only — hard stop at max_messages rows.
     rows = await messages_repo.list_messages_before(
         session,
+        conversation_id=conversation_id or CONVERSATION_ID,
         limit=max_messages,
         before=None,
     )
     # Repository already confines to conversation_id == main; assert invariant.
     for row in rows:
-        if row.conversation_id != CONVERSATION_ID:
+        if row.conversation_id != (conversation_id or CONVERSATION_ID):
             raise RuntimeError(
                 "recent context loader received non-main conversation row"
             )
