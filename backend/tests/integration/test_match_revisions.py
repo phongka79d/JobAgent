@@ -281,15 +281,15 @@ def test_rebuild_inputs_and_revision_snapshot_share_scorable_boundary(
                 expected_dimensions=LOCKED_EMBEDDING_DIMENSIONS,
             )
 
-    profile, profile_updated_at, scorable, approved_cvs, legacy_active = run_async(
-        _body()
-    )
+    ready_profiles, scorable = run_async(_body())
 
-    assert profile is not None
-    assert snapshot.candidate == SourceRevision("active", profile_updated_at)
+    assert len(ready_profiles) == 1
+    ready = ready_profiles[0]
+    assert snapshot.candidate == SourceRevision(
+        ready.profile_id, ready.source_updated_at
+    )
     assert {
         SourceRevision(job.job_id, job.source_updated_at) for job in scorable
     } == set(snapshot.jobs)
-    # Plan 9 rebuild also returns approved CV rows + optional legacy active.
-    assert isinstance(approved_cvs, list)
-    assert legacy_active is None or getattr(legacy_active, "attachment_id", None)
+    assert ready.cv is None
+    assert ready.legacy_cv is not None

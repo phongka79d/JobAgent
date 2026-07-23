@@ -122,7 +122,7 @@ def revision_read_driver(
     """Build a read fake for the Candidate/Job revision snapshot queries."""
     return ScriptedReadDriver(
         (
-            ScriptedRead("MATCH (c:Candidate)", candidates),
+            ScriptedRead("MATCH (c:Candidate", candidates),
             ScriptedRead("MATCH (j:Job)", jobs),
         ),
         failure=failure,
@@ -147,7 +147,7 @@ def orchestration_read_driver(
     can pass revision consistency and still simulate vector-query outage.
     """
     scripts: list[ScriptedRead] = [
-        ScriptedRead("MATCH (c:Candidate)", candidates),
+        ScriptedRead("MATCH (c:Candidate", candidates),
         ScriptedRead("MATCH (j:Job)", jobs),
     ]
     if vector_rows is not None:

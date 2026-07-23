@@ -211,7 +211,7 @@ def _ready_response_payload() -> dict[str, Any]:
         "summary": "Selected map is ready.",
         "rebuild_instruction": None,
         "candidate": {
-            "id": "active",
+            "id": "22222222-2222-4222-8222-222222222222",
             "attachment_id": "11111111-2222-4333-8444-555555555555",
             "current_title": "Synthetic profile",
             "revision": datetime(2024, 1, 1, tzinfo=UTC),
@@ -422,7 +422,7 @@ def test_selected_relationship_integrity_accepts_exact_sync_projection() -> None
     assert result.is_consistent
     assert result.error_code is None
     assert driver.parameters == [
-        {"candidate_id": "active"},
+        {"profile_id": "active"},
         {"job_id": "11111111-2222-4333-8444-555555555555"},
     ]
     assert len(driver.queries) == 2
