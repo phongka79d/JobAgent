@@ -402,6 +402,10 @@ def test_profile_patch_is_strict_trimmed_and_rename_only(
         too_long = client.patch(
             f"/api/profiles/{profile_id}", json={"display_name": "x" * 121}
         )
+        padded_maximum = client.patch(
+            f"/api/profiles/{profile_id}",
+            json={"display_name": f"  {'y' * 120}  "},
+        )
         renamed = client.patch(
             f"/api/profiles/{profile_id}", json={"display_name": "  After  "}
         )
@@ -413,6 +417,12 @@ def test_profile_patch_is_strict_trimmed_and_rename_only(
         "summary": "display name must not be blank",
     }
     assert too_long.status_code == 422
+    assert too_long.json()["detail"] == {
+        "code": "INVALID_DISPLAY_NAME",
+        "summary": "display name must be between 1 and 120 characters",
+    }
+    assert padded_maximum.status_code == 200
+    assert padded_maximum.json()["display_name"] == "y" * 120
     assert renamed.status_code == 200
     assert renamed.json()["display_name"] == "After"
     assert run_async(snapshot()) == before

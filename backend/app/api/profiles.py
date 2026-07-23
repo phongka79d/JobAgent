@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Path, Request
 
+from app.db.models.profiles import PROFILE_DISPLAY_NAME_MAX
 from app.db.session import get_session_factory
 from app.repositories import profiles as profiles_repo
 from app.schemas.common import UuidStr
@@ -62,13 +63,23 @@ async def patch_profile(
     profile_id: Annotated[UuidStr, Path(description="Profile id")],
     body: ProfileUpdateRequest,
 ) -> ProfileDetail:
-    if not body.display_name.strip():
+    display_name = body.display_name.strip()
+    if not display_name:
         raise _http("INVALID_DISPLAY_NAME", "display name must not be blank", 422)
+    if len(display_name) > PROFILE_DISPLAY_NAME_MAX:
+        raise _http(
+            "INVALID_DISPLAY_NAME",
+            (
+                "display name must be between 1 and "
+                f"{PROFILE_DISPLAY_NAME_MAX} characters"
+            ),
+            422,
+        )
     factory = get_session_factory()
     async with factory() as session:
         try:
             await profiles_repo.update_display_name(
-                session, profile_id=profile_id, display_name=body.display_name.strip()
+                session, profile_id=profile_id, display_name=display_name
             )
             detail = await build_profile_detail(session, profile_id=profile_id)
             await session.commit()

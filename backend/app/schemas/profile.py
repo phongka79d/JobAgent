@@ -26,7 +26,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from app.db.models.attachments import ATTACHMENT_MIME_TYPE_PDF
-from app.db.models.profiles import PROFILE_DISPLAY_NAME_MAX
 from app.schemas.attachments import AttachmentPublic
 from app.schemas.chat import ConversationSummary
 from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
@@ -244,7 +243,10 @@ class ProfileDetail(ProfileListItem):
 class ProfileUpdateRequest(BaseModel):
     model_config = StrictModelConfig
 
-    display_name: str = Field(min_length=1, max_length=PROFILE_DISPLAY_NAME_MAX)
+    # ponytail: FastAPI validates Pydantic constraints before route-level trim.
+    # The sole PATCH route therefore owns the normalized limit and stable error;
+    # move it back here only when transport validation preserves both semantics.
+    display_name: str = Field(min_length=1)
 
 
 class SafeWarning(BaseModel):
