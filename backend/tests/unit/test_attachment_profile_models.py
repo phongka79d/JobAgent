@@ -142,6 +142,19 @@ def test_registry_and_shared_base() -> None:
         assert issubclass(model, Base) and model.metadata is Base.metadata
 
 
+def test_frozen_profile_contract_constants_and_state_check() -> None:
+    from app.db.models import profiles as profile_models
+
+    assert profile_models.PROFILE_STATE_READY == "ready"
+    assert profile_models.PROFILE_STATE_DELETING == "deleting"
+    assert profile_models.PROFILE_STATES == frozenset({"ready", "deleting"})
+    assert profile_models.PROFILE_DISPLAY_NAME_MAX == 120
+    assert profile_models.CONVERSATION_TITLE_MAX == 120
+    assert profile_models.PROFILE_SKILL_TAG_LIMIT == 12
+    assert profile_models.NEW_CONVERSATION_TITLE == "Chat mới"
+    assert any(name.endswith("state") for name in _check_sql(_t("profiles")))
+
+
 def test_attachment_columns_defaults_and_types() -> None:
     table = _t("attachments")
     _assert_cols(

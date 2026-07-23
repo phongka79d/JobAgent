@@ -82,6 +82,10 @@ def _create_profiles() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_opened_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_profiles"),
+        sa.CheckConstraint(
+            "state IN ('ready', 'deleting')",
+            name="state",
+        ),
         sa.ForeignKeyConstraint(
             ["attachment_id"],
             ["attachments.id"],

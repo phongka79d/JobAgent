@@ -14,12 +14,25 @@ from app.core.time import utc_now
 from app.db.base import Base
 
 WORKSPACE_STATE_ID = "main"
+PROFILE_STATE_READY = "ready"
+PROFILE_STATE_DELETING = "deleting"
+PROFILE_STATES = frozenset({PROFILE_STATE_READY, PROFILE_STATE_DELETING})
+PROFILE_DISPLAY_NAME_MAX = 120
+CONVERSATION_TITLE_MAX = 120
+PROFILE_SKILL_TAG_LIMIT = 12
+NEW_CONVERSATION_TITLE = "Chat mới"
 
 
 class Profile(Base):
     """One source-backed candidate profile owned by one attachment."""
 
     __tablename__ = "profiles"
+    __table_args__ = (
+        CheckConstraint(
+            column("state").in_(tuple(PROFILE_STATES)),
+            name="state",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
     attachment_id: Mapped[str] = mapped_column(
