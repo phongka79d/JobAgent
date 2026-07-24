@@ -165,6 +165,7 @@ export function App({deps}: AppProps = {}) {
           refreshKey={profileRefreshKey}
           activationKey={activationKey}
           savedJobsInvalidateKey={savedJobsInvalidateKey}
+          workspace={workspace}
           deps={deps?.sidebar}
         />
       }

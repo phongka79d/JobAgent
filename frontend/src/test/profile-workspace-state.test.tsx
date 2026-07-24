@@ -10,7 +10,9 @@ import type {ConversationMutationResponse} from '../features/profile/conversatio
 import type {PendingProfileBootstrap} from '../features/profile/types';
 
 const PROFILE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const PROFILE_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const CONVERSATION_A = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const CONVERSATION_B = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
 const conversation = {
   id: CONVERSATION_A,
@@ -38,6 +40,51 @@ const pendingProfile = {
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   last_opened_at: '2026-01-01T00:00:00Z',
+};
+
+const readyProfile = {
+  ...pendingProfile,
+  id: PROFILE_B,
+  display_name: 'Grace Hopper',
+  cv_filename: 'grace.pdf',
+  attachment_state: 'active' as const,
+  extraction_version: 'v1',
+  source_hash: 'source-b',
+  state: 'ready' as const,
+  setup_status: null,
+  is_active: false,
+};
+
+const readyProfileDetail = {
+  ...readyProfile,
+  profile: {
+    full_name: 'Grace Hopper',
+    location: null,
+    summary: 'Compiler engineer',
+    current_title: 'Rear Admiral',
+    total_experience_years: null,
+    skills: [],
+    experiences: [],
+    education: [],
+    languages: [],
+    extraction_confidence: 1,
+  },
+  preferences: {
+    target_roles: [],
+    preferred_locations: [],
+    acceptable_work_modes: [],
+    target_seniority: [],
+  },
+  attachment: {
+    id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    original_name: 'grace.pdf',
+    mime_type: 'application/pdf' as const,
+    size_bytes: 1024,
+    page_count: 1,
+    state: 'active' as const,
+    failure_code: null,
+  },
+  selected_conversation_id: CONVERSATION_B,
 };
 
 const bootstrap: PendingProfileBootstrap = {
@@ -136,5 +183,108 @@ describe('profile workspace state', () => {
     expect(result.current.state.conversations).toEqual([conversation]);
     expect(activateProfile).not.toHaveBeenCalled();
     expect(createProfileConversation).not.toHaveBeenCalled();
+  });
+
+  it('renames through the profile API and applies the returned display name', async () => {
+    const updateProfile = vi.fn().mockResolvedValue({
+      ...readyProfileDetail,
+      display_name: 'Amazing Grace',
+    });
+    const fetchProfiles = vi.fn().mockResolvedValue({
+      items: [readyProfile],
+      active_profile_id: PROFILE_B,
+    });
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [],
+      next_cursor: null,
+    });
+    const {result} = renderHook(() =>
+      useProfileWorkspaceState({
+        fetchProfiles,
+        fetchProfileConversations,
+        updateProfile,
+      }),
+    );
+    await waitFor(() => expect(result.current.state.profiles).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.renameProfile(PROFILE_B, 'Amazing Grace');
+    });
+
+    expect(updateProfile).toHaveBeenCalledWith(PROFILE_B, 'Amazing Grace');
+    expect(result.current.state.profiles[0]?.display_name).toBe('Amazing Grace');
+  });
+
+  it('adopts the server-returned fallback profile after deletion', async () => {
+    const serverFallback = {
+      ...readyProfile,
+      display_name: 'Grace Hopper (selected)',
+      is_active: true,
+      last_opened_at: '2026-01-02T00:00:00Z',
+    };
+    const selectedConversation = {
+      ...conversation,
+      id: CONVERSATION_B,
+      profile_id: PROFILE_B,
+    };
+    const deleteProfile = vi.fn().mockResolvedValue({
+      deleted_profile_id: PROFILE_A,
+      active_profile: serverFallback,
+      selected_conversation: selectedConversation,
+    });
+    const fetchProfiles = vi.fn().mockResolvedValue({
+      items: [pendingProfile, readyProfile],
+      active_profile_id: PROFILE_A,
+    });
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [conversation],
+      next_cursor: null,
+    });
+    const {result} = renderHook(() =>
+      useProfileWorkspaceState({
+        fetchProfiles,
+        fetchProfileConversations,
+        deleteProfile,
+      }),
+    );
+    await waitFor(() => expect(result.current.state.profiles).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.deleteProfile(PROFILE_A);
+    });
+
+    expect(deleteProfile).toHaveBeenCalledWith(PROFILE_A);
+    expect(result.current.state.activeProfileId).toBe(PROFILE_B);
+    expect(result.current.state.profiles).toEqual([serverFallback]);
+    expect(result.current.state.selectedConversationId).toBe(CONVERSATION_B);
+  });
+
+  it('reports a failed profile deletion without changing server-owned state', async () => {
+    const deleteProfile = vi.fn().mockRejectedValue(new Error('Delete blocked'));
+    const fetchProfiles = vi.fn().mockResolvedValue({
+      items: [readyProfile],
+      active_profile_id: PROFILE_B,
+    });
+    const fetchProfileConversations = vi.fn().mockResolvedValue({
+      items: [],
+      next_cursor: null,
+    });
+    const {result} = renderHook(() =>
+      useProfileWorkspaceState({
+        fetchProfiles,
+        fetchProfileConversations,
+        deleteProfile,
+      }),
+    );
+    await waitFor(() => expect(result.current.state.profiles).toHaveLength(1));
+
+    let succeeded: boolean | undefined;
+    await act(async () => {
+      succeeded = await result.current.deleteProfile(PROFILE_B);
+    });
+
+    expect(succeeded).toBe(false);
+    expect(result.current.state.error).toBe('Delete blocked');
+    expect(result.current.state.profiles).toEqual([readyProfile]);
   });
 });

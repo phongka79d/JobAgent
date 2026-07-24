@@ -3,8 +3,10 @@
  */
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -19,6 +21,7 @@ import {
   SIDEBAR_CV_TURN_MESSAGE,
 } from '../features/profile/api';
 import {CvSidebar} from '../features/profile/CvSidebar';
+import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
 import {
   parseAttachmentPublic,
   parseCvUploadResponse,
@@ -275,7 +278,7 @@ describe('CvSidebar empty / active states', () => {
     expect(screen.getByTestId('jobagent-profile-state')).toHaveTextContent(
       /Active/,
     );
-    expect(screen.getByText('Replace CV')).toBeInTheDocument();
+    expect(screen.getByText('Upload new CV')).toBeInTheDocument();
 
     const download = screen.getByTestId('jobagent-cv-download');
     expect(download).not.toBeDisabled();
@@ -349,6 +352,124 @@ describe('CvSidebar empty / active states', () => {
     });
     expect(onSuccess).not.toHaveBeenCalled();
   });
+
+  it('rejects retry responses that replace the bootstrap conversation', async () => {
+    const pending = uploadResponse('retry.pdf').bootstrap!;
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [{
+          ...pending.profile,
+          attachment_state: 'failed',
+          setup_status: 'extraction_failed',
+        }],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: CONVERSATION_ID,
+        conversations: [pending.conversation],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile: vi.fn(),
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    const retryResponse: CvUploadResponse = {
+      ...uploadResponse('retry.pdf'),
+      outcome: 'retry_pending',
+      bootstrap: {
+        ...pending,
+        conversation: {
+          ...pending.conversation,
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        },
+      },
+    };
+    const upload = vi.fn().mockResolvedValue(retryResponse);
+    const onSuccess = vi.fn();
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={onSuccess}
+          workspace={workspace}
+          deps={{loadProfile: vi.fn().mockResolvedValue(emptyProfile()), uploadCv: upload}}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', {name: 'Retry'}));
+    const input = screen.getByLabelText('Retry profile CV');
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['%PDF-1.4'], 'retry.pdf', {type: 'application/pdf'})],
+      },
+    });
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(screen.getByText(/inconsistent profile ownership/i)).toBeInTheDocument();
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('re-extracts the selected ready profile through its retained attachment', async () => {
+    const base = uploadResponse('selected.pdf').bootstrap!;
+    const ready = {
+      ...base.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'source-selected',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [ready],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: CONVERSATION_ID,
+        conversations: [base.conversation],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile: vi.fn(),
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    const reextract = vi.fn().mockReturnValue(true);
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          onCvReprocess={reextract}
+          workspace={workspace}
+          deps={{
+            loadProfile: vi.fn().mockResolvedValue(activeProfile('selected.pdf')),
+            uploadCv: vi.fn(),
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {name: 'Actions for selected.pdf'}),
+    );
+    await userEvent.click(await screen.findByText('Re-extract CV'));
+
+    expect(reextract).toHaveBeenCalledTimes(1);
+    expect(reextract).toHaveBeenCalledWith(ATTACHMENT_ID);
+  });
 });
 
 describe('shared sidebar upload → chat turn', () => {
@@ -381,12 +502,9 @@ describe('shared sidebar upload → chat turn', () => {
       expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument();
     });
 
-    // Target the sidebar file input (first Upload CV).
-    const inputs = Array.from(
-      document.querySelectorAll('input[type="file"]'),
-    ) as HTMLInputElement[];
-    expect(inputs.length).toBeGreaterThanOrEqual(1);
-    const sidebarInput = inputs[0]!;
+    const sidebarInput = screen.getByTestId(
+      'jobagent-cv-upload',
+    ) as HTMLInputElement;
     const file = new File(['%PDF-1.4'], 'side.pdf', {type: 'application/pdf'});
     await userEvent.upload(sidebarInput, file);
 
@@ -528,5 +646,70 @@ describe('shared sidebar upload → chat turn', () => {
     await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), file);
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
     expect(sendConversationTurn).not.toHaveBeenCalled();
+  });
+
+  it('renders profile and conversation navigation in the mobile drawer', async () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: true,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close = function close() {
+      this.removeAttribute('open');
+    };
+    const base = uploadResponse('mobile.pdf').bootstrap!;
+    const readyProfile = {
+      ...base.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'source-mobile',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            chat: {
+              loadHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+              loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+            },
+            sidebar: {loadProfile: vi.fn().mockResolvedValue(activeProfile('mobile.pdf'))},
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [readyProfile],
+                active_profile_id: PROFILE_ID,
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [base.conversation],
+                next_cursor: null,
+              }),
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', {name: 'Open navigation'}));
+
+    const drawer = screen.getByRole('dialog', {name: 'Navigation'});
+    expect(drawer).toBeInTheDocument();
+    expect(await screen.findByTestId('jobagent-profile-conversation-sidebar')).toBeInTheDocument();
+    expect(within(drawer).getAllByText('mobile.pdf').length).toBeGreaterThan(0);
+    expect(
+      within(drawer).getAllByText(base.conversation.title).length,
+    ).toBeGreaterThan(0);
   });
 });

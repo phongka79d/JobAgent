@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import {VStack} from '@astryxdesign/core/VStack';
 import {Icon} from '@astryxdesign/core/Icon';
 import {NavIcon} from '@astryxdesign/core/NavIcon';
 import {
@@ -30,7 +31,9 @@ import {
   uploadCv,
 } from './api';
 import {ProfileOverviewPanel} from './ProfileOverviewPanel';
+import {ProfileConversationSidebar} from './ProfileConversationSidebar';
 import type {CvUploadResponse, ProfileReadResponse} from './types';
+import type {ProfileWorkspaceController} from './workspaceState';
 
 export type CvSidebarDeps = {
   loadProfile?: typeof fetchActiveProfileCompat;
@@ -73,6 +76,7 @@ export type CvSidebarProps = {
    * saved-JD state marks list/detail non-current (no remount, no second store).
    */
   savedJobsInvalidateKey?: number;
+  workspace?: ProfileWorkspaceController;
   deps?: CvSidebarDeps;
 };
 
@@ -156,6 +160,7 @@ function CvSidebarController({
   refreshKey = 0,
   activationKey = 0,
   savedJobsInvalidateKey = 0,
+  workspace,
   deps,
 }: CvSidebarProps) {
   const observability = useObservabilityState({api: deps?.observability});
@@ -274,6 +279,50 @@ function CvSidebarController({
     [doUpload, isUploadDisabled, isUploading, onSidebarUploadSuccess, reload],
   );
 
+  const handleRetryUpload = useCallback(
+    async (target: {id: string}, file: File) => {
+      if (isUploadDisabled || isUploading) return;
+      setIsUploading(true);
+      setUploadError(null);
+      try {
+        const result = await doUpload(file);
+        const expectedConversationId = workspace?.state.conversations.find(
+          (conversation) => conversation.profile_id === target.id,
+        )?.id;
+        if (
+          result.outcome !== 'retry_pending' ||
+          result.bootstrap?.profile.id !== target.id ||
+          result.bootstrap.conversation.profile_id !== target.id ||
+          result.bootstrap.conversation.id !== expectedConversationId ||
+          !result.bootstrap.start_extraction
+        ) {
+          throw new Error('Retry upload returned inconsistent profile ownership');
+        }
+        onSidebarUploadSuccess(result);
+        await reload();
+      } catch (err) {
+        const code = err instanceof ChatApiError ? err.code : 'UPLOAD_FAILED';
+        const summary =
+          err instanceof ChatApiError
+            ? err.summary
+            : err instanceof Error
+              ? err.message
+              : 'CV upload failed';
+        setUploadError(`${summary} (${code})`);
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [
+      doUpload,
+      isUploadDisabled,
+      isUploading,
+      onSidebarUploadSuccess,
+      reload,
+      workspace,
+    ],
+  );
+
   const handleViewDownload = useCallback(() => {
     if (!profile?.present || !profile.active_attachment) {
       return;
@@ -286,7 +335,7 @@ function CvSidebarController({
   const pendingName = profile?.pending_attachment?.original_name ?? null;
   const displayCvName = activeName ?? pendingName;
   const hasActive = Boolean(profile?.present && activeName);
-  const uploadLabel = hasActive ? 'Replace CV' : 'Upload CV';
+  const uploadLabel = hasActive ? 'Upload new CV' : 'Upload CV';
   const disabledReason = isUploadDisabled
     ? 'Upload is disabled while a run is active or waiting for approval'
     : undefined;
@@ -297,22 +346,40 @@ function CvSidebarController({
     : 'No active CV';
 
   const overview = (
-    <ProfileOverviewPanel
-      stateLabel={state.text}
-      stateVariant={state.variant}
-      cvName={cvName}
-      selectedFile={selectedFile}
-      loadError={loadError}
-      uploadError={uploadError}
-      uploadLabel={uploadLabel}
-      isUploadDisabled={isUploadDisabled}
-      isUploading={isUploading}
-      disabledReason={disabledReason}
-      canViewDownload={hasActive}
-      onFileChange={handleFileChange}
-      onUpload={handleUpload}
-      onViewDownload={handleViewDownload}
-    />
+    <VStack gap={4} width="100%">
+      {workspace ? (
+        <ProfileConversationSidebar
+          workspace={workspace}
+          isInteractionLocked={isUploadDisabled}
+          onReextract={(target) => {
+            if (
+              target.id === workspace.state.activeProfileId &&
+              profile?.active_attachment
+            ) {
+              onCvReprocess?.(profile.active_attachment.id);
+            }
+          }}
+          onRetryUpload={handleRetryUpload}
+          onProfileDeleted={onCvDeleted}
+        />
+      ) : null}
+      <ProfileOverviewPanel
+        stateLabel={state.text}
+        stateVariant={state.variant}
+        cvName={cvName}
+        selectedFile={selectedFile}
+        loadError={loadError}
+        uploadError={uploadError}
+        uploadLabel={uploadLabel}
+        isUploadDisabled={isUploadDisabled}
+        isUploading={isUploading}
+        disabledReason={disabledReason}
+        canViewDownload={hasActive}
+        onFileChange={handleFileChange}
+        onUpload={handleUpload}
+        onViewDownload={handleViewDownload}
+      />
+    </VStack>
   );
 
   return (

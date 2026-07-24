@@ -6,6 +6,8 @@ import type {
   ConversationListResponse,
   ConversationMutationResponse,
   ConversationSummary,
+  ProfileDeleteResponse,
+  ProfileDetail,
   ProfileListItem,
   ProfileListResponse,
   SelectionResponse,
@@ -22,11 +24,14 @@ export type ProfileWorkspaceState = {
 };
 export type ProfileWorkspaceApi = Pick<typeof defaultProfileApi,
   'fetchProfiles' | 'fetchProfileConversations' | 'activateProfile' |
-  'createProfileConversation' | 'selectConversation' | 'deleteConversation'>;
+  'updateProfile' | 'deleteProfile' | 'createProfileConversation' |
+  'selectConversation' | 'deleteConversation'>;
 export type ProfileWorkspaceAction =
   | {type: 'profiles/loaded'; response: ProfileListResponse}
   | {type: 'conversations/loaded'; response: ConversationListResponse}
   | {type: 'profile/activated'; response: SelectionResponse}
+  | {type: 'profile/renamed'; response: ProfileDetail}
+  | {type: 'profile/deleted'; response: ProfileDeleteResponse}
   | {type: 'conversation/created'; response: ConversationMutationResponse}
   | {type: 'conversation/selected'; response: ConversationMutationResponse}
   | {type: 'conversation/deleted'; response: ConversationDeleteResponse}
@@ -71,6 +76,50 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
         conversations: action.response.conversation ? [action.response.conversation] : [],
         error: action.response.warning?.summary ?? null,
       };
+    case 'profile/renamed':
+      return {
+        ...state,
+        profiles: state.profiles.map((item) =>
+          item.id === action.response.id
+            ? {
+                ...item,
+                display_name: action.response.display_name,
+                updated_at: action.response.updated_at,
+                last_opened_at: action.response.last_opened_at,
+              }
+            : item,
+        ),
+        error: null,
+      };
+    case 'profile/deleted': {
+      const activeProfile = action.response.active_profile;
+      const selected = action.response.selected_conversation;
+      const remaining = state.profiles.filter(
+        (item) => item.id !== action.response.deleted_profile_id,
+      );
+      const hasActiveProfile = activeProfile
+        ? remaining.some((item) => item.id === activeProfile.id)
+        : false;
+      return {
+        ...state,
+        profiles: activeProfile
+          ? hasActiveProfile
+            ? remaining.map((item) =>
+                item.id === activeProfile.id
+                  ? activeProfile
+                  : {...item, is_active: false},
+              )
+            : [
+                activeProfile,
+                ...remaining.map((item) => ({...item, is_active: false})),
+              ]
+          : remaining.map((item) => ({...item, is_active: false})),
+        activeProfileId: activeProfile?.id ?? null,
+        selectedConversationId: selected?.id ?? null,
+        conversations: selected ? [selected] : [],
+        error: null,
+      };
+    }
     case 'conversation/created': {
       const selected = action.response.conversation;
       return {...state, selectedConversationId: selected.id, conversations: [selected, ...state.conversations.filter((item) => item.id !== selected.id).map((item) => ({...item, is_selected: false}))]};
@@ -119,7 +168,9 @@ export type ProfileWorkspaceController = {
   activate: (profileId: string) => Promise<void>;
   createConversation: (profileId: string) => Promise<void>;
   selectConversation: (conversationId: string) => Promise<void>;
-  deleteConversation: (conversationId: string) => Promise<void>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
+  renameProfile: (profileId: string, displayName: string) => Promise<boolean>;
+  deleteProfile: (profileId: string) => Promise<boolean>;
   reload: () => Promise<void>;
   adoptBootstrap: (bootstrap: PendingProfileBootstrap) => void;
 };
@@ -132,6 +183,8 @@ export function useProfileWorkspaceState(
     apiOverrides.fetchProfiles,
     apiOverrides.fetchProfileConversations,
     apiOverrides.activateProfile,
+    apiOverrides.updateProfile,
+    apiOverrides.deleteProfile,
     apiOverrides.createProfileConversation,
     apiOverrides.selectConversation,
     apiOverrides.deleteConversation,
@@ -140,10 +193,16 @@ export function useProfileWorkspaceState(
   const pendingRef = useRef(new Set<string>());
   const requestRef = useRef(0);
   const mutate = useCallback(async <T,>(key: string, request: () => Promise<T>, action: (value: T) => ProfileWorkspaceAction) => {
-    if (interactionLocked || pendingRef.current.has(key)) return;
+    if (interactionLocked || pendingRef.current.has(key)) return false;
     pendingRef.current.add(key); dispatch({type: 'mutation/started', key});
-    try { dispatch(action(await request())); }
-    catch (error) { dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'}); }
+    try {
+      dispatch(action(await request()));
+      return true;
+    }
+    catch (error) {
+      dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'});
+      return false;
+    }
     finally { pendingRef.current.delete(key); dispatch({type: 'mutation/finished', key}); }
   }, [interactionLocked]);
   const activate = useCallback(async (profileId: string) => {
@@ -162,9 +221,31 @@ export function useProfileWorkspaceState(
       dispatch({type: 'mutation/finished', key});
     }
   }, [api, interactionLocked]);
-  const createConversation = useCallback((profileId: string) => mutate(`create:${profileId}`, () => api.createProfileConversation(profileId), (response) => ({type: 'conversation/created', response})), [api, mutate]);
-  const selectConversation = useCallback((conversationId: string) => mutate(`select:${conversationId}`, () => api.selectConversation(conversationId), (response) => ({type: 'conversation/selected', response})), [api, mutate]);
+  const createConversation = useCallback(async (profileId: string) => {
+    await mutate(`create:${profileId}`, () => api.createProfileConversation(profileId), (response) => ({type: 'conversation/created', response}));
+  }, [api, mutate]);
+  const selectConversation = useCallback(async (conversationId: string) => {
+    await mutate(`select:${conversationId}`, () => api.selectConversation(conversationId), (response) => ({type: 'conversation/selected', response}));
+  }, [api, mutate]);
   const deleteConversation = useCallback((conversationId: string) => mutate(`delete:${conversationId}`, () => api.deleteConversation(conversationId), (response) => ({type: 'conversation/deleted', response})), [api, mutate]);
+  const renameProfile = useCallback(
+    (profileId: string, displayName: string) =>
+      mutate(
+        `rename:${profileId}`,
+        () => api.updateProfile(profileId, displayName),
+        (response) => ({type: 'profile/renamed', response}),
+      ),
+    [api, mutate],
+  );
+  const deleteProfile = useCallback(
+    (profileId: string) =>
+      mutate(
+        `delete-profile:${profileId}`,
+        () => api.deleteProfile(profileId),
+        (response) => ({type: 'profile/deleted', response}),
+      ),
+    [api, mutate],
+  );
   const adoptBootstrap = useCallback((bootstrap: PendingProfileBootstrap) => {
     requestRef.current += 1;
     dispatch({type: 'workspace/bootstrapAdopted', bootstrap});
@@ -186,5 +267,5 @@ export function useProfileWorkspaceState(
     }
   }, [api]);
   useEffect(() => { void reload(); return () => { requestRef.current += 1; }; }, [reload]);
-  return {state, activate, createConversation, selectConversation, deleteConversation, reload, adoptBootstrap};
+  return {state, activate, createConversation, selectConversation, deleteConversation, renameProfile, deleteProfile, reload, adoptBootstrap};
 }
