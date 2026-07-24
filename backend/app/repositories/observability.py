@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.attachment_text_chunks import AttachmentTextChunk
 from app.db.models.attachments import Attachment
-from app.db.models.chat import AgentRun, ToolExecution
+from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
 
 
 class ObservabilityRepositoryError(Exception):
@@ -27,6 +27,7 @@ async def list_attachments_before(
     *,
     limit: int,
     before: tuple[datetime, str] | None = None,
+    attachment_id: str | None = None,
 ) -> list[Attachment]:
     """Return up to *limit* attachments newest-first for history pagination.
 
@@ -38,6 +39,8 @@ async def list_attachments_before(
         raise ObservabilityRepositoryError("limit must be >= 1")
 
     stmt = select(Attachment)
+    if attachment_id is not None:
+        stmt = stmt.where(Attachment.id == attachment_id)
     if before is not None:
         before_created_at, before_id = before
         stmt = stmt.where(
@@ -116,6 +119,7 @@ async def list_runs_before(
     *,
     limit: int,
     before: tuple[datetime, str] | None = None,
+    profile_id: str | None = None,
 ) -> list[AgentRun]:
     """Return up to *limit* agent runs newest-first for history pagination.
 
@@ -127,6 +131,12 @@ async def list_runs_before(
         raise ObservabilityRepositoryError("limit must be >= 1")
 
     stmt = select(AgentRun)
+    if profile_id is not None:
+        stmt = (
+            stmt.join(ChatMessage, AgentRun.user_message_id == ChatMessage.id)
+            .join(Conversation, ChatMessage.conversation_id == Conversation.id)
+            .where(Conversation.profile_id == profile_id)
+        )
     if before is not None:
         before_created_at, before_id = before
         stmt = stmt.where(

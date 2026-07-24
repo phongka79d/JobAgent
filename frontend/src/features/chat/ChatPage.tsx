@@ -25,11 +25,10 @@ import {
   streamChatResume,
   streamChatTurn,
   streamConversationTurn,
-  streamCvReprocess,
   type StreamCallbacks,
 } from '../../lib/api/chat';
 import {saveAndEvaluateJob as defaultSaveAndEvaluateJob} from '../jobs/api';
-import {uploadCv as defaultUploadCv} from '../profile/api';
+import {reextractProfile, uploadCv as defaultUploadCv} from '../profile/api';
 import {isProfileCommitApproval} from '../profile/ApprovalCard';
 import type {
   ProfileListItem,
@@ -61,7 +60,7 @@ export type ChatPageDeps = {
   /** Injectable resume transport for approval actions. */
   resumeRun?: typeof streamChatResume;
   /** Injectable CV reprocess SSE transport (defaults to streamCvReprocess). */
-  reprocessCv?: typeof streamCvReprocess;
+  reprocessCv?: typeof reextractProfile;
   /** Shared CV upload used by composer attachment (same as sidebar). */
   uploadCv?: typeof defaultUploadCv;
   /** Injectable save-and-evaluate for zero-result recovery tests. */
@@ -79,7 +78,7 @@ export type SidebarAttachmentTurnRequest = {
 /** CV Manager reprocess request composed through App (same SSE owner as turns). */
 export type CvReprocessRequest = {
   requestKey: number;
-  attachmentId: string;
+  profileId: string;
   message: string;
 };
 
@@ -106,7 +105,7 @@ export type ChatPageProps = {
   /** Notify sidebar when reprocess stream ends (clear pending / surface error). */
   onCvReprocessTerminal?: (
     requestKey: number,
-    attachmentId: string,
+    profileId: string,
     kind: CvReprocessTerminal,
     error?: {code: string; summary: string},
   ) => void;
@@ -152,7 +151,7 @@ export function ChatPage({
   const sendConversationTurn =
     deps?.sendConversationTurn ?? streamConversationTurn;
   const resumeRun = deps?.resumeRun ?? streamChatResume;
-  const reprocessCv = deps?.reprocessCv ?? streamCvReprocess;
+  const reprocessCv = deps?.reprocessCv ?? reextractProfile;
   const doUpload = deps?.uploadCv ?? defaultUploadCv;
   const saveAndEvaluate =
     deps?.saveAndEvaluateJob ?? defaultSaveAndEvaluateJob;
@@ -633,7 +632,7 @@ export function ChatPage({
     if (!cvReprocessRequest) {
       return;
     }
-    const {requestKey, attachmentId, message} = cvReprocessRequest;
+    const {requestKey, profileId, message} = cvReprocessRequest;
     if (handledReprocessKeysRef.current.has(requestKey)) {
       return;
     }
@@ -652,7 +651,7 @@ export function ChatPage({
 
     const callbacks = makeStreamCallbacks({
       onTerminal: (kind) => {
-        onCvReprocessTerminalRef.current?.(requestKey, attachmentId, kind);
+        onCvReprocessTerminalRef.current?.(requestKey, profileId, kind);
         if (kind === 'interrupted') {
           focusApprovalCard();
         }
@@ -673,7 +672,7 @@ export function ChatPage({
 
     void (async () => {
       try {
-        await reprocessCv(attachmentId, wrapped, controller.signal);
+        await reprocessCv(profileId, wrapped, controller.signal);
         onCvReprocessHandled?.(requestKey);
       } catch (err) {
         if (controller.signal.aborted) {
@@ -689,7 +688,7 @@ export function ChatPage({
           });
           onCvReprocessTerminalRef.current?.(
             requestKey,
-            attachmentId,
+            profileId,
             'http_error',
             {code: err.code, summary: err.summary},
           );
@@ -703,7 +702,7 @@ export function ChatPage({
           });
           onCvReprocessTerminalRef.current?.(
             requestKey,
-            attachmentId,
+            profileId,
             'http_error',
             {code: 'STREAM_ERROR', summary},
           );

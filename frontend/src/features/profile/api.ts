@@ -8,6 +8,7 @@ import {
   apiUrl,
   ChatApiError,
   parseErrorBody,
+  streamProfileReextract,
 } from '../../lib/api/chat';
 import {
   parseCvUploadResponse,
@@ -102,6 +103,7 @@ export function activateProfile(profileId: string, signal?: AbortSignal): Promis
 export function deleteProfile(profileId: string, signal?: AbortSignal): Promise<ProfileDeleteResponse> {
   return jsonRequest(profilePath(profileId), {method: 'DELETE', headers: {Accept: 'application/json'}, signal}, parseProfileDeleteResponse);
 }
+export const reextractProfile = streamProfileReextract;
 export function fetchProfileConversations(profileId: string, query: {limit?: number; before?: string | null} = {}, signal?: AbortSignal): Promise<ConversationListResponse> {
   const params = new URLSearchParams(); if (query.limit !== undefined) params.set('limit', String(query.limit)); if (query.before) params.set('before', query.before);
   const suffix = params.size ? `?${params}` : '';

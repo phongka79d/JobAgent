@@ -4,7 +4,7 @@
  * Does not own profile/upload or chat/SSE state (reprocess streams via ChatPage).
  */
 
-import {useCallback, useReducer, useRef} from 'react';
+import {useCallback, useEffect, useReducer, useRef} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
 import type {ObservabilityApi} from './api';
@@ -476,6 +476,8 @@ export function observabilityReducer(
 
 export type UseObservabilityOptions = {
   api?: Partial<ObservabilityApi>;
+  profileId?: string | null;
+  profileReady?: boolean;
 };
 
 export function useObservabilityState(options: UseObservabilityOptions = {}) {
@@ -490,6 +492,17 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const beginLatestRequest = useLatestRequest();
   /** Synchronous pending guard so rapid double-clicks cannot race re-render. */
   const actionInFlightRef = useRef<Set<string>>(new Set());
+  const profileId = options.profileId ?? null;
+  const canLoadProfileScope = options.profileReady !== false;
+  const profileScopeRef = useRef(profileId);
+  useEffect(() => {
+    if (profileScopeRef.current === profileId) return;
+    profileScopeRef.current = profileId;
+    beginLatestRequest('cv-history');
+    beginLatestRequest('runs');
+    beginLatestRequest('graph');
+    dispatch({type: 'cv_invalidate_activation'});
+  }, [beginLatestRequest, profileId]);
 
   const selectTab = useCallback((tab: ObservabilityTabId) => {
     dispatch({type: 'select_tab', tab});
@@ -509,13 +522,14 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
 
   const loadCvHistory = useCallback(
     async (opts?: {force?: boolean; signal?: AbortSignal}) => {
+      if (!canLoadProfileScope) return;
       if (state.cvHistory.loaded && !opts?.force) {
         return;
       }
       const isLatest = beginLatestRequest('cv-history');
       dispatch({type: 'resource_loading', resource: 'cvHistory'});
       try {
-        const data = await api.fetchCvHistory({}, opts?.signal);
+        const data = await api.fetchCvHistory({profileId: profileId ?? undefined}, opts?.signal);
         if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
@@ -531,18 +545,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.cvHistory.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, state.cvHistory.loaded],
   );
 
   const loadRuns = useCallback(
     async (opts?: {force?: boolean; signal?: AbortSignal}) => {
+      if (!canLoadProfileScope) return;
       if (state.runs.loaded && !opts?.force) {
         return;
       }
       const isLatest = beginLatestRequest('runs');
       dispatch({type: 'resource_loading', resource: 'runs'});
       try {
-        const data = await api.fetchRunHistory({}, opts?.signal);
+        const data = await api.fetchRunHistory({profileId: profileId ?? undefined}, opts?.signal);
         if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
@@ -558,18 +573,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.runs.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, state.runs.loaded],
   );
 
   const loadGraph = useCallback(
     async (opts?: {force?: boolean; signal?: AbortSignal}) => {
+      if (!canLoadProfileScope) return;
       if (state.graph.loaded && !opts?.force) {
         return;
       }
       const isLatest = beginLatestRequest('graph');
       dispatch({type: 'resource_loading', resource: 'graph'});
       try {
-        const data = await api.fetchGraphSnapshot(opts?.signal);
+        const data = await api.fetchGraphSnapshot(opts?.signal, profileId ?? undefined);
         if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
@@ -585,7 +601,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.graph.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, state.graph.loaded],
   );
 
   const loadChunkList = useCallback(
@@ -593,6 +609,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       attachmentId: string,
       opts?: {force?: boolean; signal?: AbortSignal},
     ) => {
+      if (!canLoadProfileScope) return;
       const cached = state.chunkLists[attachmentId];
       if (cached?.loaded && !opts?.force) {
         return;
@@ -600,7 +617,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       const isLatest = beginLatestRequest(`chunk-list:${attachmentId}`);
       dispatch({type: 'chunk_list_loading', attachmentId});
       try {
-        const data = await api.fetchChunkList(attachmentId, {}, opts?.signal);
+        const data = await api.fetchChunkList(attachmentId, {profileId: profileId ?? undefined}, opts?.signal);
         if (opts?.signal?.aborted || !isLatest()) {
           return;
         }
@@ -616,7 +633,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.chunkLists],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, state.chunkLists],
   );
 
   const expandChunk = useCallback(
@@ -625,6 +642,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       ordinal: number,
       opts?: {signal?: AbortSignal},
     ) => {
+      if (!canLoadProfileScope) return;
       const key = chunkDetailKey(attachmentId, ordinal);
       const cached = state.chunkDetails[key];
       if (
@@ -640,6 +658,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           attachmentId,
           ordinal,
           opts?.signal,
+          profileId ?? undefined,
         );
         if (opts?.signal?.aborted) {
           return;
@@ -662,7 +681,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, state.chunkDetails],
+    [api, canLoadProfileScope, profileId, state.chunkDetails],
   );
 
   const openRetainedFile = useCallback(
@@ -670,10 +689,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (!fileAvailable) {
         return;
       }
-      const url = api.getRetainedCvUrl(attachmentId);
+      if (!canLoadProfileScope) return;
+      const url = api.getRetainedCvUrl(attachmentId, profileId ?? undefined);
       window.open(url, '_blank', 'noopener,noreferrer');
     },
-    [api],
+    [api, canLoadProfileScope, profileId],
   );
 
   /**

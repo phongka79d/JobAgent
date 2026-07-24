@@ -45,6 +45,9 @@ export type ObservabilitySidebarProps = {
   onCvDeleted?: () => void;
   /** Shared workspace/chat mutation lock. */
   isInteractionLocked?: boolean;
+  /** Pending profiles must never render stale profile-owned inspector data. */
+  profileSetupInProgress?: boolean;
+  profileId?: string | null;
 };
 
 export function ObservabilitySidebar({
@@ -55,10 +58,15 @@ export function ObservabilitySidebar({
   onCvReprocess,
   onCvDeleted,
   isInteractionLocked = false,
+  profileSetupInProgress = false,
+  profileId = null,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
-  const savedJobs = useSavedJobsState();
+  const savedJobs = useSavedJobsState({
+    profileId,
+    profileReady: !profileSetupInProgress,
+  });
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
 
   const loadSavedJobsList = useCallback(() => {
@@ -70,6 +78,7 @@ export function ObservabilitySidebar({
   }, [savedJobs.loadList]);
 
   useEffect(() => {
+    if (profileSetupInProgress) return;
     const controller = new AbortController();
     const {signal} = controller;
     if (state.selectedTab === 'cv-history') {
@@ -91,6 +100,7 @@ export function ObservabilitySidebar({
     // Tab/selection plus activation generation: open tabs auto-reload after
     // Save Profile without requiring a manual refresh (Plan 11 F-03).
   }, [
+    profileSetupInProgress,
     state.selectedTab,
     state.selectedAttachmentId,
     state.activationGeneration,
@@ -101,6 +111,7 @@ export function ObservabilitySidebar({
     : undefined;
 
   useEffect(() => {
+    if (profileSetupInProgress) return;
     const jobId = savedJobs.state.selectedJobId;
     if (
       state.selectedTab !== 'graph' ||
@@ -117,12 +128,14 @@ export function ObservabilitySidebar({
     // The selected Job and cache freshness own this read. loadSkillMap itself
     // changes as cache state changes, so it is intentionally not a dependency.
   }, [
+    profileSetupInProgress,
     state.selectedTab,
     savedJobs.state.selectedJobId,
     selectedSkillMapLoaded,
   ]);
 
   useEffect(() => {
+    if (profileSetupInProgress) return;
     if (state.selectedTab !== 'saved-jobs') {
       return;
     }
@@ -136,11 +149,12 @@ export function ObservabilitySidebar({
       controller.abort();
     };
     // Selection-driven detail load; loadDetail is cache-aware.
-  }, [state.selectedTab, savedJobs.state.selectedJobId]);
+  }, [profileSetupInProgress, state.selectedTab, savedJobs.state.selectedJobId]);
 
   // Saved-JD invalidation signal: mark list/selected detail non-current; force
   // open-tab GETs; closed tab refreshes lazily on next selection/mount.
   useEffect(() => {
+    if (profileSetupInProgress) return;
     if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
       return;
     }
@@ -159,10 +173,11 @@ export function ObservabilitySidebar({
       }
     }
     // Signal-only trigger; selection/tab captured at invalidation time (Plan 11).
-  }, [savedJobsInvalidateKey]);
+  }, [profileSetupInProgress, savedJobsInvalidateKey]);
 
   // Evaluate/delete success bumps graph generation; force-refresh when graph was loaded.
   useEffect(() => {
+    if (profileSetupInProgress) return;
     const gen = savedJobs.state.externalInvalidation.graphGeneration;
     if (gen <= 0) {
       return;
@@ -171,7 +186,7 @@ export function ObservabilitySidebar({
       void obs.loadGraph({force: true});
     }
     // Generation is the sole invalidation trigger for graph projection.
-  }, [savedJobs.state.externalInvalidation.graphGeneration]);
+  }, [profileSetupInProgress, savedJobs.state.externalInvalidation.graphGeneration]);
 
   const handleSelectTab = (tab: ObservabilityTabId) => {
     obs.selectTab(tab);
@@ -274,7 +289,13 @@ export function ObservabilitySidebar({
       </div>
 
       <div className="jobagent-obs-content">
-        {state.selectedTab === 'overview' ? (
+        {profileSetupInProgress ? (
+          <Text data-testid="profile-setup-in-progress" type="supporting">
+            Profile setup in progress
+          </Text>
+        ) : null}
+
+        {!profileSetupInProgress && state.selectedTab === 'overview' ? (
           <div
             role="tabpanel"
             id="jobagent-obs-panel-overview"
@@ -285,7 +306,7 @@ export function ObservabilitySidebar({
           </div>
         ) : null}
 
-        {state.selectedTab === 'cv-history' ? (
+        {!profileSetupInProgress && state.selectedTab === 'cv-history' ? (
           <CvManagerPanel
             resource={state.cvHistory}
             selectedAttachmentId={state.selectedAttachmentId}
@@ -302,7 +323,7 @@ export function ObservabilitySidebar({
           />
         ) : null}
 
-        {state.selectedTab === 'chunks' ? (
+        {!profileSetupInProgress && state.selectedTab === 'chunks' ? (
           <ChunkPanel
             selectedAttachmentId={state.selectedAttachmentId}
             listResource={chunkList}
@@ -324,7 +345,7 @@ export function ObservabilitySidebar({
           />
         ) : null}
 
-        {state.selectedTab === 'graph' ? (
+        {!profileSetupInProgress && state.selectedTab === 'graph' ? (
           <GraphPanel
             resource={state.graph}
             selectedJobId={savedJobs.state.selectedJobId}
@@ -343,7 +364,7 @@ export function ObservabilitySidebar({
           />
         ) : null}
 
-        {state.selectedTab === 'runs' ? (
+        {!profileSetupInProgress && state.selectedTab === 'runs' ? (
           <RunHistoryPanel
             resource={state.runs}
             expandedRunId={state.expandedRunId}
@@ -358,7 +379,7 @@ export function ObservabilitySidebar({
           />
         ) : null}
 
-        {state.selectedTab === 'saved-jobs' ? (
+        {!profileSetupInProgress && state.selectedTab === 'saved-jobs' ? (
           <SavedJobsPanel
             list={savedJobs.state.list}
             details={savedJobs.state.details}

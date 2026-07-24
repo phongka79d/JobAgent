@@ -5,7 +5,7 @@
  * Does not own observability panels, chat SSE, or MatchResult formatting.
  */
 
-import {useCallback, useReducer, useRef} from 'react';
+import {useCallback, useEffect, useReducer, useRef} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
 import {useLatestRequest} from '../observability/useLatestRequest';
@@ -624,6 +624,9 @@ export function savedJobsReducer(
 
 export type UseSavedJobsOptions = {
   api?: Partial<SavedJobsApi>;
+  /** Currentness, detail, and skill maps are meaningful only for a ready profile. */
+  profileId?: string | null;
+  profileReady?: boolean;
 };
 
 export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
@@ -642,6 +645,15 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     all: 0,
     byJob: new Map<string, number>(),
   });
+  const profileScopeRef = useRef(options.profileId ?? null);
+  const canLoadProfileData = options.profileReady !== false;
+  useEffect(() => {
+    const next = options.profileId ?? null;
+    if (profileScopeRef.current === next) return;
+    profileScopeRef.current = next;
+    skillMapInvalidationRef.current.all += 1;
+    dispatch({type: 'invalidate_currentness'});
+  }, [options.profileId]);
 
   const invalidateSkillMapRequests = useCallback((jobId: string) => {
     const generations = skillMapInvalidationRef.current.byJob;
@@ -665,6 +677,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       query: SavedJobsPageQuery = {},
       opts?: {force?: boolean; signal?: AbortSignal},
     ) => {
+      if (!canLoadProfileData) return;
       if (state.list.loaded && !opts?.force) {
         return;
       }
@@ -714,7 +727,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.details],
+    [api, beginLatestRequest, canLoadProfileData, state.details],
   );
 
   const loadSkillMap = useCallback(
@@ -722,6 +735,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       jobId: string,
       opts?: {force?: boolean; signal?: AbortSignal},
     ) => {
+      if (!canLoadProfileData) return;
       const cached = state.skillMaps[jobId];
       if (cached?.loaded && !opts?.force) {
         return;
@@ -752,7 +766,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, state.skillMaps],
+    [api, beginLatestRequest, canLoadProfileData, state.skillMaps],
   );
 
   const evaluateJob = useCallback(
@@ -760,6 +774,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       jobId: string,
       opts?: {signal?: AbortSignal},
     ): Promise<'success' | 'duplicate' | 'error'> => {
+      if (!canLoadProfileData) return 'duplicate';
       if (actionInFlightRef.current.has(jobId)) {
         return 'duplicate';
       }
@@ -790,7 +805,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         return 'error';
       }
     },
-    [api],
+    [api, canLoadProfileData],
   );
 
   const confirmDelete = useCallback(

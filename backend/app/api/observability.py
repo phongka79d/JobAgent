@@ -112,6 +112,7 @@ def _chunk_query(
 async def get_observability_cvs(
     request: Request,
     query: Annotated[ObservabilityQuery, Depends(_obs_query)],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> CvHistoryPage:
     """``GET /api/observability/cvs`` — cursor-paginated CV attachment history."""
     storage: AttachmentStorage = request.app.state.storage
@@ -123,6 +124,7 @@ async def get_observability_cvs(
                 storage,
                 limit=query.limit,
                 before=query.before,
+                profile_id=profile_id,
             )
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
@@ -134,6 +136,7 @@ async def get_observability_cvs(
 async def get_observability_cv_file(
     request: Request,
     attachment_id: Annotated[UuidStr, Path()],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> StreamingResponse:
     """``GET /api/observability/cvs/{id}/file`` — stream retained PDF."""
     storage: AttachmentStorage = request.app.state.storage
@@ -145,6 +148,7 @@ async def get_observability_cv_file(
                 session,
                 storage,
                 attachment_id,
+                profile_id,
             )
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
@@ -197,6 +201,7 @@ async def get_observability_cv_file(
 async def get_observability_chunks(
     attachment_id: Annotated[UuidStr, Path()],
     query: Annotated[ChunkListQuery, Depends(_chunk_query)],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> ChunkListPage:
     """``GET /api/observability/cvs/{id}/chunks`` — preview-only chunk page."""
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
@@ -207,6 +212,7 @@ async def get_observability_chunks(
                 attachment_id,
                 limit=query.limit,
                 before=query.before,
+                profile_id=profile_id,
             )
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
@@ -221,12 +227,13 @@ async def get_observability_chunks(
 async def get_observability_chunk_detail(
     attachment_id: Annotated[UuidStr, Path()],
     ordinal: Annotated[int, Path(ge=0)],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> ChunkDetail:
     """``GET /api/observability/cvs/{id}/chunks/{ordinal}`` — selected full text."""
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
     async with factory() as session:
         try:
-            detail = await get_chunk_detail(session, attachment_id, ordinal)
+            detail = await get_chunk_detail(session, attachment_id, ordinal, profile_id)
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
         await session.commit()
@@ -239,6 +246,7 @@ async def get_observability_chunk_detail(
 )
 async def get_observability_runs(
     query: Annotated[ObservabilityQuery, Depends(_obs_query)],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> RunHistoryPage:
     """``GET /api/observability/runs`` — cursor-paginated durable run history."""
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
@@ -248,6 +256,7 @@ async def get_observability_runs(
                 session,
                 limit=query.limit,
                 before=query.before,
+                profile_id=profile_id,
             )
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
@@ -262,6 +271,7 @@ async def get_observability_runs(
 async def get_observability_skill_map(
     request: Request,
     job_id: Annotated[UuidStr, Query()],
+    profile_id: Annotated[UuidStr | None, Query()] = None,
 ) -> SelectedJobSkillMap:
     """Return one read-only selected CV/Job compatibility map."""
     driver: AsyncGraphReadDriver = request.app.state.neo4j_driver
@@ -272,6 +282,7 @@ async def get_observability_skill_map(
                 session,
                 driver,
                 job_id=job_id,
+                profile_id=profile_id,
             )
         except ObservabilityServiceError as exc:
             raise _http_for_service_error(exc) from exc
@@ -283,7 +294,10 @@ async def get_observability_skill_map(
     "/observability/graph",
     response_model=GraphSnapshot,
 )
-async def get_observability_graph(request: Request) -> GraphSnapshot:
+async def get_observability_graph(
+    request: Request,
+    profile_id: Annotated[UuidStr | None, Query()] = None,
+) -> GraphSnapshot:
     """``GET /api/observability/graph`` — bounded allowlisted Neo4j snapshot.
 
     Accepts no query/filter/expansion/mutation input. Typed ``ready``,
@@ -292,7 +306,10 @@ async def get_observability_graph(request: Request) -> GraphSnapshot:
     driver: AsyncGraphReadDriver = request.app.state.neo4j_driver
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
     async with factory() as session:
-        snapshot = await get_graph_snapshot(session, driver)
+        try:
+            snapshot = await get_graph_snapshot(session, driver, profile_id)
+        except ObservabilityServiceError as exc:
+            raise _http_for_service_error(exc) from exc
         await session.commit()
     return snapshot
 

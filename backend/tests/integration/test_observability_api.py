@@ -338,6 +338,64 @@ def test_cv_history_empty_page(
     _assert_no_forbidden(body)
 
 
+def test_observability_profile_query_rejects_a_non_active_profile(
+    obs_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    """A caller cannot use an older profile id to read another CV history."""
+    db_path, files_dir, _fake = obs_env
+    storage = AttachmentStorage(files_dir)
+
+    async def _seed() -> tuple[str, str]:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                first_attachment = await _seed_attachment(
+                    session, storage, state=ATTACHMENT_STATE_ARCHIVED,
+                    created_at=T0, file_hash="first-profile" + "a" * 51,
+                )
+                first = await profile_repo.create_profile(
+                    session, attachment_id=first_attachment,
+                    display_name="First", profile_json=profile_payload(), location=None,
+                    extraction_version="test", source_hash="first",
+                )
+                second_attachment = await _seed_attachment(
+                    session,
+                    storage,
+                    state=ATTACHMENT_STATE_ACTIVE,
+                    created_at=T0 + timedelta(minutes=1),
+                    file_hash="second-profile" + "b" * 50,
+                )
+                second = await profile_repo.create_profile(
+                    session,
+                    attachment_id=second_attachment,
+                    display_name="Second",
+                    profile_json=profile_payload(),
+                    location=None,
+                    extraction_version="test",
+                    source_hash="second",
+                )
+                await workspace_repo.set_active_profile_id(session, second.id)
+                await session.commit()
+                return first.id, second.id
+        finally:
+            await engine.dispose()
+
+    first_id, second_id = run_async(_seed())
+    with _client() as client:
+        rejected = client.get(
+            "/api/observability/cvs", params={"profile_id": first_id}
+        )
+        accepted = client.get(
+            "/api/observability/cvs", params={"profile_id": second_id}
+        )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"]["code"] == "ACTIVE_PROFILE_REQUIRED"
+    assert accepted.status_code == 200
+    assert [item["id"] for item in accepted.json()["items"]] != []
+
+
 def test_cv_history_pagination_and_post_final_cursor(
     obs_env: tuple[Path, Path, FakeDriver],
 ) -> None:

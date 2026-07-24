@@ -47,7 +47,16 @@ export {
 export type ObservabilityPageQuery = {
   limit?: number;
   before?: string | null;
+  /** Active ready profile scope, validated by the server. */
+  profileId?: string;
 };
+
+function scopedCursorQuery(query: ObservabilityPageQuery): string {
+  const params = new URLSearchParams(buildCursorQuery(query).replace(/^\?/, ''));
+  if (query.profileId) params.set('profile_id', query.profileId);
+  const value = params.toString();
+  return value ? `?${value}` : '';
+}
 
 async function getJson(
   path: string,
@@ -79,7 +88,7 @@ export async function fetchCvHistory(
   signal?: AbortSignal,
 ): Promise<CvHistoryPage> {
   const json = await getJson(
-    `/api/observability/cvs${buildCursorQuery(query)}`,
+    `/api/observability/cvs${scopedCursorQuery(query)}`,
     signal,
   );
   try {
@@ -94,8 +103,9 @@ export async function fetchCvHistory(
 }
 
 /** Absolute URL for GET /api/observability/cvs/{id}/file (view/download). */
-export function getRetainedCvUrl(attachmentId: string): string {
-  return apiUrl(`/api/observability/cvs/${encodeURIComponent(attachmentId)}/file`);
+export function getRetainedCvUrl(attachmentId: string, profileId?: string): string {
+  const query = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : '';
+  return apiUrl(`/api/observability/cvs/${encodeURIComponent(attachmentId)}/file${query}`);
 }
 
 /** GET /api/observability/cvs/{id}/chunks */
@@ -106,7 +116,7 @@ export async function fetchChunkList(
 ): Promise<ChunkListPage> {
   const path =
     `/api/observability/cvs/${encodeURIComponent(attachmentId)}/chunks` +
-    buildCursorQuery(query);
+    scopedCursorQuery(query);
   const json = await getJson(path, signal);
   try {
     return parseChunkListPage(json);
@@ -124,10 +134,12 @@ export async function fetchChunkDetail(
   attachmentId: string,
   ordinal: number,
   signal?: AbortSignal,
+  profileId?: string,
 ): Promise<ChunkDetail> {
   const path =
     `/api/observability/cvs/${encodeURIComponent(attachmentId)}` +
-    `/chunks/${encodeURIComponent(String(ordinal))}`;
+    `/chunks/${encodeURIComponent(String(ordinal))}` +
+    (profileId ? `?profile_id=${encodeURIComponent(profileId)}` : '');
   const json = await getJson(path, signal);
   try {
     return parseChunkDetail(json);
@@ -146,7 +158,7 @@ export async function fetchRunHistory(
   signal?: AbortSignal,
 ): Promise<RunHistoryPage> {
   const json = await getJson(
-    `/api/observability/runs${buildCursorQuery(query)}`,
+    `/api/observability/runs${scopedCursorQuery(query)}`,
     signal,
   );
   try {
@@ -163,8 +175,10 @@ export async function fetchRunHistory(
 /** GET /api/observability/graph */
 export async function fetchGraphSnapshot(
   signal?: AbortSignal,
+  profileId?: string,
 ): Promise<GraphSnapshot> {
-  const json = await getJson('/api/observability/graph', signal);
+  const suffix = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : '';
+  const json = await getJson(`/api/observability/graph${suffix}`, signal);
   try {
     return parseGraphSnapshot(json);
   } catch (err) {

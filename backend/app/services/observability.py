@@ -27,6 +27,7 @@ from app.db.models.jobs import (
     JOB_JD_QUALITY_PARTIAL,
     JOB_PROCESSING_STATUS_PROCESSED,
 )
+from app.db.models.profiles import Profile
 from app.graph.consistency import (
     NEO4J_REBUILD_REQUIRED,
     NEO4J_UNAVAILABLE,
@@ -124,6 +125,31 @@ class ObservabilityServiceError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+async def _require_selected_ready_profile(
+    session: AsyncSession, profile_id: str | None
+) -> Profile | None:
+    """Validate a client profile scope against the authoritative selection."""
+    active = await profile_repo.get_active_profile(session)
+    if active is None:
+        if profile_id is None:
+            return None
+        raise ObservabilityServiceError(
+            ERROR_ACTIVE_PROFILE_REQUIRED,
+            "Select an active CV profile before loading observability data.",
+        )
+    if active.state != "ready":
+        raise ObservabilityServiceError(
+            ERROR_PROFILE_NOT_READY,
+            "Profile setup is in progress.",
+        )
+    if profile_id is not None and profile_id != active.id:
+        raise ObservabilityServiceError(
+            ERROR_ACTIVE_PROFILE_REQUIRED,
+            "The requested profile is not the active profile.",
+        )
+    return active
 
 
 def _as_aware_utc(value: datetime | None) -> datetime | None:
@@ -280,6 +306,7 @@ async def get_cv_history_page(
     *,
     limit: int = 50,
     before: str | None = None,
+    profile_id: str | None = None,
 ) -> CvHistoryPage:
     """Load one chronological CV history page with opaque cursor pagination.
 
@@ -296,10 +323,12 @@ async def get_cv_history_page(
     if before is not None:
         cursor_pair = decode_observability_cursor(before)
 
+    profile = await _require_selected_ready_profile(session, profile_id)
     newest_first = await obs_repo.list_attachments_before(
         session,
         limit=limit + 1,
         before=cursor_pair,
+        attachment_id=profile.active_attachment_id if profile is not None else None,
     )
     has_older = len(newest_first) > limit
     page_newest_first = newest_first[:limit]
@@ -323,6 +352,7 @@ async def resolve_retained_cv_file(
     session: AsyncSession,
     storage: AttachmentStorage,
     attachment_id: str,
+    profile_id: str | None = None,
 ) -> tuple[str, str, int]:
     """Resolve an active/archived retained PDF for streaming.
 
@@ -330,7 +360,10 @@ async def resolve_retained_cv_file(
     :class:`ObservabilityServiceError` with ``CV_ATTACHMENT_NOT_FOUND`` or
     ``CV_FILE_UNAVAILABLE``. Never exposes the storage path in error messages.
     """
+    profile = await _require_selected_ready_profile(session, profile_id)
     row = await obs_repo.get_attachment(session, attachment_id)
+    if profile is not None and attachment_id != profile.active_attachment_id:
+        row = None
     if row is None or row.state not in _RETAINED_FILE_STATES:
         raise ObservabilityServiceError(
             ERROR_CV_ATTACHMENT_NOT_FOUND,
@@ -350,6 +383,7 @@ async def get_chunk_list_page(
     *,
     limit: int = 50,
     before: str | None = None,
+    profile_id: str | None = None,
 ) -> ChunkListPage:
     """Load one ascending-ordinal chunk page for *attachment_id*.
 
@@ -363,7 +397,10 @@ async def get_chunk_list_page(
             "limit must be an integer in 1..50",
         )
 
+    profile = await _require_selected_ready_profile(session, profile_id)
     attachment = await obs_repo.get_attachment(session, attachment_id)
+    if profile is not None and attachment_id != profile.active_attachment_id:
+        attachment = None
     if attachment is None:
         raise ObservabilityServiceError(
             ERROR_CV_ATTACHMENT_NOT_FOUND,
@@ -408,6 +445,7 @@ async def get_chunk_detail(
     session: AsyncSession,
     attachment_id: str,
     ordinal: int,
+    profile_id: str | None = None,
 ) -> ChunkDetail:
     """Return one selected full-text chunk with safe metadata.
 
@@ -421,7 +459,10 @@ async def get_chunk_detail(
             "chunk not found",
         )
 
+    profile = await _require_selected_ready_profile(session, profile_id)
     attachment = await obs_repo.get_attachment(session, attachment_id)
+    if profile is not None and attachment_id != profile.active_attachment_id:
+        attachment = None
     if attachment is None:
         raise ObservabilityServiceError(
             ERROR_CV_ATTACHMENT_NOT_FOUND,
@@ -453,6 +494,7 @@ async def get_run_history_page(
     *,
     limit: int = 50,
     before: str | None = None,
+    profile_id: str | None = None,
 ) -> RunHistoryPage:
     """Load one chronological agent-run page with redacted tool projections.
 
@@ -468,10 +510,12 @@ async def get_run_history_page(
     if before is not None:
         cursor_pair = decode_observability_cursor(before)
 
+    profile = await _require_selected_ready_profile(session, profile_id)
     newest_first = await obs_repo.list_runs_before(
         session,
         limit=limit + 1,
         before=cursor_pair,
+        profile_id=profile.id if profile is not None else None,
     )
     has_older = len(newest_first) > limit
     page_newest_first = newest_first[:limit]
@@ -586,6 +630,7 @@ async def get_selected_job_skill_map(
     driver: AsyncGraphReadDriver,
     *,
     job_id: str,
+    profile_id: str | None = None,
     normalizer: SkillNormalizer | None = None,
 ) -> SelectedJobSkillMap:
     """Load one read-only selected map after revision and relationship parity."""
@@ -612,7 +657,7 @@ async def get_selected_job_skill_map(
             "The requested Job has no valid scorable extraction.",
         ) from exc
 
-    profile_row = await profile_repo.get_selected_ready_profile(session)
+    profile_row = await _require_selected_ready_profile(session, profile_id)
     if profile_row is None:
         selected = await profile_repo.get_active_profile(session)
         raise ObservabilityServiceError(
@@ -838,6 +883,7 @@ def _ready_graph_snapshot(
 async def get_graph_snapshot(
     session: AsyncSession,
     driver: AsyncGraphReadDriver,
+    profile_id: str | None = None,
 ) -> GraphSnapshot:
     """Assemble a typed graph observability snapshot without mutation.
 
@@ -850,7 +896,13 @@ async def get_graph_snapshot(
     * otherwise ``ready`` with the cap-aware allowlisted projection (legacy
       active CV without document emits metadata only + ``CV_REPROCESS_REQUIRED``).
     """
-    profile = await profile_repo.get_selected_ready_profile(session)
+    # Preserve the legacy unscoped empty snapshot for an in-progress profile;
+    # explicitly scoped callers receive the typed readiness error before Neo4j.
+    profile = (
+        await _require_selected_ready_profile(session, profile_id)
+        if profile_id is not None
+        else await profile_repo.get_selected_ready_profile(session)
+    )
     if profile is None:
         return _empty_graph_snapshot(
             status="ready",

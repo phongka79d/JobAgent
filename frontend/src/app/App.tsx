@@ -101,11 +101,11 @@ export function App({deps}: AppProps = {}) {
    * CV Manager reprocess → ChatPage streamCvReprocess (same SSE callbacks/reducer).
    * Returns false when composition should refuse (caller already pending).
    */
-  const handleCvReprocess = useCallback((attachmentId: string): boolean => {
+  const handleCvReprocess = useCallback((profileId: string): boolean => {
     requestKeyRef.current += 1;
     setReprocessRequest({
       requestKey: requestKeyRef.current,
-      attachmentId,
+      profileId,
       message: CV_REPROCESS_TURN_MESSAGE,
     });
     return true;
@@ -120,11 +120,11 @@ export function App({deps}: AppProps = {}) {
   const handleCvReprocessTerminal = useCallback(
     (
       requestKey: number,
-      attachmentId: string,
+      profileId: string,
       kind: CvReprocessTerminal,
       error?: {code: string; summary: string},
     ) => {
-      setReprocessTerminal({requestKey, attachmentId, kind, error});
+      setReprocessTerminal({requestKey, profileId, kind, error});
     },
     [],
   );

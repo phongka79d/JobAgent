@@ -45,7 +45,7 @@ export type CvSidebarDeps = {
 /** Terminal notice from ChatPage reprocess stream (clear pending / record error). */
 export type CvReprocessTerminalNotice = {
   requestKey: number;
-  attachmentId: string;
+  profileId: string;
   kind: 'completed' | 'failed' | 'interrupted' | 'http_error';
   error?: {code: string; summary: string};
 };
@@ -59,7 +59,7 @@ export type CvSidebarProps = {
    * CV Manager reprocess request → App → ChatPage stream path.
    * Returns false when composition refuses (locked/duplicate).
    */
-  onCvReprocess?: (attachmentId: string) => boolean;
+  onCvReprocess?: (profileId: string) => boolean;
   /** After confirmed delete success (profile summary may need refresh). */
   onCvDeleted?: () => void;
   /** Latest reprocess terminal event from ChatPage (via App). */
@@ -163,7 +163,14 @@ function CvSidebarController({
   workspace,
   deps,
 }: CvSidebarProps) {
-  const observability = useObservabilityState({api: deps?.observability});
+  const selectedWorkspaceProfile = workspace?.state.profiles.find(
+    (candidate) => candidate.id === workspace.state.activeProfileId,
+  );
+  const observability = useObservabilityState({
+    api: deps?.observability,
+    profileId: selectedWorkspaceProfile?.id,
+    profileReady: workspace ? selectedWorkspaceProfile?.state === 'ready' : true,
+  });
   const {endReprocess, failReprocess, invalidateAfterActivation} = observability;
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
@@ -196,12 +203,13 @@ function CvSidebarController({
       return;
     }
     handledTerminalKey.current = reprocessTerminal.requestKey;
+    const actionId = profile?.active_attachment?.id ?? reprocessTerminal.profileId;
     if (reprocessTerminal.kind === 'http_error' && reprocessTerminal.error) {
-      failReprocess(reprocessTerminal.attachmentId, reprocessTerminal.error);
+      failReprocess(actionId, reprocessTerminal.error);
     } else {
-      endReprocess(reprocessTerminal.attachmentId);
+      endReprocess(actionId);
     }
-  }, [endReprocess, failReprocess, reprocessTerminal]);
+  }, [endReprocess, failReprocess, profile, reprocessTerminal]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -356,7 +364,7 @@ function CvSidebarController({
               target.id === workspace.state.activeProfileId &&
               profile?.active_attachment
             ) {
-              onCvReprocess?.(profile.active_attachment.id);
+              onCvReprocess?.(target.id);
             }
           }}
           onRetryUpload={handleRetryUpload}
@@ -392,9 +400,17 @@ function CvSidebarController({
           cvName: displayCvName,
         }}
         observability={observability}
+        profileSetupInProgress={Boolean(
+          workspace && selectedWorkspaceProfile?.state !== 'ready',
+        )}
+        profileId={selectedWorkspaceProfile?.id ?? null}
         isInteractionLocked={isUploadDisabled}
         savedJobsInvalidateKey={savedJobsInvalidateKey}
-        onCvReprocess={onCvReprocess}
+        onCvReprocess={(attachmentId) =>
+          selectedWorkspaceProfile
+            ? onCvReprocess?.(selectedWorkspaceProfile.id) ?? false
+            : onCvReprocess?.(attachmentId) ?? false
+        }
         onCvDeleted={onCvDeleted}
       />
     </CvSidebarShell>
