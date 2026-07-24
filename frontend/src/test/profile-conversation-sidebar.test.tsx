@@ -153,6 +153,28 @@ describe('profile and conversation navigation', () => {
     expect(create).toHaveBeenCalledWith(PROFILE_ID);
   });
 
+  it('uses an icon-only action trigger for a long conversation title', () => {
+    const title = 'Set preferred location to Da Nang and target role to Platform Engineer.';
+    const actionName = `Actions for conversation ${title}`;
+    themed(
+      <ConversationListPanel
+        profileId={PROFILE_ID}
+        profileState="ready"
+        conversations={[{...conversation, title}]}
+        selectedConversationId={CONVERSATION_ID}
+        isInteractionLocked={false}
+        onCreate={vi.fn()}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', {name: actionName})).toHaveAttribute(
+      'aria-label',
+      actionName,
+    );
+  });
+
   it('keeps a pending bootstrap conversation read-only', () => {
     themed(
       <ConversationListPanel
@@ -201,7 +223,7 @@ describe('profile and conversation navigation', () => {
     expect(screen.getByRole('button', {name: /Chat/})).toBeDisabled();
     expect(
       screen.getByRole('button', {name: 'Actions for conversation Platform role search'}),
-    ).toBeDisabled();
+    ).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('does not expose ready or pending actions for a deleting profile', () => {

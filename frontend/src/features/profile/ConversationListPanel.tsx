@@ -1,6 +1,6 @@
 import {Button} from '@astryxdesign/core/Button';
-import {DropdownMenu} from '@astryxdesign/core/DropdownMenu';
 import {List, ListItem} from '@astryxdesign/core/List';
+import {MoreMenu} from '@astryxdesign/core/MoreMenu';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
@@ -69,14 +69,10 @@ export function ConversationListPanel({
             }
             endContent={
               isReady ? (
-                <DropdownMenu
-                  button={{
-                    label: `Actions for conversation ${conversation.title}`,
-                    variant: 'ghost',
-                    size: 'sm',
-                    isDisabled: isInteractionLocked,
-                  }}
-                  hasChevron={false}
+                <MoreMenu
+                  label={`Actions for conversation ${conversation.title}`}
+                  size="sm"
+                  isDisabled={isInteractionLocked}
                   items={[
                     {
                       label: 'Delete conversation',
