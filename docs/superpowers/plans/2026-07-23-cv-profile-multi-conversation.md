@@ -1622,7 +1622,7 @@ single Task 5 commit.
 - Test: backend/tests/unit/test_profile_extraction.py, backend/tests/fixtures/skill_extraction_golden.json, backend/tests/integration/test_profile_approval.py, backend/tests/integration/test_profiles_api.py
 - Create: backend/tests/integration/test_profile_reextraction.py
 
-- [ ] Step 1: Add failing approval and reuse tests
+- [x] Step 1: Add failing approval and reuse tests
 
 Use ScriptedStructuredInvoker, FakeEmbeddingClient, and the existing _seed_cv_document_draft fixture:
 
@@ -1664,7 +1664,7 @@ def test_reextract_same_profile_preserves_conversations_and_marks_old_evidence_s
     assert reextract_context.evaluation_currentness() == "stale"
 ~~~
 
-- [ ] Step 2: Run approval/re-extraction tests to verify RED
+- [x] Step 2: Run approval/re-extraction tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -1673,11 +1673,11 @@ Set-Location backend
 
 Expected: extracted identity fields and the profile re-extraction route remain incomplete; stale singleton-oriented approval tests still fail until they are migrated to durable pending/ready IDs.
 
-- [ ] Step 3: Stamp draft ownership and guard extracted identity
+- [x] Step 3: Stamp draft ownership and guard extracted identity
 
 Add target_profile_id to every draft read/write path. Initial extraction uses the injected pending owner created in Task 5; profile re-extraction uses the requested ready profile ID. Both paths verify that the target owns the attachment before provider work and before publication. Extend the structured profile-extraction schema/prompt and synthetic golden fixtures to emit nullable full_name/location, project only direct document evidence into those fields, then run guard_optional_identity_fields over the source fragments before persisting draft/document-draft profile_json and again before approved profile persistence; persist location from the guarded profile, never from an unvalidated projection. A missing or unsupported value remains null.
 
-- [ ] Step 4: Split pending promotion from ready-profile replacement
+- [x] Step 4: Split pending promotion from ready-profile replacement
 
 Refactor _run_sqlite_approval into two explicit branches:
 
@@ -1720,15 +1720,15 @@ else:
 
 Only pending promotion archives the independently loaded prior active ready attachment and activates the pending attachment; workspace selection and the bootstrap conversation ID already belong to the pending profile. Both branches atomically replace the persisted document/chunks after provider/embedding work completes outside SQLite. Preserve source_hash revision checks and let existing evaluation currentness mark old evidence stale. Graph sync must receive the guarded profile reloaded from committed SQLite truth.
 
-- [ ] Step 5: Add profile-owned re-extraction SSE route
+- [x] Step 5: Add profile-owned re-extraction SSE route
 
 Implement POST /api/profiles/{profile_id}/reextract as a strict empty-body route. It requires the target to be the ready active workspace profile (the UI selects a profile first), asserts idle, resolves its attachment and selected conversation, and calls the existing stream_chat_turn/stream_cv_reprocess machinery with source_attachment_id plus target_profile_id. Do not accept attachment_id, profile JSON, source text, or client-selected conversation in the request body. Approval resumes through POST /api/chat/runs/{run_id}/resume and uses the same SSE events.
 
-- [ ] Step 6: Handle exact-hash upload reuse without duplicate profiles
+- [x] Step 6: Handle exact-hash upload reuse without duplicate profiles
 
 When cv_upload.py finds an exact-hash attachment already owned by a ready/archived profile, return a safe existing-profile reference and skip extraction; do not create a pending duplicate for the same attachment. Pending exact-hash new/retry behavior belongs to Task 5. Add tests proving no extractor/embedding calls on archived ready-profile reuse.
 
-- [ ] Step 7: Run lifecycle gates and commit
+- [x] Step 7: Run lifecycle gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py tests/integration/test_profiles_api.py tests/integration/test_profile_reextraction.py tests/integration/test_cv_manager_api.py -q
