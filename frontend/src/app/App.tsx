@@ -98,7 +98,7 @@ export function App({deps}: AppProps = {}) {
   }, []);
 
   /**
-   * CV Manager reprocess → ChatPage streamCvReprocess (same SSE callbacks/reducer).
+   * CV Manager re-extract → ChatPage profile stream (same SSE callbacks/reducer).
    * Returns false when composition should refuse (caller already pending).
    */
   const handleCvReprocess = useCallback((profileId: string): boolean => {

@@ -40,7 +40,7 @@ export type CvManagerPanelProps = {
   onRefresh: () => void;
   /** Re-extract (active) or Make active (archived/non-active) → SSE path. */
   onReprocess: (item: CvHistoryItem) => void;
-  /** Confirmed non-active delete → confirmDelete + focused invalidation. */
+  /** Confirmed profile delete → confirmDelete + focused invalidation. */
   onConfirmDelete: (item: CvHistoryItem) => Promise<'success' | 'duplicate' | 'error'>;
   onClearError: (attachmentId: string) => void;
 };
@@ -52,7 +52,7 @@ function attachmentVariant(state: CvHistoryItem['state']) {
   return 'neutral' as const;
 }
 
-/** Delete is never offered for the active attachment (Master §10.5 / §15.2). */
+/** Ready profile attachments can open the profile-owned delete flow. */
 export function canDeleteCv(item: CvHistoryItem): boolean {
   return item.state === 'active' || item.state === 'archived';
 }

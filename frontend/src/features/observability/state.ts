@@ -846,8 +846,8 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
   }, []);
 
   /**
-   * Confirmed delete: call DELETE, then invalidate only documented caches and
-   * select a safe remaining row. Partial failure retains row/cache + retry text.
+   * Confirmed profile delete invalidates only documented caches. Partial
+   * failure retains the row/cache and safe retry text.
    */
   const confirmDelete = useCallback(
     async (

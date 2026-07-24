@@ -59,7 +59,7 @@ export type ChatPageDeps = {
   sendConversationTurn?: typeof streamConversationTurn;
   /** Injectable resume transport for approval actions. */
   resumeRun?: typeof streamChatResume;
-  /** Injectable CV reprocess SSE transport (defaults to streamCvReprocess). */
+  /** Injectable profile re-extract SSE transport. */
   reprocessCv?: typeof reextractProfile;
   /** Shared CV upload used by composer attachment (same as sidebar). */
   uploadCv?: typeof defaultUploadCv;
@@ -99,7 +99,7 @@ export type ChatPageProps = {
   /** Sidebar successful upload → start one normal turn with attachment_id. */
   sidebarAttachmentTurn?: SidebarAttachmentTurnRequest | null;
   onSidebarAttachmentTurnHandled?: (requestKey: number) => void;
-  /** CV Manager reprocess → sole streamCvReprocess + chatReducer path. */
+  /** CV Manager re-extract → sole profile stream + chatReducer path. */
   cvReprocessRequest?: CvReprocessRequest | null;
   onCvReprocessHandled?: (requestKey: number) => void;
   /** Notify sidebar when reprocess stream ends (clear pending / surface error). */
@@ -627,7 +627,7 @@ export function ChatPage({
     state.messages,
   ]);
 
-  // CV Manager reprocess → streamCvReprocess into the same reducer; focus approval.
+  // CV Manager re-extract uses the same reducer and focuses approval on interrupt.
   useEffect(() => {
     if (!cvReprocessRequest) {
       return;
