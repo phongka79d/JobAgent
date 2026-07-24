@@ -28,7 +28,7 @@ from app.agent.graph import (
     build_agent_graph,
     initial_graph_state,
 )
-from app.agent.runner import TerminalOutcome
+from app.agent.runner import ERROR_AGENT_EXECUTION, TerminalOutcome
 from app.agent.runner import stream_agent_run as _production_stream_agent_run
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
@@ -398,6 +398,41 @@ def test_invalid_profile_update_stops_before_matching(
                 assert rows[0].error_code == ERROR_INVALID_PROFILE_UPDATE
         finally:
             await engine.dispose()
+
+    run_async(_body())
+
+
+def test_stream_close_persists_failed_terminal_once(tmp_path: Path) -> None:
+    """Closing the request-owned stream cannot leave its durable run active."""
+    db = tmp_path / "closed-stream.db"
+
+    async def _body() -> None:
+        durable_calls: list[TerminalOutcome] = []
+
+        async def on_terminal(outcome: TerminalOutcome) -> bool:
+            durable_calls.append(outcome)
+            return True
+
+        gen = stream_agent_run(
+            run_id=RUN_A,
+            user_text="close after start",
+            model=FakeChatModel(responses=[_ai_text("unused")]),
+            sqlite_path=db,
+            on_durable_terminal=on_terminal,
+            include_assistant_status=False,
+        )
+
+        first = await gen.__anext__()
+        assert first.event == "run_started"
+        await gen.aclose()
+
+        assert len(durable_calls) == 1
+        outcome = durable_calls[0]
+        assert outcome.kind == "failed"
+        assert outcome.run_id == RUN_A
+        assert outcome.error_code == ERROR_AGENT_EXECUTION
+        assert outcome.error_summary == "Agent execution failed"
+        assert outcome.pending_approval is None
 
     run_async(_body())
 

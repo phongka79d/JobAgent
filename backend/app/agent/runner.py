@@ -15,7 +15,7 @@ runs (no SQLite polling, second executor, or store).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -198,7 +198,7 @@ def _compile_with_checkpointer(
     return bundle.compiled.builder.compile(checkpointer=saver)
 
 
-async def stream_agent_run(
+async def _stream_agent_run_impl(
     *,
     run_id: str,
     conversation_id: str,
@@ -221,7 +221,7 @@ async def stream_agent_run(
     include_assistant_status: bool = True,
     assistant_status_message: str = "Generating reply",
     checkpointer_open: CheckpointerOpen | None = None,
-) -> AsyncIterator[SseEvent]:
+) -> AsyncGenerator[SseEvent, None]:
     """Run one Agent turn/resume and yield validated SSE events.
 
     Parameters
@@ -447,6 +447,91 @@ async def stream_agent_run(
                 run_id,
                 {"state": "completed"},
             )
+
+
+async def stream_agent_run(
+    *,
+    run_id: str,
+    conversation_id: str,
+    profile_id: str,
+    user_text: str | None = None,
+    resumed: bool = False,
+    resume_value: Any | None = None,
+    recent_context: Sequence[dict[str, Any]] | None = None,
+    candidate_context: Sequence[dict[str, Any]] | None = None,
+    active_cv_context: dict[str, Any] | None = None,
+    attachment_ids: Sequence[str] | None = None,
+    input_state: AgentGraphState | None = None,
+    model: BaseChatModel | Runnable[Any, Any] | None = None,
+    registry: ToolRegistry | None = None,
+    tool_loop_limit: int | None = None,
+    settings: Settings | None = None,
+    sqlite_path: str | Path | None = None,
+    graph_bundle: AgentGraphBundle | None = None,
+    on_durable_terminal: DurableTerminalCallback | None = None,
+    include_assistant_status: bool = True,
+    assistant_status_message: str = "Generating reply",
+    checkpointer_open: CheckpointerOpen | None = None,
+) -> AsyncGenerator[SseEvent, None]:
+    """Stream one run and durably fail it if its request-owned stream closes."""
+    terminal_callback_started = False
+
+    async def _tracked_terminal(outcome: TerminalOutcome) -> bool:
+        nonlocal terminal_callback_started
+        terminal_callback_started = True
+        if on_durable_terminal is None:
+            return True
+        return bool(await on_durable_terminal(outcome))
+
+    stream = _stream_agent_run_impl(
+        run_id=run_id,
+        conversation_id=conversation_id,
+        profile_id=profile_id,
+        user_text=user_text,
+        resumed=resumed,
+        resume_value=resume_value,
+        recent_context=recent_context,
+        candidate_context=candidate_context,
+        active_cv_context=active_cv_context,
+        attachment_ids=attachment_ids,
+        input_state=input_state,
+        model=model,
+        registry=registry,
+        tool_loop_limit=tool_loop_limit,
+        settings=settings,
+        sqlite_path=sqlite_path,
+        graph_bundle=graph_bundle,
+        on_durable_terminal=_tracked_terminal,
+        include_assistant_status=include_assistant_status,
+        assistant_status_message=assistant_status_message,
+        checkpointer_open=checkpointer_open,
+    )
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        await stream.aclose()
+        if not terminal_callback_started:
+            terminal_callback_started = True
+            cancelled_outcome = TerminalOutcome(
+                kind="failed",
+                run_id=run_id,
+                assistant_text=None,
+                error_code=ERROR_AGENT_EXECUTION,
+                error_summary=_safe_summary(ERROR_AGENT_EXECUTION),
+                pending_approval=None,
+            )
+            durable_ok = True
+            if on_durable_terminal is not None:
+                durable_ok = bool(await on_durable_terminal(cancelled_outcome))
+            if durable_ok:
+                open_cm = (
+                    checkpointer_open
+                    if checkpointer_open is not None
+                    else open_checkpointer
+                )
+                async with open_cm(sqlite_path, settings=settings) as saver:
+                    await delete_run_checkpoint(saver, run_id)
 
 
 __all__ = [
