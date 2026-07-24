@@ -61,3 +61,37 @@ async def test_open_sse_response_rejects_empty_stream() -> None:
         "code": "EMPTY_STREAM",
         "summary": "Agent stream produced no events",
     }
+
+
+@pytest.mark.asyncio
+async def test_open_sse_response_closes_underlying_iterator_when_body_closes() -> None:
+    class TrackedEvents:
+        def __init__(self) -> None:
+            self.closed = 0
+            self._sent_event = False
+
+        def __aiter__(self) -> TrackedEvents:
+            return self
+
+        async def __anext__(self) -> SseEvent:
+            if self._sent_event:
+                raise StopAsyncIteration
+            self._sent_event = True
+            return _event()
+
+        async def aclose(self) -> None:
+            self.closed += 1
+
+    events = TrackedEvents()
+    response = await open_sse_response(
+        events,
+        error_mapper=lambda exc: HTTPException(status_code=400),
+    )
+
+    first = await response.body_iterator.__anext__()
+    assert b"event: assistant_status" in first
+
+    await response.body_iterator.aclose()
+    await response.body_iterator.aclose()
+
+    assert events.closed == 1

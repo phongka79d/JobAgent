@@ -46,8 +46,13 @@ async def open_sse_response(
     first_bytes = format_validated_sse(first)
 
     async def produce() -> AsyncIterator[bytes]:
-        yield first_bytes
-        async for event in iterator:
-            yield format_validated_sse(event)
+        try:
+            yield first_bytes
+            async for event in iterator:
+                yield format_validated_sse(event)
+        finally:
+            aclose = getattr(iterator, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     return EventSourceResponse(produce())
