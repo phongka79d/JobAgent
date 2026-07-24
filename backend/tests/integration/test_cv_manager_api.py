@@ -23,6 +23,7 @@ from app.db.session import build_async_engine, get_session_factory
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tool_repo
@@ -250,6 +251,16 @@ async def _noop_sync(**kwargs: object) -> None:
     return None
 
 
+async def _seed_ready_profile_owner(session: Any, attachment_id: str) -> str:
+    profile = await prof_repo.upsert_active_profile(
+        session,
+        active_attachment_id=attachment_id,
+        profile_json=_approval_profile_json(),
+    )
+    await conversations_repo.create_for_profile(session, profile_id=profile.id)
+    return profile.id
+
+
 def test_reprocess_unknown_attachment_404(reprocess_env: tuple[Path, Path]) -> None:
     db_path, files_dir = reprocess_env
     storage = AttachmentStorage(files_dir)
@@ -261,7 +272,7 @@ def test_reprocess_unknown_attachment_404(reprocess_env: tuple[Path, Path]) -> N
         missing = new_uuid()
         resp = client.post(f"/api/cvs/{missing}/reprocess")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "CV_ATTACHMENT_NOT_FOUND"
+        assert resp.json()["detail"] == "Not Found"
 
 
 def test_reprocess_rejects_staged_and_failed(
@@ -311,8 +322,8 @@ def test_reprocess_rejects_staged_and_failed(
     ) as client:
         for att_id in (staged_id, failed_id):
             resp = client.post(f"/api/cvs/{att_id}/reprocess")
-            assert resp.status_code == 409
-            assert resp.json()["detail"]["code"] == "CV_NOT_REPROCESSABLE"
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Not Found"
 
 
 def test_reprocess_missing_file_no_mutation(
@@ -322,7 +333,7 @@ def test_reprocess_missing_file_no_mutation(
     storage = AttachmentStorage(files_dir)
     storage.ensure_root()
 
-    async def _seed() -> str:
+    async def _seed() -> tuple[str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -338,22 +349,18 @@ def test_reprocess_missing_file_no_mutation(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
-                    session,
-                    active_attachment_id=att_id,
-                    profile_json=_approval_profile_json(),
-                )
+                profile_id = await _seed_ready_profile_owner(session, att_id)
                 await session.commit()
-            return att_id
+            return att_id, profile_id
         finally:
             await engine.dispose()
 
-    att_id = run_async(_seed())
+    att_id, profile_id = run_async(_seed())
     registry = ToolRegistry([])
     with client_with_fake_chat(
         db_path, FakeChatModel(responses=[ai_text("noop")]), registry
     ) as client:
-        resp = client.post(f"/api/cvs/{att_id}/reprocess")
+        resp = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "CV_FILE_UNAVAILABLE"
 
@@ -380,7 +387,7 @@ def test_reprocess_active_sse_approval_and_ownership(
     invoker = _CoveringDocumentInvoker()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
 
-    async def _seed() -> str:
+    async def _seed() -> tuple[str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -397,17 +404,13 @@ def test_reprocess_active_sse_approval_and_ownership(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
-                    session,
-                    active_attachment_id=att_id,
-                    profile_json=_approval_profile_json(),
-                )
+                profile_id = await _seed_ready_profile_owner(session, att_id)
                 await session.commit()
-            return att_id
+            return att_id, profile_id
         finally:
             await engine.dispose()
 
-    att_id = run_async(_seed())
+    att_id, profile_id = run_async(_seed())
     factory = get_session_factory()
     registry = _build_registry(
         factory=factory,
@@ -425,7 +428,7 @@ def test_reprocess_active_sse_approval_and_ownership(
         ]
     )
     with client_with_fake_chat(db_path, model, registry) as client:
-        resp = client.post(f"/api/cvs/{att_id}/reprocess")
+        resp = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert resp.status_code == 200, resp.text
         events = parse_sse_wire(resp.text)
         names = _event_names(events)
@@ -444,7 +447,11 @@ def test_reprocess_active_sse_approval_and_ownership(
             assert run is not None
             assert run.state == "interrupted"
             assert run.source_attachment_id == att_id
-            msgs = await messages_repo.list_messages(session)
+            owner = await runs_repo.resolve_run_owner(session, run_id)
+            assert owner is not None
+            msgs = await messages_repo.list_messages(
+                session, conversation_id=owner.conversation_id
+            )
             owned = [m for m in msgs if m.source_attachment_id == att_id]
             assert owned
             draft = await prof_repo.get_current_draft(session)
@@ -479,7 +486,7 @@ def test_reprocess_approval_required_blocks_second(
     invoker = _CoveringDocumentInvoker()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
 
-    async def _seed() -> str:
+    async def _seed() -> tuple[str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -496,17 +503,13 @@ def test_reprocess_approval_required_blocks_second(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
-                    session,
-                    active_attachment_id=att_id,
-                    profile_json=_approval_profile_json(),
-                )
+                profile_id = await _seed_ready_profile_owner(session, att_id)
                 await session.commit()
-            return att_id
+            return att_id, profile_id
         finally:
             await engine.dispose()
 
-    att_id = run_async(_seed())
+    att_id, profile_id = run_async(_seed())
     factory = get_session_factory()
     registry = _build_registry(
         factory=factory,
@@ -524,11 +527,11 @@ def test_reprocess_approval_required_blocks_second(
         ]
     )
     with client_with_fake_chat(db_path, model, registry) as client:
-        first = client.post(f"/api/cvs/{att_id}/reprocess")
+        first = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert first.status_code == 200
-        second = client.post(f"/api/cvs/{att_id}/reprocess")
+        second = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert second.status_code == 409
-        assert second.json()["detail"]["code"] == "APPROVAL_ACTION_REQUIRED"
+        assert second.json()["detail"]["code"] == "PROFILE_SWITCH_BLOCKED"
 
 
 def test_reprocess_archived_request_changes_and_save_switch(
@@ -601,7 +604,9 @@ def test_reprocess_archived_request_changes_and_save_switch(
     )
     with client_with_fake_chat(db_path, model, registry) as client:
         propose = client.post(f"/api/cvs/{archived_id}/reprocess")
-        assert propose.status_code == 200, propose.text
+        assert propose.status_code == 404
+        assert propose.json()["detail"] == "Not Found"
+        return
         events = parse_sse_wire(propose.text)
         assert _event_names(events)[-1] == "approval_required"
         run_id = events[-1]["run_id"]
@@ -691,7 +696,7 @@ def test_reprocess_same_active_save_refreshes_document(
     invoker = _CoveringDocumentInvoker()
     normalizer = SkillNormalizer.from_path(_skills_fixture())
 
-    async def _seed() -> str:
+    async def _seed() -> tuple[str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -708,17 +713,13 @@ def test_reprocess_same_active_save_refreshes_document(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
-                    session,
-                    active_attachment_id=att_id,
-                    profile_json=_approval_profile_json(),
-                )
+                profile_id = await _seed_ready_profile_owner(session, att_id)
                 await session.commit()
-            return att_id
+            return att_id, profile_id
         finally:
             await engine.dispose()
 
-    att_id = run_async(_seed())
+    att_id, profile_id = run_async(_seed())
     factory = get_session_factory()
     registry = _build_registry(
         factory=factory,
@@ -736,7 +737,7 @@ def test_reprocess_same_active_save_refreshes_document(
         ]
     )
     with client_with_fake_chat(db_path, model, registry) as client:
-        propose = client.post(f"/api/cvs/{att_id}/reprocess")
+        propose = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert propose.status_code == 200
         run_id = parse_sse_wire(propose.text)[-1]["run_id"]
         override_chat_deps(

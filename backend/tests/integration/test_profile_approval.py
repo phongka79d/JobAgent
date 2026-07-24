@@ -900,10 +900,14 @@ def test_propose_from_cv_no_text_marks_failed_retains_file(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="img.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -1001,10 +1005,14 @@ def test_propose_update_current_draft_profile_and_skills(
                 att_id = await _staged_attachment(
                     session, file_hash="upd-draft", storage_path="upd-draft.pdf"
                 )
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="upd-draft.pdf"
+                )
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=att_id,
+                    target_profile_id=owner.id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -1080,13 +1088,14 @@ def test_propose_update_active_context_copy(
                     session, file_hash="upd-active", storage_path="upd-active.pdf"
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
+                profile = await prof_repo.upsert_active_profile(
                     session,
                     active_attachment_id=att_id,
                     profile_json=_valid_profile_json(),
                 )
                 await session.commit()
                 saved_att = att_id
+                owner_id = profile.id
 
             result = await propose_profile_update(
                 session_factory=factory,
@@ -1105,6 +1114,7 @@ def test_propose_update_active_context_copy(
                 draft = await prof_repo.get_current_draft(session)
                 assert draft is not None
                 assert draft.source_attachment_id is None
+                assert draft.target_profile_id == owner_id
                 assert (
                     draft.draft_json["candidate_profile"]["summary"]
                     == "Corrected summary from chat"
@@ -1202,10 +1212,17 @@ def test_propose_update_exclusions_survive_repeated_updates(
         factory = session_factory(engine)
         try:
             async with factory() as session:
+                att_id = await _staged_attachment(
+                    session, file_hash="upd-repeat", storage_path="upd-repeat.pdf"
+                )
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="upd-repeat.pdf"
+                )
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=None,
+                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
@@ -1283,10 +1300,17 @@ def test_propose_update_invalid_payload_leaves_prior_unchanged(
         factory = session_factory(engine)
         try:
             async with factory() as session:
+                att_id = await _staged_attachment(
+                    session, file_hash="upd-invalid", storage_path="upd-invalid.pdf"
+                )
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="upd-invalid.pdf"
+                )
                 await prof_repo.upsert_current_draft(
                     session,
                     draft_json=prior,
                     source_attachment_id=None,
+                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
@@ -1549,6 +1573,7 @@ async def _seed_pending_profile_draft_owner(
     *,
     attachment_id: str,
     draft_json: dict[str, Any],
+    select_workspace: bool = True,
 ) -> tuple[str, str]:
     from app.repositories import conversations as conversations_repo
     from app.repositories import workspace_state as workspace_repo
@@ -1561,7 +1586,8 @@ async def _seed_pending_profile_draft_owner(
     conversation = await conversations_repo.create_bootstrap_for_profile(
         session, profile_id=pending.id
     )
-    await workspace_repo.set_active_profile_id(session, pending.id)
+    if select_workspace:
+        await workspace_repo.set_active_profile_id(session, pending.id)
     await prof_repo.upsert_current_draft(
         session,
         draft_json=draft_json,
@@ -1910,10 +1936,11 @@ def test_replacement_archives_old_attachment_and_retains_file(
                     page_count=1,
                     attachment_id=new_id,
                 )
-                await prof_repo.upsert_current_draft(
+                await _seed_pending_profile_draft_owner(
                     session,
+                    attachment_id=new_id,
                     draft_json=_approval_draft_json(),
-                    source_attachment_id=new_id,
+                    select_workspace=False,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2028,10 +2055,11 @@ def test_preflight_missing_file_leaves_prior_truth(
                     page_count=1,
                     attachment_id=new_id,
                 )
-                await prof_repo.upsert_current_draft(
+                await _seed_pending_profile_draft_owner(
                     session,
+                    attachment_id=new_id,
                     draft_json=_approval_draft_json(),
-                    source_attachment_id=new_id,
+                    select_workspace=False,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2119,10 +2147,11 @@ def test_transaction_failpoint_rolls_back_preserves_staged(
                     page_count=1,
                     attachment_id=new_id,
                 )
-                await prof_repo.upsert_current_draft(
+                await _seed_pending_profile_draft_owner(
                     session,
+                    attachment_id=new_id,
                     draft_json=_approval_draft_json(),
-                    source_attachment_id=new_id,
+                    select_workspace=False,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2195,10 +2224,10 @@ def test_sync_failure_after_commit_keeps_sqlite_truth(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                await prof_repo.upsert_current_draft(
+                await _seed_pending_profile_draft_owner(
                     session,
+                    attachment_id=att_id,
                     draft_json=_approval_draft_json(exclude_python=True),
-                    source_attachment_id=att_id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2288,10 +2317,11 @@ def test_cleanup_failure_reported_sqlite_valid(
                     page_count=1,
                     attachment_id=new_id,
                 )
-                await prof_repo.upsert_current_draft(
+                await _seed_pending_profile_draft_owner(
                     session,
+                    attachment_id=new_id,
                     draft_json=_approval_draft_json(),
-                    source_attachment_id=new_id,
+                    select_workspace=False,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2367,7 +2397,7 @@ def test_preference_only_approval_keeps_attachment(
                     attachment_id=att_id,
                 )
                 await att_repo.mark_active(session, att_id)
-                await prof_repo.upsert_active_profile(
+                ready = await prof_repo.upsert_active_profile(
                     session,
                     active_attachment_id=att_id,
                     profile_json=_approval_valid_profile_json(),
@@ -2376,6 +2406,7 @@ def test_preference_only_approval_keeps_attachment(
                     session,
                     draft_json=_approval_draft_json(prefs=prefs),
                     source_attachment_id=None,
+                    target_profile_id=ready.id,
                 )
                 await session.commit()
 

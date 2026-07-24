@@ -139,6 +139,8 @@ def project_candidate_profile(
     document: CVDocument,
     *,
     skills: Sequence[CandidateSkill],
+    full_name: str | None = None,
+    location: str | None = None,
 ) -> CandidateProfile:
     """Derive a validated CandidateProfile solely from *document*.
 
@@ -155,6 +157,8 @@ def project_candidate_profile(
     elif conf > 1.0:
         conf = 1.0
     raw: dict[str, Any] = {
+        "full_name": full_name,
+        "location": location,
         "summary": summary,
         "current_title": current_title,
         "total_experience_years": None,

@@ -300,6 +300,8 @@ async def create_user_turn(
 async def assert_cv_reprocessable(
     *,
     attachment_id: str,
+    target_profile_id: str,
+    conversation_id: str,
     storage: AttachmentStorage,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
@@ -332,6 +334,22 @@ async def assert_cv_reprocessable(
             raise ChatTurnError(
                 ERROR_CV_NOT_REPROCESSABLE,
                 f"attachment state {row.state!r} cannot be reprocessed",
+            )
+        profile = await session.get(Profile, target_profile_id)
+        owner = await conversations_repo.resolve_owner(session, conversation_id)
+        if (
+            profile is None
+            or profile.state != PROFILE_STATE_READY
+            or profile.attachment_id != att_id
+        ):
+            raise ChatTurnError(
+                "PROFILE_NOT_READY",
+                "target profile is not ready or does not own the attachment",
+            )
+        if owner is None or owner.profile_id != target_profile_id:
+            raise ChatTurnError(
+                "CONVERSATION_NOT_FOUND",
+                "profile conversation could not be resolved",
             )
         if not storage.exists(row.storage_path):
             raise ChatTurnError(
@@ -625,6 +643,8 @@ async def stream_chat_turn(
 async def stream_cv_reprocess(
     *,
     attachment_id: str,
+    target_profile_id: str,
+    conversation_id: str,
     storage: AttachmentStorage,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
     registry: ToolRegistry | None = None,
@@ -642,27 +662,11 @@ async def stream_cv_reprocess(
     factory = session_factory or get_session_factory()
     await assert_cv_reprocessable(
         attachment_id=attachment_id,
+        target_profile_id=target_profile_id,
+        conversation_id=conversation_id,
         storage=storage,
         session_factory=factory,
     )
-    async with factory() as session:
-        profile_id = (
-            await session.execute(
-                select(Profile.id).where(Profile.attachment_id == attachment_id)
-            )
-        ).scalar_one_or_none()
-        conversation = (
-            await conversations_repo.most_recent_for_profile(
-                session, profile_id=profile_id
-            )
-            if profile_id is not None
-            else None
-        )
-    if conversation is None:
-        raise ChatTurnError(
-            ERROR_CV_NOT_REPROCESSABLE,
-            "CV owner conversation could not be resolved",
-        )
     # Domain-agnostic user text; attachment_ids + ownership drive the tools.
     # Do not name tool symbols here (ownership boundary). CV-owned runs stamp
     # source_attachment_id so propose forces reprocess even if the model omits it.
@@ -672,7 +676,7 @@ async def stream_cv_reprocess(
         "existing approved profile as a no-extract short-circuit."
     )
     async for event in stream_chat_turn(
-        conversation_id=conversation.id,
+        conversation_id=conversation_id,
         message=message,
         model=model,
         registry=registry,

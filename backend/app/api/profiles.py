@@ -12,6 +12,7 @@ from app.api.sse import open_sse_response
 from app.core.settings import get_settings
 from app.db.models.profiles import PROFILE_DISPLAY_NAME_MAX
 from app.db.session import get_session_factory
+from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profiles_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.common import UuidStr
@@ -45,6 +46,9 @@ def _http_for_reextract_error(exc: ChatTurnError) -> HTTPException:
         "CONVERSATION_NOT_FOUND": 404,
         "CONVERSATION_SWITCH_BLOCKED": 409,
         "APPROVAL_ACTION_REQUIRED": 409,
+        "CV_ATTACHMENT_NOT_FOUND": 404,
+        "CV_FILE_UNAVAILABLE": 404,
+        "CV_NOT_REPROCESSABLE": 409,
     }.get(exc.code, 400)
     return HTTPException(
         status_code=status,
@@ -176,9 +180,20 @@ async def reextract_profile(
                 409,
             )
         attachment_id = profile.attachment_id
+        conversation = await conversations_repo.most_recent_for_profile(
+            session, profile_id=profile_id
+        )
+        if conversation is None:
+            raise _http(
+                "CONVERSATION_NOT_FOUND",
+                "profile conversation could not be resolved",
+                404,
+            )
     storage = request.app.state.storage
     events = stream_cv_reprocess(
         attachment_id=attachment_id,
+        target_profile_id=profile_id,
+        conversation_id=conversation.id,
         storage=storage,
         model=deps.model,
         registry=deps.registry,

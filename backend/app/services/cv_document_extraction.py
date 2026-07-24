@@ -60,14 +60,17 @@ _BATCH_SYSTEM: Final[str] = (
     "Return only structured JSON. Rules: (1) preserve original headings exactly; "
     "(2) use kind from the allowed enum — unknown meaningful headings use kind "
     "'other' (never coerce certifications, GPA, awards, or projects into skills); "
-    "(3) every entry/section must list source_chunk_ordinals from the provided "
-    "batch only; (4) keep source order; (5) facts only — do not invent content."
+    "(3) full_name and location are nullable profile facts and may be returned "
+    "only when directly stated in the provided chunks; (4) every entry/section "
+    "must list source_chunk_ordinals from the provided "
+    "batch only; (5) keep source order; (6) facts only — do not invent content."
 )
 
 _CONSOLIDATE_SYSTEM: Final[str] = (
     "You consolidate CV section fragments into one ordered document outline. "
     "Merge adjacent fragments that share the same original heading/kind, preserve "
-    "entry content and source_chunk_ordinals, keep source order, and never coerce "
+    "entry content and source_chunk_ordinals, keep source order, preserve nullable "
+    "full_name and location only when directly supported, and never coerce "
     "certifications or unknown sections into skills. Return only structured JSON."
 )
 
@@ -143,6 +146,8 @@ class ExtractedBatchDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    full_name: str | None = None
+    location: str | None = None
     detected_languages: list[str]
     sections: list[ExtractedSectionFragment]
     extraction_warnings: list[str]
@@ -154,6 +159,8 @@ class ExtractedConsolidation(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    full_name: str | None = None
+    location: str | None = None
     detected_languages: list[str]
     sections: list[ExtractedSectionFragment]
     extraction_warnings: list[str]
@@ -199,6 +206,8 @@ class CVDocumentExtractionOutcome:
     """Validated CVDocument plus extraction diagnostics (no DB / profile)."""
 
     document: CVDocument
+    full_name: str | None
+    location: str | None
     schema_repairs_used: int
     provider_retries_used: int
     batches: tuple[ChunkBatch, ...]
@@ -840,6 +849,8 @@ def consolidate_fragments(
     if not items:
         return (
             ExtractedConsolidation(
+                full_name=None,
+                location=None,
                 detected_languages=[],
                 sections=[],
                 extraction_warnings=["no section fragments to consolidate"],
@@ -855,6 +866,8 @@ def consolidate_fragments(
     if len(items) == 1:
         return (
             ExtractedConsolidation(
+                full_name=None,
+                location=None,
                 detected_languages=[],
                 sections=items,
                 extraction_warnings=[],
@@ -903,6 +916,8 @@ def consolidate_fragments(
         )
         return (
             ExtractedConsolidation(
+                full_name=left.full_name or right.full_name,
+                location=left.location or right.location,
                 detected_languages=langs,
                 sections=combined,
                 extraction_warnings=warnings,
@@ -997,6 +1012,8 @@ def extract_cv_document_from_chunks(
     languages: list[str] = []
     batch_warnings: list[str] = []
     confidences: list[float] = []
+    full_names: list[str] = []
+    locations: list[str] = []
     repairs_total = 0
     retries_total = 0
 
@@ -1011,6 +1028,10 @@ def extract_cv_document_from_chunks(
         repairs_total += repairs
         retries_total += retries
         languages.extend(extracted.detected_languages)
+        if extracted.full_name:
+            full_names.append(extracted.full_name)
+        if extracted.location:
+            locations.append(extracted.location)
         batch_warnings.extend(extracted.extraction_warnings)
         confidences.append(float(extracted.extraction_confidence))
         for section in extracted.sections:
@@ -1058,6 +1079,8 @@ def extract_cv_document_from_chunks(
         retries_total += t
     else:
         consolidated = ExtractedConsolidation(
+            full_name=full_names[0] if full_names else None,
+            location=locations[0] if locations else None,
             detected_languages=list(dict.fromkeys(languages)),
             sections=[],
             extraction_warnings=batch_warnings
@@ -1070,6 +1093,10 @@ def extract_cv_document_from_chunks(
         consolidated = consolidated.model_copy(
             update={"detected_languages": list(dict.fromkeys(languages))}
         )
+    if consolidated.full_name is None and full_names:
+        consolidated = consolidated.model_copy(update={"full_name": full_names[0]})
+    if consolidated.location is None and locations:
+        consolidated = consolidated.model_copy(update={"location": locations[0]})
     if batch_warnings:
         consolidated = consolidated.model_copy(
             update={
@@ -1090,6 +1117,8 @@ def extract_cv_document_from_chunks(
     )
     return CVDocumentExtractionOutcome(
         document=document,
+        full_name=consolidated.full_name,
+        location=consolidated.location,
         schema_repairs_used=repairs_total,
         provider_retries_used=retries_total,
         batches=tuple(batches),

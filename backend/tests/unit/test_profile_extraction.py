@@ -287,6 +287,31 @@ class CoveringDocumentInvoker:
         )
 
 
+class IdentityDocumentInvoker(CoveringDocumentInvoker):
+    """Emit one grounded and one unsupported optional identity value."""
+
+    def invoke_structured(
+        self,
+        messages: Sequence[Any],
+        *,
+        schema_name: str,
+        is_repair: bool = False,
+    ) -> Any:
+        result = super().invoke_structured(
+            messages,
+            schema_name=schema_name,
+            is_repair=is_repair,
+        )
+        if schema_name in {"batch", "consolidate"}:
+            return result.model_copy(
+                update={
+                    "full_name": "Ava Synthetic",
+                    "location": "Unsupported Atlantis",
+                }
+            )
+        return result
+
+
 class _TimeoutExc(Exception):
     """Named like APITimeoutError for classify_provider_error coverage."""
 
@@ -369,10 +394,14 @@ def test_extraction_failure_writes_no_chunk_rows(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="img.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -416,10 +445,14 @@ def test_successful_propose_persists_chunks_document_and_profile_atomically(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="cv.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -474,6 +507,64 @@ def test_successful_propose_persists_chunks_document_and_profile_atomically(
                 await session.commit()
                 assert await chunk_repo.count_for_attachment(session, other) == 0
                 assert await cv_doc_repo.get_draft(session, other) is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_optional_identity_is_guarded_before_both_draft_stores(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    invoker = IdentityDocumentInvoker()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = storage.write_bytes(att_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="identity-guard-hash",
+                    original_name="identity.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                owner = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=att_id,
+                    display_name="identity.pdf",
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=att_id,
+                target_profile_id=owner.id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is True
+
+            async with factory() as session:
+                draft = await profile_repo.get_current_draft(session)
+                document_draft = await cv_doc_repo.get_draft(session, att_id)
+                assert draft is not None
+                assert document_draft is not None
+                for profile_json in (
+                    draft.draft_json["candidate_profile"],
+                    document_draft.profile_json,
+                ):
+                    assert profile_json["full_name"] == "Ava Synthetic"
+                    assert profile_json["location"] is None
         finally:
             await engine.dispose()
 
@@ -587,10 +678,14 @@ def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="cv.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -645,15 +740,20 @@ def test_publish_failpoint_rolls_back_all_draft_artifacts(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="cv.pdf"
+                )
                 await profile_repo.upsert_current_draft(
                     session,
                     draft_json=prior_draft.model_dump(mode="json"),
                     source_attachment_id=prior_id,
+                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -861,6 +961,7 @@ def test_propose_active_reuses_profile_without_provider(
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=profile.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -906,15 +1007,20 @@ def test_propose_existing_draft_reuse_without_provider(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="cv.pdf"
+                )
                 await profile_repo.upsert_current_draft(
                     session,
                     draft_json=draft.model_dump(mode="json"),
                     source_attachment_id=att_id,
+                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -968,16 +1074,21 @@ def test_propose_new_draft_and_replace_prior_staged(
                     page_count=1,
                     attachment_id=new_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=new_id, display_name="new.pdf"
+                )
                 await profile_repo.upsert_current_draft(
                     session,
                     draft_json=old_draft.model_dump(mode="json"),
                     source_attachment_id=old_id,
+                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
             assert storage.exists(old_rel)
             result = await propose_profile_from_cv(
                 attachment_id=new_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -1043,10 +1154,14 @@ def test_failed_extraction_marks_failed_retains_file(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="img.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -1093,10 +1208,14 @@ def test_exhausted_provider_failure_no_success_claim(
                     page_count=1,
                     attachment_id=att_id,
                 )
+                owner = await profile_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="cv.pdf"
+                )
                 await session.commit()
 
             result = await propose_profile_from_cv(
                 attachment_id=att_id,
+                target_profile_id=owner.id,
                 session_factory=factory,
                 storage=storage,
                 invoker=invoker,
@@ -1572,6 +1691,47 @@ def test_pending_profile_ownership_is_rechecked_after_provider_work(
                 assert await chunk_repo.list_for_attachment(
                     session, attachment_id
                 ) == []
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_profile_proposal_requires_explicit_target_before_provider_work(
+    migrated_sqlite: Path, files_root: Path
+) -> None:
+    storage = AttachmentStorage(files_root)
+    pdf = CV_DIR / "digital_cv_01.pdf"
+    attachment_id = new_uuid()
+    relative_path = _write_pdf(storage, attachment_id, pdf)
+    invoker = CoveringDocumentInvoker()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="explicit-target-required",
+                    original_name="target.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=relative_path,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=attachment_id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=_normalizer(),
+            )
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == "PROFILE_INCONSISTENT"
+            assert invoker.calls == []
         finally:
             await engine.dispose()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from inspect import getsource
 from pathlib import Path
@@ -722,3 +723,124 @@ def test_profile_activation_graph_failure_warns_and_preserves_selection(
             return active, attachment.state if attachment is not None else None
 
     assert run_async(selected()) == (target_id, ATTACHMENT_STATE_ACTIVE)
+
+
+def test_profile_reextract_uses_server_owned_attachment_and_conversation(
+    health_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del health_env
+    profile_id, attachment_id, conversation_id = run_async(
+        _create_profile(
+            state=ATTACHMENT_STATE_ACTIVE,
+            marker="r",
+            display_name="Reextract",
+        )
+    )
+    run_async(_set_active(profile_id))
+    captured: dict[str, Any] = {}
+
+    async def fake_stream(**kwargs: Any) -> Any:
+        from app.schemas.sse import build_sse_event
+
+        captured.update(kwargs)
+        run_id = new_uuid()
+        yield build_sse_event(
+            "run_started", run_id, {"state": "running", "resumed": False}
+        )
+        yield build_sse_event("run_completed", run_id, {"state": "completed"})
+
+    monkeypatch.setattr("app.api.profiles.stream_cv_reprocess", fake_stream)
+    with health_client() as client:
+        response = client.post(f"/api/profiles/{profile_id}/reextract", json={})
+        assert response.status_code == 200
+        assert client.post(
+            f"/api/profiles/{profile_id}/reextract",
+            json={"attachment_id": attachment_id},
+        ).status_code == 422
+        assert client.post(f"/api/cvs/{attachment_id}/reprocess").status_code == 404
+
+    assert captured["attachment_id"] == attachment_id
+    assert captured["target_profile_id"] == profile_id
+    assert captured["conversation_id"] == conversation_id
+
+
+def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
+    health_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.storage.attachments import AttachmentStorage
+
+    from tests.fakes.embeddings import FakeEmbeddingClient
+    from tests.fakes.structured_output import ScriptedStructuredInvoker
+
+    _db_path, files_dir, _driver = health_env
+    pdf_path = (
+        Path(__file__).resolve().parents[1] / "fixtures" / "cv" / "digital_cv_01.pdf"
+    )
+    pdf_bytes = pdf_path.read_bytes()
+    provider = ScriptedStructuredInvoker()
+    embedder = FakeEmbeddingClient()
+    extractor = Mock(side_effect=AssertionError("extractor must not run"))
+    scorer = Mock(side_effect=AssertionError("scorer must not run"))
+    monkeypatch.setattr(
+        "app.services.profile_drafts.extract_document_publication_from_pdf",
+        extractor,
+    )
+    monkeypatch.setattr("app.services.matching.match_jobs", scorer)
+
+    async def seed() -> tuple[str, str]:
+        factory = get_session_factory()
+        storage = AttachmentStorage(files_dir)
+        attachment_id = new_uuid()
+        rel = storage.write_bytes(attachment_id, pdf_bytes)
+        async with factory() as session:
+            await attachments_repo.create_staged(
+                session,
+                file_hash=hashlib.sha256(pdf_bytes).hexdigest(),
+                original_name="archived.pdf",
+                size_bytes=len(pdf_bytes),
+                storage_path=rel,
+                page_count=1,
+                attachment_id=attachment_id,
+            )
+            await attachments_repo.mark_active(session, attachment_id)
+            await attachments_repo.mark_archived(session, attachment_id)
+            profile = await profiles_repo.create_profile(
+                session,
+                attachment_id=attachment_id,
+                display_name="Archived Ready",
+                profile_json=_candidate(),
+                location="Hanoi",
+                extraction_version="existing-v1",
+                source_hash="existing-source",
+            )
+            await conversations_repo.create_for_profile(
+                session, profile_id=profile.id
+            )
+            await session.commit()
+            return attachment_id, profile.id
+
+    attachment_id, profile_id = run_async(seed())
+    with health_client() as client:
+        response = client.post(
+            "/api/attachments/cv",
+            files={"file": ("same.pdf", pdf_bytes, "application/pdf")},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "existing_profile"
+    assert body["attachment"]["id"] == attachment_id
+    assert body["profile"]["profile_id"] == profile_id
+    assert provider.call_count == 0
+    assert embedder.call_count == 0
+    extractor.assert_not_called()
+    scorer.assert_not_called()
+
+    async def assert_no_pending() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            assert await profiles_repo.get_incomplete_profile(session) is None
+
+    run_async(assert_no_pending())

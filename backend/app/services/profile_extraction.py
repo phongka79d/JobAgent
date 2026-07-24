@@ -374,6 +374,7 @@ def extract_document_publication_from_pdf(
         CandidateSkillExtractionError,
         extract_candidate_skills_from_document,
     )
+    from app.services.profile_identity_guard import guard_optional_identity_fields
 
     if not isinstance(attachment_id, str) or attachment_id.strip() == "":
         raise ProfileExtractionError(
@@ -402,6 +403,12 @@ def extract_document_publication_from_pdf(
         profile = project_candidate_profile(
             outcome.document,
             skills=skill_outcome.skills,
+            full_name=outcome.full_name,
+            location=outcome.location,
+        )
+        profile = guard_optional_identity_fields(
+            profile,
+            source_fragments=[chunk.text for chunk in chunks],
         )
     except CVDocumentExtractionError as exc:
         raise ProfileExtractionError(exc.code, exc.message) from exc
@@ -479,6 +486,7 @@ def extract_document_and_profile_from_chunks(
         CandidateSkillExtractionError,
         extract_candidate_skills_from_document,
     )
+    from app.services.profile_identity_guard import guard_optional_identity_fields
 
     try:
         outcome = extract_cv_document_from_chunks(
@@ -496,6 +504,12 @@ def extract_document_and_profile_from_chunks(
         profile = project_candidate_profile(
             outcome.document,
             skills=skill_outcome.skills,
+            full_name=outcome.full_name,
+            location=outcome.location,
+        )
+        profile = guard_optional_identity_fields(
+            profile,
+            source_fragments=[chunk.text for chunk in chunks],
         )
     except CVDocumentExtractionError as exc:
         raise ProfileExtractionError(exc.code, exc.message) from exc

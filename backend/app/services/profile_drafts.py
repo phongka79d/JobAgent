@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import (
@@ -40,7 +39,6 @@ from app.db.models.profiles import (
     PROFILE_DRAFT_ID,
     PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
-    Profile,
 )
 from app.db.session import session_scope
 from app.repositories import attachments as att_repo
@@ -65,6 +63,7 @@ from app.services.profile_extraction import (
     extract_document_publication_from_pdf,
     persist_canonical_chunks,
 )
+from app.services.profile_identity_guard import guard_optional_identity_fields
 from app.services.skill_normalization import SkillNormalizer, SkillTaxonomyError
 from app.storage.attachments import AttachmentStorage
 
@@ -190,6 +189,16 @@ async def propose_profile_from_cv(
             ),
             attachment_id=None,
         )
+    if not isinstance(target_profile_id, str) or target_profile_id.strip() == "":
+        return ProposeFromCvResult(
+            kind="new_draft",
+            tool_result=_tool_fail(
+                "PROFILE_INCONSISTENT",
+                "an explicit target profile is required",
+            ),
+            attachment_id=attachment_id,
+        )
+    target_profile_id = target_profile_id.strip()
 
     async with session_factory() as session:
         attachment = await _load_attachment(session, attachment_id)
@@ -208,26 +217,25 @@ async def propose_profile_from_cv(
         storage_path = attachment.storage_path
         original_name = attachment.original_name
 
-        if target_profile_id is not None:
-            target_profile = await profile_repo.get_profile(
-                session, target_profile_id
+        target_profile = await profile_repo.get_profile(session, target_profile_id)
+        required_state = (
+            PROFILE_STATE_READY
+            if reprocess or state == ATTACHMENT_STATE_ACTIVE
+            else PROFILE_STATE_PENDING
+        )
+        if (
+            target_profile is None
+            or target_profile.state != required_state
+            or target_profile.attachment_id != attachment_id
+        ):
+            return ProposeFromCvResult(
+                kind="new_draft",
+                tool_result=_tool_fail(
+                    "PROFILE_INCONSISTENT",
+                    "target profile does not own the attachment",
+                ),
+                attachment_id=attachment_id,
             )
-            required_state = (
-                PROFILE_STATE_READY if reprocess else PROFILE_STATE_PENDING
-            )
-            if (
-                target_profile is None
-                or target_profile.state != required_state
-                or target_profile.attachment_id != attachment_id
-            ):
-                return ProposeFromCvResult(
-                    kind="new_draft",
-                    tool_result=_tool_fail(
-                        "PROFILE_INCONSISTENT",
-                        "target profile does not own the attachment",
-                    ),
-                    attachment_id=attachment_id,
-                )
 
         if reprocess:
             if state not in (
@@ -355,7 +363,14 @@ async def propose_profile_from_cv(
             attachment_id=attachment_id,
         )
 
-    draft_payload = artifacts.draft
+    guarded_profile = guard_optional_identity_fields(
+        artifacts.draft.candidate_profile,
+        source_fragments=[chunk.text for chunk in artifacts.chunks],
+    )
+    draft_payload = artifacts.draft.model_copy(
+        update={"candidate_profile": guarded_profile}
+    )
+    guarded_profile_json = guarded_profile.model_dump(mode="json")
     draft_json = draft_payload.model_dump(mode="json")
     # Full model already validated by document projection / parse helpers.
     parse_profile_draft_payload(draft_json)
@@ -417,13 +432,21 @@ async def propose_profile_from_cv(
                         attachment_id=attachment_id,
                     )
 
+                if reprocess:
+                    preferences_row = await profile_repo.get_profile_preferences(
+                        session, target_profile_id
+                    )
+                    if preferences_row is not None:
+                        preferences = parse_job_preferences(
+                            preferences_row.preferences_json
+                        )
+                        draft_payload = draft_payload.model_copy(
+                            update={"job_preferences": preferences}
+                        )
+                        draft_json = draft_payload.model_dump(mode="json")
+                        parse_profile_draft_payload(draft_json)
+
             existing = await profile_repo.get_current_draft(session)
-            draft_target_profile_id = target_profile_id
-            if reprocess and draft_target_profile_id is None:
-                owner = await session.scalar(
-                    select(Profile.id).where(Profile.attachment_id == attachment_id)
-                )
-                draft_target_profile_id = owner
             if existing is not None and existing.source_attachment_id is not None:
                 prior_id = existing.source_attachment_id
                 if prior_id != attachment_id:
@@ -439,13 +462,13 @@ async def propose_profile_from_cv(
                 session,
                 draft_json=draft_json,
                 source_attachment_id=attachment_id,
-                target_profile_id=draft_target_profile_id,
+                target_profile_id=target_profile_id,
             )
             await cv_doc_repo.upsert_draft(
                 session,
                 attachment_id=attachment_id,
                 document_json=artifacts.document_json,
-                profile_json=artifacts.profile_json,
+                profile_json=guarded_profile_json,
                 outline_json=artifacts.outline_json,
                 extraction_version=artifacts.extraction_version,
                 source_hash=artifacts.source_hash,
@@ -848,6 +871,14 @@ async def propose_profile_update(
     async with session_factory() as session:
         draft_row = await profile_repo.get_current_draft(session)
         if draft_row is not None:
+            if draft_row.target_profile_id is None:
+                return ProposeUpdateResult(
+                    base_kind="current_draft",
+                    tool_result=_tool_fail(
+                        "PROFILE_INCONSISTENT",
+                        "current draft has no explicit profile owner",
+                    ),
+                )
             try:
                 base = parse_profile_draft_payload(draft_row.draft_json)
             except ValidationError as exc:
@@ -860,6 +891,7 @@ async def propose_profile_update(
                     ),
                 )
             source_attachment_id = draft_row.source_attachment_id
+            target_profile_id = draft_row.target_profile_id
             base_kind: UpdateBaseKind = "current_draft"
         else:
             profile_row = await profile_repo.get_selected_ready_profile(session)
@@ -899,6 +931,7 @@ async def propose_profile_update(
             # Preference-only or profile corrections from active context are
             # not CV-backed drafts; source attachment stays null.
             source_attachment_id = None
+            target_profile_id = profile_row.id
             base_kind = "active_context"
 
     try:
@@ -930,9 +963,7 @@ async def propose_profile_update(
                 session,
                 draft_json=draft_json,
                 source_attachment_id=source_attachment_id,
-                target_profile_id=(
-                    draft_row.target_profile_id if draft_row is not None else None
-                ),
+                target_profile_id=target_profile_id,
             )
     except Exception as exc:
         logger.exception("draft upsert failed during propose_profile_update")
