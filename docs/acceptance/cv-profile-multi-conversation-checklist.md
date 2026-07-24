@@ -10,7 +10,7 @@ storage paths, or database dumps are included.
 |---|---|
 | Date | `2026-07-24` |
 | Operator | Codex |
-| Branch/SHA | `feat/cv-profile-multi-conversation` / `e6b9789` before the Task 14 documentation commit |
+| Branch/SHA | `feat/cv-profile-multi-conversation` / `cc5f5d0` before this evidence update |
 | Compose project | `jobagent-cv-profile-reset-smoke` |
 | Backup decision recorded | PASS - disposable project only; no non-disposable volumes targeted |
 | Final volume cleanup | PASS - warned exact-project cleanup removed the disposable containers, network, and volumes |
@@ -60,6 +60,7 @@ storage paths, or database dumps are included.
 | Concurrent proposal and commit could approve a stale draft | `98cb3eb` | Valid correction produced a fresh approval and saved successfully |
 | Long title covered the selectable conversation row | `635d04c` | Desktop selection and overflow delete remained operable |
 | Reload left a durable run in `running` | `5ff1912`, `4d556ef`, `e6b9789` | ASGI, callback-cancellation, durable chat-close regressions passed; real Chrome reload produced terminal failure and released the activity gate |
+| Disconnected extraction left its attachment staged, so Retry raised an ownership alert | `cc5f5d0` | Profile `d7e9b9d2` became `extraction_failed`; exact-hash Retry preserved IDs, reached approval without the alert, and Save Profile promoted it to ready |
 
 ## Automated and runtime gates
 
@@ -84,7 +85,7 @@ storage paths, or database dumps are included.
 | Evidence item | Result |
 |---|---|
 | Routes/statuses | Upload/extraction, activation/hydration, conversation mutation, deletion, and pending-isolation routes exercised successfully |
-| Abbreviated IDs | Upload A `31a7abb0`/`255928bb`; retry `f82bf671`/`b15fcbd6`; reload regression `e7293dc9`/`2941b069` |
+| Abbreviated IDs | Upload A `31a7abb0`/`255928bb`; retry `f82bf671`/`b15fcbd6`; reload regression `e7293dc9`/`2941b069`; disconnected-retry repair profile `d7e9b9d2` |
 | Provider/scorer diagnostics | Profile switching and pending isolation issued no extraction, chat, evaluation, or scorer call |
 | Screenshots | Inline synthetic-data captures recorded two ready profiles, the long-title defect, and the mobile drawer |
 | Non-blocking warnings | Python/aiosqlite deprecations, Vite chunk advisory, and zero-count graph relationship notifications |
