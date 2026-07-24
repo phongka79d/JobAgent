@@ -48,8 +48,10 @@ from app.schemas.tools import ToolResult
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 from app.tools.profile import (
+    COMMIT_PROFILE_DRAFT_NAME,
     ERROR_INVALID_PROFILE_UPDATE,
     PROPOSE_PROFILE_UPDATE_NAME,
+    build_commit_profile_draft_tool,
     build_propose_profile_update_tool,
 )
 from app.tools.registry import ToolRegistry
@@ -394,6 +396,135 @@ def test_invalid_profile_update_stops_before_matching(
                 assert rows[0].tool_name == PROPOSE_PROFILE_UPDATE_NAME
                 assert rows[0].status == TOOL_EXECUTION_STATUS_FAILED
                 assert rows[0].error_code == ERROR_INVALID_PROFILE_UPDATE
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_invalid_profile_update_cannot_open_stale_profile_approval(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """A failed proposal cannot concurrently interrupt to approve its old draft."""
+    checkpoint_db = tmp_path / "profile-update-stale-approval.db"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            profile_id = await seed_candidate(factory)
+            async with factory() as session:
+                profile = await profile_repo.get_profile(session, profile_id)
+                assert profile is not None
+                await profile_repo.upsert_current_draft(
+                    session,
+                    draft_json={
+                        "candidate_profile": profile.profile_json,
+                        "job_preferences": {
+                            "target_roles": [],
+                            "preferred_locations": [],
+                            "acceptable_work_modes": [],
+                            "target_seniority": [],
+                        },
+                    },
+                    source_attachment_id=None,
+                    target_profile_id=profile_id,
+                )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile_id
+                )
+                await session.commit()
+                conversation_id = conversation.id
+
+            async with factory() as session:
+                draft = await profile_repo.get_current_draft(session)
+                profile = await profile_repo.get_profile(session, profile_id)
+                assert draft is not None
+                assert profile is not None
+                draft_before = json.dumps(draft.draft_json, sort_keys=True)
+                profile_before = json.dumps(profile.profile_json, sort_keys=True)
+
+            await _seed_run_for_tools(
+                factory,
+                run_id=RUN_A,
+                conversation_id=conversation_id,
+            )
+            normalizer = SkillNormalizer.from_path(skills_fixture())
+            profile_update = build_propose_profile_update_tool(
+                session_factory=factory,
+                normalizer=normalizer,
+            )
+            commit_draft = build_commit_profile_draft_tool(
+                session_factory=factory,
+                normalizer=normalizer,
+            )
+            model = FakeChatModel(
+                responses=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": PROPOSE_PROFILE_UPDATE_NAME,
+                                "args": {
+                                    "preference_changes": {
+                                        "acceptable_work_modes": [
+                                            "unsupported_mode"
+                                        ]
+                                    }
+                                },
+                                "id": "update-invalid-1",
+                                "type": "tool_call",
+                            },
+                            {
+                                "name": COMMIT_PROFILE_DRAFT_NAME,
+                                "args": {"draft_id": "current"},
+                                "id": "commit-stale-1",
+                                "type": "tool_call",
+                            },
+                        ],
+                    )
+                ]
+            )
+            bundle = build_agent_graph(
+                model=model,
+                registry=ToolRegistry([profile_update, commit_draft]),
+            )
+            events = await _collect(
+                stream_agent_run(
+                    run_id=RUN_A,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
+                    user_text="Update one saved preference.",
+                    graph_bundle=bundle,
+                    sqlite_path=checkpoint_db,
+                    include_assistant_status=False,
+                )
+            )
+
+            assert _names(events)[-1] == "run_failed"
+            assert "approval_required" not in _names(events)
+            failed = events[-1]
+            assert failed.payload.error_code == ERROR_PROFILE_UPDATE_FAILED
+            statuses = [event for event in events if event.event == "tool_status"]
+            assert {event.payload.tool_name for event in statuses} == {
+                PROPOSE_PROFILE_UPDATE_NAME
+            }
+            assert statuses[-1].payload.error_code == ERROR_INVALID_PROFILE_UPDATE
+
+            async with factory() as session:
+                draft = await profile_repo.get_current_draft(session)
+                profile = await profile_repo.get_profile(session, profile_id)
+                assert draft is not None
+                assert profile is not None
+                assert json.dumps(draft.draft_json, sort_keys=True) == draft_before
+                assert (
+                    json.dumps(profile.profile_json, sort_keys=True)
+                    == profile_before
+                )
+                rows = await tool_repo.list_for_run_ids(session, [RUN_A])
+                assert len(rows) == 1
+                assert rows[0].tool_name == PROPOSE_PROFILE_UPDATE_NAME
         finally:
             await engine.dispose()
 

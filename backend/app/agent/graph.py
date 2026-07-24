@@ -437,6 +437,33 @@ def _turn_already_requested_commit(messages: Sequence[Any]) -> bool:
     return False
 
 
+def _strip_concurrent_profile_commit(response: AIMessage) -> AIMessage:
+    """Keep profile proposals and defer their approval to the next graph pass.
+
+    A provider may request a proposal and ``commit_profile_draft`` in one
+    response. ToolNode can execute those calls concurrently, so the commit
+    could interrupt against the prior draft even when the proposal fails. The
+    deterministic auto-commit below adds the approval call only after a
+    successful proposal ToolResult.
+    """
+    calls = response.tool_calls or []
+    if not any(
+        _tool_call_name(call)
+        in {PROPOSE_PROFILE_FROM_CV_NAME, PROPOSE_PROFILE_UPDATE_NAME}
+        for call in calls
+    ):
+        return response
+
+    retained = [
+        call
+        for call in calls
+        if _tool_call_name(call) != COMMIT_PROFILE_DRAFT_NAME
+    ]
+    if len(retained) == len(calls):
+        return response
+    return response.model_copy(update={"tool_calls": retained})
+
+
 def _auto_commit_after_draft_tool(
     state: AgentGraphState,
     *,
@@ -1145,6 +1172,7 @@ def build_agent_graph(
                         ]
                     }
 
+        response = _strip_concurrent_profile_commit(response)
         updates = {MESSAGES_KEY: [response]}
         count = int(state.get("tool_iteration_count") or 0)
         if _has_tool_calls(response) and count >= limit:
