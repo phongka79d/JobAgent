@@ -150,7 +150,7 @@ def test_health_does_not_mutate_schema(
     create_all.assert_not_called()
 
 
-def test_startup_idempotent_seeds_and_graph(
+def test_startup_idempotent_workspace_seed_starts_without_product_rows(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     async def seed_state() -> tuple[int, str | None, int, int, int]:
@@ -292,7 +292,7 @@ def test_startup_skips_seeds_when_sqlite_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Singleton safeguard is skipped when SQLite cannot answer SELECT 1."""
+    """Workspace seed is skipped when SQLite cannot answer SELECT 1."""
     seed_calls = {"count": 0}
 
     async def tracking_seed(session: Any) -> None:

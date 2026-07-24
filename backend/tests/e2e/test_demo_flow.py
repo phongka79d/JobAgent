@@ -1,17 +1,21 @@
 """Disposable fake-backed public-boundary E2E smoke (Plan 7 §7.2).
 
-Exercises greeting → continuation → CV upload → propose draft → approval_required
-→ save_profile resume → JD text save/extract/embed/sync → match_jobs with ordered
-score and skill gaps. Dependency-overridden fakes only; never reads root ``.env``,
-developer SQLite/files, live Neo4j, network, or browser.
+Exercises CV upload/bootstrap → owned greeting/continuation → propose draft →
+approval_required → save_profile resume → JD text save/extract/embed/sync →
+match_jobs with ordered score and skill gaps. A second ready profile/conversation
+fixture proves isolation. Dependency-overridden fakes only; never reads root
+``.env``, developer SQLite/files, live Neo4j, network, or browser.
 """
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
@@ -21,6 +25,7 @@ from app.db.models.chat import (
     TOOL_EXECUTION_STATUS_COMPLETED,
     AgentRun,
     ChatMessage,
+    Conversation,
     ToolExecution,
 )
 from app.db.models.job_evaluations import JobEvaluation
@@ -29,11 +34,14 @@ from app.db.models.jobs import (
     JOB_PROCESSING_STATUS_PROCESSED,
     JobPost,
 )
-from app.db.models.profiles import PROFILE_DRAFT_ID
+from app.db.models.profiles import PROFILE_STATE_PENDING, Profile
 from app.db.session import get_session_factory
 from app.graph.rebuild_snapshot import load_source_revision_snapshot
+from app.repositories import attachments as attachment_repo
+from app.repositories import conversations as conversation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.chat import HistoryPage
 from app.schemas.matching import parse_match_jobs_result_data
 from app.services.jd_extraction import ExtractedJobPost
@@ -53,6 +61,7 @@ from tests.fakes.fake_chat_model import FakeChatModel
 from tests.fakes.matching import ScriptedRead, ScriptedReadDriver
 from tests.fakes.structured_output import ScriptedStructuredInvoker
 from tests.support.db_migration import run_async
+from tests.support.graph_rebuild import profile_payload
 from tests.support.health import FAKE_SHOPAIKEY, FakeDriver
 from tests.support.public_api import (
     ai_text,
@@ -65,6 +74,7 @@ from tests.unit.test_profile_extraction import CoveringDocumentInvoker
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 CV_PDF = FIXTURES / "cv" / "digital_cv_01.pdf"
+SECOND_CV_PDF = FIXTURES / "cv" / "digital_cv_02.pdf"
 SKILLS_FIXTURE = FIXTURES / "skills_seed.yaml"
 
 GREETING_REPLY = "Hello! I can help with your profile, jobs, and matches."
@@ -188,8 +198,26 @@ def _build_registry(
 def demo_env(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> Iterator[tuple[Path, Path]]:
-    """Disposable migrated SQLite + FILES_DIR (chat_env already installs Neo4j fake)."""
+    """Disposable migrated SQLite/files without the legacy ``main`` test owner."""
     db_path, files_dir, _fake = chat_env
+    connection = sqlite3.connect(db_path)
+    try:
+        owner = connection.execute(
+            "SELECT profile_id FROM conversations WHERE id = 'main'"
+        ).fetchone()
+        if owner is not None:
+            attachment = connection.execute(
+                "SELECT attachment_id FROM profiles WHERE id = ?", (owner[0],)
+            ).fetchone()
+            connection.execute("DELETE FROM conversations WHERE id = 'main'")
+            connection.execute("DELETE FROM profiles WHERE id = ?", (owner[0],))
+            if attachment is not None:
+                connection.execute(
+                    "DELETE FROM attachments WHERE id = ?", (attachment[0],)
+                )
+            connection.commit()
+    finally:
+        connection.close()
     yield db_path, files_dir
 
 
@@ -220,9 +248,51 @@ def test_demo_flow_greeting_to_matching_public_boundary(
     with client_with_fake_chat(
         db_path, FakeChatModel(responses=[ai_text(GREETING_REPLY)]), registry
     ) as client:
-        # --- 1. Greeting: natural reply, no tools ---
+        async def _seed_ready_profile_fixture() -> tuple[str, str]:
+            payload = SECOND_CV_PDF.read_bytes()
+            storage = AttachmentStorage(files_dir)
+            attachment_id = (
+                sha256(payload).hexdigest()[:8]
+                + "-0000-4000-8000-000000000001"
+            )
+            storage_path = storage.write_bytes(attachment_id, payload)
+            factory = get_session_factory()
+            async with factory() as session:
+                await attachment_repo.create_staged(
+                    session,
+                    file_hash=sha256(payload).hexdigest(),
+                    original_name="first-demo-cv.pdf",
+                    size_bytes=len(payload),
+                    storage_path=storage_path,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await attachment_repo.mark_active(
+                    session, attachment_id, page_count=1
+                )
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="First demo profile",
+                    profile_json=profile_payload(),
+                    location="Berlin",
+                    extraction_version="demo-primary-v1",
+                    source_hash=sha256(payload).hexdigest(),
+                )
+                conversation = await conversation_repo.create_for_profile(
+                    session, profile_id=profile.id
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                await session.commit()
+                return profile.id, conversation.id
+
+        first_profile_id, first_conversation_id = run_async(
+            _seed_ready_profile_fixture()
+        )
+
+        # --- 1. Owned greeting: natural reply, no tools ---
         greet = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{first_conversation_id}/turns",
             json={"message": "hi there", "attachment_ids": []},
         )
         assert greet.status_code == 200
@@ -244,7 +314,10 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         assert "".join(deltas) == GREETING_REPLY
 
         hist = HistoryPage.model_validate(
-            client.get("/api/chat/history", params={"limit": 50}).json()
+            client.get(
+                f"/api/conversations/{first_conversation_id}/history",
+                params={"limit": 50},
+            ).json()
         )
         assert len(hist.items) == 2
         assert hist.items[0].content == "hi there"
@@ -261,7 +334,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             db_path=db_path,
         )
         cont = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{first_conversation_id}/turns",
             json={
                 "message": "yes please help me set up my profile",
                 "attachment_ids": [],
@@ -281,7 +354,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         assert "".join(cont_deltas) == CONTINUE_REPLY
         _assert_no_false_success(cont.text)
 
-        # --- 3. Upload synthetic digital PDF ---
+        # --- 3. Upload creates one pending profile + bootstrap conversation ---
         upload = client.post(
             "/api/attachments/cv",
             files={
@@ -295,8 +368,15 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         assert upload.status_code == 200, upload.text
         _assert_no_false_success(upload.text)
         upload_body = upload.json()
-        assert upload_body["outcome"] == "new"
+        assert upload_body["outcome"] == "new_pending"
         attachment_id = upload_body["attachment"]["id"]
+        bootstrap = upload_body["bootstrap"]
+        profile_id = bootstrap["profile"]["id"]
+        conversation_id = bootstrap["conversation"]["id"]
+        assert profile_id != first_profile_id
+        assert conversation_id != first_conversation_id
+        assert bootstrap["conversation"]["profile_id"] == profile_id
+        assert bootstrap["start_extraction"] is True
         assert upload_body["attachment"]["state"] == "staged"
         assert "storage_path" not in upload_body["attachment"]
         assert (files_dir / attachment_id).is_file()
@@ -319,7 +399,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             db_path=db_path,
         )
         propose = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{conversation_id}/turns",
             json={
                 "message": "please extract my profile from the uploaded CV",
                 "attachment_ids": [attachment_id],
@@ -347,8 +427,9 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             async with factory() as session:
                 draft = await profile_repo.get_current_draft(session)
                 assert draft is not None
-                assert draft.id == PROFILE_DRAFT_ID
+                assert UUID(draft.id).version == 4
                 assert draft.source_attachment_id == attachment_id
+                assert draft.target_profile_id == profile_id
                 profile = draft.draft_json["candidate_profile"]
                 # Document-first projection from CoveringDocumentInvoker.
                 assert isinstance(profile.get("current_title"), str)
@@ -357,16 +438,19 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                     s["skill"]["canonical_key"] == "python"
                     for s in profile["skills"]
                 )
-                assert await profile_repo.get_active_profile(session) is None
+                selected = await profile_repo.get_active_profile(session)
+                assert selected is not None
+                assert selected.id == profile_id
+                assert selected.state == PROFILE_STATE_PENDING
 
         run_async(_assert_draft())
 
         blocked = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{conversation_id}/turns",
             json={"message": "should be blocked", "attachment_ids": []},
         )
         assert blocked.status_code == 409
-        assert blocked.json()["detail"]["code"] == "APPROVAL_ACTION_REQUIRED"
+        assert blocked.json()["detail"]["code"] == "CONVERSATION_SWITCH_BLOCKED"
 
         # --- 6. Resume save_profile ---
         override_chat_deps(
@@ -394,6 +478,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 assert await profile_repo.get_current_draft(session) is None
                 active = await profile_repo.get_active_profile(session)
                 assert active is not None
+                assert active.id == profile_id
                 assert active.active_attachment_id == attachment_id
                 title = active.profile_json.get("current_title")
                 assert isinstance(title, str) and title
@@ -465,7 +550,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             db_path=db_path,
         )
         jd_turn = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{conversation_id}/turns",
             json={
                 "message": f"save this job:\n{SYNTHETIC_JD_TEXT}",
                 "attachment_ids": [],
@@ -564,7 +649,9 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         ]:
             factory = get_session_factory()
             async with factory() as session:
-                snapshot = await load_source_revision_snapshot(session)
+                snapshot = await load_source_revision_snapshot(
+                    session, profile_id=profile_id
+                )
             candidates: list[dict[str, Any]] = []
             if snapshot.candidate is not None:
                 candidates.append(
@@ -589,7 +676,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         assert any(j["id"] == job_id for j in jobs)
         match_driver.reconfigure(
             (
-                ScriptedRead("MATCH (c:Candidate)", candidates),
+                ScriptedRead("MATCH (c:Candidate", candidates),
                 ScriptedRead("MATCH (j:Job)", jobs),
                 ScriptedRead(
                     "db.index.vector.queryNodes",
@@ -615,7 +702,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             db_path=db_path,
         )
         match_turn = client.post(
-            "/api/chat/turns",
+            f"/api/conversations/{conversation_id}/turns",
             json={
                 "message": "match my profile to saved jobs",
                 "attachment_ids": [],
@@ -683,8 +770,11 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 ).scalars().all()
                 assert len(match_rows) == 1
                 row = match_rows[0]
-                assert row.status == TOOL_EXECUTION_STATUS_COMPLETED
                 stored = tool_repo.load_stored_result(row)
+                assert row.status == TOOL_EXECUTION_STATUS_COMPLETED, (
+                    row.error_code,
+                    stored.summary,
+                )
                 assert stored.ok is True
                 assert stored.data is not None
                 data = parse_match_jobs_result_data(stored.data)
@@ -716,22 +806,53 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                     ).scalar_one()
                 )
                 assert jobs_n == 1
+                profile_rows = (await session.execute(select(Profile))).scalars().all()
+                conversations_n = int(
+                    (
+                        await session.execute(
+                            select(func.count()).select_from(Conversation)
+                        )
+                    ).scalar_one()
+                )
+                assert len(profile_rows) == 2, [
+                    (item.id, item.state, item.attachment_id)
+                    for item in profile_rows
+                ]
+                assert conversations_n == 2
 
         run_async(_assert_match_durable())
 
         # History stays coherent after full flow.
         final_hist = HistoryPage.model_validate(
-            client.get("/api/chat/history", params={"limit": 50}).json()
+            client.get(
+                f"/api/conversations/{conversation_id}/history",
+                params={"limit": 50},
+            ).json()
         )
-        assert len(final_hist.items) >= 10
+        assert len(final_hist.items) == 6
         roles = {item.role for item in final_hist.items}
         assert "user" in roles
         assert "assistant" in roles
         _assert_no_false_success(
-            client.get("/api/chat/history", params={"limit": 50}).text
+            client.get(
+                f"/api/conversations/{conversation_id}/history",
+                params={"limit": 50},
+            ).text
         )
+        first_hist = HistoryPage.model_validate(
+            client.get(
+                f"/api/conversations/{first_conversation_id}/history",
+                params={"limit": 50},
+            ).json()
+        )
+        assert [item.content for item in first_hist.items] == [
+            "hi there",
+            GREETING_REPLY,
+            "yes please help me set up my profile",
+            CONTINUE_REPLY,
+        ]
 
         # Matching used revision scripts (no write Cypher).
         assert match_driver.write_queries == []
-        assert any("MATCH (c:Candidate)" in q for q in match_driver.queries)
+        assert any("MATCH (c:Candidate" in q for q in match_driver.queries)
         assert any("queryNodes" in q for q in match_driver.queries)

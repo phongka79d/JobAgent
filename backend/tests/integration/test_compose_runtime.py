@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +21,45 @@ from app.schemas.health import HealthResponse
 _HEALTH_URL = "http://127.0.0.1:8000/api/health"
 _EXPECTED_KEYS = frozenset({"overall", "sqlite", "filesystem", "neo4j"})
 _AVAILABLE = "available"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_COMPOSE_FILE = _REPO_ROOT / "infrastructure" / "docker-compose.yml"
+_BACKEND_DOCKERFILE = _REPO_ROOT / "infrastructure" / "docker" / "backend.Dockerfile"
+_MIGRATION = (
+    _REPO_ROOT
+    / "backend"
+    / "migrations"
+    / "versions"
+    / "0005_cv_profiles_multi_conversation.py"
+)
+
+
+def _compose_service_names(source: str) -> list[str]:
+    in_services = False
+    names: list[str] = []
+    for line in source.splitlines():
+        if line == "services:":
+            in_services = True
+            continue
+        if not in_services:
+            continue
+        if line and not line.startswith(" "):
+            break
+        match = re.fullmatch(r"  ([a-z0-9_-]+):", line)
+        if match is not None:
+            names.append(match.group(1))
+    return names
+
+
+def test_compose_source_has_exact_services_and_migrates_before_uvicorn() -> None:
+    compose = _COMPOSE_FILE.read_text(encoding="utf-8")
+    dockerfile = _BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+    migration = _MIGRATION.read_text(encoding="utf-8")
+    command = next(line for line in dockerfile.splitlines() if line.startswith("CMD "))
+
+    assert _compose_service_names(compose) == ["neo4j", "backend", "frontend"]
+    assert "alembic upgrade head && exec uvicorn" in dockerfile
+    assert 'revision: str = "0005_cv_profiles_multi_conversation"' in migration
+    assert "create_all" not in command
 
 
 def _fetch_health() -> dict[str, Any] | None:

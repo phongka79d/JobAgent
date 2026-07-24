@@ -1,11 +1,20 @@
 import '@testing-library/jest-dom/vitest';
 
 // AppShell uses matchMedia for responsive mobile nav; jsdom does not implement it.
+let matchMediaMatches = false;
+
+/** Set the shared responsive-media answer for the next render/assertion. */
+export function setMatchMediaMatches(matches: boolean): void {
+  matchMediaMatches = matches;
+}
+
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   configurable: true,
   value: (query: string) => ({
-    matches: false,
+    get matches() {
+      return matchMediaMatches;
+    },
     media: query,
     onchange: null,
     addListener: () => {},
@@ -14,6 +23,13 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: () => {},
     dispatchEvent: () => false,
   }),
+});
+
+// Astryx dialog scroll-lock cleanup restores the prior viewport position.
+Object.defineProperty(window, 'scrollTo', {
+  writable: true,
+  configurable: true,
+  value: () => {},
 });
 
 // ChatLayout / ChatMessageList use ResizeObserver (jsdom does not implement it).

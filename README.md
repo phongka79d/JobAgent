@@ -2,7 +2,7 @@
 
 ## Overview
 
-JobAgent is a local, single-user CV/JD chat and deterministic matching MVP. It
+JobAgent is a local, single-user, multi-profile CV/JD chat and deterministic matching MVP. It
 combines a React/Astryx chat interface, a FastAPI/LangGraph backend, SQLite
 application state, retained PDF files, a rebuildable Neo4j projection, and
 ShopAIKey chat and embedding APIs.
@@ -49,16 +49,18 @@ Scope, acceptance, and design authority:
 - [Plan 14](docs/plans/Plan_14.md)
 - [Task 14](docs/tasks/task_14.md)
 - [Acceptance documents](docs/acceptance/)
+- [Multi-profile destructive rollout](docs/operations/cv-profile-multi-conversation-rollout.md)
+- [Multi-profile acceptance checklist](docs/acceptance/cv-profile-multi-conversation-checklist.md)
 
 ## What This Repository Does
 
 This is a full-stack local application workspace. A user can:
 
-1. Chat normally with one persistent conversation.
-2. Upload a digital-text PDF CV, extract its complete document structure, review
-   a derived profile draft, and explicitly approve or revise it.
-3. Retain and inspect CV versions, reprocess active or archived CVs, and delete
-   eligible non-active CVs.
+1. Keep multiple ready CV profiles, each with separately persisted conversations.
+2. Upload a digital-text PDF CV into one durable pending profile/bootstrap
+   conversation, extract once, review the draft, and explicitly approve or revise it.
+3. Switch, re-extract, rename, and delete profiles with named confirmations and
+   safe fallback selection.
 4. Paste a JD or provide a public HTTP(S) URL, explicitly confirm passive pasted
    text before saving, and retain exact-hash-deduplicated Jobs.
 5. Explicitly evaluate a saved Job against the current approved CV/profile and
@@ -146,7 +148,8 @@ The boundaries are intentionally narrow:
 
 1. [`CvSidebar`](frontend/src/features/profile/CvSidebar.tsx) or
    [`ChatPage`](frontend/src/features/chat/ChatPage.tsx) sends the PDF through the
-   shared upload client to `POST /api/attachments/cv`.
+   shared upload client to `POST /api/attachments/cv`, which returns a pending
+   profile and bootstrap conversation for new/retry uploads.
 2. The [attachment upload route](backend/app/api/attachments.py) delegates to the
    [CV upload service](backend/app/services/cv_upload.py), which checks the
    interrupted-run guard before reading bytes, validates PDF MIME/magic/size/page
@@ -168,8 +171,8 @@ The boundaries are intentionally narrow:
    persists the chunks, document draft, and profile draft before the profile
    confirmation interrupt. The UI displays **Save Profile** and **Request
    Changes** from the durable approval projection.
-6. Resume continues the same run and tool identity. Requesting changes preserves
-   the draft; saving delegates to the
+6. Resume continues the same profile, conversation, run, and tool identity.
+   Requesting changes preserves the draft; saving delegates to the
    [profile approval service](backend/app/services/profile_approval.py).
 7. Approval commits the selected attachment/document/profile/preferences in one
    constraint-safe SQLite transaction, retains the former PDF as archived, then
@@ -180,7 +183,7 @@ The boundaries are intentionally narrow:
 
 1. [`ChatPage`](frontend/src/features/chat/ChatPage.tsx) sends a message and
    attachment IDs through the [chat SSE client](frontend/src/lib/api/chat.ts) to
-   `POST /api/chat/turns`.
+   `POST /api/conversations/{conversation_id}/turns`.
 2. The [chat routes](backend/app/api/chat.py) prime the service stream so
    pre-stream failures remain JSON errors; they then frame only validated SSE
    events.
