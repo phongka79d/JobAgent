@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+import anyio
 import pytest
 from app.api.sse import format_validated_sse, open_sse_response
 from app.schemas.sse import SseEvent, build_sse_event
@@ -93,5 +94,49 @@ async def test_open_sse_response_closes_underlying_iterator_when_body_closes() -
 
     await response.body_iterator.aclose()
     await response.body_iterator.aclose()
+
+    assert events.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_open_sse_response_closes_source_after_asgi_disconnect() -> None:
+    class TrackedEvents:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def __aiter__(self) -> TrackedEvents:
+            return self
+
+        async def __anext__(self) -> SseEvent:
+            return _event()
+
+        async def aclose(self) -> None:
+            await anyio.sleep(0)
+            self.closed += 1
+
+    events = TrackedEvents()
+    response = await open_sse_response(
+        events,
+        error_mapper=lambda exc: HTTPException(status_code=400),
+    )
+    body_started = anyio.Event()
+
+    async def send(message: dict[str, object]) -> None:
+        if message["type"] == "http.response.body":
+            body_started.set()
+            await anyio.sleep_forever()
+
+    async def receive() -> dict[str, str]:
+        await body_started.wait()
+        return {"type": "http.disconnect"}
+
+    await response(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+        },
+        receive,
+        send,
+    )
 
     assert events.closed == 1

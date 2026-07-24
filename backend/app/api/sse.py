@@ -2,14 +2,35 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Callable
+from typing import Any
 
+from anyio import CancelScope
 from fastapi import HTTPException
 from fastapi.sse import EventSourceResponse, format_sse_event
+from starlette.types import Send
 
 from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.services.chat_turns import ChatTurnError
 
 ChatErrorMapper = Callable[[ChatTurnError], HTTPException]
+
+
+async def _close_async_iterator(iterator: Any) -> None:
+    aclose = getattr(iterator, "aclose", None)
+    if aclose is None:
+        return
+    with CancelScope(shield=True):
+        await aclose()
+
+
+class ClosingEventSourceResponse(EventSourceResponse):
+    """Close the body even when an ASGI disconnect cancels streaming."""
+
+    async def stream_response(self, send: Send) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            await _close_async_iterator(self.body_iterator)
 
 
 def format_validated_sse(event: SseEvent) -> bytes:
@@ -51,8 +72,6 @@ async def open_sse_response(
             async for event in iterator:
                 yield format_validated_sse(event)
         finally:
-            aclose = getattr(iterator, "aclose", None)
-            if aclose is not None:
-                await aclose()
+            await _close_async_iterator(iterator)
 
-    return EventSourceResponse(produce())
+    return ClosingEventSourceResponse(produce())

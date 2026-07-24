@@ -8,6 +8,7 @@ another run's checkpoint.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,7 +31,9 @@ from app.agent.graph import (
 )
 from app.agent.runner import ERROR_AGENT_EXECUTION, TerminalOutcome
 from app.agent.runner import stream_agent_run as _production_stream_agent_run
+from app.api.sse import open_sse_response
 from app.db.models.chat import (
+    AGENT_RUN_STATE_FAILED,
     CHAT_MESSAGE_ROLE_USER,
     CONVERSATION_ID,
     TOOL_EXECUTION_STATUS_COMPLETED,
@@ -45,6 +48,7 @@ from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
 from app.schemas.sse import SseEvent, parse_sse_event
 from app.schemas.tools import ToolResult
+from app.services.activity_gate import assert_profile_idle
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 from app.tools.profile import (
@@ -433,6 +437,92 @@ def test_stream_close_persists_failed_terminal_once(tmp_path: Path) -> None:
         assert outcome.error_code == ERROR_AGENT_EXECUTION
         assert outcome.error_summary == "Agent execution failed"
         assert outcome.pending_approval is None
+
+    run_async(_body())
+
+
+def test_cancelled_terminal_callback_retries_failed_terminal(tmp_path: Path) -> None:
+    """Callback entry is not terminal until durable persistence succeeds."""
+    db = tmp_path / "cancelled-terminal-callback.db"
+
+    async def _body() -> None:
+        completed_started = asyncio.Event()
+        calls: list[TerminalOutcome] = []
+
+        async def on_terminal(outcome: TerminalOutcome) -> bool:
+            calls.append(outcome)
+            if outcome.kind == "completed":
+                completed_started.set()
+                await asyncio.Event().wait()
+            return True
+
+        task = asyncio.create_task(
+            _collect(
+                stream_agent_run(
+                    run_id=RUN_A,
+                    user_text="finish then cancel persistence",
+                    model=FakeChatModel(responses=[_ai_text("done")]),
+                    sqlite_path=db,
+                    on_durable_terminal=on_terminal,
+                    include_assistant_status=False,
+                )
+            )
+        )
+        await completed_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert [outcome.kind for outcome in calls] == ["completed", "failed"]
+        assert calls[-1].error_code == ERROR_AGENT_EXECUTION
+
+    run_async(_body())
+
+
+def test_sse_body_close_durably_fails_chat_turn(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """Closing the HTTP body propagates through chat service to durable run."""
+    from app.services.chat_turns import stream_chat_turn
+
+    checkpoint_db = tmp_path / "closed-chat-turn.db"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            response = await open_sse_response(
+                stream_chat_turn(
+                    conversation_id=CONVERSATION_ID,
+                    message="close after run starts",
+                    model=FakeChatModel(responses=[_ai_text("unused")]),
+                    session_factory=factory,
+                    sqlite_path=checkpoint_db,
+                    include_assistant_status=False,
+                ),
+                error_mapper=lambda exc: RuntimeError(exc.message),
+            )
+            await response.body_iterator.__anext__()
+            await response.body_iterator.aclose()
+
+            async with factory() as session:
+                run_ids = await runs_repo.list_run_ids_for_conversation(
+                    session, CONVERSATION_ID
+                )
+                assert len(run_ids) == 1
+                run = await runs_repo.get_run(session, run_ids[0])
+                assert run is not None
+                assert run.state == AGENT_RUN_STATE_FAILED
+                assert run.error_code == ERROR_AGENT_EXECUTION
+                assert run.completed_at is not None
+                owner = await conversations_repo.resolve_owner(
+                    session, CONVERSATION_ID
+                )
+                assert owner is not None
+                await assert_profile_idle(session, profile_id=owner.profile_id)
+        finally:
+            await engine.dispose()
 
     run_async(_body())
 

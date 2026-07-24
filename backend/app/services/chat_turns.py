@@ -83,6 +83,12 @@ class ChatTurnError(Exception):
         self.message = message
 
 
+async def _close_async_iterator(iterator: AsyncIterator[SseEvent]) -> None:
+    aclose = getattr(iterator, "aclose", None)
+    if aclose is not None:
+        await aclose()
+
+
 @dataclass(frozen=True, slots=True)
 class CreatedTurn:
     """Result of the atomic user-message + running-run create."""
@@ -639,7 +645,7 @@ async def stream_chat_turn(
             interrupt_holder=interrupt_holder,
         )
 
-    async for event in stream_agent_run(
+    stream = stream_agent_run(
         run_id=turn.run_id,
         conversation_id=turn.conversation_id,
         profile_id=turn.profile_id,
@@ -655,8 +661,12 @@ async def stream_chat_turn(
         on_durable_terminal=on_terminal,
         include_assistant_status=include_assistant_status,
         resumed=False,
-    ):
-        yield event
+    )
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        await _close_async_iterator(stream)
 
     projection = interrupt_holder.get("projection")
     if isinstance(projection, dict):
@@ -706,7 +716,7 @@ async def stream_cv_reprocess(
         "and prepare a new current draft for approval without reusing the "
         "existing approved profile as a no-extract short-circuit."
     )
-    async for event in stream_chat_turn(
+    stream = stream_chat_turn(
         conversation_id=conversation_id,
         message=message,
         model=model,
@@ -717,8 +727,12 @@ async def stream_cv_reprocess(
         sqlite_path=sqlite_path,
         include_assistant_status=include_assistant_status,
         source_attachment_id=attachment_id,
-    ):
-        yield event
+    )
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        await _close_async_iterator(stream)
 
 
 async def stream_resume(
@@ -773,7 +787,7 @@ async def stream_resume(
             interrupt_holder=interrupt_holder,
         )
 
-    async for event in stream_agent_run(
+    stream = stream_agent_run(
         run_id=run_id,
         conversation_id=owner.conversation_id,
         profile_id=owner.profile_id,
@@ -785,8 +799,12 @@ async def stream_resume(
         sqlite_path=sqlite_path,
         on_durable_terminal=on_terminal,
         include_assistant_status=include_assistant_status,
-    ):
-        yield event
+    )
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        await _close_async_iterator(stream)
 
     projection = interrupt_holder.get("projection")
     if isinstance(projection, dict):

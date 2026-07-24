@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from anyio import CancelScope
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
@@ -474,14 +475,16 @@ async def stream_agent_run(
     checkpointer_open: CheckpointerOpen | None = None,
 ) -> AsyncGenerator[SseEvent, None]:
     """Stream one run and durably fail it if its request-owned stream closes."""
-    terminal_callback_started = False
+    terminal_persisted = False
 
     async def _tracked_terminal(outcome: TerminalOutcome) -> bool:
-        nonlocal terminal_callback_started
-        terminal_callback_started = True
-        if on_durable_terminal is None:
-            return True
-        return bool(await on_durable_terminal(outcome))
+        nonlocal terminal_persisted
+        durable_ok = True
+        if on_durable_terminal is not None:
+            durable_ok = bool(await on_durable_terminal(outcome))
+        if durable_ok:
+            terminal_persisted = True
+        return durable_ok
 
     stream = _stream_agent_run_impl(
         run_id=run_id,
@@ -510,28 +513,29 @@ async def stream_agent_run(
         async for event in stream:
             yield event
     finally:
-        await stream.aclose()
-        if not terminal_callback_started:
-            terminal_callback_started = True
-            cancelled_outcome = TerminalOutcome(
-                kind="failed",
-                run_id=run_id,
-                assistant_text=None,
-                error_code=ERROR_AGENT_EXECUTION,
-                error_summary=_safe_summary(ERROR_AGENT_EXECUTION),
-                pending_approval=None,
-            )
-            durable_ok = True
-            if on_durable_terminal is not None:
-                durable_ok = bool(await on_durable_terminal(cancelled_outcome))
-            if durable_ok:
-                open_cm = (
-                    checkpointer_open
-                    if checkpointer_open is not None
-                    else open_checkpointer
+        with CancelScope(shield=True):
+            await stream.aclose()
+            if not terminal_persisted:
+                cancelled_outcome = TerminalOutcome(
+                    kind="failed",
+                    run_id=run_id,
+                    assistant_text=None,
+                    error_code=ERROR_AGENT_EXECUTION,
+                    error_summary=_safe_summary(ERROR_AGENT_EXECUTION),
+                    pending_approval=None,
                 )
-                async with open_cm(sqlite_path, settings=settings) as saver:
-                    await delete_run_checkpoint(saver, run_id)
+                durable_ok = True
+                if on_durable_terminal is not None:
+                    durable_ok = bool(await on_durable_terminal(cancelled_outcome))
+                if durable_ok:
+                    terminal_persisted = True
+                    open_cm = (
+                        checkpointer_open
+                        if checkpointer_open is not None
+                        else open_checkpointer
+                    )
+                    async with open_cm(sqlite_path, settings=settings) as saver:
+                        await delete_run_checkpoint(saver, run_id)
 
 
 __all__ = [
