@@ -4,7 +4,13 @@
  * Does not own profile/upload or chat/SSE state (reprocess streams via ChatPage).
  */
 
-import {useCallback, useEffect, useReducer, useRef} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
 import type {ObservabilityApi} from './api';
@@ -504,6 +510,36 @@ function observabilityScopeKey(
   return `${profileId ?? 'none'}:${profileReady === false ? 'blocked' : 'ready'}`;
 }
 
+type LinkedAbortSignal = {
+  signal: AbortSignal;
+  release: () => void;
+};
+
+function linkAbortSignals(
+  ...signals: Array<AbortSignal | undefined>
+): LinkedAbortSignal {
+  const controller = new AbortController();
+  const sources = signals.filter(
+    (signal): signal is AbortSignal => signal !== undefined,
+  );
+  const abort = () => controller.abort();
+  for (const source of sources) {
+    if (source.aborted) {
+      controller.abort();
+      break;
+    }
+    source.addEventListener('abort', abort, {once: true});
+  }
+  return {
+    signal: controller.signal,
+    release: () => {
+      for (const source of sources) {
+        source.removeEventListener('abort', abort);
+      }
+    },
+  };
+}
+
 export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const api: ObservabilityApi = {
     ...defaultObservabilityApi,
@@ -519,8 +555,29 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const profileId = options.profileId ?? null;
   const canLoadProfileScope = options.profileReady !== false;
   const scopeKey = observabilityScopeKey(options.profileId, options.profileReady);
+  const scopeAbortRef = useRef(new AbortController());
+  const abortScopeKeyRef = useRef(scopeKey);
   const profileScopeRef = useRef(scopeKey);
   profileScopeRef.current = scopeKey;
+  useLayoutEffect(() => {
+    if (abortScopeKeyRef.current === scopeKey) {
+      return;
+    }
+    scopeAbortRef.current.abort();
+    scopeAbortRef.current = new AbortController();
+    abortScopeKeyRef.current = scopeKey;
+  }, [scopeKey]);
+  useEffect(
+    () => () => {
+      scopeAbortRef.current.abort();
+    },
+    [],
+  );
+  const beginScopedRequest = useCallback(
+    (signal?: AbortSignal) =>
+      linkAbortSignals(scopeAbortRef.current.signal, signal),
+    [],
+  );
   const state =
     storedState.profileScopeKey === scopeKey
       ? storedState
@@ -555,15 +612,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         return;
       }
       const isLatest = beginLatestRequest(`cv-history:${scopeKey}`);
+      const request = beginScopedRequest(opts?.signal);
       dispatch({type: 'resource_loading', resource: 'cvHistory'});
       try {
-        const data = await api.fetchCvHistory({profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        const data = await api.fetchCvHistory(
+          {profileId: profileId ?? undefined},
+          request.signal,
+        );
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'cvHistory', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -571,9 +632,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           resource: 'cvHistory',
           error: toSafeError(err),
         });
+      } finally {
+        request.release();
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.cvHistory.loaded],
+    [api, beginLatestRequest, beginScopedRequest, canLoadProfileScope, profileId, scopeKey, state.cvHistory.loaded],
   );
 
   const loadRuns = useCallback(
@@ -583,15 +646,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         return;
       }
       const isLatest = beginLatestRequest(`runs:${scopeKey}`);
+      const request = beginScopedRequest(opts?.signal);
       dispatch({type: 'resource_loading', resource: 'runs'});
       try {
-        const data = await api.fetchRunHistory({profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        const data = await api.fetchRunHistory(
+          {profileId: profileId ?? undefined},
+          request.signal,
+        );
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'runs', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -599,9 +666,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           resource: 'runs',
           error: toSafeError(err),
         });
+      } finally {
+        request.release();
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.runs.loaded],
+    [api, beginLatestRequest, beginScopedRequest, canLoadProfileScope, profileId, scopeKey, state.runs.loaded],
   );
 
   const loadGraph = useCallback(
@@ -611,15 +680,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         return;
       }
       const isLatest = beginLatestRequest(`graph:${scopeKey}`);
+      const request = beginScopedRequest(opts?.signal);
       dispatch({type: 'resource_loading', resource: 'graph'});
       try {
-        const data = await api.fetchGraphSnapshot(opts?.signal, profileId ?? undefined);
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        const data = await api.fetchGraphSnapshot(
+          request.signal,
+          profileId ?? undefined,
+        );
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'graph', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -627,9 +700,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           resource: 'graph',
           error: toSafeError(err),
         });
+      } finally {
+        request.release();
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.graph.loaded],
+    [api, beginLatestRequest, beginScopedRequest, canLoadProfileScope, profileId, scopeKey, state.graph.loaded],
   );
 
   const loadChunkList = useCallback(
@@ -645,15 +720,20 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       const isLatest = beginLatestRequest(
         `chunk-list:${scopeKey}:${attachmentId}`,
       );
+      const request = beginScopedRequest(opts?.signal);
       dispatch({type: 'chunk_list_loading', attachmentId});
       try {
-        const data = await api.fetchChunkList(attachmentId, {profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        const data = await api.fetchChunkList(
+          attachmentId,
+          {profileId: profileId ?? undefined},
+          request.signal,
+        );
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'chunk_list_success', attachmentId, data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -661,9 +741,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           attachmentId,
           error: toSafeError(err),
         });
+      } finally {
+        request.release();
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.chunkLists],
+    [api, beginLatestRequest, beginScopedRequest, canLoadProfileScope, profileId, scopeKey, state.chunkLists],
   );
 
   const expandChunk = useCallback(
@@ -682,15 +764,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         dispatch({type: 'set_expanded_chunk', ordinal});
         return;
       }
+      const request = beginScopedRequest(opts?.signal);
       dispatch({type: 'chunk_detail_loading', attachmentId, ordinal});
       try {
         const data = await api.fetchChunkDetail(
           attachmentId,
           ordinal,
-          opts?.signal,
+          request.signal,
           profileId ?? undefined,
         );
-        if (opts?.signal?.aborted || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -700,7 +783,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           data,
         });
       } catch (err) {
-        if (opts?.signal?.aborted || profileScopeRef.current !== scopeKey) {
+        if (request.signal.aborted || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -709,9 +792,11 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           ordinal,
           error: toSafeError(err),
         });
+      } finally {
+        request.release();
       }
     },
-    [api, canLoadProfileScope, profileId, scopeKey, state.chunkDetails],
+    [api, beginScopedRequest, canLoadProfileScope, profileId, scopeKey, state.chunkDetails],
   );
 
   const openRetainedFile = useCallback(

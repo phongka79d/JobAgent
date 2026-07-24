@@ -669,6 +669,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     all: 0,
     byJob: new Map<string, number>(),
   });
+  const profileId = options.profileId ?? null;
   const scopeKey = savedJobsScopeKey(options.profileId, options.profileReady);
   const profileScopeRef = useRef(scopeKey);
   profileScopeRef.current = scopeKey;
@@ -734,6 +735,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       jobId: string,
       opts?: {force?: boolean; signal?: AbortSignal},
     ) => {
+      if (!canLoadProfileData) return;
       const cached = state.details[jobId];
       if (cached?.loaded && !opts?.force) {
         return;
@@ -784,7 +786,11 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
           jobGeneration;
       dispatch({type: 'skill_map_loading', jobId});
       try {
-        const data = await api.fetchSelectedJobSkillMap(jobId, opts?.signal);
+        const data = await api.fetchSelectedJobSkillMap(
+          jobId,
+          opts?.signal,
+          profileId ?? undefined,
+        );
         if (opts?.signal?.aborted || !isLatest() || !isStillValid() || profileScopeRef.current !== scopeKey) {
           return;
         }
@@ -800,7 +806,14 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileData, scopeKey, state.skillMaps],
+    [
+      api,
+      beginLatestRequest,
+      canLoadProfileData,
+      profileId,
+      scopeKey,
+      state.skillMaps,
+    ],
   );
 
   const evaluateJob = useCallback(

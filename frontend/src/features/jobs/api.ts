@@ -261,9 +261,13 @@ export async function fetchSavedJobDetail(
 export async function fetchSelectedJobSkillMap(
   jobId: string,
   signal?: AbortSignal,
+  profileId?: string,
 ): Promise<SelectedJobSkillMap> {
-  const path =
-    `/api/observability/skill-map?job_id=${encodeURIComponent(jobId)}`;
+  const params = new URLSearchParams({job_id: jobId});
+  if (profileId) {
+    params.set('profile_id', profileId);
+  }
+  const path = `/api/observability/skill-map?${params.toString()}`;
   const json = await getJson(path, signal);
   try {
     const parsed = parseSelectedJobSkillMap(json);

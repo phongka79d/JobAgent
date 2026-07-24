@@ -222,6 +222,60 @@ describe('saved-JD action slice ownership', () => {
 });
 
 describe('selected skill-map cache ownership', () => {
+  it('passes the ready profile scope to the skill-map request', async () => {
+    const fetchSelectedJobSkillMap = vi
+      .fn()
+      .mockResolvedValue(skillMapFor(JOB_A));
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {fetchSelectedJobSkillMap},
+        profileId: PROFILE_A,
+        profileReady: true,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadSkillMap(JOB_A);
+    });
+
+    expect(fetchSelectedJobSkillMap).toHaveBeenCalledWith(
+      JOB_A,
+      undefined,
+      PROFILE_A,
+    );
+  });
+
+  it('suppresses profile-derived reads and evaluation while setup is pending', async () => {
+    const fetchSavedJobs = vi.fn();
+    const fetchSavedJobDetail = vi.fn();
+    const fetchSelectedJobSkillMap = vi.fn();
+    const evaluateSavedJob = vi.fn();
+    const {result} = renderHook(() =>
+      useSavedJobsState({
+        api: {
+          fetchSavedJobs,
+          fetchSavedJobDetail,
+          fetchSelectedJobSkillMap,
+          evaluateSavedJob,
+        },
+        profileId: PROFILE_A,
+        profileReady: false,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadList();
+      await result.current.loadDetail(JOB_A);
+      await result.current.loadSkillMap(JOB_A);
+      await result.current.evaluateJob(JOB_A);
+    });
+
+    expect(fetchSavedJobs).not.toHaveBeenCalled();
+    expect(fetchSavedJobDetail).not.toHaveBeenCalled();
+    expect(fetchSelectedJobSkillMap).not.toHaveBeenCalled();
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
   it('keeps request ordering independent per Job and retains safe cached data', async () => {
     const initial = deferred<SelectedJobSkillMap>();
     const refresh = deferred<SelectedJobSkillMap>();

@@ -4,6 +4,7 @@ import {fetchSelectedJobSkillMap} from '../features/jobs/api';
 import {parseSelectedJobSkillMap} from '../features/jobs/types';
 
 const JOB_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const PROFILE_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 const CV_ID = '11111111-2222-4333-8444-555555555555';
 const TS = '2024-08-01T12:00:00.000Z';
 
@@ -209,13 +210,20 @@ describe('selected skill-map transport', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     try {
-      const result = await fetchSelectedJobSkillMap(JOB_ID);
+      const result = await fetchSelectedJobSkillMap(
+        JOB_ID,
+        undefined,
+        PROFILE_ID,
+      );
 
       expect(result.status).toBe('ready');
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [url, init] = fetchMock.mock.calls[0]!;
       expect(String(url)).toContain(
         `/api/observability/skill-map?job_id=${encodeURIComponent(JOB_ID)}`,
+      );
+      expect(String(url)).toContain(
+        `profile_id=${encodeURIComponent(PROFILE_ID)}`,
       );
       expect(init).toMatchObject({method: 'GET'});
       expect(String(url)).not.toContain('evaluate');

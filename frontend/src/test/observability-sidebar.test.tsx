@@ -16,6 +16,8 @@ import userEvent from '@testing-library/user-event';
 import {afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {CvSidebar} from '../features/profile/CvSidebar';
+import type {ProfileListItem} from '../features/profile/conversationTypes';
+import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
 import {
   ATTACHMENT_ID,
   RUN_ID,
@@ -57,6 +59,85 @@ beforeEach(() => {
 });
 
 describe('ObservabilitySidebar composition', () => {
+  it('keeps selected pending-profile controls visible and makes zero derived requests', async () => {
+    const pendingProfile: ProfileListItem = {
+      id: '99999999-8888-4777-8666-555555555555',
+      display_name: 'pending-cv.pdf',
+      cv_filename: 'pending-cv.pdf',
+      attachment_state: 'staged',
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: null,
+      source_hash: null,
+      state: 'pending',
+      setup_status: 'awaiting_extraction',
+      is_active: true,
+      created_at: '2026-07-24T10:00:00Z',
+      updated_at: '2026-07-24T10:00:00Z',
+      last_opened_at: '2026-07-24T10:00:00Z',
+    };
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [pendingProfile],
+        activeProfileId: pendingProfile.id,
+        selectedConversationId: null,
+        conversations: [],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile: vi.fn(),
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    const api = mockObservabilityApi();
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('pending profile must not fetch'));
+
+    renderObservabilitySidebar(api, {
+      workspace,
+      profile: {
+        present: false,
+        profile: null,
+        preferences: null,
+        active_attachment: null,
+        draft_present: false,
+        pending_attachment: {
+          id: ATTACHMENT_ID,
+          original_name: 'pending-cv.pdf',
+          mime_type: 'application/pdf',
+          size_bytes: 1024,
+          page_count: 1,
+          state: 'staged',
+          failure_code: null,
+        },
+      },
+    });
+
+    expect(await screen.findByTestId('jobagent-obs-overview')).toBeInTheDocument();
+    expect(screen.getByTestId('jobagent-cv-upload')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: /Retry/})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: /Discard/})).toBeInTheDocument();
+
+    for (const tab of ['cv-history', 'chunks', 'runs', 'graph', 'saved-jobs']) {
+      await userEvent.click(screen.getByTestId(`jobagent-obs-tab-${tab}`));
+      expect(screen.getByText('Profile setup in progress')).toBeInTheDocument();
+    }
+
+    expect(api.fetchCvHistory).not.toHaveBeenCalled();
+    expect(api.fetchChunkList).not.toHaveBeenCalled();
+    expect(api.fetchChunkDetail).not.toHaveBeenCalled();
+    expect(api.fetchRunHistory).not.toHaveBeenCalled();
+    expect(api.fetchGraphSnapshot).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('defaults to Overview and does not fetch other tabs until selected', async () => {
     const api = mockObservabilityApi();
     renderObservabilitySidebar(api);

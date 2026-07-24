@@ -1,4 +1,4 @@
-import {act, renderHook} from '@testing-library/react';
+import {act, renderHook, waitFor} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 
 import {ChatApiError} from '../lib/api/chat';
@@ -236,7 +236,7 @@ describe('CV Manager action state and invalidation', () => {
     });
     expect(fetchCvHistory).toHaveBeenLastCalledWith(
       {profileId: PROFILE_B},
-      undefined,
+      expect.any(AbortSignal),
     );
     expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
       'profile-b.pdf',
@@ -278,6 +278,45 @@ describe('CV Manager action state and invalidation', () => {
 
     expect(result.current.state.chunkDetails).toEqual({});
     expect(result.current.state.expandedChunkOrdinal).toBeNull();
+  });
+
+  it('aborts a manually started ready-profile request on scope change', async () => {
+    const pending = deferred<CvHistoryPage>();
+    let requestSignal: AbortSignal | undefined;
+    const fetchCvHistory = vi.fn(
+      (_query: unknown, signal?: AbortSignal) => {
+        requestSignal = signal;
+        return pending.promise;
+      },
+    );
+    const {result, rerender} = renderHook(
+      ({profileId, profileReady}) =>
+        useObservabilityState({
+          api: {fetchCvHistory},
+          profileId,
+          profileReady,
+        }),
+      {
+        initialProps: {profileId: PROFILE_A, profileReady: true},
+      },
+    );
+
+    let load!: Promise<void>;
+    act(() => {
+      load = result.current.loadCvHistory();
+    });
+    expect(requestSignal?.aborted).toBe(false);
+
+    rerender({profileId: PROFILE_B, profileReady: false});
+
+    await waitFor(() => {
+      expect(requestSignal?.aborted).toBe(true);
+    });
+    await act(async () => {
+      pending.resolve(cvHistoryPage());
+      await load;
+    });
+    expect(result.current.state.cvHistory.data).toBeNull();
   });
 
   it('prevents duplicate pending actions per attachment', () => {
