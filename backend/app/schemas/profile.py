@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from app.db.models.attachments import ATTACHMENT_MIME_TYPE_PDF
+from app.core.attachments import ATTACHMENT_MIME_TYPE_PDF
 from app.schemas.attachments import AttachmentPublic
 from app.schemas.chat import ConversationSummary
 from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr

@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from typing import Literal
 
-from app.db.models.attachments import (
+from app.core.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
