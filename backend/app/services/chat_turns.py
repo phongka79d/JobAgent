@@ -52,6 +52,7 @@ from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.activity_gate import ActivityBlockedError, assert_conversation_idle
 from app.storage.attachments import AttachmentStorage
@@ -318,44 +319,66 @@ async def assert_cv_reprocessable(
     att_id = attachment_id.strip()
     factory = session_factory or get_session_factory()
     async with factory() as session:
-        interrupted = await get_interrupted_run(session)
-        if interrupted is not None:
-            raise ChatTurnError(
-                ERROR_APPROVAL_ACTION_REQUIRED,
-                "an interrupted run requires an approval action before reprocess",
-            )
-        row = await att_repo.get_by_id(session, att_id)
-        if row is None:
-            raise ChatTurnError(
-                ERROR_CV_ATTACHMENT_NOT_FOUND,
-                f"attachment {att_id!r} not found",
-            )
-        if row.state not in _REPROCESS_ELIGIBLE_STATES:
-            raise ChatTurnError(
-                ERROR_CV_NOT_REPROCESSABLE,
-                f"attachment state {row.state!r} cannot be reprocessed",
-            )
-        profile = await session.get(Profile, target_profile_id)
-        owner = await conversations_repo.resolve_owner(session, conversation_id)
-        if (
-            profile is None
-            or profile.state != PROFILE_STATE_READY
-            or profile.attachment_id != att_id
-        ):
-            raise ChatTurnError(
-                "PROFILE_NOT_READY",
-                "target profile is not ready or does not own the attachment",
-            )
-        if owner is None or owner.profile_id != target_profile_id:
-            raise ChatTurnError(
-                "CONVERSATION_NOT_FOUND",
-                "profile conversation could not be resolved",
-            )
-        if not storage.exists(row.storage_path):
-            raise ChatTurnError(
-                ERROR_CV_FILE_UNAVAILABLE,
-                "retained CV file is unavailable for reprocess",
-            )
+        await _assert_cv_reprocessable_in_session(
+            session,
+            attachment_id=att_id,
+            target_profile_id=target_profile_id,
+            conversation_id=conversation_id,
+            storage=storage,
+        )
+
+
+async def _assert_cv_reprocessable_in_session(
+    session: AsyncSession,
+    *,
+    attachment_id: str,
+    target_profile_id: str,
+    conversation_id: str,
+    storage: AttachmentStorage,
+) -> None:
+    interrupted = await get_interrupted_run(session)
+    if interrupted is not None:
+        raise ChatTurnError(
+            ERROR_APPROVAL_ACTION_REQUIRED,
+            "an interrupted run requires an approval action before reprocess",
+        )
+    row = await att_repo.get_by_id(session, attachment_id)
+    if row is None:
+        raise ChatTurnError(
+            ERROR_CV_ATTACHMENT_NOT_FOUND,
+            f"attachment {attachment_id!r} not found",
+        )
+    if row.state not in _REPROCESS_ELIGIBLE_STATES:
+        raise ChatTurnError(
+            ERROR_CV_NOT_REPROCESSABLE,
+            f"attachment state {row.state!r} cannot be reprocessed",
+        )
+    profile = await session.get(Profile, target_profile_id)
+    owner = await conversations_repo.resolve_owner(session, conversation_id)
+    if (
+        profile is None
+        or profile.state != PROFILE_STATE_READY
+        or profile.attachment_id != attachment_id
+    ):
+        raise ChatTurnError(
+            "PROFILE_NOT_READY",
+            "target profile is not ready or does not own the attachment",
+        )
+    if owner is None or owner.profile_id != target_profile_id:
+        raise ChatTurnError(
+            "CONVERSATION_NOT_FOUND",
+            "profile conversation could not be resolved",
+        )
+    if await workspace_repo.get_active_profile_id(session) != target_profile_id:
+        raise ChatTurnError(
+            "PROFILE_NOT_READY",
+            "target profile is not the active workspace profile",
+        )
+    if not storage.exists(row.storage_path):
+        raise ChatTurnError(
+            ERROR_CV_FILE_UNAVAILABLE,
+            "retained CV file is unavailable for reprocess",
+        )
 
 
 async def persist_terminal_success(
@@ -667,6 +690,14 @@ async def stream_cv_reprocess(
         storage=storage,
         session_factory=factory,
     )
+    async with factory() as session:
+        await _assert_cv_reprocessable_in_session(
+            session,
+            attachment_id=attachment_id,
+            target_profile_id=target_profile_id,
+            conversation_id=conversation_id,
+            storage=storage,
+        )
     # Domain-agnostic user text; attachment_ids + ownership drive the tools.
     # Do not name tool symbols here (ownership boundary). CV-owned runs stamp
     # source_attachment_id so propose forces reprocess even if the model omits it.

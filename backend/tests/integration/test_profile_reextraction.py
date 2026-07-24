@@ -54,6 +54,21 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
         "app.services.job_evaluation.project_single_job_match", scorer
     )
 
+    async def _unexpected_activation(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ready re-extraction must not activate attachments")
+
+    async def _unexpected_archive(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ready re-extraction must not archive attachments")
+
+    monkeypatch.setattr(
+        "app.services.profile_approval.activate_selected_attachment",
+        _unexpected_activation,
+    )
+    monkeypatch.setattr(
+        "app.services.profile_approval.att_repo.mark_archived",
+        _unexpected_archive,
+    )
+
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
         factory = session_factory(engine)
@@ -142,6 +157,10 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                     },
                 )
                 old_revision = profile.updated_at
+                old_preferences_revision = preference_row.updated_at
+                attachment = await att_repo.get_by_id(session, attachment_id)
+                assert attachment is not None
+                old_attachment_revision = attachment.updated_at
                 await session.commit()
                 profile_id = profile.id
                 conversation_ids = {first.id, second.id}
@@ -166,6 +185,12 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 changed_profile = dict(changed["candidate_profile"])
                 changed_profile["full_name"] = "Unsupported Person"
                 changed["candidate_profile"] = changed_profile
+                changed["job_preferences"] = {
+                    "target_roles": ["Injected Draft Role"],
+                    "preferred_locations": ["Injected Draft Location"],
+                    "acceptable_work_modes": ["onsite"],
+                    "target_seniority": ["junior"],
+                }
                 await profile_repo.upsert_current_draft(
                     session,
                     draft_json=changed,
@@ -182,6 +207,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 storage=storage,
                 normalizer=_normalizer(),
                 sync_fn=no_sync,
+                expected_profile_id=profile_id,
             )
             assert approved.ok is True
             assert approved.profile_id == profile_id
@@ -199,14 +225,24 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 assert prefs is not None
                 assert document is not None
                 assert refreshed.attachment_id == attachment_id
+                assert refreshed.display_name == "Ready"
                 refreshed_revision = refreshed.updated_at.replace(tzinfo=None)
                 assert refreshed_revision != old_revision.replace(tzinfo=None)
                 assert refreshed.source_hash == document.source_hash
                 assert refreshed.source_hash != "old-source-hash"
                 assert refreshed.profile_json["full_name"] is None
                 assert prefs.preferences_json == _preferences()
+                assert prefs.updated_at.replace(
+                    tzinfo=None
+                ) == old_preferences_revision.replace(tzinfo=None)
                 assert {item.id for item in conversations.rows} == conversation_ids
                 assert await workspace_repo.get_active_profile_id(session) == profile_id
+                attachment = await att_repo.get_by_id(session, attachment_id)
+                assert attachment is not None
+                assert attachment.state == "active"
+                assert attachment.updated_at.replace(
+                    tzinfo=None
+                ) == old_attachment_revision.replace(tzinfo=None)
                 job = await jobs_repo.get_by_id(session, job_id)
                 assert job is not None
                 current_facts = EvaluationContextFacts(
@@ -280,6 +316,7 @@ def test_approval_rejects_a_draft_without_explicit_profile_owner(
                 storage=storage,
                 normalizer=_normalizer(),
                 sync_fn=no_sync,
+                expected_profile_id=new_uuid(),
             )
             assert result.ok is False
             assert result.code == "PROFILE_INCONSISTENT"

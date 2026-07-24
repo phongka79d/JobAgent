@@ -771,23 +771,32 @@ def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
 ) -> None:
     from app.storage.attachments import AttachmentStorage
 
-    from tests.fakes.embeddings import FakeEmbeddingClient
-    from tests.fakes.structured_output import ScriptedStructuredInvoker
-
     _db_path, files_dir, _driver = health_env
     pdf_path = (
         Path(__file__).resolve().parents[1] / "fixtures" / "cv" / "digital_cv_01.pdf"
     )
     pdf_bytes = pdf_path.read_bytes()
-    provider = ScriptedStructuredInvoker()
-    embedder = FakeEmbeddingClient()
     extractor = Mock(side_effect=AssertionError("extractor must not run"))
+    provider = Mock(side_effect=AssertionError("provider must not run"))
+    embedder = Mock(side_effect=AssertionError("embedding must not run"))
     scorer = Mock(side_effect=AssertionError("scorer must not run"))
     monkeypatch.setattr(
         "app.services.profile_drafts.extract_document_publication_from_pdf",
         extractor,
     )
-    monkeypatch.setattr("app.services.matching.match_jobs", scorer)
+    monkeypatch.setattr(
+        "app.services.cv_document_extraction."
+        "ShopAIKeyStructuredCVDocumentInvoker.invoke_structured",
+        provider,
+    )
+    monkeypatch.setattr(
+        "app.adapters.shopaikey_embeddings."
+        "ShopAIKeyEmbeddingAdapter.embed_text",
+        embedder,
+    )
+    monkeypatch.setattr(
+        "app.services.matching.score_retrieved_candidates", scorer
+    )
 
     async def seed() -> tuple[str, str]:
         factory = get_session_factory()
@@ -833,14 +842,20 @@ def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
     assert body["outcome"] == "existing_profile"
     assert body["attachment"]["id"] == attachment_id
     assert body["profile"]["profile_id"] == profile_id
-    assert provider.call_count == 0
-    assert embedder.call_count == 0
     extractor.assert_not_called()
+    provider.assert_not_called()
+    embedder.assert_not_called()
     scorer.assert_not_called()
 
     async def assert_no_pending() -> None:
         factory = get_session_factory()
         async with factory() as session:
             assert await profiles_repo.get_incomplete_profile(session) is None
+            assert await profiles_repo.get_current_draft(session) is None
+            for table in ("agent_runs", "tool_executions"):
+                count = (
+                    await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                ).scalar_one()
+                assert int(count) == 0
 
     run_async(assert_no_pending())

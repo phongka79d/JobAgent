@@ -1038,6 +1038,89 @@ def test_propose_existing_draft_reuse_without_provider(
     run_async(_body())
 
 
+def test_propose_rejects_current_draft_owned_by_another_profile_before_provider(
+    migrated_sqlite: Path, files_root: Path
+) -> None:
+    storage = AttachmentStorage(files_root)
+    invoker = CoveringDocumentInvoker()
+    normalizer = _normalizer()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+    draft = _valid_draft()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            other_attachment_id = new_uuid()
+            relative_path = _write_pdf(storage, attachment_id, pdf)
+            other_relative_path = _write_pdf(storage, other_attachment_id, pdf)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="draft-owner-expected",
+                    original_name="expected.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=relative_path,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                expected_owner = await profile_repo.create_pending_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="expected.pdf",
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="draft-owner-other",
+                    original_name="other.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=other_relative_path,
+                    page_count=1,
+                    attachment_id=other_attachment_id,
+                )
+                await att_repo.mark_active(session, other_attachment_id)
+                await att_repo.mark_archived(session, other_attachment_id)
+                other_owner = await profile_repo.create_profile(
+                    session,
+                    attachment_id=other_attachment_id,
+                    display_name="Other",
+                    profile_json=_valid_profile().model_dump(mode="json"),
+                    location=None,
+                    extraction_version="existing-v1",
+                    source_hash="other-source",
+                )
+                await profile_repo.upsert_current_draft(
+                    session,
+                    draft_json=draft.model_dump(mode="json"),
+                    source_attachment_id=attachment_id,
+                    target_profile_id=other_owner.id,
+                )
+                await session.commit()
+
+            result = await propose_profile_from_cv(
+                attachment_id=attachment_id,
+                target_profile_id=expected_owner.id,
+                session_factory=factory,
+                storage=storage,
+                invoker=invoker,
+                normalizer=normalizer,
+            )
+
+            assert result.tool_result.ok is False
+            assert result.tool_result.code == "PROFILE_INCONSISTENT"
+            assert invoker.calls == []
+            async with factory() as session:
+                preserved = await profile_repo.get_current_draft(session)
+                assert preserved is not None
+                assert preserved.target_profile_id == other_owner.id
+                assert preserved.source_attachment_id == attachment_id
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_propose_new_draft_and_replace_prior_staged(
     migrated_sqlite: Path, files_root: Path
 ) -> None:

@@ -175,6 +175,7 @@ async def _load_preflight(
     storage: AttachmentStorage | None,
     *,
     check_files: bool,
+    expected_profile_id: str,
 ) -> _Preflight:
     """Validate draft and attachment prerequisites.
 
@@ -187,6 +188,11 @@ async def _load_preflight(
         raise ProfileApprovalError(
             "No current profile draft to approve",
             code=ERROR_DRAFT_NOT_FOUND,
+        )
+    if draft_row.target_profile_id != expected_profile_id:
+        raise ProfileApprovalError(
+            "Current profile draft belongs to another profile",
+            code="PROFILE_INCONSISTENT",
         )
 
     try:
@@ -358,6 +364,7 @@ async def _assert_final_invariant(
     *,
     profile_id: str,
     expected_attachment_id: str,
+    require_active_attachment: bool,
 ) -> None:
     """Require the approved profile and attachment rows are durable."""
     profile = await profile_repo.get_profile(session, profile_id)
@@ -373,19 +380,22 @@ async def _assert_final_invariant(
             code=ERROR_INVARIANT_VIOLATION,
         )
 
-    stmt = select(Attachment).where(Attachment.state == ATTACHMENT_STATE_ACTIVE)
-    result = await session.execute(stmt)
-    active_rows = list(result.scalars().all())
-    if len(active_rows) != 1:
-        raise ProfileApprovalError(
-            f"expected exactly one active attachment, found {len(active_rows)}",
-            code=ERROR_INVARIANT_VIOLATION,
+    if require_active_attachment:
+        stmt = select(Attachment).where(
+            Attachment.state == ATTACHMENT_STATE_ACTIVE
         )
-    if active_rows[0].id != expected_attachment_id:
-        raise ProfileApprovalError(
-            "active attachment id does not match profile pointer",
-            code=ERROR_INVARIANT_VIOLATION,
-        )
+        result = await session.execute(stmt)
+        active_rows = list(result.scalars().all())
+        if len(active_rows) != 1:
+            raise ProfileApprovalError(
+                f"expected exactly one active attachment, found {len(active_rows)}",
+                code=ERROR_INVARIANT_VIOLATION,
+            )
+        if active_rows[0].id != expected_attachment_id:
+            raise ProfileApprovalError(
+                "active attachment id does not match profile pointer",
+                code=ERROR_INVARIANT_VIOLATION,
+            )
 
     draft = await profile_repo.get_current_draft(session)
     if draft is not None:
@@ -402,12 +412,10 @@ async def _run_sqlite_approval(
     failpoint: str | None,
 ) -> tuple[datetime, str, str | None]:
     """Apply constraint-safe ordering inside one open session (no commit here)."""
-    source_fragments: tuple[str, ...] = ()
-    if preflight.document_bundle is not None:
-        rows = await chunk_repo.list_for_attachment(
-            session, preflight.document_bundle.attachment_id
-        )
-        source_fragments = tuple(str(row.text) for row in rows)
+    rows = await chunk_repo.list_for_attachment(
+        session, preflight.active_attachment_id_for_profile
+    )
+    source_fragments = tuple(str(row.text) for row in rows)
     guarded_profile = guard_optional_identity_fields(
         preflight.draft.candidate_profile,
         source_fragments=source_fragments,
@@ -430,6 +438,16 @@ async def _run_sqlite_approval(
                 "Pending profile approval requires extracted CV data",
                 code=ERROR_DOCUMENT_DRAFT_NOT_FOUND,
             )
+        if preflight.new_attachment is None:
+            raise ProfileApprovalError(
+                "Pending profile attachment is missing",
+                code=ERROR_ATTACHMENT_NOT_FOUND,
+            )
+        from app.services.profile_projection import project_display_name
+
+        existing_profile.display_name = project_display_name(
+            guarded_profile, preflight.new_attachment.original_name
+        )
         existing_profile.profile_json = profile_json
         existing_profile.location = guarded_profile.location
         existing_profile.extraction_version = (
@@ -469,9 +487,8 @@ async def _run_sqlite_approval(
         raise RuntimeError("failpoint:after_profile_upsert")
 
     # 2. Preferences only when changed.
-    if (
-        preflight.preferences_changed
-        or preflight.target_profile_state == PROFILE_STATE_PENDING
+    if preflight.target_profile_state == PROFILE_STATE_PENDING or (
+        preflight.document_bundle is None and preflight.preferences_changed
     ):
         await profile_repo.upsert_profile_preferences(
             session,
@@ -483,7 +500,10 @@ async def _run_sqlite_approval(
 
     # 3–4. CV-backed: archive prior active when IDs differ; activate selected.
     # Profile already repointed so FK RESTRICT on candidate_profile is satisfied.
-    if preflight.new_attachment is not None:
+    if (
+        preflight.target_profile_state == PROFILE_STATE_PENDING
+        and preflight.new_attachment is not None
+    ):
         if preflight.old_attachment_id is not None:
             await att_repo.mark_archived(session, preflight.old_attachment_id)
             if failpoint in (
@@ -502,18 +522,25 @@ async def _run_sqlite_approval(
             raise _activation_to_approval_error(exc) from exc
 
         # Promote document draft → approved cv_documents; clear document draft.
-        if preflight.document_bundle is not None:
-            try:
-                await promote_document_draft(session, preflight.document_bundle)
-            except ActivationError as exc:
-                raise _activation_to_approval_error(exc) from exc
+    # Promote a source-backed document revision without changing ready-profile
+    # attachment selection/state.
+    if preflight.document_bundle is not None:
+        try:
+            await promote_document_draft(session, preflight.document_bundle)
+        except ActivationError as exc:
+            raise _activation_to_approval_error(exc) from exc
 
     # 5. Delete profile draft.
     await profile_repo.delete_current_draft(session)
 
     # 6. Final invariant, then caller commits.
     await _assert_final_invariant(
-        session, profile_id=profile_id, expected_attachment_id=target_att_id
+        session,
+        profile_id=profile_id,
+        expected_attachment_id=target_att_id,
+        require_active_attachment=(
+            preflight.target_profile_state == PROFILE_STATE_PENDING
+        ),
     )
 
     if failpoint == "before_commit":
@@ -530,6 +557,7 @@ async def commit_approved_draft(
     session_factory: async_sessionmaker[AsyncSession],
     storage: AttachmentStorage,
     normalizer: SkillNormalizer,
+    expected_profile_id: str,
     driver: AsyncGraphDriver | None = None,
     failpoint: str | None = None,
     sync_fn: Callable[..., Awaitable[None]] | None = None,
@@ -552,7 +580,10 @@ async def commit_approved_draft(
     async with session_factory() as read_session:
         try:
             preflight = await _load_preflight(
-                read_session, storage, check_files=True
+                read_session,
+                storage,
+                check_files=True,
+                expected_profile_id=expected_profile_id,
             )
         except ProfileApprovalError as exc:
             return ApprovalCommitResult(
@@ -572,14 +603,19 @@ async def commit_approved_draft(
     # Snapshot archive identity before the write transaction (file retained).
     old_attachment_id = preflight.old_attachment_id
     target_att_id = preflight.active_attachment_id_for_profile
-    preferences_updated = preflight.preferences_changed
+    preferences_updated = preflight.target_profile_state == PROFILE_STATE_PENDING or (
+        preflight.document_bundle is None and preflight.preferences_changed
+    )
 
     # ---- SQLite transaction (DB only — no filesystem / Neo4j) ----
     try:
         async with session_scope(session_factory) as session:
             # Re-validate DB rows only inside the transaction (no storage I/O).
             live = await _load_preflight(
-                session, storage=None, check_files=False
+                session,
+                storage=None,
+                check_files=False,
+                expected_profile_id=expected_profile_id,
             )
             if (
                 live.draft_row_source_attachment_id

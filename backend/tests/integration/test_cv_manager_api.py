@@ -16,9 +16,7 @@ import pytest
 from app.core.ids import new_uuid
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
-    ATTACHMENT_STATE_ARCHIVED,
 )
-from app.db.models.profiles import PROFILE_DRAFT_ID
 from app.db.session import build_async_engine, get_session_factory
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
@@ -477,6 +475,142 @@ def test_reprocess_active_sse_approval_and_ownership(
     assert invoker.calls >= 1
 
 
+def test_reextract_rechecks_active_profile_before_creating_run_or_provider_work(
+    reprocess_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.db.models.chat import AgentRun, ChatMessage
+    from app.services import chat_turns
+    from app.services.chat_turns import ChatTurnError
+    from sqlalchemy import func, select
+
+    db_path, files_dir = reprocess_env
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+    pdf = _cv_fixture("digital_cv_01.pdf")
+
+    async def _seed() -> tuple[str, str, str]:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            other_attachment_id = new_uuid()
+            target_attachment_id = new_uuid()
+            other_rel = _write_real_pdf(storage, other_attachment_id)
+            target_rel = _write_real_pdf(storage, target_attachment_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="active-drift-other",
+                    original_name="other.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=other_rel,
+                    page_count=1,
+                    attachment_id=other_attachment_id,
+                )
+                await att_repo.mark_active(session, other_attachment_id)
+                await att_repo.mark_archived(session, other_attachment_id)
+                other_profile = await prof_repo.create_profile(
+                    session,
+                    attachment_id=other_attachment_id,
+                    display_name="Other",
+                    profile_json=_approval_profile_json(),
+                    location=None,
+                    extraction_version="existing-v1",
+                    source_hash="other-source",
+                )
+                await conversations_repo.create_for_profile(
+                    session, profile_id=other_profile.id
+                )
+                await att_repo.create_staged(
+                    session,
+                    file_hash="active-drift-target",
+                    original_name="target.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=target_rel,
+                    page_count=1,
+                    attachment_id=target_attachment_id,
+                )
+                await att_repo.mark_active(session, target_attachment_id)
+                target_profile = await prof_repo.create_profile(
+                    session,
+                    attachment_id=target_attachment_id,
+                    display_name="Target",
+                    profile_json=_approval_profile_json(),
+                    location=None,
+                    extraction_version="existing-v1",
+                    source_hash="target-source",
+                )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=target_profile.id
+                )
+                from app.repositories import workspace_state as workspace_repo
+
+                await workspace_repo.set_active_profile_id(
+                    session, target_profile.id
+                )
+                await session.commit()
+                return (
+                    target_attachment_id,
+                    target_profile.id,
+                    conversation.id,
+                )
+        finally:
+            await engine.dispose()
+
+    attachment_id, target_profile_id, conversation_id = run_async(_seed())
+    factory = get_session_factory()
+    real_assert = chat_turns.assert_cv_reprocessable
+
+    async def _switch_after_route_precheck(**kwargs: Any) -> None:
+        await real_assert(**kwargs)
+        async with factory() as session:
+            profiles = await prof_repo.list_profiles(session)
+            other_profile = next(
+                row for row in profiles if row.id != target_profile_id
+            )
+            from app.repositories import workspace_state as workspace_repo
+
+            await workspace_repo.set_active_profile_id(session, other_profile.id)
+            await session.commit()
+
+    monkeypatch.setattr(
+        chat_turns, "assert_cv_reprocessable", _switch_after_route_precheck
+    )
+    model = FakeChatModel(responses=[ai_text("must not run")])
+
+    async def _exercise() -> None:
+        with pytest.raises(ChatTurnError) as exc_info:
+            _ = [
+                event
+                async for event in chat_turns.stream_cv_reprocess(
+                    attachment_id=attachment_id,
+                    target_profile_id=target_profile_id,
+                    conversation_id=conversation_id,
+                    storage=storage,
+                    model=model,
+                    registry=ToolRegistry([]),
+                    session_factory=factory,
+                    sqlite_path=db_path,
+                )
+            ]
+        assert exc_info.value.code == "PROFILE_NOT_READY"
+        assert model.invoke_count == 0
+        async with factory() as session:
+            assert int(
+                (await session.execute(select(func.count()).select_from(AgentRun)))
+                .scalar_one()
+            ) == 0
+            assert int(
+                (
+                    await session.execute(
+                        select(func.count()).select_from(ChatMessage)
+                    )
+                ).scalar_one()
+            ) == 0
+            assert await prof_repo.get_current_draft(session) is None
+
+    run_async(_exercise())
+
+
 def test_reprocess_approval_required_blocks_second(
     reprocess_env: tuple[Path, Path],
 ) -> None:
@@ -534,157 +668,20 @@ def test_reprocess_approval_required_blocks_second(
         assert second.json()["detail"]["code"] == "PROFILE_SWITCH_BLOCKED"
 
 
-def test_reprocess_archived_request_changes_and_save_switch(
+def test_legacy_attachment_reprocess_route_is_not_available(
     reprocess_env: tuple[Path, Path],
 ) -> None:
-    """Archived reprocess: pending keeps prior active; Save Profile switches."""
-    db_path, files_dir = reprocess_env
-    storage = AttachmentStorage(files_dir)
-    storage.ensure_root()
-    invoker = _CoveringDocumentInvoker()
-    normalizer = SkillNormalizer.from_path(_skills_fixture())
+    db_path, _files_dir = reprocess_env
+    with client_with_fake_chat(
+        db_path,
+        FakeChatModel(responses=[]),
+        ToolRegistry([]),
+    ) as client:
+        response = client.post(f"/api/cvs/{new_uuid()}/reprocess")
 
-    async def _seed() -> tuple[str, str]:
-        engine = build_async_engine(db_path)
-        factory = session_factory(engine)
-        try:
-            active_id = new_uuid()
-            archived_id = new_uuid()
-            active_rel = _write_real_pdf(storage, active_id)
-            archived_rel = _write_real_pdf(storage, archived_id)
-            async with factory() as session:
-                # Create archived first, then active (one-active invariant).
-                await att_repo.create_staged(
-                    session,
-                    file_hash="arch-old",
-                    original_name="old.pdf",
-                    size_bytes=100,
-                    storage_path=archived_rel,
-                    page_count=1,
-                    attachment_id=archived_id,
-                )
-                await att_repo.mark_active(session, archived_id)
-                await att_repo.mark_archived(session, archived_id)
-                await att_repo.create_staged(
-                    session,
-                    file_hash="arch-active",
-                    original_name="cur.pdf",
-                    size_bytes=100,
-                    storage_path=active_rel,
-                    page_count=1,
-                    attachment_id=active_id,
-                )
-                await att_repo.mark_active(session, active_id)
-                await prof_repo.upsert_active_profile(
-                    session,
-                    active_attachment_id=active_id,
-                    profile_json=_approval_profile_json(),
-                )
-                await session.commit()
-            return active_id, archived_id
-        finally:
-            await engine.dispose()
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Not Found"
 
-    active_id, archived_id = run_async(_seed())
-    factory = get_session_factory()
-    registry = _build_registry(
-        factory=factory,
-        storage=storage,
-        invoker=invoker,
-        normalizer=normalizer,
-    )
-    model = FakeChatModel(
-        responses=[
-            ai_tool_call(
-                PROPOSE_PROFILE_FROM_CV_NAME,
-                call_id="call-arch-propose",
-                args={"attachment_id": archived_id, "reprocess": True},
-            ),
-        ]
-    )
-    with client_with_fake_chat(db_path, model, registry) as client:
-        propose = client.post(f"/api/cvs/{archived_id}/reprocess")
-        assert propose.status_code == 404
-        assert propose.json()["detail"] == "Not Found"
-        return
-        events = parse_sse_wire(propose.text)
-        assert _event_names(events)[-1] == "approval_required"
-        run_id = events[-1]["run_id"]
-
-        # Request Changes: archived stays archived; active unchanged.
-        override_chat_deps(
-            client,
-            model=FakeChatModel(responses=[ai_text("changes noted")]),
-            registry=registry,
-            db_path=db_path,
-        )
-        rc = client.post(
-            f"/api/chat/runs/{run_id}/resume",
-            json={"action": "request_changes"},
-        )
-        assert rc.status_code == 200, rc.text
-        assert "run_completed" in _event_names(parse_sse_wire(rc.text))
-
-    async def _assert_after_rc() -> None:
-        async with factory() as session:
-            draft = await prof_repo.get_current_draft(session)
-            assert draft is not None
-            assert draft.source_attachment_id == archived_id
-            assert draft.id == PROFILE_DRAFT_ID
-            active = await att_repo.get_by_id(session, active_id)
-            archived = await att_repo.get_by_id(session, archived_id)
-            assert active is not None and active.state == ATTACHMENT_STATE_ACTIVE
-            assert archived is not None and archived.state == ATTACHMENT_STATE_ARCHIVED
-            profile = await prof_repo.get_active_profile(session)
-            assert profile is not None
-            assert profile.active_attachment_id == active_id
-
-    run_async(_assert_after_rc())
-
-    # Re-enter reprocess → save_profile switch.
-    model2 = FakeChatModel(
-        responses=[
-            ai_tool_call(
-                PROPOSE_PROFILE_FROM_CV_NAME,
-                call_id="call-arch-propose-2",
-                args={"attachment_id": archived_id, "reprocess": True},
-            ),
-        ]
-    )
-    with client_with_fake_chat(db_path, model2, registry) as client:
-        propose2 = client.post(f"/api/cvs/{archived_id}/reprocess")
-        assert propose2.status_code == 200, propose2.text
-        run_id2 = parse_sse_wire(propose2.text)[-1]["run_id"]
-        override_chat_deps(
-            client,
-            model=FakeChatModel(responses=[ai_text("saved")]),
-            registry=registry,
-            db_path=db_path,
-        )
-        save = client.post(
-            f"/api/chat/runs/{run_id2}/resume",
-            json={"action": "save_profile"},
-        )
-        assert save.status_code == 200, save.text
-        assert "run_completed" in _event_names(parse_sse_wire(save.text))
-
-    async def _assert_switched() -> None:
-        async with factory() as session:
-            assert await prof_repo.get_current_draft(session) is None
-            profile = await prof_repo.get_active_profile(session)
-            assert profile is not None
-            assert profile.active_attachment_id == archived_id
-            new_active = await att_repo.get_by_id(session, archived_id)
-            old = await att_repo.get_by_id(session, active_id)
-            assert new_active is not None
-            assert new_active.state == ATTACHMENT_STATE_ACTIVE
-            assert old is not None
-            assert old.state == ATTACHMENT_STATE_ARCHIVED
-            approved = await cv_doc_repo.get_document(session, archived_id)
-            assert approved is not None
-            assert await cv_doc_repo.get_draft(session, archived_id) is None
-
-    run_async(_assert_switched())
 
 
 def test_reprocess_same_active_save_refreshes_document(

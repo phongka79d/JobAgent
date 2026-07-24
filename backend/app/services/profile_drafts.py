@@ -296,6 +296,15 @@ async def propose_profile_from_cv(
                     draft_row is not None
                     and draft_row.source_attachment_id == attachment_id
                 ):
+                    if draft_row.target_profile_id != target_profile_id:
+                        return ProposeFromCvResult(
+                            kind="existing_draft",
+                            tool_result=_tool_fail(
+                                "PROFILE_INCONSISTENT",
+                                "current draft belongs to another profile",
+                            ),
+                            attachment_id=attachment_id,
+                        )
                     draft = parse_profile_draft_payload(draft_row.draft_json)
                     data = {
                         "draft_id": PROFILE_DRAFT_ID,
@@ -846,6 +855,7 @@ async def propose_profile_update(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     normalizer: SkillNormalizer,
+    expected_profile_id: str,
     profile_changes: Mapping[str, Any] | None = None,
     preference_changes: Mapping[str, Any] | None = None,
     skill_corrections: Sequence[Mapping[str, Any]] | None = None,
@@ -867,16 +877,28 @@ async def propose_profile_update(
                 "propose_profile_update requires profile, preference, or skill changes",
             ),
         )
+    if (
+        not isinstance(expected_profile_id, str)
+        or expected_profile_id.strip() == ""
+    ):
+        return ProposeUpdateResult(
+            base_kind=None,
+            tool_result=_tool_fail(
+                "PROFILE_INCONSISTENT",
+                "an explicit expected profile owner is required",
+            ),
+        )
+    expected_profile_id = expected_profile_id.strip()
 
     async with session_factory() as session:
         draft_row = await profile_repo.get_current_draft(session)
         if draft_row is not None:
-            if draft_row.target_profile_id is None:
+            if draft_row.target_profile_id != expected_profile_id:
                 return ProposeUpdateResult(
                     base_kind="current_draft",
                     tool_result=_tool_fail(
                         "PROFILE_INCONSISTENT",
-                        "current draft has no explicit profile owner",
+                        "current draft belongs to another profile",
                     ),
                 )
             try:
@@ -894,8 +916,10 @@ async def propose_profile_update(
             target_profile_id = draft_row.target_profile_id
             base_kind: UpdateBaseKind = "current_draft"
         else:
-            profile_row = await profile_repo.get_selected_ready_profile(session)
-            if profile_row is None:
+            profile_row = await profile_repo.get_profile(
+                session, expected_profile_id
+            )
+            if profile_row is None or profile_row.state != PROFILE_STATE_READY:
                 return ProposeUpdateResult(
                     base_kind=None,
                     tool_result=_tool_fail(
@@ -914,7 +938,9 @@ async def propose_profile_update(
                         {"errors": str(exc)[:400]},
                     ),
                 )
-            prefs_row = await profile_repo.get_job_preferences(session)
+            prefs_row = await profile_repo.get_profile_preferences(
+                session, expected_profile_id
+            )
             if prefs_row is None:
                 prefs = empty_job_preferences()
             else:
@@ -959,6 +985,29 @@ async def propose_profile_update(
 
     try:
         async with session_scope(session_factory) as session:
+            live_draft = await profile_repo.get_current_draft(session)
+            if base_kind == "current_draft":
+                if (
+                    live_draft is None
+                    or live_draft.target_profile_id != expected_profile_id
+                ):
+                    return ProposeUpdateResult(
+                        base_kind=base_kind,
+                        tool_result=_tool_fail(
+                            "PROFILE_INCONSISTENT",
+                            "current draft owner changed before update",
+                        ),
+                        source_attachment_id=source_attachment_id,
+                    )
+            elif live_draft is not None:
+                return ProposeUpdateResult(
+                    base_kind=base_kind,
+                    tool_result=_tool_fail(
+                        "PROFILE_INCONSISTENT",
+                        "current draft changed before update",
+                    ),
+                    source_attachment_id=source_attachment_id,
+                )
             await profile_repo.upsert_current_draft(
                 session,
                 draft_json=draft_json,

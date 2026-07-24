@@ -1,9 +1,8 @@
-"""Thin CV Manager mutation routes (Plan 9 / Master §14.1).
+"""Deletion-only CV Manager route ownership (Plan 9 / Master §14.1).
 
-Transport only: validate path params, delegate reprocess to chat-turn
-services and delete to the CV Manager coordinator, frame already-validated
-SSE events. No second runner, no extraction/approval/deletion business rules
-inlined here, and no open DB transaction across yields.
+Deletion-only transport: validate the attachment path parameter and delegate
+to the CV Manager coordinator. Profile-owned re-extraction routes live in
+app.api.profiles; this module owns no extraction or approval routes.
 """
 
 from __future__ import annotations

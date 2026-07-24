@@ -375,6 +375,21 @@ def build_propose_profile_update_tool(
                 data=None,
             ).model_dump(mode="json")
 
+        expected_profile_id = (
+            state.get("profile_id") if isinstance(state, dict) else None
+        )
+        if (
+            not isinstance(expected_profile_id, str)
+            or expected_profile_id.strip() == ""
+        ):
+            return ToolResult(
+                ok=False,
+                code="PROFILE_INCONSISTENT",
+                summary="propose_profile_update requires profile_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
+        expected_profile_id = expected_profile_id.strip()
+
         if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
             return ToolResult(
                 ok=False,
@@ -402,6 +417,7 @@ def build_propose_profile_update_tool(
             result = await propose_profile_update(
                 session_factory=factory,
                 normalizer=norm,
+                expected_profile_id=expected_profile_id,
                 profile_changes=profile_map,
                 preference_changes=prefs_map,
                 skill_corrections=skills_seq,
@@ -465,6 +481,21 @@ def build_commit_profile_draft_tool(
                 data=None,
             ).model_dump(mode="json")
 
+        expected_profile_id = (
+            state.get("profile_id") if isinstance(state, dict) else None
+        )
+        if (
+            not isinstance(expected_profile_id, str)
+            or expected_profile_id.strip() == ""
+        ):
+            return ToolResult(
+                ok=False,
+                code="PROFILE_INCONSISTENT",
+                summary="commit_profile_draft requires profile_id in graph state",
+                data=None,
+            ).model_dump(mode="json")
+        expected_profile_id = expected_profile_id.strip()
+
         if not isinstance(tool_call_id, str) or tool_call_id.strip() == "":
             return ToolResult(
                 ok=False,
@@ -493,6 +524,13 @@ def build_commit_profile_draft_tool(
                     ok=False,
                     code=ERROR_DRAFT_NOT_FOUND,
                     summary="No current profile draft to commit",
+                    data={"draft_id": PROFILE_DRAFT_ID},
+                )
+            if draft_row.target_profile_id != expected_profile_id:
+                return ToolResult(
+                    ok=False,
+                    code="PROFILE_INCONSISTENT",
+                    summary="current draft belongs to another profile",
                     data={"draft_id": PROFILE_DRAFT_ID},
                 )
 
@@ -547,6 +585,7 @@ def build_commit_profile_draft_tool(
                 normalizer=norm,
                 driver=driver,
                 sync_fn=sync_fn,
+                expected_profile_id=expected_profile_id,
             )
 
             data: dict[str, Any] = {
