@@ -957,30 +957,27 @@ describe('Save Profile refreshes sidebar', () => {
     );
     const profileId = 'abababab-abab-4bab-8bab-abababababab';
     const conversationId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
-    const pendingProfile = {
+    const baselineProfile = {
       id: profileId,
-      display_name: 'pending.pdf',
+      display_name: 'Existing profile',
       cv_filename: 'pending.pdf',
-      attachment_state: 'staged' as const,
+      attachment_state: 'active' as const,
       location: null,
       skill_tags: [],
       skill_count: 0,
-      extraction_version: null,
-      source_hash: null,
-      state: 'pending' as const,
-      setup_status: 'awaiting_approval' as const,
+      extraction_version: 'cv-document-v0',
+      source_hash: 'previous-source-hash',
+      state: 'ready' as const,
+      setup_status: null,
       is_active: true,
       created_at: TS,
       updated_at: TS,
       last_opened_at: TS,
     };
     const readyProfile = {
-      ...pendingProfile,
-      attachment_state: 'active' as const,
+      ...baselineProfile,
       extraction_version: 'cv-document-v1',
       source_hash: 'approved-source-hash',
-      state: 'ready' as const,
-      setup_status: null,
     };
     const conversation = {
       id: conversationId,
@@ -993,7 +990,7 @@ describe('Save Profile refreshes sidebar', () => {
     };
     const fetchProfiles = vi
       .fn()
-      .mockResolvedValueOnce({items: [pendingProfile], active_profile_id: profileId})
+      .mockResolvedValueOnce({items: [baselineProfile], active_profile_id: profileId})
       .mockResolvedValue({items: [readyProfile], active_profile_id: profileId});
     const fetchProfileConversations = vi.fn().mockResolvedValue({
       items: [conversation],
@@ -1175,6 +1172,13 @@ describe('Save Profile refreshes sidebar', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('jobagent-approval-card')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(fetchProfiles).toHaveBeenCalled();
+        expect(fetchProfileConversations).toHaveBeenCalledWith(profileId, {limit: 50});
+        expect(screen.getByTestId('jobagent-profile-list-panel')).toHaveTextContent(
+          'Existing profile',
+        );
       });
 
       // Seed CV Manager cache, then open saved-JD (activation while JD tab open).

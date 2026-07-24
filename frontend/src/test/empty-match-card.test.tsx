@@ -54,6 +54,8 @@ const MSG_USER_B = 'aaaa1111-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const MSG_ASST_B = 'bbbb2222-cccc-4ddd-8eee-ffffffffffff';
 const JOB_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
 const EVAL_ID = 'dddddddd-eeee-4fff-8aaa-111111111111';
+const PROFILE_ID = 'eeeeeeee-ffff-4000-8aaa-222222222222';
+const CONVERSATION_ID = 'ffffffff-0000-4111-8bbb-333333333333';
 const TS = '2026-07-18T12:00:00.000Z';
 
 afterEach(() => {
@@ -609,6 +611,9 @@ describe('ChatPage recovery action wiring', () => {
       .fn()
       .mockResolvedValue(saveSuccessResponse('created'));
     const loadHistory = vi.fn().mockResolvedValue(historyWithZeroMatch());
+    const loadConversationHistory = vi
+      .fn()
+      .mockResolvedValue(historyWithZeroMatch());
     const loadProfile = vi.fn().mockResolvedValue({
       present: false,
       draft_present: false,
@@ -620,8 +625,51 @@ describe('ChatPage recovery action wiring', () => {
     renderWithTheme(
       <App
         deps={{
-          chat: {loadHistory, sendTurn: vi.fn(), saveAndEvaluateJob},
+          chat: {
+            loadHistory,
+            loadConversationHistory,
+            sendTurn: vi.fn(),
+            saveAndEvaluateJob,
+          },
           sidebar: {loadProfile},
+          workspace: {
+            fetchProfiles: vi.fn().mockResolvedValue({
+              items: [
+                {
+                  id: PROFILE_ID,
+                  display_name: 'Recovery profile',
+                  cv_filename: 'recovery.pdf',
+                  attachment_state: 'active',
+                  location: 'Berlin',
+                  skill_tags: [{key: 'python', label: 'Python'}],
+                  skill_count: 1,
+                  extraction_version: 'v1',
+                  source_hash: 'source-recovery',
+                  state: 'ready',
+                  setup_status: null,
+                  is_active: true,
+                  created_at: TS,
+                  updated_at: TS,
+                  last_opened_at: TS,
+                },
+              ],
+              active_profile_id: PROFILE_ID,
+            }),
+            fetchProfileConversations: vi.fn().mockResolvedValue({
+              items: [
+                {
+                  id: CONVERSATION_ID,
+                  profile_id: PROFILE_ID,
+                  title: 'Recovery chat',
+                  is_selected: true,
+                  created_at: TS,
+                  updated_at: TS,
+                  last_opened_at: TS,
+                },
+              ],
+              next_cursor: null,
+            }),
+          },
         }}
       />,
     );
@@ -633,6 +681,11 @@ describe('ChatPage recovery action wiring', () => {
       expect(screen.getByTestId('jobagent-match-card')).toBeInTheDocument();
     });
     expect(saveAndEvaluateJob).toHaveBeenCalledWith(MSG_USER, undefined);
+    expect(loadConversationHistory).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+      {limit: 50},
+      expect.any(AbortSignal),
+    );
   });
 });
 
