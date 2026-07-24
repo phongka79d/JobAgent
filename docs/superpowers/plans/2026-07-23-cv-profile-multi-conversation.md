@@ -1750,7 +1750,7 @@ git commit -m "feat: persist profile extraction revisions"
 - Modify: backend/app/services/cv_manager.py, cv_deletion_ownership.py, backend/app/agent/checkpoint.py
 - Test: backend/tests/integration/test_conversation_deletion.py, test_profile_deletion.py, backend/tests/integration/test_cv_manager_deletion.py, backend/tests/integration/test_agent_runner.py
 
-- [ ] Step 1: Write failing deletion/coordinator tests
+- [x] Step 1: Write failing deletion/coordinator tests
 
 Use FakeDriver, AttachmentStorage, and existing checkpoint test helpers:
 
@@ -1793,7 +1793,7 @@ def test_pending_profile_discard_skips_graph_and_restores_ready_fallback(
 
 Add fault-injection tests proving retained-file or graph cleanup failure leaves profiles.state == deleting, returns a safe retryable error, and never reports success. Cover a pending-shape deleting retry, which remains the unique incomplete profile and continues to block new upload until finalization.
 
-- [ ] Step 2: Run deletion tests to verify RED
+- [x] Step 2: Run deletion tests to verify RED
 
 ~~~powershell
 Set-Location backend
@@ -1802,7 +1802,7 @@ Set-Location backend
 
 Expected: no coordinator or profile graph-delete module exists, and the old CV deletion path redacts rather than removes all profile conversations.
 
-- [ ] Step 3: Implement conversation deletion ordering
+- [x] Step 3: Implement conversation deletion ordering
 
 Create conversation_deletion.py with this order and no transaction spanning external work:
 
@@ -1845,13 +1845,13 @@ async def delete_conversation(
 
 Implement delete_and_select so the final transaction cascades messages/runs/tools, preserves the current selected conversation when a non-selected row is deleted, and creates exactly one empty Chat mới row only when no conversation remains. Return the explicit deleted_was_last boolean; never infer replacement status from timestamps.
 
-- [ ] Step 4: Implement retryable profile deletion
+- [x] Step 4: Implement retryable profile deletion
 
 Create profile_deletion.py with these phases: owner/activity validation; classify the profile as approved-shape or incomplete-shape; mark a ready or pending profile and its attachment deleting (or resume idempotently when both are already deleting); enumerate all profile run IDs regardless of source_attachment_id; open the existing AsyncSqliteSaver through open_checkpointer(sqlite_path) and delete those threads; delete the retained file idempotently; call exact profile graph branch deletion idempotently only for an approved-shape profile; final transaction selects the most recently opened remaining ready profile or clears workspace state, archives every other ready attachment, activates the fallback attachment when one exists, then deletes conversations, preferences, evaluations, chunks/documents/drafts, profile, and attachment. If any external phase fails, leave the original approved/incomplete field shape with deleting markers and return PROFILE_DELETE_RETRYABLE with no raw path/error.
 
 Add delete_profile_branch(driver, profile_id) in graph/delete_profile.py. Its Cypher must match only Candidate with profile_id parameter and its owned CV/section/entry nodes, preserve Job/Skill nodes, and pass the existing allowlist assertion. Do not reuse delete_cv_branch, which intentionally preserves Candidate nodes, and never call this graph boundary for an incomplete pending/deleting profile.
 
-- [ ] Step 5: Replace old attachment-delete API semantics
+- [x] Step 5: Replace old attachment-delete API semantics
 
 Add the routes only after the coordinators compile:
 
@@ -1879,7 +1879,7 @@ async def delete_profile(
 
 Restrict or remove DELETE /api/cvs/{attachment_id} so it only handles unowned staged/failed attachments and cannot delete a profile CV. Update error maps and tests to ensure a profile delete removes every conversation even when messages lack source_attachment_id.
 
-- [ ] Step 6: Run deletion/checkpoint gates and commit
+- [x] Step 6: Run deletion/checkpoint gates and commit
 
 ~~~powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_conversation_deletion.py tests/integration/test_profile_deletion.py tests/integration/test_cv_manager_deletion.py tests/integration/test_agent_runner.py tests/unit/test_job_graph_deletion.py -q
