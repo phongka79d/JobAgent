@@ -15,6 +15,8 @@ from sqlalchemy import text
 
 from tests.support.db_migration import cleanup_isolated_sqlite, run_async
 from tests.support.health import (
+    EXPECTED_PUBLIC_API_ROUTES,
+    EXPECTED_ROUTE_DECORATORS,
     FakeDriver,
     assert_no_secrets,
     blocked_sqlite_path,
@@ -151,26 +153,47 @@ def test_health_does_not_mutate_schema(
 def test_startup_idempotent_seeds_and_graph(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    async def seed_count() -> tuple[int, int]:
+    async def seed_state() -> tuple[int, str | None, int, int, int]:
         async with session_scope() as session:
-            conv = (
+            workspace = (
                 await session.execute(
-                    text("SELECT COUNT(*) FROM conversation WHERE id = 'main'")
+                    text(
+                        "SELECT COUNT(*), MAX(active_profile_id) "
+                        "FROM workspace_state WHERE id = 'main'"
+                    )
                 )
-            ).scalar_one()
-            prefs = (
-                await session.execute(
-                    text("SELECT COUNT(*) FROM job_preferences WHERE id = 'active'")
-                )
-            ).scalar_one()
-            return int(conv), int(prefs)
+            ).one()
+            profiles = int(
+                (
+                    await session.execute(text("SELECT COUNT(*) FROM profiles"))
+                ).scalar_one()
+            )
+            preferences = int(
+                (
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM profile_preferences")
+                    )
+                ).scalar_one()
+            )
+            conversations = int(
+                (
+                    await session.execute(text("SELECT COUNT(*) FROM conversations"))
+                ).scalar_one()
+            )
+            return (
+                int(workspace[0]),
+                workspace[1],
+                profiles,
+                preferences,
+                conversations,
+            )
 
     with health_client() as client:
         assert client.get("/api/health").status_code == 200
-        assert run_async(seed_count()) == (1, 1)
+        assert run_async(seed_state()) == (1, None, 0, 0, 0)
     with health_client() as client:
         assert client.get("/api/health").status_code == 200
-        assert run_async(seed_count()) == (1, 1)
+        assert run_async(seed_state()) == (1, None, 0, 0, 0)
 
 
 def test_shutdown_and_open_once(
@@ -226,33 +249,11 @@ def test_partial_startup_failure_cleans_up_resources(
 def test_only_public_functional_routes_are_health_chat_cv_and_profile(
     health_env: tuple[Path, Path, FakeDriver],
 ) -> None:
-    """Public surface after Plan 10: health, chat, CV, profile, observability, jobs."""
-    expected = [
-        ("DELETE", "/api/cvs/{attachment_id}"),
-        ("DELETE", "/api/jobs/{job_id}"),
-        ("GET", "/api/chat/history"),
-        ("GET", "/api/health"),
-        ("GET", "/api/jobs"),
-        ("GET", "/api/jobs/{job_id}"),
-        ("GET", "/api/observability/cvs"),
-        ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
-        ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
-        ("GET", "/api/observability/cvs/{attachment_id}/file"),
-            ("GET", "/api/observability/graph"),
-            ("GET", "/api/observability/runs"),
-            ("GET", "/api/observability/skill-map"),
-            ("GET", "/api/profile"),
-        ("GET", "/api/profile/cv"),
-        ("POST", "/api/attachments/cv"),
-        ("POST", "/api/chat/runs/{run_id}/resume"),
-        ("POST", "/api/chat/turns"),
-        ("POST", "/api/cvs/{attachment_id}/reprocess"),
-        ("POST", "/api/jobs/save-and-evaluate"),
-        ("POST", "/api/jobs/{job_id}/evaluate"),
-        ("POST", "/api/jobs/{job_id}/reextract"),
-    ]
+    """Public surface stays identical to the shared accepted route contract."""
     with health_client() as client:
-        assert sorted(public_api_routes(client.app)) == sorted(expected)
+        assert sorted(public_api_routes(client.app)) == sorted(
+            EXPECTED_PUBLIC_API_ROUTES
+        )
         # Jobs list is GET-only; profile GETs exist (wrong method is 405, not 404).
         assert client.post("/api/jobs").status_code == 405
         assert client.post("/api/profile").status_code == 405
@@ -263,62 +264,7 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
 
 def test_source_tree_has_no_other_route_decorators() -> None:
     matches = sorted(route_decorator_matches())
-    history_dec = (
-        "chat.py:get_chat_history:router.get("
-        "'/chat/history', response_model=HistoryPage)"
-    )
-    profile_dec = (
-        "profile.py:get_profile:router.get("
-        "'/profile', response_model=ProfileReadResponse)"
-    )
-    assert matches == sorted(
-        [
-            "attachments.py:post_cv_upload:router.post("
-            "'/attachments/cv', response_model=CvUploadResponse)",
-            "chat.py:get_chat_history:router.get("
-            "'/chat/history', response_model=HistoryPage)",
-            "chat.py:post_chat_resume:router.post("
-            "'/chat/runs/{run_id}/resume')",
-            "chat.py:post_chat_turn:router.post('/chat/turns')",
-            "cvs.py:delete_cv_attachment:router.delete("
-            "'/cvs/{attachment_id}', status_code=204, response_class=Response)",
-            "cvs.py:post_cv_reprocess:router.post("
-            "'/cvs/{attachment_id}/reprocess')",
-            "health.py:get_health:router.get("
-            "'/health', response_model=HealthResponse)",
-            "jobs.py:delete_saved_job_route:router.delete("
-            "'/jobs/{job_id}', status_code=204, response_class=Response)",
-            "jobs.py:get_saved_job:router.get("
-            "'/jobs/{job_id}', response_model=SavedJobDetail)",
-            "jobs.py:list_saved_jobs:router.get("
-            "'/jobs', response_model=SavedJobListPage)",
-            "jobs.py:post_evaluate_job:router.post("
-            "'/jobs/{job_id}/evaluate', response_model=EvaluateJobResponse)",
-            "jobs.py:post_reextract_job:router.post("
-            "'/jobs/{job_id}/reextract', response_model=ReextractJobResponse)",
-            "jobs.py:post_save_and_evaluate:router.post("
-            "'/jobs/save-and-evaluate', response_model=SaveAndEvaluateResponse)",
-            "observability.py:get_observability_chunk_detail:router.get("
-            "'/observability/cvs/{attachment_id}/chunks/{ordinal}', "
-            "response_model=ChunkDetail)",
-            "observability.py:get_observability_chunks:router.get("
-            "'/observability/cvs/{attachment_id}/chunks', "
-            "response_model=ChunkListPage)",
-            "observability.py:get_observability_cv_file:router.get("
-            "'/observability/cvs/{attachment_id}/file')",
-            "observability.py:get_observability_cvs:router.get("
-            "'/observability/cvs', response_model=CvHistoryPage)",
-            "observability.py:get_observability_graph:router.get("
-            "'/observability/graph', response_model=GraphSnapshot)",
-            "observability.py:get_observability_runs:router.get("
-            "'/observability/runs', response_model=RunHistoryPage)",
-            "observability.py:get_observability_skill_map:router.get("
-            "'/observability/skill-map', response_model=SelectedJobSkillMap)",
-            profile_dec,
-            "profile.py:get_profile_cv:router.get('/profile/cv')",
-        ]
-    )
-    del history_dec
+    assert matches == sorted(EXPECTED_ROUTE_DECORATORS)
 
 
 def test_lifespan_opens_resources_once(

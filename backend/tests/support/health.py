@@ -1,5 +1,8 @@
 """Focused helpers for GET /api/health integration tests (temporary resources)."""
 
+# Exact AST decorator snapshots stay on one line for direct failure comparison.
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import ast
@@ -29,6 +32,78 @@ FAKE_NEO4J_URI = "bolt://health-test-neo4j.invalid:7687"
 FAKE_NEO4J_USER = "neo4j-health-test"
 
 BACKEND_APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+
+EXPECTED_PUBLIC_API_ROUTES: tuple[tuple[str, str], ...] = (
+    ("DELETE", "/api/conversations/{conversation_id}"),
+    ("DELETE", "/api/cvs/{attachment_id}"),
+    ("DELETE", "/api/jobs/{job_id}"),
+    ("DELETE", "/api/profiles/{profile_id}"),
+    ("GET", "/api/chat/history"),
+    ("GET", "/api/conversations/{conversation_id}/history"),
+    ("GET", "/api/health"),
+    ("GET", "/api/jobs"),
+    ("GET", "/api/jobs/{job_id}"),
+    ("GET", "/api/observability/cvs"),
+    ("GET", "/api/observability/cvs/{attachment_id}/chunks"),
+    ("GET", "/api/observability/cvs/{attachment_id}/chunks/{ordinal}"),
+    ("GET", "/api/observability/cvs/{attachment_id}/file"),
+    ("GET", "/api/observability/graph"),
+    ("GET", "/api/observability/runs"),
+    ("GET", "/api/observability/skill-map"),
+    ("GET", "/api/profile"),
+    ("GET", "/api/profile/cv"),
+    ("GET", "/api/profiles"),
+    ("GET", "/api/profiles/{profile_id}"),
+    ("GET", "/api/profiles/{profile_id}/conversations"),
+    ("PATCH", "/api/profiles/{profile_id}"),
+    ("POST", "/api/attachments/cv"),
+    ("POST", "/api/chat/runs/{run_id}/resume"),
+    ("POST", "/api/chat/turns"),
+    ("POST", "/api/conversations/{conversation_id}/select"),
+    ("POST", "/api/conversations/{conversation_id}/turns"),
+    ("POST", "/api/jobs/save-and-evaluate"),
+    ("POST", "/api/jobs/{job_id}/evaluate"),
+    ("POST", "/api/jobs/{job_id}/reextract"),
+    ("POST", "/api/profiles/{profile_id}/activate"),
+    ("POST", "/api/profiles/{profile_id}/conversations"),
+    ("POST", "/api/profiles/{profile_id}/reextract"),
+)
+
+EXPECTED_ROUTE_DECORATORS: tuple[str, ...] = (
+    "attachments.py:post_cv_upload:router.post('/attachments/cv', response_model=CvUploadResponse)",
+    "chat.py:get_chat_history:router.get('/chat/history', response_model=HistoryPage)",
+    "chat.py:post_chat_resume:router.post('/chat/runs/{run_id}/resume')",
+    "chat.py:post_chat_turn:router.post('/chat/turns')",
+    "conversations.py:create_profile_conversation:router.post('/profiles/{profile_id}/conversations', response_model=ConversationMutationResponse)",
+    "conversations.py:delete_conversation:router.delete('/conversations/{conversation_id}', response_model=ConversationDeleteResponse)",
+    "conversations.py:get_conversation_history:router.get('/conversations/{conversation_id}/history', response_model=HistoryPage)",
+    "conversations.py:list_profile_conversations:router.get('/profiles/{profile_id}/conversations', response_model=ConversationListResponse)",
+    "conversations.py:post_conversation_turn:router.post('/conversations/{conversation_id}/turns')",
+    "conversations.py:select_conversation:router.post('/conversations/{conversation_id}/select', response_model=ConversationMutationResponse)",
+    "cvs.py:delete_cv_attachment:router.delete('/cvs/{attachment_id}', status_code=204, response_class=Response)",
+    "health.py:get_health:router.get('/health', response_model=HealthResponse)",
+    "jobs.py:delete_saved_job_route:router.delete('/jobs/{job_id}', status_code=204, response_class=Response)",
+    "jobs.py:get_saved_job:router.get('/jobs/{job_id}', response_model=SavedJobDetail)",
+    "jobs.py:list_saved_jobs:router.get('/jobs', response_model=SavedJobListPage)",
+    "jobs.py:post_evaluate_job:router.post('/jobs/{job_id}/evaluate', response_model=EvaluateJobResponse)",
+    "jobs.py:post_reextract_job:router.post('/jobs/{job_id}/reextract', response_model=ReextractJobResponse)",
+    "jobs.py:post_save_and_evaluate:router.post('/jobs/save-and-evaluate', response_model=SaveAndEvaluateResponse)",
+    "observability.py:get_observability_chunk_detail:router.get('/observability/cvs/{attachment_id}/chunks/{ordinal}', response_model=ChunkDetail)",
+    "observability.py:get_observability_chunks:router.get('/observability/cvs/{attachment_id}/chunks', response_model=ChunkListPage)",
+    "observability.py:get_observability_cv_file:router.get('/observability/cvs/{attachment_id}/file')",
+    "observability.py:get_observability_cvs:router.get('/observability/cvs', response_model=CvHistoryPage)",
+    "observability.py:get_observability_graph:router.get('/observability/graph', response_model=GraphSnapshot)",
+    "observability.py:get_observability_runs:router.get('/observability/runs', response_model=RunHistoryPage)",
+    "observability.py:get_observability_skill_map:router.get('/observability/skill-map', response_model=SelectedJobSkillMap)",
+    "profile.py:get_profile:router.get('/profile', response_model=ProfileReadResponse)",
+    "profile.py:get_profile_cv:router.get('/profile/cv')",
+    "profiles.py:activate_profile:router.post('/profiles/{profile_id}/activate', response_model=SelectionResponse)",
+    "profiles.py:delete_profile:router.delete('/profiles/{profile_id}', response_model=ProfileDeleteResponse)",
+    "profiles.py:get_profile:router.get('/profiles/{profile_id}', response_model=ProfileDetail)",
+    "profiles.py:list_profiles:router.get('/profiles', response_model=ProfileListResponse)",
+    "profiles.py:patch_profile:router.patch('/profiles/{profile_id}', response_model=ProfileDetail)",
+    "profiles.py:reextract_profile:router.post('/profiles/{profile_id}/reextract')",
+)
 
 
 class _FakeSession:
