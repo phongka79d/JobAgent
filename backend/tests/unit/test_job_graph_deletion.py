@@ -21,6 +21,11 @@ from app.graph.delete_job import (
     job_absence_cypher,
     job_node_absent,
 )
+from app.graph.delete_profile import (
+    DELETE_PROFILE_BRANCH_CYPHER,
+    assert_delete_profile_query_allowlisted,
+    delete_profile_branch,
+)
 from app.graph.rebuild_ops import CLEAR_JOB_CYPHER
 
 
@@ -220,3 +225,24 @@ def test_delete_job_module_exports_and_source_contract() -> None:
     assert "MATCH (j:Job {id: $job_id})" in src
     assert "MATCH (j:Job) DETACH DELETE j" not in src
     assert "JobGraphDeleteError" in src
+
+
+def test_delete_profile_branch_follows_projects_to_and_preserves_shared_labels(
+) -> None:
+    profile_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    driver = FakeNeo4jDriver()
+
+    async def _body() -> None:
+        await delete_profile_branch(driver, profile_id)
+
+    run_async(_body())
+    assert len(driver.queries) == 1
+    query = driver.queries[0]
+    assert_delete_profile_query_allowlisted(query)
+    assert "MATCH (c:Candidate {profile_id: $profile_id})" in query
+    assert "(cv:CV)-[:PROJECTS_TO]->(c)" in query
+    assert "CV {profile_id:" not in query
+    assert ":Job" not in query
+    assert ":Skill" not in query
+    assert driver.parameters == [{"profile_id": profile_id}]
+    assert query == DELETE_PROFILE_BRANCH_CYPHER

@@ -23,7 +23,6 @@ from app.agent.checkpoint import (
 from app.core.settings import get_settings
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
-    ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_DELETING,
     ATTACHMENT_STATE_FAILED,
     ATTACHMENT_STATE_STAGED,
@@ -58,7 +57,6 @@ _ELIGIBLE_STATES: frozenset[str] = frozenset(
     {
         ATTACHMENT_STATE_STAGED,
         ATTACHMENT_STATE_FAILED,
-        ATTACHMENT_STATE_ARCHIVED,
         ATTACHMENT_STATE_DELETING,
     }
 )
@@ -186,6 +184,11 @@ async def _phase_mark_and_redact(
         raise CvDeleteError(
             ERROR_CV_ATTACHMENT_NOT_FOUND,
             f"attachment {attachment_id!r} not found",
+        )
+    if await profile_repo.get_profile_by_attachment_id(session, attachment_id):
+        raise CvDeleteError(
+            ERROR_CV_ACTIVE_DELETE_FORBIDDEN,
+            "profile-owned CVs must be deleted through profile deletion",
         )
     if row.state == ATTACHMENT_STATE_ACTIVE:
         raise CvDeleteError(
@@ -337,6 +340,11 @@ async def delete_cv(
             raise CvDeleteError(
                 ERROR_CV_ATTACHMENT_NOT_FOUND,
                 f"attachment {aid!r} not found",
+            )
+        if await profile_repo.get_profile_by_attachment_id(probe, aid):
+            raise CvDeleteError(
+                ERROR_CV_ACTIVE_DELETE_FORBIDDEN,
+                "profile-owned CVs must be deleted through profile deletion",
             )
         if existing.state == ATTACHMENT_STATE_ACTIVE:
             raise CvDeleteError(

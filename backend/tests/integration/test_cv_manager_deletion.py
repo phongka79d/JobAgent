@@ -30,6 +30,7 @@ from app.repositories import agent_runs as runs_repo
 from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
+from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tool_repo
@@ -124,6 +125,33 @@ async def _seed_chunk(session: Any, attachment_id: str) -> None:
     )
 
 
+async def _seed_ready_conversation(
+    session: Any,
+    storage: AttachmentStorage,
+    *,
+    marker: str,
+) -> tuple[Any, str]:
+    attachment = await _seed_attachment(
+        session,
+        storage,
+        state=ATTACHMENT_STATE_ACTIVE,
+        file_hash=f"owner-{marker}",
+    )
+    profile = await prof_repo.create_profile(
+        session,
+        attachment_id=attachment.id,
+        display_name=f"Owner {marker}",
+        profile_json={"full_name": f"Owner {marker}"},
+        location=None,
+        extraction_version="v1",
+        source_hash=f"owner-source-{marker}",
+    )
+    conversation = await conversations_repo.create_for_profile(
+        session, profile_id=profile.id
+    )
+    return profile, conversation.id
+
+
 def test_delete_cv_branch_constant_is_allowlisted() -> None:
     assert_delete_cv_query_allowlisted(DELETE_CV_BRANCH_CYPHER)
     with pytest.raises(ValueError):
@@ -177,7 +205,7 @@ def test_active_delete_forbidden_no_mutation(del_env: tuple[Path, Path]) -> None
     run_async(_body())
 
 
-def test_complete_archived_deletion_and_preservation(
+def test_unowned_archived_attachment_is_not_eligible(
     del_env: tuple[Path, Path],
 ) -> None:
     db_path, files = del_env
@@ -188,11 +216,43 @@ def test_complete_archived_deletion_and_preservation(
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                # Archived first (sole active briefly), then active + staged.
                 archived = await _seed_attachment(
+                    session, storage, state=ATTACHMENT_STATE_ARCHIVED
+                )
+                await session.commit()
+                attachment_id = archived.id
+
+            with pytest.raises(CvDeleteError) as exc_info:
+                await delete_cv(
+                    attachment_id,
+                    storage=storage,
+                    session_factory=factory,
+                    driver=FakeNeo4jDriver(),
+                    sqlite_path=db_path,
+                )
+            assert exc_info.value.code == ERROR_CV_ATTACHMENT_NOT_FOUND
+            assert storage.exists(attachment_id)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_complete_failed_deletion_and_preservation(
+    del_env: tuple[Path, Path],
+) -> None:
+    db_path, files = del_env
+    storage = AttachmentStorage(files)
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                target_row = await _seed_attachment(
                     session,
                     storage,
-                    state=ATTACHMENT_STATE_ARCHIVED,
+                    state=ATTACHMENT_STATE_FAILED,
                     file_hash="h-arch",
                 )
                 active = await _seed_attachment(
@@ -201,41 +261,51 @@ def test_complete_archived_deletion_and_preservation(
                 other = await _seed_attachment(
                     session, storage, state=ATTACHMENT_STATE_STAGED, file_hash="h-oth"
                 )
-                await _seed_cv_document(session, archived.id)
-                await _seed_chunk(session, archived.id)
-                await prof_repo.upsert_active_profile(
+                await _seed_cv_document(session, target_row.id)
+                await _seed_chunk(session, target_row.id)
+                profile = await prof_repo.upsert_active_profile(
                     session,
                     active_attachment_id=active.id,
                     profile_json={"full_name": "Keep"},
                 )
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile.id
+                )
+                conversation_id = conversation.id
 
                 owned_msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation_id,
                     role="assistant",
                     content="CV summary for delete target",
-                    source_attachment_id=archived.id,
+                    source_attachment_id=target_row.id,
                 )
                 legacy_msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation_id,
                     role="assistant",
                     content="legacy payload owner",
                     structured_payload={
-                        "attachment_id": archived.id,
+                        "attachment_id": target_row.id,
                         "kind": "note",
                     },
                 )
                 keep_msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation_id,
                     role="user",
                     content="unrelated chat",
                 )
                 cv_run = await runs_repo.create_run(
                     session,
                     user_message_id=owned_msg.id,
-                    source_attachment_id=archived.id,
+                    source_attachment_id=target_row.id,
                 )
                 other_user = await messages_repo.insert_message(
-                    session, role="user", content="other run turn"
+                    session,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content="other run turn",
                 )
                 other_run = await runs_repo.create_run(
                     session, user_message_id=other_user.id
@@ -245,16 +315,16 @@ def test_complete_archived_deletion_and_preservation(
                     run_id=cv_run.id,
                     tool_call_id="t-cv",
                     tool_name="propose_profile_from_cv",
-                    source_attachment_id=archived.id,
-                    arguments_summary_json={"attachment_id": archived.id},
+                    source_attachment_id=target_row.id,
+                    arguments_summary_json={"attachment_id": target_row.id},
                 )
                 cross, _ = await tool_repo.get_or_create_pending(
                     session,
                     run_id=other_run.id,
                     tool_call_id="t-cross",
                     tool_name="propose_profile_from_cv",
-                    source_attachment_id=archived.id,
-                    arguments_summary_json={"attachment_id": archived.id},
+                    source_attachment_id=target_row.id,
+                    arguments_summary_json={"attachment_id": target_row.id},
                 )
                 await tool_repo.mark_running(session, cross.id)
                 await tool_repo.complete_execution(
@@ -264,7 +334,7 @@ def test_complete_archived_deletion_and_preservation(
                         ok=True,
                         code=None,
                         summary="ok",
-                        data={"attachment_id": archived.id},
+                        data={"attachment_id": target_row.id},
                     ),
                     duration_ms=1,
                 )
@@ -276,7 +346,7 @@ def test_complete_archived_deletion_and_preservation(
                     arguments_summary_json={"q": "python"},
                 )
                 await session.commit()
-                target = archived.id
+                target = target_row.id
                 active_id = active.id
                 other_id = other.id
                 keep_msg_id = keep_msg.id
@@ -326,7 +396,12 @@ def test_complete_archived_deletion_and_preservation(
                 assert prof is not None
                 assert prof.active_attachment_id == active_id
 
-                by_id = {m.id: m for m in await messages_repo.list_messages(session)}
+                by_id = {
+                    m.id: m
+                    for m in await messages_repo.list_messages(
+                        session, conversation_id=conversation_id
+                    )
+                }
                 assert by_id[owned_id].content == "[CV deleted]"
                 assert by_id[owned_id].structured_payload is None
                 assert by_id[owned_id].source_attachment_id is None
@@ -390,9 +465,13 @@ def test_fault_injection_retains_deleting_then_retry_succeeds(
                 row = await _seed_attachment(
                     session, storage, state=ATTACHMENT_STATE_FAILED
                 )
+                _profile, conversation_id = await _seed_ready_conversation(
+                    session, storage, marker=f"fault-{failpoint}"
+                )
                 await _seed_chunk(session, row.id)
                 msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation_id,
                     role="assistant",
                     content="owned",
                     source_attachment_id=row.id,
@@ -425,7 +504,12 @@ def test_fault_injection_retains_deleting_then_retry_succeeds(
                 assert stuck is not None
                 assert stuck.state == ATTACHMENT_STATE_DELETING
                 assert stuck.failure_code is None
-                by_id = {m.id: m for m in await messages_repo.list_messages(session)}
+                by_id = {
+                    m.id: m
+                    for m in await messages_repo.list_messages(
+                        session, conversation_id=conversation_id
+                    )
+                }
                 assert by_id[msg_id].content == "[CV deleted]"
 
             await delete_cv(
@@ -445,7 +529,9 @@ def test_fault_injection_retains_deleting_then_retry_succeeds(
     run_async(_body())
 
 
-def test_pending_approval_draft_cleanup(del_env: tuple[Path, Path]) -> None:
+def test_profile_owned_staged_attachment_is_rejected(
+    del_env: tuple[Path, Path],
+) -> None:
     db_path, files = del_env
     storage = AttachmentStorage(files)
 
@@ -456,6 +542,14 @@ def test_pending_approval_draft_cleanup(del_env: tuple[Path, Path]) -> None:
             async with factory() as session:
                 staged = await _seed_attachment(
                     session, storage, state=ATTACHMENT_STATE_STAGED
+                )
+                profile = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=staged.id,
+                    display_name="Pending draft",
+                )
+                conversation = await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=profile.id
                 )
                 await prof_repo.upsert_current_draft(
                     session,
@@ -477,6 +571,7 @@ def test_pending_approval_draft_cleanup(del_env: tuple[Path, Path]) -> None:
                 )
                 msg = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation.id,
                     role="user",
                     content="extract this",
                     source_attachment_id=staged.id,
@@ -499,17 +594,19 @@ def test_pending_approval_draft_cleanup(del_env: tuple[Path, Path]) -> None:
                 await session.commit()
                 aid = staged.id
 
-            await delete_cv(
-                aid,
-                storage=storage,
-                session_factory=factory,
-                driver=FakeNeo4jDriver(),
-                sqlite_path=db_path,
-            )
+            with pytest.raises(CvDeleteError) as exc_info:
+                await delete_cv(
+                    aid,
+                    storage=storage,
+                    session_factory=factory,
+                    driver=FakeNeo4jDriver(),
+                    sqlite_path=db_path,
+                )
+            assert exc_info.value.code == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
             async with factory() as session:
-                assert await att_repo.get_by_id(session, aid) is None
-                assert await prof_repo.get_current_draft(session) is None
-                assert await cv_doc_repo.get_draft(session, aid) is None
+                assert await att_repo.get_by_id(session, aid) is not None
+                assert await prof_repo.get_current_draft(session) is not None
+                assert await cv_doc_repo.get_draft(session, aid) is not None
         finally:
             await engine.dispose()
 
@@ -520,7 +617,7 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
     db_path, files = del_env
     storage = AttachmentStorage(files)
 
-    async def _seed() -> tuple[str, str]:
+    async def _seed() -> tuple[str, str, str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -537,12 +634,58 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
                     state=ATTACHMENT_STATE_ACTIVE,
                     file_hash="api-a",
                 )
+                archived_profile = await prof_repo.create_profile(
+                    session,
+                    attachment_id=archived.id,
+                    display_name="Archived owner",
+                    profile_json={"full_name": "Archived"},
+                    location=None,
+                    extraction_version="v1",
+                    source_hash="archived-source",
+                )
+                await conversations_repo.create_for_profile(
+                    session, profile_id=archived_profile.id
+                )
+                active_profile = await prof_repo.create_profile(
+                    session,
+                    attachment_id=active.id,
+                    display_name="Active owner",
+                    profile_json={"full_name": "Active"},
+                    location=None,
+                    extraction_version="v1",
+                    source_hash="active-source",
+                )
+                await conversations_repo.create_for_profile(
+                    session, profile_id=active_profile.id
+                )
+                unowned = await _seed_attachment(
+                    session,
+                    storage,
+                    state=ATTACHMENT_STATE_STAGED,
+                    file_hash="api-unowned",
+                )
+                deleting = await _seed_attachment(
+                    session,
+                    storage,
+                    state=ATTACHMENT_STATE_DELETING,
+                    file_hash="api-deleting",
+                )
+                deleting_profile = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=deleting.id,
+                    display_name="Deleting owner",
+                )
+                await conversations_repo.create_bootstrap_for_profile(
+                    session, profile_id=deleting_profile.id
+                )
+                deleting_profile.state = "deleting"
+                await session.flush()
                 await session.commit()
-                return active.id, archived.id
+                return active.id, archived.id, deleting.id, unowned.id
         finally:
             await engine.dispose()
 
-    active_id, archived_id = run_async(_seed())
+    active_id, archived_id, deleting_id, unowned_id = run_async(_seed())
 
     model = FakeChatModel(responses=[ai_text("noop")])
     with client_with_fake_chat(db_path, model) as client:
@@ -551,12 +694,16 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
         assert resp.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
 
         resp2 = client.delete(f"/api/cvs/{archived_id}")
-        assert resp2.status_code == 204
-        assert resp2.content == b""
+        assert resp2.status_code == 409
+        assert resp2.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
 
-        resp3 = client.delete(f"/api/cvs/{archived_id}")
-        assert resp3.status_code == 404
-        assert resp3.json()["detail"]["code"] == ERROR_CV_ATTACHMENT_NOT_FOUND
+        resp3 = client.delete(f"/api/cvs/{deleting_id}")
+        assert resp3.status_code == 409
+        assert resp3.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
+
+        resp3 = client.delete(f"/api/cvs/{unowned_id}")
+        assert resp3.status_code == 204
+        assert resp3.content == b""
 
 
 def test_historical_tool_ownership_without_fk(del_env: tuple[Path, Path]) -> None:
@@ -569,10 +716,16 @@ def test_historical_tool_ownership_without_fk(del_env: tuple[Path, Path]) -> Non
         try:
             async with factory() as session:
                 target = await _seed_attachment(
-                    session, storage, state=ATTACHMENT_STATE_ARCHIVED
+                    session, storage, state=ATTACHMENT_STATE_FAILED
+                )
+                _profile, conversation_id = await _seed_ready_conversation(
+                    session, storage, marker="historical"
                 )
                 user = await messages_repo.insert_message(
-                    session, role="user", content="match jobs"
+                    session,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content="match jobs",
                 )
                 run = await runs_repo.create_run(session, user_message_id=user.id)
                 tool, _ = await tool_repo.get_or_create_pending(

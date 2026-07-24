@@ -6,7 +6,7 @@ from app.graph.sync_shared import AsyncGraphDriver, consume_result
 
 DELETE_PROFILE_BRANCH_CYPHER = (
     "MATCH (c:Candidate {profile_id: $profile_id}) "
-    "OPTIONAL MATCH (cv:CV {profile_id: $profile_id}) "
+    "OPTIONAL MATCH (cv:CV)-[:PROJECTS_TO]->(c) "
     "OPTIONAL MATCH (cv)-[:HAS_SECTION]->(sec:CVSection) "
     "OPTIONAL MATCH (sec)-[:HAS_ENTRY]->(entry:CVEntry) "
     "DETACH DELETE entry, sec, cv, c"

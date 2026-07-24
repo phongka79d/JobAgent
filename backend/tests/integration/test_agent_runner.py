@@ -105,11 +105,16 @@ async def _collect(gen: AsyncIterator[SseEvent]) -> list[SseEvent]:
     return [event async for event in gen]
 
 
-def stream_agent_run(**kwargs: Any) -> AsyncIterator[SseEvent]:
+def stream_agent_run(
+    *,
+    conversation_id: str = CONVERSATION_ID,
+    profile_id: str = PROFILE_ID,
+    **kwargs: Any,
+) -> AsyncIterator[SseEvent]:
     """Run the Agent with explicit durable test ownership."""
     return _production_stream_agent_run(
-        conversation_id=CONVERSATION_ID,
-        profile_id=PROFILE_ID,
+        conversation_id=conversation_id,
+        profile_id=profile_id,
         **kwargs,
     )
 
@@ -307,8 +312,18 @@ def test_invalid_profile_update_stops_before_matching(
         engine = build_async_engine(migrated_sqlite)
         factory = session_factory(engine)
         try:
-            await seed_candidate(factory)
-            await _seed_run_for_tools(factory, run_id=RUN_A)
+            profile_id = await seed_candidate(factory)
+            async with factory() as session:
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile_id
+                )
+                await session.commit()
+                conversation_id = conversation.id
+            await _seed_run_for_tools(
+                factory,
+                run_id=RUN_A,
+                conversation_id=conversation_id,
+            )
             profile_update = build_propose_profile_update_tool(
                 session_factory=factory,
                 normalizer=SkillNormalizer.from_path(skills_fixture()),
@@ -343,6 +358,8 @@ def test_invalid_profile_update_stops_before_matching(
             events = await _collect(
                 stream_agent_run(
                     run_id=RUN_A,
+                    conversation_id=conversation_id,
+                    profile_id=profile_id,
                     user_text="Update one saved preference.",
                     graph_bundle=bundle,
                     sqlite_path=checkpoint_db,
@@ -538,12 +555,13 @@ async def _seed_run_for_tools(
     *,
     run_id: str,
     content: str = "tool status turn",
+    conversation_id: str = CONVERSATION_ID,
 ) -> None:
     """Insert user message + agent_run with fixed *run_id* for tool FK."""
     async with factory() as session:
         user = await messages_repo.insert_message(
             session,
-            conversation_id=CONVERSATION_ID,
+            conversation_id=conversation_id,
             role=CHAT_MESSAGE_ROLE_USER,
             content=content,
         )
