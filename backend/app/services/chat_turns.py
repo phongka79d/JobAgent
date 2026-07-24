@@ -30,6 +30,7 @@ from app.agent.runner import TerminalOutcome, stream_agent_run
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
     ATTACHMENT_STATE_ARCHIVED,
+    ATTACHMENT_STATE_STAGED,
 )
 from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
@@ -420,12 +421,21 @@ async def persist_terminal_failure(
     error_code: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
-    """Mark run failed with stable code; retain the user turn."""
+    """Fail the run and make an unfinished bootstrap attachment retryable."""
     code = error_code.strip() if isinstance(error_code, str) else ""
     if code == "":
         code = "AGENT_EXECUTION_FAILED"
     factory = session_factory or get_session_factory()
     async with session_scope(factory) as session:
+        run = await runs_repo.get_run(session, run_id)
+        if run is not None and run.source_attachment_id is not None:
+            attachment = await att_repo.get_by_id(session, run.source_attachment_id)
+            if attachment is not None and attachment.state == ATTACHMENT_STATE_STAGED:
+                await att_repo.mark_failed(
+                    session,
+                    attachment.id,
+                    failure_code=code,
+                )
         await runs_repo.fail_run(session, run_id, error_code=code)
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.agent.runner import ERROR_AGENT_EXECUTION
 from app.core.ids import new_uuid
 from app.db.models.attachments import (
     ATTACHMENT_MIME_TYPE_PDF,
@@ -38,6 +39,7 @@ from app.repositories.attachments import (
     InvalidAttachmentTransitionError,
 )
 from app.schemas.profile_setup import CvUploadResponse
+from app.services.chat_turns import create_user_turn, persist_terminal_failure
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from pypdf import PdfWriter
@@ -966,6 +968,52 @@ def test_failed_exact_hash_retry_preserves_pending_identity(
     )
     assert retry["bootstrap"]["start_extraction"] is True
     assert _attachment_count() == 1
+
+
+def test_failed_bootstrap_run_makes_exact_hash_retryable(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+    payload = DIGITAL_CV.read_bytes()
+    with health_client() as client:
+        first = _upload(client, payload, filename="first.pdf").json()
+
+    async def _fail_bootstrap_run() -> None:
+        factory = get_session_factory()
+        bootstrap = first["bootstrap"]
+        turn = await create_user_turn(
+            conversation_id=bootstrap["conversation"]["id"],
+            message="extract pending CV",
+            attachment_ids=[first["attachment"]["id"]],
+            session_factory=factory,
+        )
+        await persist_terminal_failure(
+            run_id=turn.run_id,
+            error_code=ERROR_AGENT_EXECUTION,
+            session_factory=factory,
+        )
+        async with factory() as session:
+            attachment = await att_repo.get_by_id(
+                session, first["attachment"]["id"]
+            )
+            assert attachment is not None
+            assert attachment.state == ATTACHMENT_STATE_FAILED
+            assert attachment.failure_code == ERROR_AGENT_EXECUTION
+
+    run_async(_fail_bootstrap_run())
+    with health_client() as client:
+        retry_response = _upload(client, payload, filename="retry.pdf")
+
+    assert retry_response.status_code == 200, retry_response.text
+    retry = retry_response.json()
+    assert retry["outcome"] == "retry_pending"
+    assert retry["attachment"]["id"] == first["attachment"]["id"]
+    assert retry["bootstrap"]["profile"]["id"] == first["bootstrap"]["profile"]["id"]
+    assert (
+        retry["bootstrap"]["conversation"]["id"]
+        == first["bootstrap"]["conversation"]["id"]
+    )
+    assert retry["bootstrap"]["start_extraction"] is True
 
 
 def test_existing_pending_draft_does_not_restart_extraction(
