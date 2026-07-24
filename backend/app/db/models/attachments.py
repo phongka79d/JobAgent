@@ -13,23 +13,32 @@ from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Text, column
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.attachments import (
-    ATTACHMENT_MIME_TYPE_PDF,
-    ATTACHMENT_STATE_ACTIVE,
-    ATTACHMENT_STATE_ARCHIVED,
-    ATTACHMENT_STATE_DEFAULT,
-    ATTACHMENT_STATE_DELETING,
-    ATTACHMENT_STATE_FAILED,
-    ATTACHMENT_STATE_STAGED,
+    ATTACHMENT_MIME_TYPE_PDF as ATTACHMENT_MIME_TYPE_PDF,
 )
 from app.core.attachments import (
-    ATTACHMENT_STATES as CORE_ATTACHMENT_STATES,
+    ATTACHMENT_STATE_ACTIVE as ATTACHMENT_STATE_ACTIVE,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATE_ARCHIVED as ATTACHMENT_STATE_ARCHIVED,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATE_DEFAULT as ATTACHMENT_STATE_DEFAULT,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATE_DELETING as ATTACHMENT_STATE_DELETING,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATE_FAILED as ATTACHMENT_STATE_FAILED,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATE_STAGED as ATTACHMENT_STATE_STAGED,
+)
+from app.core.attachments import (
+    ATTACHMENT_STATES as ATTACHMENT_STATES,
 )
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
-
-# Compatibility re-export for existing model-layer callers.
-ATTACHMENT_STATES = CORE_ATTACHMENT_STATES
 
 
 class Attachment(Base):
