@@ -2504,7 +2504,7 @@ git commit -m "feat(frontend): key chat state by conversation"
 - Modify: frontend/src/features/profile/CvSidebar.tsx, ProfileOverviewPanel.tsx, frontend/src/features/observability/ObservabilitySidebar.tsx
 - Test: frontend/src/test/profile-conversation-sidebar.test.tsx, profile-dialogs.test.tsx, cv-sidebar.test.tsx
 
-- [ ] Step 1: Re-run Astryx discovery before UI edits
+- [x] Step 1: Re-run Astryx discovery before UI edits
 
 From frontend/, run the installed CLI and retain its output in implementation notes:
 
@@ -2522,7 +2522,7 @@ npx astryx component MobileNav --detail compact
 
 Use installed props, not invented names. The confirmed AlertDialog props are isOpen, onOpenChange, title, description, actionLabel, onAction, optional cancelLabel, and isActionLoading.
 
-- [ ] Step 2: Write failing UI metadata and confirmation tests
+- [x] Step 2: Write failing UI metadata and confirmation tests
 
 ~~~tsx
 it('renders location, bounded skill tokens, and overflow without inference', () => {
@@ -2585,7 +2585,7 @@ it('requires confirmation and performs one conversation delete request', async (
 
 Cover profile rename (only display_name changes), profile delete warning naming CV/profile, pending retry/discard actions, conversation delete warning, cancel/no-request, loading/focus return, Escape, keyboard visibility, and mobile drawer rendering. A pending row must never offer rename or re-extract, and its setup status must be rendered from the server value without inferring approved metadata.
 
-- [ ] Step 3: Run UI tests to verify RED
+- [x] Step 3: Run UI tests to verify RED
 
 ~~~powershell
 Set-Location frontend
@@ -2594,7 +2594,7 @@ npm test -- --run src/test/profile-conversation-sidebar.test.tsx src/test/profil
 
 Expected: the new components and dialogs do not exist.
 
-- [ ] Step 4: Implement Astryx profile rows
+- [x] Step 4: Implement Astryx profile rows
 
 Define the panel props before writing markup:
 
@@ -2613,7 +2613,7 @@ type ProfileListPanelProps = {
 
 Use SideNavSection/SideNavItem for profile groups and List/ListItem for dense rows. A profile row displays display_name, sanitized cv_filename, persisted location or the neutral text Location unavailable, and at most four Token components followed by +N when skill_count exceeds the rendered tags. Show No extracted skills when skill_count is zero. Use the server skill_tags order; do not lowercase, deduplicate, or invent tags in React. Render the server setup_status for pending rows (`Awaiting extraction`, `Awaiting approval`, or `Extraction failed`) and keep their location/tags empty. Put row actions in an adjacent Astryx DropdownMenu rather than nesting interactive controls inside ListItem. Ready rows may rename, re-extract, or delete; pending rows may retry or discard only, and deleting a pending row is labeled as discarding setup. Retry opens the existing shared PDF picker and sends the selected `File` through `POST /api/attachments/cv`; it does not invent a retry endpoint. The response must be `retry_pending`, preserve the same bootstrap profile/conversation IDs, and set `start_extraction=true` before App schedules one extraction turn. Discard uses the normal profile-delete coordinator.
 
-- [ ] Step 5: Implement conversation rows and dialogs
+- [x] Step 5: Implement conversation rows and dialogs
 
 Define the mutation components with explicit props:
 
@@ -2639,11 +2639,11 @@ type ConversationDeleteDialogProps = {
 
 Render a Chat mới action above the selected ready profile’s conversation list. Conversation rows show server title, localized last activity, selected state, and a delete menu. A pending profile exposes only its bootstrap conversation; it cannot create/select/delete conversations, while the correction composer is governed by Task 5’s setup-state matrix. ProfileRenameDialog uses Astryx Dialog/TextInput and sends exactly one PATCH; ProfileDeleteDialog and ConversationDeleteDialog use AlertDialog with the target name, irreversible warning, loading lock, cancel/no-op, and focus restoration. Disable all selection/create/delete/re-extract controls when isInteractionLocked is true, and disable rename/re-extract for pending rows regardless of lock state.
 
-- [ ] Step 6: Preserve responsive shell and upload/observability seams
+- [x] Step 6: Preserve responsive shell and upload/observability seams
 
 Refactor CvSidebar to compose the new profile/conversation panels while keeping AppShell/SideNav collapse and the mobile render branch. Change the active-state upload label from Replace CV to Upload new CV so the action clearly creates another profile; explicit Re-extract CV remains a separate selected-profile menu action. Keep upload and approval presentation in the existing ChatPage path. Pass selected profile ID to observability/CV manager panels; do not add a second SSE/reducer owner or a second design system.
 
-- [ ] Step 7: Run UI/static gates and commit
+- [x] Step 7: Run UI/static gates and commit
 
 ~~~powershell
 npm test -- --run src/test/profile-conversation-sidebar.test.tsx src/test/profile-dialogs.test.tsx src/test/cv-sidebar.test.tsx src/test/observability-sidebar.test.tsx
