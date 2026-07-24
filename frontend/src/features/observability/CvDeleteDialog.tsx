@@ -1,6 +1,6 @@
 /**
- * Accessible delete confirmation for a non-active CV attachment.
- * Names the target file and warns about owned-data scope (Master §10.5 / §15.2).
+ * Accessible profile deletion confirmation from the selected CV view.
+ * Names both the profile and retained CV; workspace state owns the mutation.
  */
 
 import {AlertDialog} from '@astryxdesign/core/AlertDialog';
@@ -9,6 +9,7 @@ export type CvDeleteDialogProps = {
   isOpen: boolean;
   /** Original filename shown in title/description. */
   fileName: string;
+  profileName: string;
   isDeleting: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onConfirm: () => void;
@@ -16,19 +17,20 @@ export type CvDeleteDialogProps = {
 
 /** Scope warning shared by the dialog and action tests. */
 export const CV_DELETE_SCOPE_WARNING =
-  'This permanently removes the retained PDF, owned chunks, document snapshot, ' +
-  'CV-scoped runs and tools, CV-linked chat content, and the CV-owned graph branch. ' +
-  'Shared jobs, skills, and unrelated conversation history are preserved.';
+  'This permanently removes the profile, retained PDF, extracted document and chunks, ' +
+  'owned conversations, messages, runs, tools, evaluations, and graph branch. ' +
+  'Global Saved Jobs and unrelated profiles are preserved.';
 
 export function CvDeleteDialog({
   isOpen,
   fileName,
+  profileName,
   isDeleting,
   onOpenChange,
   onConfirm,
 }: CvDeleteDialogProps) {
-  const title = `Delete ${fileName}?`;
-  const description = `Delete “${fileName}”? ${CV_DELETE_SCOPE_WARNING}`;
+  const title = `Delete ${profileName}?`;
+  const description = `Delete profile “${profileName}” and CV “${fileName}”? ${CV_DELETE_SCOPE_WARNING}`;
 
   return (
     <AlertDialog
@@ -41,7 +43,7 @@ export function CvDeleteDialog({
       }}
       title={title}
       description={description}
-      actionLabel="Delete CV"
+      actionLabel="Delete profile permanently"
       cancelLabel="Cancel"
       actionVariant="destructive"
       isActionLoading={isDeleting}

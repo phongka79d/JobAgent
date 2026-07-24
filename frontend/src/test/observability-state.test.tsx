@@ -3,10 +3,6 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {ChatApiError} from '../lib/api/chat';
 import {
-  CV_DELETE_ERROR_CODES,
-  CV_DELETE_RETRY_SUMMARY,
-} from '../features/observability/api';
-import {
   observabilityReducer,
   initialObservabilityState,
   useObservabilityState,
@@ -124,6 +120,8 @@ describe('observability request ordering', () => {
 
 const ACTIVE_ID = '11111111-2222-4333-8444-555555555555';
 const ARCHIVED_B = '22222222-3333-4444-8555-666666666666';
+const PROFILE_A = '33333333-4444-4555-8666-777777777777';
+const PROFILE_B = '44444444-5555-4666-8777-888888888888';
 
 function multiCvPage(): CvHistoryPage {
   return {
@@ -202,6 +200,86 @@ function seededState() {
 }
 
 describe('CV Manager action state and invalidation', () => {
+  it('drops profile-owned observability data immediately when profile scope changes', async () => {
+    const profileAPage = cvHistoryPage();
+    profileAPage.items[0]!.original_name = 'profile-a.pdf';
+    const profileBPage = cvHistoryPage();
+    profileBPage.items[0]!.original_name = 'profile-b.pdf';
+    const fetchCvHistory = vi
+      .fn()
+      .mockResolvedValueOnce(profileAPage)
+      .mockResolvedValueOnce(profileBPage);
+    const {result, rerender} = renderHook(
+      ({profileId}) =>
+        useObservabilityState({
+          api: {fetchCvHistory},
+          profileId,
+          profileReady: true,
+        }),
+      {initialProps: {profileId: PROFILE_A}},
+    );
+
+    await act(async () => {
+      await result.current.loadCvHistory();
+    });
+    expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
+      'profile-a.pdf',
+    );
+
+    rerender({profileId: PROFILE_B});
+
+    expect(result.current.state.cvHistory.data).toBeNull();
+    expect(result.current.state.selectedAttachmentId).toBeNull();
+
+    await act(async () => {
+      await result.current.loadCvHistory();
+    });
+    expect(fetchCvHistory).toHaveBeenLastCalledWith(
+      {profileId: PROFILE_B},
+      undefined,
+    );
+    expect(result.current.state.cvHistory.data?.items[0]?.original_name).toBe(
+      'profile-b.pdf',
+    );
+  });
+
+  it('ignores an in-flight chunk detail after profile scope changes', async () => {
+    const pending = deferred<
+      import('../features/observability/types').ChunkDetail
+    >();
+    const fetchChunkDetail = vi.fn().mockReturnValue(pending.promise);
+    const {result, rerender} = renderHook(
+      ({profileId}) =>
+        useObservabilityState({
+          api: {fetchChunkDetail},
+          profileId,
+          profileReady: true,
+        }),
+      {initialProps: {profileId: PROFILE_A}},
+    );
+
+    let load!: Promise<void>;
+    act(() => {
+      load = result.current.expandChunk(ATTACHMENT_ID, 0);
+    });
+    rerender({profileId: PROFILE_B});
+    await act(async () => {
+      pending.resolve({
+        attachment_id: ATTACHMENT_ID,
+        ordinal: 0,
+        text: 'profile A only',
+        preview: 'profile A',
+        char_count: 14,
+        token_estimate: 4,
+        created_at: '2024-07-01T12:00:00Z',
+      });
+      await load;
+    });
+
+    expect(result.current.state.chunkDetails).toEqual({});
+    expect(result.current.state.expandedChunkOrdinal).toBeNull();
+  });
+
   it('prevents duplicate pending actions per attachment', () => {
     let state = initialObservabilityState;
     state = observabilityReducer(state, {
@@ -251,33 +329,10 @@ describe('CV Manager action state and invalidation', () => {
   });
 
   it('retains list/cache/selection on delete failure with retry guidance', async () => {
-    const deleteCv = vi.fn().mockRejectedValue(
-      new ChatApiError(
-        409,
-        CV_DELETE_ERROR_CODES.CV_DELETE_FILE_FAILED,
-        'file failed',
-      ),
-    );
-    const {result} = renderHook(() =>
-      useObservabilityState({api: {deleteCv}}),
-    );
-
-    await act(async () => {
-      result.current.selectAttachment(ATTACHMENT_ID);
-    });
-    // Seed cache via reducer-equivalent loads.
-    await act(async () => {
-      // Force success path into state by dispatching through load mocks.
-    });
-
-    // Manually seed via successive API success using fetch mocks.
     const fetchCvHistory = vi.fn().mockResolvedValue(multiCvPage());
     const {result: seeded} = renderHook(() =>
       useObservabilityState({
-        api: {
-          fetchCvHistory,
-          deleteCv,
-        },
+        api: {fetchCvHistory},
       }),
     );
     await act(async () => {
@@ -291,7 +346,9 @@ describe('CV Manager action state and invalidation', () => {
 
     let outcome: 'success' | 'duplicate' | 'error' = 'success';
     await act(async () => {
-      outcome = await seeded.current.confirmDelete(ATTACHMENT_ID);
+      outcome = await seeded.current.confirmDelete(ATTACHMENT_ID, async () => {
+        throw new Error('Profile deletion failed; retry from the profile actions.');
+      });
     });
 
     expect(outcome).toBe('error');
@@ -299,7 +356,7 @@ describe('CV Manager action state and invalidation', () => {
     expect(seeded.current.state.selectedAttachmentId).toBe(priorSelection);
     expect(
       seeded.current.state.cvManager.errorsByAttachment[ATTACHMENT_ID]?.summary,
-    ).toBe(CV_DELETE_RETRY_SUMMARY);
+    ).toBe('Profile deletion failed; retry from the profile actions.');
     expect(
       seeded.current.state.cvManager.pendingByAttachment[ATTACHMENT_ID],
     ).toBeUndefined();
@@ -390,10 +447,9 @@ describe('CV Manager action state and invalidation', () => {
   });
 
   it('confirmDelete success path clears deleted row and invalidates runs/graph', async () => {
-    const deleteCv = vi.fn().mockResolvedValue(undefined);
     const fetchCvHistory = vi.fn().mockResolvedValue(multiCvPage());
     const {result} = renderHook(() =>
-      useObservabilityState({api: {deleteCv, fetchCvHistory}}),
+      useObservabilityState({api: {fetchCvHistory}}),
     );
     await act(async () => {
       await result.current.loadCvHistory();
@@ -406,26 +462,21 @@ describe('CV Manager action state and invalidation', () => {
     await act(async () => {
       // Inject loaded runs/graph via parallel force-style success is hard;
       // exercise confirmDelete success against list selection only.
-      outcome = await result.current.confirmDelete(ATTACHMENT_ID);
+      outcome = await result.current.confirmDelete(ATTACHMENT_ID, async () => true);
     });
     expect(outcome).toBe('success');
-    expect(
-      result.current.state.cvHistory.data?.items.some(
-        (i) => i.id === ATTACHMENT_ID,
-      ),
-    ).toBe(false);
-    expect(result.current.state.selectedAttachmentId).toBe(ACTIVE_ID);
+    expect(result.current.state.cvHistory.data?.items).toEqual([]);
+    expect(result.current.state.selectedAttachmentId).toBeNull();
     expect(result.current.state.runs.loaded).toBe(false);
     expect(result.current.state.graph.loaded).toBe(false);
-    expect(deleteCv).toHaveBeenCalledWith(ATTACHMENT_ID, undefined);
   });
 
   it('blocks duplicate confirmDelete while pending', async () => {
-    const gate = deferred<void>();
-    const deleteCv = vi.fn().mockReturnValue(gate.promise);
+    const gate = deferred<boolean>();
+    const deleteProfile = vi.fn().mockReturnValue(gate.promise);
     const fetchCvHistory = vi.fn().mockResolvedValue(multiCvPage());
     const {result} = renderHook(() =>
-      useObservabilityState({api: {deleteCv, fetchCvHistory}}),
+      useObservabilityState({api: {fetchCvHistory}}),
     );
     await act(async () => {
       await result.current.loadCvHistory();
@@ -434,16 +485,16 @@ describe('CV Manager action state and invalidation', () => {
     let first!: Promise<'success' | 'duplicate' | 'error'>;
     let second!: Promise<'success' | 'duplicate' | 'error'>;
     act(() => {
-      first = result.current.confirmDelete(ATTACHMENT_ID);
-      second = result.current.confirmDelete(ATTACHMENT_ID);
+      first = result.current.confirmDelete(ATTACHMENT_ID, deleteProfile);
+      second = result.current.confirmDelete(ATTACHMENT_ID, deleteProfile);
     });
     const secondResult = await second;
     expect(secondResult).toBe('duplicate');
     await act(async () => {
-      gate.resolve();
+      gate.resolve(true);
       await first;
     });
-    expect(deleteCv).toHaveBeenCalledTimes(1);
+    expect(deleteProfile).toHaveBeenCalledTimes(1);
   });
 
   it('preserves stale-on-error for unrelated tab loads after action error', async () => {

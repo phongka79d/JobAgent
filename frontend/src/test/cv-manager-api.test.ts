@@ -1,6 +1,6 @@
 /**
  * CV Manager typed transport tests (Plan 9 / 07A).
- * Reprocess SSE path, delete status mapping, forbidden-field rejection.
+ * Profile re-extract SSE path, delete status mapping, forbidden-field rejection.
  */
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
@@ -14,7 +14,7 @@ import {
   isRetryableDeleteError,
   toCvManagerActionError,
 } from '../features/observability/api';
-import {streamCvReprocess} from '../lib/api/chat';
+import {reextractProfile} from '../features/profile/api';
 import {
   selectSafeRemainingAttachmentId,
 } from '../features/observability/cvManagerTypes';
@@ -23,6 +23,7 @@ import {parseSseEventData} from '../features/chat/types';
 import {chatReducer, createInitialChatState} from '../features/chat/reducer';
 
 const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const PROFILE_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
 const RUN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 const EVENT_A = '11111111-1111-4111-8111-111111111111';
 const EVENT_B = '22222222-2222-4222-8222-222222222222';
@@ -144,8 +145,8 @@ describe('deleteCv transport', () => {
   });
 });
 
-describe('streamCvReprocess SSE path', () => {
-  it('POSTs reprocess and feeds events into the sole chat reducer', async () => {
+describe('profile re-extract SSE path', () => {
+  it('POSTs the selected profile re-extract and feeds events into the sole chat reducer', async () => {
     const prev = import.meta.env.VITE_API_BASE_URL;
     // @ts-expect-error test mutation
     import.meta.env.VITE_API_BASE_URL = 'http://api.test';
@@ -189,7 +190,7 @@ describe('streamCvReprocess SSE path', () => {
     const events: string[] = [];
 
     try {
-      await streamCvReprocess(ATTACHMENT_ID, {
+      await reextractProfile(PROFILE_ID, {
         onEvent: (event) => {
           events.push(event.event);
           state = chatReducer(state, {type: 'sse/event', event});
@@ -197,9 +198,12 @@ describe('streamCvReprocess SSE path', () => {
       });
 
       expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-        `http://api.test/api/cvs/${ATTACHMENT_ID}/reprocess`,
+        `http://api.test/api/profiles/${PROFILE_ID}/reextract`,
       );
-      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({method: 'POST'});
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+        method: 'POST',
+        body: '{}',
+      });
       expect(events).toEqual(['run_started', 'approval_required']);
       expect(state.pendingApproval?.kind).toBe('profile_commit');
       expect(state.messages.some((m) => m.run?.state === 'interrupted')).toBe(
@@ -234,9 +238,7 @@ describe('streamCvReprocess SSE path', () => {
       ),
     );
     try {
-      await expect(
-        streamCvReprocess(ATTACHMENT_ID, {onEvent: () => undefined}),
-      ).rejects.toMatchObject({
+      await expect(reextractProfile(PROFILE_ID, {onEvent: () => undefined})).rejects.toMatchObject({
         code: CV_REPROCESS_ERROR_CODES.CV_NOT_REPROCESSABLE,
       });
     } finally {

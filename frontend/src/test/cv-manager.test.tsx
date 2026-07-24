@@ -26,6 +26,7 @@ import {toGraphModel} from '../features/observability/graphPresentation';
 import type {CvHistoryItem} from '../features/observability/types';
 import {CvSidebar} from '../features/profile/CvSidebar';
 import type {ProfileReadResponse} from '../features/profile/types';
+import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
 import {
   ACTIVE_ATTACHMENT_ID,
   ATTACHMENT_ID,
@@ -35,6 +36,8 @@ import {
   mockObservabilityApi,
   renderObservabilitySidebar,
 } from './support/observability';
+
+const PROFILE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -67,6 +70,7 @@ function renderPanel(
 ) {
   const page = cvManagerHistoryPage();
   const props: ComponentProps<typeof CvManagerPanel> = {
+    profileDisplayName: 'Profile A',
     resource: {
       phase: 'ready',
       data: page,
@@ -118,11 +122,11 @@ function CvSidebarWithReprocess({
 }
 
 describe('canDeleteCv guard', () => {
-  it('forbids delete for active and allows non-active states', () => {
-    expect(canDeleteCv(activeItem())).toBe(false);
+  it('allows ready profile attachments and rejects incomplete states', () => {
+    expect(canDeleteCv(activeItem())).toBe(true);
     expect(canDeleteCv(archivedItem())).toBe(true);
-    expect(canDeleteCv({...archivedItem(), state: 'failed'})).toBe(true);
-    expect(canDeleteCv({...archivedItem(), state: 'staged'})).toBe(true);
+    expect(canDeleteCv({...archivedItem(), state: 'failed'})).toBe(false);
+    expect(canDeleteCv({...archivedItem(), state: 'staged'})).toBe(false);
   });
 });
 
@@ -181,7 +185,7 @@ describe('CV Manager activation loading presentation', () => {
 });
 
 describe('CV Manager panel actions', () => {
-  it('shows one Active badge and only Open/Re-extract for the active row', () => {
+  it('shows one Active badge with profile-owned actions for the active row', () => {
     renderPanel({selectedAttachmentId: ACTIVE_ATTACHMENT_ID});
 
     expect(
@@ -205,10 +209,10 @@ describe('CV Manager panel actions', () => {
       ),
     ).toBeEnabled();
     expect(
-      within(actions).queryByTestId(
+      within(actions).getByTestId(
         `jobagent-obs-cv-delete-${ACTIVE_ATTACHMENT_ID}`,
       ),
-    ).toBeNull();
+    ).toBeEnabled();
     expect(
       within(actions).queryByTestId(
         `jobagent-obs-cv-make-active-${ACTIVE_ATTACHMENT_ID}`,
@@ -272,8 +276,8 @@ describe('CV Manager panel actions', () => {
         ),
       ).toBeNull();
       expect(
-        within(actions).getByTestId(`jobagent-obs-cv-delete-${item.id}`),
-      ).toBeEnabled();
+        within(actions).queryByTestId(`jobagent-obs-cv-delete-${item.id}`),
+      ).toBeNull();
     },
   );
 
@@ -302,20 +306,26 @@ describe('CV Manager panel actions', () => {
   it('names the file and scope in the accessible delete confirmation', async () => {
     const user = userEvent.setup();
     const onConfirmDelete = vi.fn().mockResolvedValue('success' as const);
-    renderPanel({onConfirmDelete});
+    renderPanel({
+      onConfirmDelete,
+      profileDisplayName: undefined as unknown as string,
+    });
 
     await user.click(
       screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
     );
 
     const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Delete this profile?');
     expect(dialog).toHaveTextContent('archived.pdf');
     expect(dialog).toHaveTextContent(CV_DELETE_SCOPE_WARNING);
     expect(
-      within(dialog).getByRole('button', {name: 'Delete CV'}),
+      within(dialog).getByRole('button', {name: 'Delete profile permanently'}),
     ).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole('button', {name: 'Delete CV'}));
+    await user.click(
+      within(dialog).getByRole('button', {name: 'Delete profile permanently'}),
+    );
     await waitFor(() => {
       expect(onConfirmDelete).toHaveBeenCalledTimes(1);
     });
@@ -330,7 +340,9 @@ describe('CV Manager panel actions', () => {
     await user.click(
       screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
     );
-    await user.click(await screen.findByRole('button', {name: 'Delete CV'}));
+    await user.click(
+      await screen.findByRole('button', {name: 'Delete profile permanently'}),
+    );
     await waitFor(() => {
       expect(onConfirmDelete).toHaveBeenCalled();
     });
@@ -389,14 +401,65 @@ describe('CV Manager panel actions', () => {
 });
 
 describe('CV Manager sidebar integration', () => {
-  it('renames the tab/panel to CV Manager and wires delete through confirmDelete', async () => {
+  it('deletes through workspace profile ownership without attachment DELETE', async () => {
     const user = userEvent.setup();
     const deleteCv = vi.fn().mockResolvedValue(undefined);
+    const deleteProfile = vi.fn().mockResolvedValue(true);
     const api = mockObservabilityApi({
       fetchCvHistory: vi.fn().mockResolvedValue(cvManagerHistoryPage()),
       deleteCv,
     });
-    renderObservabilitySidebar(api);
+    const profile: ProfileReadResponse = {
+      present: true,
+      profile: {summary: 'Profile A', current_title: 'Engineer'},
+      preferences: null,
+      active_attachment: {
+        id: ACTIVE_ATTACHMENT_ID,
+        original_name: 'active.pdf',
+        mime_type: 'application/pdf',
+        size_bytes: 1000,
+        page_count: 2,
+        state: 'active',
+        failure_code: null,
+      },
+      draft_present: false,
+      pending_attachment: null,
+    };
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [{
+          id: PROFILE_ID,
+          display_name: 'Profile A',
+          cv_filename: 'active.pdf',
+          attachment_state: 'active',
+          location: null,
+          skill_tags: [],
+          skill_count: 0,
+          extraction_version: 'v1',
+          source_hash: 'source-a',
+          state: 'ready',
+          setup_status: null,
+          is_active: true,
+          created_at: '2024-07-01T12:00:00Z',
+          updated_at: '2024-07-01T12:00:00Z',
+          last_opened_at: '2024-07-01T12:00:00Z',
+        }],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: null,
+        conversations: [],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile,
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    renderObservabilitySidebar(api, {workspace, profile});
 
     await user.click(screen.getByRole('tab', {name: 'CV Manager'}));
     const panel = await screen.findByTestId('jobagent-obs-cv-history');
@@ -406,24 +469,21 @@ describe('CV Manager sidebar integration', () => {
     ).toBeInTheDocument();
 
     await user.click(
-      await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
+      await screen.findByTestId(
+        `jobagent-obs-cv-select-${ACTIVE_ATTACHMENT_ID}`,
+      ),
     );
     await user.click(
-      screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
+      screen.getByTestId(`jobagent-obs-cv-delete-${ACTIVE_ATTACHMENT_ID}`),
     );
-    await user.click(await screen.findByRole('button', {name: 'Delete CV'}));
+    await user.click(
+      await screen.findByRole('button', {name: 'Delete profile permanently'}),
+    );
 
     await waitFor(() => {
-      expect(deleteCv).toHaveBeenCalledWith(ATTACHMENT_ID, undefined);
+      expect(deleteProfile).toHaveBeenCalledWith(PROFILE_ID);
     });
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
-      ).toBeNull();
-    });
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-select-${ACTIVE_ATTACHMENT_ID}`),
-    ).toBeInTheDocument();
+    expect(deleteCv).not.toHaveBeenCalled();
   });
 
   it('calls onCvReprocess when Make active is chosen on an archived CV', async () => {

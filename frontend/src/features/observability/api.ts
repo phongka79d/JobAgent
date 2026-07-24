@@ -2,7 +2,7 @@
  * Typed observability + CV Manager transport (Plan 8/9).
  * Uses only VITE_API_BASE_URL via shared chat API origin helpers.
  * Never stores or returns raw PDF bytes, storage paths, or secrets.
- * Reprocess SSE is owned by streamCvReprocess in lib/api/chat.ts.
+ * Profile re-extract SSE is owned by ChatPage through the profile transport.
  */
 
 import {

@@ -30,6 +30,7 @@ import type {
 } from './types';
 
 export type CvManagerPanelProps = {
+  profileDisplayName?: string;
   resource: CachedResource<CvHistoryPage>;
   selectedAttachmentId: string | null;
   pendingByAttachment: Readonly<Record<string, CvManagerActionKind>>;
@@ -53,7 +54,7 @@ function attachmentVariant(state: CvHistoryItem['state']) {
 
 /** Delete is never offered for the active attachment (Master §10.5 / §15.2). */
 export function canDeleteCv(item: CvHistoryItem): boolean {
-  return item.state !== 'active';
+  return item.state === 'active' || item.state === 'archived';
 }
 
 /** Reprocess is supported only for approved active/archived CV documents. */
@@ -75,6 +76,7 @@ function rowEndContent(item: CvHistoryItem) {
 }
 
 export function CvManagerPanel({
+  profileDisplayName = 'this profile',
   resource,
   selectedAttachmentId,
   pendingByAttachment,
@@ -285,6 +287,7 @@ export function CvManagerPanel({
       <CvDeleteDialog
         isOpen={deleteTarget !== null}
         fileName={deleteTarget?.original_name ?? ''}
+        profileName={profileDisplayName}
         isDeleting={
           deleteTarget !== null &&
           pendingByAttachment[deleteTarget.id] === 'delete'

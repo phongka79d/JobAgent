@@ -13,6 +13,7 @@ import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {useState} from 'react';
 
 import {App} from '../app/App';
 import {
@@ -33,6 +34,7 @@ import {getApiBaseUrl} from '../lib/api/chat';
 
 const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const PROFILE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const PROFILE_B_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const CONVERSATION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const NOW = '2026-07-23T10:00:00Z';
 
@@ -224,6 +226,90 @@ describe('profile transport parsers', () => {
 });
 
 describe('CvSidebar empty / active states', () => {
+  it('reloads active profile details when the workspace profile changes', async () => {
+    const profileA = {
+      ...uploadResponse('profile-a.pdf').bootstrap!.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'profile-a',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const profileB = {
+      ...profileA,
+      id: PROFILE_B_ID,
+      display_name: 'Profile B',
+      cv_filename: 'profile-b.pdf',
+      source_hash: 'profile-b',
+      is_active: false,
+    };
+    const profileBDetail = activeProfile('profile-b.pdf');
+    profileBDetail.active_attachment = {
+      ...profileBDetail.active_attachment!,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    };
+    const loadProfile = vi
+      .fn()
+      .mockResolvedValueOnce(activeProfile('profile-a.pdf'))
+      .mockResolvedValueOnce(profileBDetail);
+
+    function Harness() {
+      const [activeProfileId, setActiveProfileId] = useState(PROFILE_ID);
+      const workspace: ProfileWorkspaceController = {
+        state: {
+          profiles: [
+            {...profileA, is_active: activeProfileId === PROFILE_ID},
+            {...profileB, is_active: activeProfileId === PROFILE_B_ID},
+          ],
+          activeProfileId,
+          selectedConversationId: CONVERSATION_ID,
+          conversations: [],
+          pending: new Set(),
+          error: null,
+        },
+        activate: vi.fn(),
+        createConversation: vi.fn(),
+        selectConversation: vi.fn(),
+        deleteConversation: vi.fn(),
+        renameProfile: vi.fn(),
+        deleteProfile: vi.fn(),
+        reload: vi.fn(),
+        adoptBootstrap: vi.fn(),
+      };
+      return (
+        <>
+          <button type="button" onClick={() => setActiveProfileId(PROFILE_B_ID)}>
+            Switch profile
+          </button>
+          <CvSidebar
+            isUploadDisabled={false}
+            onSidebarUploadSuccess={vi.fn()}
+            workspace={workspace}
+            deps={{loadProfile, uploadCv: vi.fn()}}
+          />
+        </>
+      );
+    }
+
+    render(
+      <Theme theme={neutralTheme}>
+        <Harness />
+      </Theme>,
+    );
+    expect(await screen.findByTestId('jobagent-active-cv-filename')).toHaveTextContent(
+      'profile-a.pdf',
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: 'Switch profile'}));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('jobagent-active-cv-filename')).toHaveTextContent(
+        'profile-b.pdf',
+      );
+    });
+    expect(loadProfile).toHaveBeenCalledTimes(2);
+  });
+
   it('shows empty profile state, upload, and disabled download', async () => {
     const loadProfile = vi.fn().mockResolvedValue(emptyProfile());
     const onSuccess = vi.fn();
@@ -417,7 +503,7 @@ describe('CvSidebar empty / active states', () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  it('re-extracts the selected ready profile through its retained attachment', async () => {
+  it('re-extracts the selected ready profile through its profile id', async () => {
     const base = uploadResponse('selected.pdf').bootstrap!;
     const ready = {
       ...base.profile,
@@ -468,7 +554,7 @@ describe('CvSidebar empty / active states', () => {
     await userEvent.click(await screen.findByText('Re-extract CV'));
 
     expect(reextract).toHaveBeenCalledTimes(1);
-    expect(reextract).toHaveBeenCalledWith(ATTACHMENT_ID);
+    expect(reextract).toHaveBeenCalledWith(PROFILE_ID);
   });
 });
 

@@ -29,6 +29,8 @@ const JOB_A = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const JOB_B = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 const JOB_C = 'cccccccc-dddd-4eee-8fff-000000000000';
 const EVAL_ID = '11111111-2222-4333-8444-555555555555';
+const PROFILE_A = '22222222-3333-4444-8555-666666666666';
+const PROFILE_B = '33333333-4444-4555-8666-777777777777';
 const TS = '2024-08-01T12:00:00.000Z';
 
 function deferred<T>() {
@@ -405,6 +407,53 @@ describe('selected skill-map cache ownership', () => {
 });
 
 describe('saved-JD request ordering and stale-on-error', () => {
+  it('drops profile currentness and ignores an older profile list response', async () => {
+    const profileARequest = deferred<SavedJobListPage>();
+    const fetchSavedJobs = vi
+      .fn()
+      .mockReturnValueOnce(profileARequest.promise)
+      .mockResolvedValueOnce(
+        listPage([
+          listItem(JOB_A, {evaluation_state: 'stale', latest_score: 0.8}),
+        ]),
+      );
+    const evaluateSavedJob = vi.fn();
+    const {result, rerender} = renderHook(
+      ({profileId}) =>
+        useSavedJobsState({
+          api: {fetchSavedJobs, evaluateSavedJob},
+          profileId,
+          profileReady: true,
+        }),
+      {initialProps: {profileId: PROFILE_A}},
+    );
+
+    let profileALoad!: Promise<void>;
+    act(() => {
+      profileALoad = result.current.loadList();
+    });
+    rerender({profileId: PROFILE_B});
+
+    expect(result.current.state.list.data).toBeNull();
+    await act(async () => {
+      profileARequest.resolve(
+        listPage([
+          listItem(JOB_A, {evaluation_state: 'current', latest_score: 0.8}),
+        ]),
+      );
+      await profileALoad;
+    });
+    expect(result.current.state.list.data).toBeNull();
+
+    await act(async () => {
+      await result.current.loadList();
+    });
+    expect(result.current.state.list.data?.items[0]?.evaluation_state).toBe(
+      'stale',
+    );
+    expect(evaluateSavedJob).not.toHaveBeenCalled();
+  });
+
   it('ignores an older list request after a forced refresh succeeds', async () => {
     const initial = deferred<SavedJobListPage>();
     const refresh = deferred<SavedJobListPage>();

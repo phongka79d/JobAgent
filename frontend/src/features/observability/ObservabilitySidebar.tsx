@@ -48,6 +48,8 @@ export type ObservabilitySidebarProps = {
   /** Pending profiles must never render stale profile-owned inspector data. */
   profileSetupInProgress?: boolean;
   profileId?: string | null;
+  profileDisplayName?: string;
+  onProfileDelete?: (profileId: string) => Promise<boolean>;
 };
 
 export function ObservabilitySidebar({
@@ -60,6 +62,8 @@ export function ObservabilitySidebar({
   isInteractionLocked = false,
   profileSetupInProgress = false,
   profileId = null,
+  profileDisplayName = '',
+  onProfileDelete,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
@@ -88,6 +92,8 @@ export function ObservabilitySidebar({
     } else if (state.selectedTab === 'graph') {
       void obs.loadGraph({signal});
       void savedJobs.loadList({}, {signal});
+    } else if (state.selectedTab === 'saved-jobs') {
+      void savedJobs.loadList({}, {signal});
     } else if (
       state.selectedTab === 'chunks' &&
       state.selectedAttachmentId
@@ -101,6 +107,7 @@ export function ObservabilitySidebar({
     // Save Profile without requiring a manual refresh (Plan 11 F-03).
   }, [
     profileSetupInProgress,
+    profileId,
     state.selectedTab,
     state.selectedAttachmentId,
     state.activationGeneration,
@@ -129,6 +136,7 @@ export function ObservabilitySidebar({
     // changes as cache state changes, so it is intentionally not a dependency.
   }, [
     profileSetupInProgress,
+    profileId,
     state.selectedTab,
     savedJobs.state.selectedJobId,
     selectedSkillMapLoaded,
@@ -149,7 +157,12 @@ export function ObservabilitySidebar({
       controller.abort();
     };
     // Selection-driven detail load; loadDetail is cache-aware.
-  }, [profileSetupInProgress, state.selectedTab, savedJobs.state.selectedJobId]);
+  }, [
+    profileId,
+    profileSetupInProgress,
+    state.selectedTab,
+    savedJobs.state.selectedJobId,
+  ]);
 
   // Saved-JD invalidation signal: mark list/selected detail non-current; force
   // open-tab GETs; closed tab refreshes lazily on next selection/mount.
@@ -224,7 +237,12 @@ export function ObservabilitySidebar({
     if (isInteractionLocked) {
       return 'duplicate';
     }
-    const outcome = await obs.confirmDelete(item.id);
+    const outcome = await obs.confirmDelete(item.id, async () => {
+      if (!profileId || !onProfileDelete) {
+        return false;
+      }
+      return onProfileDelete(profileId);
+    });
     if (outcome === 'success') {
       onCvDeleted?.();
     }
@@ -289,13 +307,13 @@ export function ObservabilitySidebar({
       </div>
 
       <div className="jobagent-obs-content">
-        {profileSetupInProgress ? (
+        {profileSetupInProgress && state.selectedTab !== 'overview' ? (
           <Text data-testid="profile-setup-in-progress" type="supporting">
             Profile setup in progress
           </Text>
         ) : null}
 
-        {!profileSetupInProgress && state.selectedTab === 'overview' ? (
+        {state.selectedTab === 'overview' ? (
           <div
             role="tabpanel"
             id="jobagent-obs-panel-overview"
@@ -308,6 +326,7 @@ export function ObservabilitySidebar({
 
         {!profileSetupInProgress && state.selectedTab === 'cv-history' ? (
           <CvManagerPanel
+            profileDisplayName={profileDisplayName}
             resource={state.cvHistory}
             selectedAttachmentId={state.selectedAttachmentId}
             pendingByAttachment={state.cvManager.pendingByAttachment}

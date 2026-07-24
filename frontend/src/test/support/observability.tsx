@@ -13,6 +13,7 @@ import type {
 } from '../../features/observability/types';
 import {CvSidebar} from '../../features/profile/CvSidebar';
 import type {ProfileReadResponse} from '../../features/profile/types';
+import type {ProfileWorkspaceController} from '../../features/profile/workspaceState';
 
 export const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 export const RUN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
@@ -247,12 +248,16 @@ export function mockObservabilityApi(
 
 export function renderObservabilitySidebar(
   api?: ObservabilityApi,
+  options: {
+    workspace?: ProfileWorkspaceController;
+    profile?: ProfileReadResponse;
+  } = {},
 ): ReturnType<typeof render> & {
   api: ObservabilityApi;
   loadProfile: ReturnType<typeof vi.fn>;
 } {
   const resolvedApi = api ?? mockObservabilityApi();
-  const loadProfile = vi.fn().mockResolvedValue(emptyProfile());
+  const loadProfile = vi.fn().mockResolvedValue(options.profile ?? emptyProfile());
   return {
     api: resolvedApi,
     loadProfile,
@@ -261,6 +266,7 @@ export function renderObservabilitySidebar(
         <CvSidebar
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
+          workspace={options.workspace}
           deps={{
             loadProfile,
             uploadCv: vi.fn(),

@@ -177,6 +177,12 @@ function CvSidebarController({
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
 
   const [profile, setProfile] = useState<ProfileReadResponse | null>(null);
+  const profileScope = workspace?.state.activeProfileId ?? 'legacy';
+  const [loadedProfileScope, setLoadedProfileScope] = useState<string | null>(
+    null,
+  );
+  const scopedProfile =
+    loadedProfileScope === profileScope ? profile : null;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -203,13 +209,14 @@ function CvSidebarController({
       return;
     }
     handledTerminalKey.current = reprocessTerminal.requestKey;
-    const actionId = profile?.active_attachment?.id ?? reprocessTerminal.profileId;
+    const actionId =
+      scopedProfile?.active_attachment?.id ?? reprocessTerminal.profileId;
     if (reprocessTerminal.kind === 'http_error' && reprocessTerminal.error) {
       failReprocess(actionId, reprocessTerminal.error);
     } else {
       endReprocess(actionId);
     }
-  }, [endReprocess, failReprocess, profile, reprocessTerminal]);
+  }, [endReprocess, failReprocess, reprocessTerminal, scopedProfile]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -217,6 +224,7 @@ function CvSidebarController({
         const next = await loadProfile(signal);
         if (!signal?.aborted) {
           setProfile(next);
+          setLoadedProfileScope(profileScope);
           setLoadError(null);
         }
       } catch (err) {
@@ -232,13 +240,14 @@ function CvSidebarController({
         setLoadError(summary);
       }
     },
-    [loadProfile],
+    [loadProfile, profileScope],
   );
 
   useEffect(() => {
     const isRefreshRequested = loadedRefreshKey.current !== refreshKey;
     loadedRefreshKey.current = refreshKey;
-    if (profile !== null && !isRefreshRequested) {
+    const isProfileScopeChanged = loadedProfileScope !== profileScope;
+    if (profile !== null && !isRefreshRequested && !isProfileScopeChanged) {
       return;
     }
 
@@ -247,7 +256,7 @@ function CvSidebarController({
     return () => {
       controller.abort();
     };
-  }, [profile, reload, refreshKey]);
+  }, [loadedProfileScope, profile, profileScope, reload, refreshKey]);
 
   const handleFileChange = useCallback(
     (files: File | File[] | null) => {
@@ -332,15 +341,15 @@ function CvSidebarController({
   );
 
   const handleViewDownload = useCallback(() => {
-    if (!profile?.present || !profile.active_attachment) {
+    if (!scopedProfile?.present || !scopedProfile.active_attachment) {
       return;
     }
     window.open(cvUrl(), '_blank', 'noopener,noreferrer');
-  }, [cvUrl, profile]);
+  }, [cvUrl, scopedProfile]);
 
-  const state = profileStateLabel(profile);
-  const activeName = profile?.active_attachment?.original_name ?? null;
-  const pendingName = profile?.pending_attachment?.original_name ?? null;
+  const state = profileStateLabel(scopedProfile);
+  const activeName = scopedProfile?.active_attachment?.original_name ?? null;
+  const pendingName = scopedProfile?.pending_attachment?.original_name ?? null;
   const displayCvName = activeName ?? pendingName;
   const hasActive = Boolean(profile?.present && activeName);
   const uploadLabel = hasActive ? 'Upload new CV' : 'Upload CV';
@@ -362,7 +371,7 @@ function CvSidebarController({
           onReextract={(target) => {
             if (
               target.id === workspace.state.activeProfileId &&
-              profile?.active_attachment
+              scopedProfile?.active_attachment
             ) {
               onCvReprocess?.(target.id);
             }
@@ -404,6 +413,12 @@ function CvSidebarController({
           workspace && selectedWorkspaceProfile?.state !== 'ready',
         )}
         profileId={selectedWorkspaceProfile?.id ?? null}
+        profileDisplayName={selectedWorkspaceProfile?.display_name ?? ''}
+        onProfileDelete={
+          workspace
+            ? async (profileId) => workspace.deleteProfile(profileId)
+            : undefined
+        }
         isInteractionLocked={isUploadDisabled}
         savedJobsInvalidateKey={savedJobsInvalidateKey}
         onCvReprocess={(attachmentId) =>

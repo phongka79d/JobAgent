@@ -53,6 +53,8 @@ export type CachedResource<T> = {
 };
 
 export type ObservabilityState = {
+  /** Owns every profile-derived cache entry in this reducer. */
+  profileScopeKey: string;
   selectedTab: ObservabilityTabId;
   selectedAttachmentId: string | null;
   expandedChunkOrdinal: number | null;
@@ -81,6 +83,7 @@ const emptyResource = <T,>(): CachedResource<T> => ({
 });
 
 export const initialObservabilityState: ObservabilityState = {
+  profileScopeKey: 'legacy',
   selectedTab: 'overview',
   selectedAttachmentId: null,
   expandedChunkOrdinal: null,
@@ -109,6 +112,7 @@ function toSafeError(err: unknown): ObservabilitySafeError {
 }
 
 type Action =
+  | {type: 'profile_scope_changed'; scopeKey: string}
   | {type: 'select_tab'; tab: ObservabilityTabId}
   | {type: 'select_attachment'; attachmentId: string | null}
   | {type: 'set_expanded_chunk'; ordinal: number | null}
@@ -223,6 +227,16 @@ export function observabilityReducer(
   action: Action,
 ): ObservabilityState {
   switch (action.type) {
+    case 'profile_scope_changed':
+      if (state.profileScopeKey === action.scopeKey) {
+        return state;
+      }
+      return {
+        ...initialObservabilityState,
+        profileScopeKey: action.scopeKey,
+        selectedTab: state.selectedTab,
+        activationGeneration: state.activationGeneration + 1,
+      };
     case 'select_tab':
       return {...state, selectedTab: action.tab};
     case 'select_attachment':
@@ -480,12 +494,22 @@ export type UseObservabilityOptions = {
   profileReady?: boolean;
 };
 
+function observabilityScopeKey(
+  profileId: string | null | undefined,
+  profileReady: boolean | undefined,
+): string {
+  if (profileId === undefined) {
+    return 'legacy';
+  }
+  return `${profileId ?? 'none'}:${profileReady === false ? 'blocked' : 'ready'}`;
+}
+
 export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const api: ObservabilityApi = {
     ...defaultObservabilityApi,
     ...options.api,
   };
-  const [state, dispatch] = useReducer(
+  const [storedState, dispatch] = useReducer(
     observabilityReducer,
     initialObservabilityState,
   );
@@ -494,15 +518,19 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const actionInFlightRef = useRef<Set<string>>(new Set());
   const profileId = options.profileId ?? null;
   const canLoadProfileScope = options.profileReady !== false;
-  const profileScopeRef = useRef(profileId);
+  const scopeKey = observabilityScopeKey(options.profileId, options.profileReady);
+  const profileScopeRef = useRef(scopeKey);
+  profileScopeRef.current = scopeKey;
+  const state =
+    storedState.profileScopeKey === scopeKey
+      ? storedState
+      : observabilityReducer(storedState, {
+          type: 'profile_scope_changed',
+          scopeKey,
+        });
   useEffect(() => {
-    if (profileScopeRef.current === profileId) return;
-    profileScopeRef.current = profileId;
-    beginLatestRequest('cv-history');
-    beginLatestRequest('runs');
-    beginLatestRequest('graph');
-    dispatch({type: 'cv_invalidate_activation'});
-  }, [beginLatestRequest, profileId]);
+    dispatch({type: 'profile_scope_changed', scopeKey});
+  }, [scopeKey]);
 
   const selectTab = useCallback((tab: ObservabilityTabId) => {
     dispatch({type: 'select_tab', tab});
@@ -526,16 +554,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.cvHistory.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest('cv-history');
+      const isLatest = beginLatestRequest(`cv-history:${scopeKey}`);
       dispatch({type: 'resource_loading', resource: 'cvHistory'});
       try {
         const data = await api.fetchCvHistory({profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'cvHistory', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -545,7 +573,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, state.cvHistory.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.cvHistory.loaded],
   );
 
   const loadRuns = useCallback(
@@ -554,16 +582,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.runs.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest('runs');
+      const isLatest = beginLatestRequest(`runs:${scopeKey}`);
       dispatch({type: 'resource_loading', resource: 'runs'});
       try {
         const data = await api.fetchRunHistory({profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'runs', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -573,7 +601,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, state.runs.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.runs.loaded],
   );
 
   const loadGraph = useCallback(
@@ -582,16 +610,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (state.graph.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest('graph');
+      const isLatest = beginLatestRequest(`graph:${scopeKey}`);
       dispatch({type: 'resource_loading', resource: 'graph'});
       try {
         const data = await api.fetchGraphSnapshot(opts?.signal, profileId ?? undefined);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'resource_success', resource: 'graph', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -601,7 +629,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, state.graph.loaded],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.graph.loaded],
   );
 
   const loadChunkList = useCallback(
@@ -614,16 +642,18 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       if (cached?.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest(`chunk-list:${attachmentId}`);
+      const isLatest = beginLatestRequest(
+        `chunk-list:${scopeKey}:${attachmentId}`,
+      );
       dispatch({type: 'chunk_list_loading', attachmentId});
       try {
         const data = await api.fetchChunkList(attachmentId, {profileId: profileId ?? undefined}, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'chunk_list_success', attachmentId, data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -633,7 +663,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileScope, profileId, state.chunkLists],
+    [api, beginLatestRequest, canLoadProfileScope, profileId, scopeKey, state.chunkLists],
   );
 
   const expandChunk = useCallback(
@@ -660,7 +690,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           opts?.signal,
           profileId ?? undefined,
         );
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -670,7 +700,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
           data,
         });
       } catch (err) {
-        if (opts?.signal?.aborted) {
+        if (opts?.signal?.aborted || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -681,7 +711,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         });
       }
     },
-    [api, canLoadProfileScope, profileId, state.chunkDetails],
+    [api, canLoadProfileScope, profileId, scopeKey, state.chunkDetails],
   );
 
   const openRetainedFile = useCallback(
@@ -698,7 +728,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
 
   /**
    * Mark reprocess pending for one attachment. Returns false when duplicate.
-   * Actual SSE stream is owned by ChatPage via streamCvReprocess.
+   * Actual SSE stream is owned by ChatPage through profile re-extract.
    */
   const beginReprocess = useCallback((attachmentId: string): boolean => {
     if (actionInFlightRef.current.has(attachmentId)) {
@@ -737,6 +767,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
   const confirmDelete = useCallback(
     async (
       attachmentId: string,
+      deleteProfile: () => Promise<boolean>,
       opts?: {signal?: AbortSignal},
     ): Promise<'success' | 'duplicate' | 'error'> => {
       if (actionInFlightRef.current.has(attachmentId)) {
@@ -745,16 +776,16 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
       actionInFlightRef.current.add(attachmentId);
       dispatch({type: 'cv_action_begin', attachmentId, kind: 'delete'});
       try {
-        await api.deleteCv(attachmentId, opts?.signal);
+        const deleted = await deleteProfile();
+        if (!deleted) {
+          throw new Error('Profile deletion failed; retry from the profile actions.');
+        }
         if (opts?.signal?.aborted) {
           actionInFlightRef.current.delete(attachmentId);
           dispatch({type: 'cv_action_end', attachmentId});
           return 'error';
         }
-        const priorItems = state.cvHistory.data?.items ?? [];
-        const remainingItems = priorItems.filter(
-          (item) => item.id !== attachmentId,
-        );
+        const remainingItems: CvHistoryItem[] = [];
         actionInFlightRef.current.delete(attachmentId);
         dispatch({
           type: 'cv_delete_success',
@@ -777,7 +808,7 @@ export function useObservabilityState(options: UseObservabilityOptions = {}) {
         return 'error';
       }
     },
-    [api, state.cvHistory.data?.items],
+    [],
   );
 
   /** Invalidate CV/chunk/run/graph caches after Save Profile activation. */

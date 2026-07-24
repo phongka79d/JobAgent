@@ -63,6 +63,8 @@ export type SavedJobsExternalInvalidation = {
 };
 
 export type SavedJobsState = {
+  /** Owns evaluation currentness and selected profile projections. */
+  profileScopeKey: string;
   selectedJobId: string | null;
   list: CachedResource<SavedJobListPage>;
   /** Cache key: jobId */
@@ -86,6 +88,7 @@ export const initialSavedJobsActionSlice: SavedJobsActionSlice = {
 };
 
 export const initialSavedJobsState: SavedJobsState = {
+  profileScopeKey: 'legacy',
   selectedJobId: null,
   list: emptyResource(),
   details: {},
@@ -273,6 +276,7 @@ function patchDetailAfterEvaluate(
 }
 
 type Action =
+  | {type: 'profile_scope_changed'; scopeKey: string}
   | {type: 'select_job'; jobId: string | null}
   | {type: 'list_loading'}
   | {type: 'list_success'; data: SavedJobListPage}
@@ -326,6 +330,16 @@ export function savedJobsReducer(
   action: Action,
 ): SavedJobsState {
   switch (action.type) {
+    case 'profile_scope_changed':
+      if (state.profileScopeKey === action.scopeKey) {
+        return state;
+      }
+      return {
+        ...initialSavedJobsState,
+        profileScopeKey: action.scopeKey,
+        selectedJobId: state.selectedJobId,
+        externalInvalidation: state.externalInvalidation,
+      };
     case 'select_job':
       return {...state, selectedJobId: action.jobId};
     case 'list_loading':
@@ -629,12 +643,22 @@ export type UseSavedJobsOptions = {
   profileReady?: boolean;
 };
 
+function savedJobsScopeKey(
+  profileId: string | null | undefined,
+  profileReady: boolean | undefined,
+): string {
+  if (profileId === undefined) {
+    return 'legacy';
+  }
+  return `${profileId ?? 'none'}:${profileReady === false ? 'blocked' : 'ready'}`;
+}
+
 export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
   const api: SavedJobsApi = {
     ...defaultSavedJobsApi,
     ...options.api,
   };
-  const [state, dispatch] = useReducer(
+  const [storedState, dispatch] = useReducer(
     savedJobsReducer,
     initialSavedJobsState,
   );
@@ -645,15 +669,21 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
     all: 0,
     byJob: new Map<string, number>(),
   });
-  const profileScopeRef = useRef(options.profileId ?? null);
+  const scopeKey = savedJobsScopeKey(options.profileId, options.profileReady);
+  const profileScopeRef = useRef(scopeKey);
+  profileScopeRef.current = scopeKey;
   const canLoadProfileData = options.profileReady !== false;
+  const state =
+    storedState.profileScopeKey === scopeKey
+      ? storedState
+      : savedJobsReducer(storedState, {
+          type: 'profile_scope_changed',
+          scopeKey,
+        });
   useEffect(() => {
-    const next = options.profileId ?? null;
-    if (profileScopeRef.current === next) return;
-    profileScopeRef.current = next;
     skillMapInvalidationRef.current.all += 1;
-    dispatch({type: 'invalidate_currentness'});
-  }, [options.profileId]);
+    dispatch({type: 'profile_scope_changed', scopeKey});
+  }, [scopeKey]);
 
   const invalidateSkillMapRequests = useCallback((jobId: string) => {
     const generations = skillMapInvalidationRef.current.byJob;
@@ -681,22 +711,22 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       if (state.list.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest('saved-jobs-list');
+      const isLatest = beginLatestRequest(`saved-jobs-list:${scopeKey}`);
       dispatch({type: 'list_loading'});
       try {
         const data = await api.fetchSavedJobs(query, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'list_success', data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'list_error', error: toSafeError(err)});
       }
     },
-    [api, beginLatestRequest, state.list.loaded],
+    [api, beginLatestRequest, canLoadProfileData, scopeKey, state.list.loaded],
   );
 
   const loadDetail = useCallback(
@@ -708,16 +738,18 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       if (cached?.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest(`saved-job-detail:${jobId}`);
+      const isLatest = beginLatestRequest(
+        `saved-job-detail:${scopeKey}:${jobId}`,
+      );
       dispatch({type: 'detail_loading', jobId});
       try {
         const data = await api.fetchSavedJobDetail(jobId, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'detail_success', jobId, data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest()) {
+        if (opts?.signal?.aborted || !isLatest() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -727,7 +759,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileData, state.details],
+    [api, beginLatestRequest, canLoadProfileData, scopeKey, state.details],
   );
 
   const loadSkillMap = useCallback(
@@ -740,7 +772,9 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       if (cached?.loaded && !opts?.force) {
         return;
       }
-      const isLatest = beginLatestRequest(`saved-job-skill-map:${jobId}`);
+      const isLatest = beginLatestRequest(
+        `saved-job-skill-map:${scopeKey}:${jobId}`,
+      );
       const allGeneration = skillMapInvalidationRef.current.all;
       const jobGeneration =
         skillMapInvalidationRef.current.byJob.get(jobId) ?? 0;
@@ -751,12 +785,12 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       dispatch({type: 'skill_map_loading', jobId});
       try {
         const data = await api.fetchSelectedJobSkillMap(jobId, opts?.signal);
-        if (opts?.signal?.aborted || !isLatest() || !isStillValid()) {
+        if (opts?.signal?.aborted || !isLatest() || !isStillValid() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({type: 'skill_map_success', jobId, data});
       } catch (err) {
-        if (opts?.signal?.aborted || !isLatest() || !isStillValid()) {
+        if (opts?.signal?.aborted || !isLatest() || !isStillValid() || profileScopeRef.current !== scopeKey) {
           return;
         }
         dispatch({
@@ -766,7 +800,7 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
         });
       }
     },
-    [api, beginLatestRequest, canLoadProfileData, state.skillMaps],
+    [api, beginLatestRequest, canLoadProfileData, scopeKey, state.skillMaps],
   );
 
   const evaluateJob = useCallback(
