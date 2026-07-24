@@ -9,10 +9,17 @@ from typing import Any
 
 import pytest
 from app.core.ids import new_uuid
+from app.db.models.attachments import (
+    ATTACHMENT_MIME_TYPE_PDF,
+    ATTACHMENT_STATE_STAGED,
+    Attachment,
+)
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_ASSISTANT,
     CHAT_MESSAGE_ROLE_USER,
+    Conversation,
 )
+from app.db.models.profiles import PROFILE_STATE_PENDING, Profile
 from app.db.session import build_async_engine
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
@@ -507,10 +514,49 @@ async def _seed_run_with_message(
     *,
     content: str,
     role: str = CHAT_MESSAGE_ROLE_USER,
+    structured_payload: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     async with factory() as session:
+        attachment_id = new_uuid()
+        profile_id = new_uuid()
+        conversation_id = new_uuid()
+        attachment = Attachment(
+            id=attachment_id,
+            file_hash=new_uuid(),
+            original_name="job-confirmation.pdf",
+            mime_type=ATTACHMENT_MIME_TYPE_PDF,
+            size_bytes=1,
+            page_count=None,
+            storage_path=f"job-confirmation/{new_uuid()}.pdf",
+            state=ATTACHMENT_STATE_STAGED,
+        )
+        profile = Profile(
+            id=profile_id,
+            attachment_id=attachment_id,
+            display_name="Pending job confirmation profile",
+            profile_json=None,
+            location=None,
+            extraction_version=None,
+            source_hash=None,
+            state=PROFILE_STATE_PENDING,
+        )
+        conversation = Conversation(
+            id=conversation_id,
+            profile_id=profile_id,
+            title="Job confirmation",
+        )
+        session.add(attachment)
+        await session.flush()
+        session.add(profile)
+        await session.flush()
+        session.add(conversation)
+        await session.flush()
         msg = await messages_repo.insert_message(
-            session, role=role, content=content
+            session,
+            conversation_id=conversation.id,
+            role=role,
+            content=content,
+            structured_payload=structured_payload,
         )
         run = await runs_repo.create_run(session, user_message_id=msg.id)
         await session.commit()
@@ -608,19 +654,12 @@ def test_resolve_empty_content(migrated_sqlite: Path) -> None:
 
     async def _body() -> None:
         try:
-            async with factory() as session:
-                # Empty content allowed only with structured_payload on insert.
-                msg = await messages_repo.insert_message(
-                    session,
-                    role=CHAT_MESSAGE_ROLE_USER,
-                    content="",
-                    structured_payload={"kind": "marker"},
-                )
-                run = await runs_repo.create_run(
-                    session, user_message_id=msg.id
-                )
-                await session.commit()
-                run_id = run.id
+            # Empty content allowed only with structured_payload on insert.
+            run_id, _ = await _seed_run_with_message(
+                factory,
+                content="",
+                structured_payload={"kind": "marker"},
+            )
             async with factory() as session:
                 result = await conf.resolve_initiating_user_message(
                     session, run_id

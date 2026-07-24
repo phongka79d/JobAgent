@@ -27,6 +27,8 @@ from app.services.skill_compatibility import (
 from app.services.skill_normalization import SkillNormalizer, load_skill_taxonomy
 from pydantic import ValidationError
 
+_PROFILE_ID = "22222222-2222-4222-8222-222222222222"
+
 
 def _ref(key: str, display: str | None = None) -> SkillRef:
     return SkillRef(
@@ -414,6 +416,7 @@ def test_selected_relationship_integrity_accepts_exact_sync_projection() -> None
         check_selected_skill_relationship_integrity(
             driver,
             job_id="11111111-2222-4333-8444-555555555555",
+            profile_id=_PROFILE_ID,
             profile=profile,
             extraction=extraction,
         )
@@ -422,7 +425,7 @@ def test_selected_relationship_integrity_accepts_exact_sync_projection() -> None
     assert result.is_consistent
     assert result.error_code is None
     assert driver.parameters == [
-        {"profile_id": "active"},
+        {"profile_id": _PROFILE_ID},
         {"job_id": "11111111-2222-4333-8444-555555555555"},
     ]
     assert len(driver.queries) == 2
@@ -445,6 +448,7 @@ def test_selected_relationship_integrity_withholds_oversized_actual_rows() -> No
         check_selected_skill_relationship_integrity(
             driver,
             job_id="11111111-2222-4333-8444-555555555555",
+            profile_id=_PROFILE_ID,
             profile=profile,
             extraction=extraction,
         )
@@ -508,6 +512,7 @@ def test_selected_relationship_integrity_withholds_every_mismatch(
         check_selected_skill_relationship_integrity(
             driver,
             job_id="11111111-2222-4333-8444-555555555555",
+            profile_id=_PROFILE_ID,
             profile=profile,
             extraction=extraction,
         )
@@ -525,6 +530,7 @@ def test_selected_relationship_integrity_maps_driver_failure_to_unavailable() ->
         check_selected_skill_relationship_integrity(
             driver,
             job_id="11111111-2222-4333-8444-555555555555",
+            profile_id=_PROFILE_ID,
             profile=profile,
             extraction=extraction,
         )

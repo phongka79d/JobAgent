@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 
 import pytest
+from app.core.ids import new_uuid
+from app.core.time import utc_now
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
     TOOL_EXECUTION_STATUS_COMPLETED,
@@ -55,8 +57,55 @@ def db_path(migrated_sqlite: Path) -> Path:
 
 async def _seed_run(session: AsyncSession, content: str = "tool turn") -> str:
     """Insert one user message + running agent run; return run_id."""
+    attachment_id = new_uuid()
+    profile_id = new_uuid()
+    conversation_id = new_uuid()
+    now = utc_now()
+    await session.execute(
+        text(
+            "INSERT INTO attachments ("
+            "id, file_hash, original_name, mime_type, size_bytes, page_count, "
+            "storage_path, state, created_at, updated_at) VALUES ("
+            ":attachment_id, :file_hash, 'run.pdf', 'application/pdf', 1, 1, "
+            ":storage_path, 'archived', :now, :now)"
+        ),
+        {
+            "attachment_id": attachment_id,
+            "file_hash": f"run-{attachment_id}",
+            "storage_path": f"runs/{attachment_id}.pdf",
+            "now": now,
+        },
+    )
+    await session.execute(
+        text(
+            "INSERT INTO profiles ("
+            "id, attachment_id, display_name, profile_json, extraction_version, "
+            "source_hash, state, created_at, updated_at, last_opened_at) VALUES ("
+            ":profile_id, :attachment_id, 'Replay profile', '{}', 'v1', "
+            ":source_hash, 'ready', :now, :now, :now)"
+        ),
+        {
+            "profile_id": profile_id,
+            "attachment_id": attachment_id,
+            "source_hash": f"source-{attachment_id}",
+            "now": now,
+        },
+    )
+    await session.execute(
+        text(
+            "INSERT INTO conversations ("
+            "id, profile_id, title, created_at, updated_at, last_opened_at) VALUES ("
+            ":conversation_id, :profile_id, 'Chat mới', :now, :now, :now)"
+        ),
+        {
+            "conversation_id": conversation_id,
+            "profile_id": profile_id,
+            "now": now,
+        },
+    )
     user = await messages_repo.insert_message(
         session,
+        conversation_id=conversation_id,
         role=CHAT_MESSAGE_ROLE_USER,
         content=content,
     )

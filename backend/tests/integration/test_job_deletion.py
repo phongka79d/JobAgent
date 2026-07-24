@@ -35,6 +35,7 @@ _TS = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 _JOB_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 _JOB_B = "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 _ATT_ID = "11111111-2222-4333-8444-555555555555"
+_PROFILE_ID = "33333333-3333-4333-8333-333333333333"
 _EVAL_A = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee"
 _EVAL_B = "eeeeeeee-2222-4111-8111-eeeeeeeeeeee"
 
@@ -137,6 +138,17 @@ async def _seed_attachment(session: AsyncSession) -> None:
             f"'p/cv.pdf', 'active', '{_TS.isoformat()}', '{_TS.isoformat()}')"
         )
     )
+    await session.execute(
+        text(
+            "INSERT INTO profiles ("
+            "id, attachment_id, display_name, profile_json, location, "
+            "extraction_version, source_hash, state, created_at, updated_at, "
+            "last_opened_at) VALUES ("
+            f"'{_PROFILE_ID}', '{_ATT_ID}', 'Profile', '{{}}', NULL, 'v1', "
+            f"'cv-hash', 'ready', '{_TS.isoformat()}', '{_TS.isoformat()}', "
+            f"'{_TS.isoformat()}')"
+        )
+    )
 
 
 async def _seed_job(
@@ -199,11 +211,11 @@ async def _seed_evaluation(
     await session.execute(
         text(
             "INSERT INTO job_evaluations ("
-            "id, job_id, active_attachment_id, evaluation_context_hash, "
+            "id, job_id, profile_id, evaluation_context_hash, "
             "job_revision, profile_revision, preferences_revision, "
             "cv_source_hash, matching_contract_version, result_json, "
             "created_at, updated_at) VALUES ("
-            ":id, :job_id, :att_id, :ctx, "
+            ":id, :job_id, :profile_id, :ctx, "
             ":ts, :ts, :ts, "
             ":cv_hash, :version, :result_json, "
             ":ts, :ts)"
@@ -211,7 +223,7 @@ async def _seed_evaluation(
         {
             "id": eval_id,
             "job_id": job_id,
-            "att_id": _ATT_ID,
+            "profile_id": _PROFILE_ID,
             "ctx": f"ctx-{eval_id}",
             "ts": _TS.isoformat(),
             "cv_hash": "cv-hash",

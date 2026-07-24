@@ -145,9 +145,61 @@ def _factory(db_path: Path):
     return engine, session_factory(engine)
 
 
+async def _seed_conversation(session: Any) -> str:
+    attachment_id = new_uuid()
+    profile_id = new_uuid()
+    conversation_id = new_uuid()
+    now = utc_now()
+    await session.execute(
+        text(
+            "INSERT INTO attachments ("
+            "id, file_hash, original_name, mime_type, size_bytes, page_count, "
+            "storage_path, state, created_at, updated_at) VALUES ("
+            ":attachment_id, :file_hash, 'run.pdf', 'application/pdf', 1, 1, "
+            ":storage_path, 'archived', :now, :now)"
+        ),
+        {
+            "attachment_id": attachment_id,
+            "file_hash": f"run-{attachment_id}",
+            "storage_path": f"runs/{attachment_id}.pdf",
+            "now": now,
+        },
+    )
+    await session.execute(
+        text(
+            "INSERT INTO profiles ("
+            "id, attachment_id, display_name, profile_json, extraction_version, "
+            "source_hash, state, created_at, updated_at, last_opened_at) VALUES ("
+            ":profile_id, :attachment_id, 'Run profile', '{}', 'v1', "
+            ":source_hash, 'ready', :now, :now, :now)"
+        ),
+        {
+            "profile_id": profile_id,
+            "attachment_id": attachment_id,
+            "source_hash": f"source-{attachment_id}",
+            "now": now,
+        },
+    )
+    await session.execute(
+        text(
+            "INSERT INTO conversations ("
+            "id, profile_id, title, created_at, updated_at, last_opened_at) VALUES ("
+            ":conversation_id, :profile_id, 'Chat mới', :now, :now, :now)"
+        ),
+        {
+            "conversation_id": conversation_id,
+            "profile_id": profile_id,
+            "now": now,
+        },
+    )
+    return conversation_id
+
+
 async def _seed_run(session: Any, content: str = "job tool turn") -> str:
+    conversation_id = await _seed_conversation(session)
     user = await messages_repo.insert_message(
         session,
+        conversation_id=conversation_id,
         role=CHAT_MESSAGE_ROLE_USER,
         content=content,
     )
@@ -1148,15 +1200,23 @@ def test_save_job_history_and_current_sse_exclude_raw_and_embeddings(
                 assert tool_row is not None
                 assert tool_row.status == TOOL_EXECUTION_STATUS_COMPLETED
                 assert tool_row.result_json is not None
+                owner = await runs_repo.resolve_run_owner(session, run_id)
+                assert owner is not None
                 await runs_repo.complete_run(session, run_id)
                 await session.commit()
                 tool_execution_id = tool_row.id
                 tool_summary = result.summary or "Saved job description"
                 args_summary = tool_row.arguments_summary_json
+                conversation_id = owner.conversation_id
 
             # 1) Durable history hydration surface.
             async with factory() as session:
-                page = await get_history_page(session, limit=50, before=None)
+                page = await get_history_page(
+                    session,
+                    conversation_id=conversation_id,
+                    limit=50,
+                    before=None,
+                )
                 hist = history_page_as_dict(page)
             hist_blob = json.dumps(hist, default=str)
             assert "raw_content" not in hist_blob
@@ -1367,6 +1427,9 @@ def test_save_job_current_message_interrupts_before_dependencies(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
+            async with factory() as session:
+                conversation_id = await _seed_conversation(session)
+                await session.commit()
             invoker = FakeJdInvoker([_full_extracted()])
             embedder = FakeEmbeddingClient()
             sync = RecordingSync()
@@ -1407,6 +1470,7 @@ def test_save_job_current_message_interrupts_before_dependencies(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message=_OBVIOUS_JD_MESSAGE,
                     graph_bundle=bundle,
                     session_factory=factory,
@@ -1519,6 +1583,9 @@ def test_save_job_current_message_save_reloads_exact_source_once(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
+            async with factory() as session:
+                conversation_id = await _seed_conversation(session)
+                await session.commit()
             invoker = FakeJdInvoker([_full_extracted(), _full_extracted()])
             embedder = FakeEmbeddingClient()
             sync = RecordingSync()
@@ -1552,6 +1619,7 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message=_OBVIOUS_JD_MESSAGE,
                     graph_bundle=bundle,
                     session_factory=factory,
@@ -1704,6 +1772,7 @@ def test_save_job_current_message_save_reloads_exact_source_once(
             events_dup = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message=_OBVIOUS_JD_MESSAGE,
                     graph_bundle=build_agent_graph(
                         model=model_dup,
@@ -1790,6 +1859,9 @@ def test_save_job_current_message_cancel_zero_dependencies(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
+            async with factory() as session:
+                conversation_id = await _seed_conversation(session)
+                await session.commit()
             invoker = FakeJdInvoker([_full_extracted()])
             embedder = FakeEmbeddingClient()
             sync = RecordingSync()
@@ -1819,6 +1891,7 @@ def test_save_job_current_message_cancel_zero_dependencies(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message=_OBVIOUS_JD_MESSAGE,
                     graph_bundle=build_agent_graph(
                         model=model,
@@ -2039,16 +2112,16 @@ def test_save_job_current_message_source_lookup_failure_no_side_effects(
         engine, factory = _factory(db_path)
         try:
             async with factory() as session:
+                conversation_id = await _seed_conversation(session)
                 # Empty content allowed only with structured_payload on insert.
                 user = await messages_repo.insert_message(
                     session,
+                    conversation_id=conversation_id,
                     role=CHAT_MESSAGE_ROLE_USER,
                     content="",
                     structured_payload={"kind": "empty_fixture"},
                 )
-                run = await runs_repo.create_run(
-                    session, user_message_id=user.id
-                )
+                run = await runs_repo.create_run(session, user_message_id=user.id)
                 await session.commit()
                 run_id = run.id
 
@@ -2096,6 +2169,9 @@ def test_save_job_arguments_summary_current_message_redacted(
     async def _body() -> None:
         engine, factory = _factory(db_path)
         try:
+            async with factory() as session:
+                conversation_id = await _seed_conversation(session)
+                await session.commit()
             tool_fn = build_save_job_tool(
                 session_factory=factory,
                 invoker=FakeJdInvoker([_full_extracted()]),
@@ -2128,6 +2204,7 @@ def test_save_job_arguments_summary_current_message_redacted(
             events = [
                 e
                 async for e in stream_chat_turn(
+                    conversation_id=conversation_id,
                     message=_OBVIOUS_JD_MESSAGE,
                     graph_bundle=build_agent_graph(
                         model=model,

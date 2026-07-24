@@ -105,15 +105,20 @@ def _job_rows(
 
 
 async def _seed_candidate_and_jobs(factory: Any) -> SourceRevisionSnapshot:
-    await seed_candidate(factory)
+    profile_id = await seed_candidate(factory)
     await seed_scorable_job(factory, raw_hash="match-revisions-a")
     await seed_scorable_job(factory, raw_hash="match-revisions-b")
     await seed_unscorable_job(factory, raw_hash="match-revisions-unscorable")
     async with factory() as session:
-        return await load_source_revision_snapshot(session)
+        return await load_source_revision_snapshot(session, profile_id=profile_id)
 
 
-def _check(factory: Any, driver: ScriptedReadDriver) -> tuple[
+def _check(
+    factory: Any,
+    driver: ScriptedReadDriver,
+    *,
+    profile_id: str,
+) -> tuple[
     Any,
     list[tuple[Any, ...]],
     list[tuple[Any, ...]],
@@ -122,7 +127,9 @@ def _check(factory: Any, driver: ScriptedReadDriver) -> tuple[
 
     async def _body() -> Any:
         async with factory() as session:
-            return await check_graph_revision_consistency(session, driver)
+            return await check_graph_revision_consistency(
+                session, driver, profile_id=profile_id
+            )
 
     result = run_async(_body())
     after = run_async(snapshot_sqlite(factory))
@@ -138,7 +145,10 @@ def test_exact_match_accepts_equivalent_utc_timestamp_formats(
         jobs=_job_rows(snapshot),
     )
 
-    result, before, after = _check(sqlite_factory, driver)
+    assert snapshot.candidate is not None
+    result, before, after = _check(
+        sqlite_factory, driver, profile_id=snapshot.candidate.id
+    )
 
     assert result.is_consistent is True
     assert result.error_code is None
@@ -196,7 +206,10 @@ def test_revision_difference_rebuild_required(
         )
     driver = revision_read_driver(candidates=candidate_rows, jobs=job_rows)
 
-    result, before, after = _check(sqlite_factory, driver)
+    assert snapshot.candidate is not None
+    result, before, after = _check(
+        sqlite_factory, driver, profile_id=snapshot.candidate.id
+    )
 
     assert result.is_consistent is False
     assert result.error_code == NEO4J_REBUILD_REQUIRED
@@ -217,7 +230,10 @@ def test_neo4j_query_failure_returns_unavailable_without_details(
         failure=OSError("bolt://neo4j:7687 password=super-secret"),
     )
 
-    result, before, after = _check(sqlite_factory, driver)
+    assert snapshot.candidate is not None
+    result, before, after = _check(
+        sqlite_factory, driver, profile_id=snapshot.candidate.id
+    )
 
     assert result.is_consistent is False
     assert result.error_code == NEO4J_UNAVAILABLE
@@ -233,16 +249,20 @@ def test_empty_scorable_corpus_with_candidate_is_consistent(
     sqlite_factory: Any,
 ) -> None:
     async def _setup() -> SourceRevisionSnapshot:
-        await seed_candidate(sqlite_factory)
+        profile_id = await seed_candidate(sqlite_factory)
         async with sqlite_factory() as session:
-            return await load_source_revision_snapshot(session)
+            return await load_source_revision_snapshot(
+                session, profile_id=profile_id
+            )
 
     snapshot = run_async(_setup())
     assert snapshot.candidate is not None
     assert snapshot.jobs == ()
     driver = revision_read_driver(candidates=_candidate_rows(snapshot), jobs=[])
 
-    result, before, after = _check(sqlite_factory, driver)
+    result, before, after = _check(
+        sqlite_factory, driver, profile_id=snapshot.candidate.id
+    )
 
     assert result.is_consistent is True
     assert result.error_code is None
