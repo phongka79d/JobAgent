@@ -130,6 +130,7 @@ function historyWithMessages(): HistoryPage {
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -384,6 +385,7 @@ describe('ChatPage history and load-older', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               {
                 id: TOOL_EXEC,
@@ -528,6 +530,7 @@ describe('ChatPage send / stream / lock', () => {
             duration_ms: null,
             summary: null,
             error_code: null,
+            activity: null,
           }),
         );
         await new Promise<void>((resolve) => {
@@ -542,6 +545,7 @@ describe('ChatPage send / stream / lock', () => {
             duration_ms: 120,
             summary: 'done',
             error_code: null,
+            activity: null,
           }),
         );
         cbs.onEvent(sse(EVENT_D, 'text_delta', {delta: 'After tools'}));
@@ -708,6 +712,7 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
             duration_ms: null,
             summary: null,
             error_code: null,
+            activity: null,
           }),
         );
         cbs.onDisconnected?.();
@@ -946,6 +951,7 @@ describe('ChatPage active-CV source from durable history (03A)', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               {
                 id: TOOL_EXEC,

@@ -190,6 +190,7 @@ function historyWithCv(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [tool],
         },
       },
@@ -833,6 +834,7 @@ describe('stream vs terminal active-CV evidence', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               toolExecution(rawPage([entryRecord({entry_id: 'turn-a'})])),
             ],
@@ -863,6 +865,7 @@ describe('stream vs terminal active-CV evidence', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               toolExecution(
                 rawPage([entryRecord({entry_id: 'turn-b'})], {

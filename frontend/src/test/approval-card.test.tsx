@@ -93,6 +93,7 @@ function interruptedHistory(card = profileCommitCard()): HistoryPage {
           completed_at: null,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [
             {
               id: TOOL_EXEC,

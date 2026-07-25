@@ -9,6 +9,7 @@ import {projectMatchJobsResultData} from '../jobs/matchResult';
 import {projectCompactResultData} from '../jobs/types';
 import {projectActiveCvResultData} from './activeCvEvidence';
 import type {
+  AgentActivityPayload,
   AgentRunView,
   ApprovalRequiredPayload,
   ChatMessageView,
@@ -17,6 +18,7 @@ import type {
   ToolExecutionView,
 } from './types';
 import type {
+  ClientAgentActivity,
   ClientMessage,
   ClientRun,
   ClientToolActivity,
@@ -55,6 +57,27 @@ export function toolViewToActivity(tool: ToolExecutionView): ClientToolActivity 
   };
 }
 
+/** Map the canonical durable activity projection into client history state. */
+export function activityViewToClient(
+  activity: AgentActivityPayload,
+): ClientAgentActivity {
+  return {
+    activityId: activity.activity_id,
+    runId: activity.run_id,
+    sequence: activity.sequence,
+    kind: activity.kind,
+    label: activity.label,
+    technicalName: activity.technical_name,
+    state: activity.state,
+    startedAt: activity.started_at,
+    updatedAt: activity.updated_at,
+    completedAt: activity.completed_at,
+    durationMs: activity.duration_ms,
+    errorCode: activity.error_code,
+    source: 'history',
+  };
+}
+
 /** Map a durable agent run into client run state. */
 export function runViewToClient(run: AgentRunView): ClientRun {
   return {
@@ -65,6 +88,7 @@ export function runViewToClient(run: AgentRunView): ClientRun {
     errorCode: run.error_code,
     completedAt: run.completed_at,
     tools: run.tool_executions.map(toolViewToActivity),
+    activities: run.activities.map(activityViewToClient),
   };
 }
 
@@ -159,6 +183,7 @@ export function replaceTransientToolsFromHistory(
         pendingApproval: durable.pendingApproval,
         // Durable tools replace all transient stream tools for this run.
         tools: durable.tools,
+        activities: durable.activities,
       },
       isStreaming: false,
     };

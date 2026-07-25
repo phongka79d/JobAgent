@@ -10,6 +10,23 @@ export type RunState = 'running' | 'interrupted' | 'completed' | 'failed';
 /** Exact tool statuses (no complete/error aliases). */
 export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type AgentActivityKind = 'assistant' | 'tool';
+
+export interface AgentActivityPayload {
+  activity_id: string;
+  run_id: string;
+  sequence: number;
+  kind: AgentActivityKind;
+  label: string;
+  technical_name: string | null;
+  state: ToolStatus;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_code: string | null;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type SseEventName =
@@ -81,6 +98,7 @@ export interface RunStartedPayload {
 
 export interface AssistantStatusPayload {
   message: string;
+  activity: AgentActivityPayload | null;
 }
 
 export interface ToolStatusPayload {
@@ -91,6 +109,7 @@ export interface ToolStatusPayload {
   duration_ms: number | null;
   summary: string | null;
   error_code: string | null;
+  activity: AgentActivityPayload | null;
 }
 
 export interface ApprovalRequiredPayload {
@@ -152,6 +171,7 @@ export interface AgentRunView {
   created_at: string;
   updated_at: string;
   tool_executions: ToolExecutionView[];
+  activities: AgentActivityPayload[];
 }
 
 export interface ChatMessageView {
@@ -232,7 +252,153 @@ function asRunState(value: unknown): RunState {
   return value as RunState;
 }
 
-function parseToolStatusPayload(raw: Record<string, unknown>): ToolStatusPayload {
+const AGENT_ACTIVITY_KEYS = [
+  'activity_id',
+  'run_id',
+  'sequence',
+  'kind',
+  'label',
+  'technical_name',
+  'state',
+  'started_at',
+  'updated_at',
+  'completed_at',
+  'duration_ms',
+  'error_code',
+] as const;
+
+function requireExactKeys(
+  raw: Record<string, unknown>,
+  expected: readonly string[],
+  path: string,
+): void {
+  const actual = Object.keys(raw).sort();
+  const required = [...expected].sort();
+  if (
+    actual.length !== required.length ||
+    actual.some((key, index) => key !== required[index])
+  ) {
+    throw new SseParseError(`${path} has invalid fields`);
+  }
+}
+
+function asUtcTimestamp(value: unknown, path: string): string {
+  if (
+    typeof value !== 'string' ||
+    !/(?:Z|[+-]00:00)$/i.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
+    throw new SseParseError(`${path} must be an aware UTC timestamp`);
+  }
+  return value;
+}
+
+function asNullableBoundedString(
+  value: unknown,
+  path: string,
+  maxLength: number,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (
+    typeof value !== 'string' ||
+    value.trim() === '' ||
+    value.length > maxLength
+  ) {
+    throw new SseParseError(`${path} must be a bounded non-empty string or null`);
+  }
+  return value;
+}
+
+function parseAgentActivity(
+  raw: unknown,
+  expectedRunId: string,
+  path = 'activity',
+): AgentActivityPayload {
+  if (!isObject(raw)) {
+    throw new SseParseError(`${path} must be an object`);
+  }
+  requireExactKeys(raw, AGENT_ACTIVITY_KEYS, path);
+  const activity_id = requireUuid(raw, 'activity_id');
+  const run_id = requireUuid(raw, 'run_id');
+  if (run_id !== expectedRunId) {
+    throw new SseParseError(`${path}.run_id must match envelope run_id`);
+  }
+  const sequence = raw.sequence;
+  if (
+    typeof sequence !== 'number' ||
+    !Number.isInteger(sequence) ||
+    sequence < 0
+  ) {
+    throw new SseParseError(`${path}.sequence must be a non-negative integer`);
+  }
+  if (raw.kind !== 'assistant' && raw.kind !== 'tool') {
+    throw new SseParseError(`${path}.kind must be assistant or tool`);
+  }
+  const label = requireString(raw, 'label');
+  if (label.trim() === '' || label.length > 160) {
+    throw new SseParseError(`${path}.label must be a bounded non-empty string`);
+  }
+  const technical_name = asNullableBoundedString(
+    raw.technical_name,
+    `${path}.technical_name`,
+    120,
+  );
+  const state = asToolStatus(raw.state);
+  const started_at = asUtcTimestamp(raw.started_at, `${path}.started_at`);
+  const updated_at = asUtcTimestamp(raw.updated_at, `${path}.updated_at`);
+  const completed_at =
+    raw.completed_at === null
+      ? null
+      : asUtcTimestamp(raw.completed_at, `${path}.completed_at`);
+  const duration_ms =
+    raw.duration_ms === null
+      ? null
+      : typeof raw.duration_ms === 'number' &&
+          Number.isInteger(raw.duration_ms) &&
+          raw.duration_ms >= 0
+        ? raw.duration_ms
+        : (() => {
+            throw new SseParseError(
+              `${path}.duration_ms must be a non-negative integer or null`,
+            );
+          })();
+  const error_code = asNullableBoundedString(
+    raw.error_code,
+    `${path}.error_code`,
+    120,
+  );
+  const terminal = state === 'completed' || state === 'failed';
+  if (terminal !== (completed_at !== null)) {
+    throw new SseParseError(`${path} terminal state requires completed_at`);
+  }
+  if (!terminal && duration_ms !== null) {
+    throw new SseParseError(`${path} non-terminal state forbids duration_ms`);
+  }
+  if (state === 'failed' ? error_code === null : error_code !== null) {
+    throw new SseParseError(`${path} has invalid error_code coupling`);
+  }
+  return {
+    activity_id,
+    run_id,
+    sequence,
+    kind: raw.kind,
+    label,
+    technical_name,
+    state,
+    started_at,
+    updated_at,
+    completed_at,
+    duration_ms,
+    error_code,
+  };
+}
+
+function parseToolStatusPayload(
+  raw: Record<string, unknown>,
+  expectedRunId: string,
+): ToolStatusPayload {
   const status = asToolStatus(raw.status);
   const tool_execution_id = requireUuid(raw, 'tool_execution_id');
   const tool_call_id = requireString(raw, 'tool_call_id');
@@ -285,6 +451,25 @@ function parseToolStatusPayload(raw: Record<string, unknown>): ToolStatusPayload
     throw new SseParseError('completed must not include error_code');
   }
 
+  const activity =
+    raw.activity === undefined || raw.activity === null
+      ? null
+      : parseAgentActivity(raw.activity, expectedRunId);
+  if (activity !== null) {
+    if (activity.kind !== 'tool') {
+      throw new SseParseError('tool_status activity kind must be tool');
+    }
+    if (activity.activity_id !== tool_execution_id) {
+      throw new SseParseError('tool_status activity_id must match tool_execution_id');
+    }
+    if (activity.technical_name !== tool_name) {
+      throw new SseParseError('tool_status technical_name must match tool_name');
+    }
+    if (activity.state !== status) {
+      throw new SseParseError('tool_status activity state must match status');
+    }
+  }
+
   return {
     tool_execution_id,
     tool_call_id,
@@ -293,6 +478,7 @@ function parseToolStatusPayload(raw: Record<string, unknown>): ToolStatusPayload
     duration_ms,
     summary,
     error_code,
+    activity,
   };
 }
 
@@ -334,13 +520,33 @@ export function parseSseEventData(data: unknown): SseEvent {
     }
     case 'assistant_status': {
       const message = requireString(payload, 'message');
-      return {...base, event: 'assistant_status', payload: {message}};
+      const activity =
+        payload.activity === undefined || payload.activity === null
+          ? null
+          : parseAgentActivity(payload.activity, run_id);
+      if (activity !== null) {
+        if (activity.kind !== 'assistant') {
+          throw new SseParseError(
+            'assistant_status activity kind must be assistant',
+          );
+        }
+        if (activity.label !== message) {
+          throw new SseParseError(
+            'assistant_status message must match activity label',
+          );
+        }
+      }
+      return {
+        ...base,
+        event: 'assistant_status',
+        payload: {message, activity},
+      };
     }
     case 'tool_status':
       return {
         ...base,
         event: 'tool_status',
-        payload: parseToolStatusPayload(payload),
+        payload: parseToolStatusPayload(payload, run_id),
       };
     case 'approval_required': {
       if (payload.state !== 'interrupted') {
@@ -495,6 +701,12 @@ function parseAgentRunView(raw: unknown, path: string): AgentRunView {
   const tool_executions = raw.tool_executions.map((t, i) =>
     parseToolExecutionView(t, `${path}.tool_executions[${i}]`),
   );
+  if (!Array.isArray(raw.activities)) {
+    throw new SseParseError(`${path}.activities must be an array`);
+  }
+  const activities = raw.activities.map((activity, index) =>
+    parseAgentActivity(activity, id, `${path}.activities[${index}]`),
+  );
   return {
     id,
     user_message_id,
@@ -505,6 +717,7 @@ function parseAgentRunView(raw: unknown, path: string): AgentRunView {
     created_at,
     updated_at,
     tool_executions,
+    activities,
   };
 }
 

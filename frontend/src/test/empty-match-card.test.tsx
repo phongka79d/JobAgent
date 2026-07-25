@@ -159,6 +159,7 @@ function historyWithZeroMatch(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [tool],
         },
       },
@@ -407,6 +408,7 @@ describe('zero-only gate and durable source binding', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               toolExecution(zeroMatchData(), {tool_name: 'query_jobs'}),
             ],
@@ -728,6 +730,7 @@ describe('hydrate path still projects zero-result once', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [toolExecution(zeroMatchData())],
           },
         },
@@ -756,6 +759,7 @@ describe('hydrate path still projects zero-result once', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               toolExecution(zeroMatchData(), {
                 id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',

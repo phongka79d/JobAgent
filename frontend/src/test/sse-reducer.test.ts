@@ -45,6 +45,27 @@ const MSG_ASST = '99999999-9999-4999-8999-999999999999';
 const MSG_OLD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TS = '2026-07-13T12:00:00.000Z';
 const TS_OLD = '2026-07-13T11:00:00.000Z';
+const TS_NEW = '2026-07-13T12:00:01.000Z';
+
+function activity(
+  overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    activity_id: EVENT_F,
+    run_id: RUN_ID,
+    sequence: 0,
+    kind: 'assistant',
+    label: 'Generating reply',
+    technical_name: 'response_generation',
+    state: 'running',
+    started_at: TS,
+    updated_at: TS,
+    completed_at: null,
+    duration_ms: null,
+    error_code: null,
+    ...overrides,
+  };
+}
 
 function envelope(
   eventId: string,
@@ -190,6 +211,70 @@ describe('SSE event vocabulary and status aliases', () => {
       }
     }
   });
+
+  it('parses canonical assistant and tool activity with matching identities', () => {
+    const assistant = parseSseEventData(
+      envelope(EVENT_A, 'assistant_status', {
+        message: 'Generating reply',
+        activity: activity(),
+      }),
+    );
+    expect(assistant.event).toBe('assistant_status');
+    if (assistant.event === 'assistant_status') {
+      expect(assistant.payload.activity?.label).toBe('Generating reply');
+      expect(assistant.payload.activity?.kind).toBe('assistant');
+    }
+
+    const tool = parseSseEventData(
+      envelope(EVENT_B, 'tool_status', {
+        tool_execution_id: TOOL_EXEC,
+        tool_call_id: 'tc-query',
+        tool_name: 'query_jobs',
+        status: 'running',
+        activity: activity({
+          activity_id: TOOL_EXEC,
+          kind: 'tool',
+          label: 'Search jobs',
+          technical_name: 'query_jobs',
+        }),
+      }),
+    );
+    expect(tool.event).toBe('tool_status');
+    if (tool.event === 'tool_status') {
+      expect(tool.payload.activity?.activity_id).toBe(TOOL_EXEC);
+      expect(tool.payload.activity?.technical_name).toBe('query_jobs');
+    }
+  });
+
+  it('rejects nested activity owned by another run', () => {
+    expect(() =>
+      parseSseEventData(
+        envelope(EVENT_A, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity({run_id: MSG_USER}),
+        }),
+      ),
+    ).toThrow(/run_id/);
+  });
+
+  it('rejects extra activity fields and invalid terminal coupling', () => {
+    expect(() =>
+      parseSseEventData(
+        envelope(EVENT_A, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity({arguments: {secret: true}}),
+        }),
+      ),
+    ).toThrow(/fields/);
+    expect(() =>
+      parseSseEventData(
+        envelope(EVENT_A, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity({state: 'completed'}),
+        }),
+      ),
+    ).toThrow(/completed_at/);
+  });
 });
 
 describe('Incremental SSE parser', () => {
@@ -303,9 +388,168 @@ describe('Reducer: direct answer path', () => {
     expect(assistant?.content).toBe('X');
     expect(Object.keys(state.seenEventIds)).toHaveLength(2);
   });
+
+  it('attaches assistant activity and ignores a duplicate event id', () => {
+    let state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity(),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'assistant_status', {
+          message: 'Conflicting duplicate',
+          activity: activity({label: 'Conflicting duplicate'}),
+        }),
+      ),
+    ]);
+    const run = state.messages.find((message) => message.role === 'assistant')?.run;
+    expect(run?.activities).toHaveLength(1);
+    expect(run?.activities[0]?.label).toBe('Generating reply');
+    expect(Object.keys(state.seenEventIds)).toHaveLength(2);
+
+    state = chatReducer(state, {
+      type: 'sse/event',
+      event: parseSseEventData(
+        envelope(EVENT_C, 'assistant_status', {
+          message: 'Generated reply',
+          activity: activity({
+            label: 'Generated reply',
+            state: 'completed',
+            updated_at: TS_NEW,
+            completed_at: TS_NEW,
+            duration_ms: 25,
+          }),
+        }),
+      ),
+    });
+    expect(
+      state.messages.find((message) => message.role === 'assistant')?.run
+        ?.activities[0]?.state,
+    ).toBe('completed');
+
+    state = reduceAll(state, [
+      parseSseEventData(
+        envelope(EVENT_D, 'assistant_status', {
+          message: 'Older update',
+          activity: activity({label: 'Older update', updated_at: TS_OLD}),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_E, 'assistant_status', {
+          message: 'Equal-time conflict',
+          activity: activity({
+            label: 'Equal-time conflict',
+            state: 'completed',
+            updated_at: TS_NEW,
+            completed_at: TS_NEW,
+            duration_ms: 99,
+          }),
+        }),
+      ),
+    ]);
+    const stable = state.messages.find(
+      (message) => message.role === 'assistant',
+    )?.run?.activities[0];
+    expect(stable?.label).toBe('Generated reply');
+    expect(stable?.durationMs).toBe(25);
+  });
+
+  it('preserves activities across completed, failed, and interrupted runs', () => {
+    const terminalEvents = [
+      envelope(EVENT_C, 'run_completed', {state: 'completed'}),
+      envelope(EVENT_C, 'run_failed', {
+        state: 'failed',
+        error_code: 'AGENT_FAILED',
+        summary: 'Unable to complete',
+      }),
+      envelope(EVENT_C, 'approval_required', {
+        state: 'interrupted',
+        kind: 'profile_commit',
+        allowed_actions: ['save_profile'],
+        card: {},
+      }),
+    ];
+    for (const terminalEvent of terminalEvents) {
+      const state = reduceAll(createInitialChatState(), [
+        parseSseEventData(
+          envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+        ),
+        parseSseEventData(
+          envelope(EVENT_B, 'assistant_status', {
+            message: 'Generating reply',
+            activity: activity(),
+          }),
+        ),
+        parseSseEventData(terminalEvent),
+      ]);
+      expect(
+        state.messages.find((message) => message.role === 'assistant')?.run
+          ?.activities,
+      ).toHaveLength(1);
+    }
+  });
+
+  it('creates a backend-labelled stream activity for legacy assistant status', () => {
+    const state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'assistant_status', {
+          message: 'Backend-owned legacy step',
+        }),
+      ),
+    ]);
+    const legacy = state.messages.find(
+      (message) => message.role === 'assistant',
+    )?.run?.activities[0];
+    expect(legacy).toMatchObject({
+      activityId: EVENT_B,
+      label: 'Backend-owned legacy step',
+      technicalName: null,
+      source: 'stream',
+    });
+  });
 });
 
 describe('Reducer: tool, interruption, failure, disconnect', () => {
+  it('normalizes canonical tool activity onto the run timeline', () => {
+    const state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-query',
+          tool_name: 'query_jobs',
+          status: 'running',
+          activity: activity({
+            activity_id: TOOL_EXEC,
+            kind: 'tool',
+            label: 'Search jobs',
+            technical_name: 'query_jobs',
+          }),
+        }),
+      ),
+    ]);
+    expect(
+      state.messages.find((message) => message.role === 'assistant')?.run
+        ?.activities[0],
+    ).toMatchObject({
+      activityId: TOOL_EXEC,
+      kind: 'tool',
+      label: 'Search jobs',
+      technicalName: 'query_jobs',
+      source: 'stream',
+    });
+  });
+
   it('tracks ordered tool_status with exact statuses', () => {
     let state = createInitialChatState();
     state = reduceAll(state, [
@@ -474,6 +718,22 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
                 updated_at: TS,
               },
             ],
+            activities: [
+              {
+                activity_id: EVENT_F,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'assistant',
+                label: 'Generating reply',
+                technical_name: 'response_generation',
+                state: 'completed',
+                started_at: TS_OLD,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 15,
+                error_code: null,
+              },
+            ],
           },
         },
         {
@@ -580,6 +840,22 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
                 arguments_summary: {source: 'current_message'},
                 created_at: TS,
                 updated_at: TS,
+              },
+            ],
+            activities: [
+              {
+                activity_id: EVENT_F,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'assistant',
+                label: 'Generating reply',
+                technical_name: 'response_generation',
+                state: 'completed',
+                started_at: TS_OLD,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 15,
+                error_code: null,
               },
             ],
           },
@@ -753,6 +1029,22 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
                 arguments_summary: null,
                 created_at: TS,
                 updated_at: TS,
+              },
+            ],
+            activities: [
+              {
+                activity_id: EVENT_F,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'assistant',
+                label: 'Generating reply',
+                technical_name: 'response_generation',
+                state: 'completed',
+                started_at: TS_OLD,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 15,
+                error_code: null,
               },
             ],
           },
@@ -933,6 +1225,22 @@ describe('History hydration and load-older', () => {
                 updated_at: TS,
               },
             ],
+            activities: [
+              {
+                activity_id: EVENT_F,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'assistant',
+                label: 'Generating reply',
+                technical_name: 'response_generation',
+                state: 'completed',
+                started_at: TS_OLD,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 15,
+                error_code: null,
+              },
+            ],
           },
         },
         {
@@ -956,6 +1264,11 @@ describe('History hydration and load-older', () => {
     expect(nextCursor).toBe('cursor-older');
     expect(messages[0].run?.tools[0].status).toBe('completed');
     expect(messages[0].run?.tools[0].source).toBe('history');
+    expect(messages[0].run?.activities[0]).toMatchObject({
+      label: 'Generating reply',
+      state: 'completed',
+      source: 'history',
+    });
     // Stream path keeps resultData null; history may carry compact data or null.
     expect(messages[0].run?.tools[0].resultData).toBeNull();
   });
@@ -1046,6 +1359,12 @@ describe('History hydration and load-older', () => {
         }),
       ),
       parseSseEventData(
+        envelope(EVENT_D, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity(),
+        }),
+      ),
+      parseSseEventData(
         envelope(EVENT_C, 'run_completed', {state: 'completed'}),
       ),
     ]);
@@ -1064,6 +1383,10 @@ describe('History hydration and load-older', () => {
     expect(userFromHistory?.run?.tools[0].source).toBe('history');
     expect(userFromHistory?.run?.tools[0].status).toBe('completed');
     expect(userFromHistory?.run?.tools[0].summary).toBe('durable summary');
+    expect(userFromHistory?.run?.activities[0]).toMatchObject({
+      state: 'completed',
+      source: 'history',
+    });
     // data was null in this fixture — still explicit, not stream-shaped.
     expect(userFromHistory?.run?.tools[0].resultData).toBeNull();
 
@@ -1130,6 +1453,7 @@ describe('History hydration and load-older', () => {
                   updated_at: TS,
                 },
               ],
+              activities: [],
             },
           },
         ],
@@ -1184,7 +1508,7 @@ describe('Reducer integration via sse/raw', () => {
     expect(next).toEqual(initial);
   });
 
-  it('assistant_status is non-terminal', () => {
+  it('assistant_status creates a non-terminal run activity', () => {
     const state = reduceAll(createInitialChatState(), [
       parseSseEventData(
         envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
@@ -1193,7 +1517,9 @@ describe('Reducer integration via sse/raw', () => {
         envelope(EVENT_B, 'assistant_status', {message: 'thinking'}),
       ),
     ]);
-    expect(state.assistantStatus).toBe('thinking');
+    expect(
+      state.messages.find((m) => m.role === 'assistant')?.run?.activities[0],
+    ).toMatchObject({label: 'thinking', state: 'running'});
     expect(state.messages.find((m) => m.role === 'assistant')?.run?.state).toBe(
       'running',
     );
@@ -1319,6 +1645,7 @@ describe('read_active_cv stream-null vs terminal history projection', () => {
                 updated_at: TS,
               },
             ],
+            activities: [],
           },
         },
         {

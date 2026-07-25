@@ -238,6 +238,7 @@ function historyWithMatchJobs(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [tool],
         },
       },

@@ -123,6 +123,7 @@ function interruptedHistory(
           completed_at: null,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -172,6 +173,7 @@ function terminalCommittedHistory(): HistoryPage {
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -226,6 +228,7 @@ function terminalCancelledHistory(): HistoryPage {
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -578,6 +581,7 @@ describe('jobSaveConfirmationForRow association', () => {
       pendingApproval: pending,
       errorCode: null,
       completedAt: null,
+      activities: [],
       tools: [
         {
           toolExecutionId: TOOL_EXEC,
@@ -655,6 +659,7 @@ describe('jobSaveConfirmationForRow association', () => {
           errorCode: null,
           completedAt: TS,
           tools: [],
+          activities: [],
         },
         isStreaming: false,
       },

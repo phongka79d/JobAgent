@@ -1115,7 +1115,7 @@ git commit -m "feat(backend): hydrate agent activity history"
 - Modify: `frontend/src/features/chat/reducer.ts`
 - Modify: `frontend/src/test/sse-reducer.test.ts`
 
-- [ ] **Step 1: Write failing parser and reducer tests**
+- [x] **Step 1: Write failing parser and reducer tests**
 
 In `frontend/src/test/sse-reducer.test.ts`, define a canonical activity helper:
 
@@ -1152,7 +1152,7 @@ Add tests for:
 - history hydration restoring activities and replacing stream-shaped terminal truth; and
 - a legacy assistant status without nested activity creating a stream-only activity whose label is the backend `message`, not a frontend mapping.
 
-- [ ] **Step 2: Run frontend reducer tests to verify RED**
+- [x] **Step 2: Run frontend reducer tests to verify RED**
 
 Run:
 
@@ -1163,7 +1163,7 @@ npm run test -- --run src/test/sse-reducer.test.ts
 
 Expected: missing activity types and `ClientRun.activities` failures.
 
-- [ ] **Step 3: Add wire types and strict parsing**
+- [x] **Step 3: Add wire types and strict parsing**
 
 In `frontend/src/features/chat/types.ts`, add:
 
@@ -1219,7 +1219,7 @@ constructor in `reducer.ts`. Remove `assistantStatus` from `ChatState`, initial
 state, and reset paths. Re-export `ClientAgentActivity` from `reducer.ts`
 beside the other model types so presentation code has one import boundary.
 
-- [ ] **Step 5: Normalize history and SSE into the same model**
+- [x] **Step 5: Normalize history and SSE into the same model**
 
 In `history.ts`, add `activityViewToClient` and map `run.activities`. In
 `reducer.ts`, add:
@@ -1257,7 +1257,7 @@ friendly timeline row.
 Update durable rehydration to replace terminal `activities` together with
 terminal `tools`.
 
-- [ ] **Step 6: Run reducer/history tests and typecheck**
+- [x] **Step 6: Run reducer/history tests and typecheck**
 
 Run:
 
@@ -1270,7 +1270,7 @@ npm run lint
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit the frontend state slice**
+- [x] **Step 7: Commit the frontend state slice**
 
 ```powershell
 git add frontend/src/features/chat/types.ts frontend/src/features/chat/model.ts frontend/src/features/chat/history.ts frontend/src/features/chat/reducer.ts frontend/src/test/sse-reducer.test.ts

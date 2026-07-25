@@ -135,6 +135,7 @@ function historyWithSaveJob(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
+          activities: [],
           tool_executions: [tool],
         },
       },
@@ -745,6 +746,7 @@ describe('ChatPage durable saved-job card', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
+            activities: [],
             tool_executions: [
               {
                 id: TOOL_EXEC,

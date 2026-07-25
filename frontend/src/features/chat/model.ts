@@ -23,6 +23,22 @@ export interface ClientToolActivity {
   resultData: JsonObject | null;
 }
 
+export interface ClientAgentActivity {
+  activityId: string;
+  runId: string;
+  sequence: number;
+  kind: 'assistant' | 'tool';
+  label: string;
+  technicalName: string | null;
+  state: ToolStatus;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  errorCode: string | null;
+  source: 'stream' | 'history';
+}
+
 export interface ClientRun {
   id: string;
   userMessageId: string | null;
@@ -31,6 +47,7 @@ export interface ClientRun {
   errorCode: string | null;
   completedAt: string | null;
   tools: ClientToolActivity[];
+  activities: ClientAgentActivity[];
 }
 
 export interface ClientMessage {

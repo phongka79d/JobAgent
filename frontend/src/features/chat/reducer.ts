@@ -11,6 +11,7 @@ import {
   rehydrateWithDurableTruth,
 } from './history';
 import type {
+  ClientAgentActivity,
   ClientMessage,
   ClientRun,
   ClientToolActivity,
@@ -18,6 +19,7 @@ import type {
   StreamPhase,
 } from './model';
 import type {
+  AgentActivityPayload,
   ApprovalRequiredPayload,
   HistoryPage,
   SseEvent,
@@ -25,6 +27,7 @@ import type {
 import {parseSseEventData, SseParseError} from './types';
 
 export type {
+  ClientAgentActivity,
   ClientMessage,
   ClientRun,
   ClientToolActivity,
@@ -102,6 +105,70 @@ function upsertTool(
   return copy;
 }
 
+function streamActivity(
+  activity: AgentActivityPayload,
+): ClientAgentActivity {
+  return {
+    activityId: activity.activity_id,
+    runId: activity.run_id,
+    sequence: activity.sequence,
+    kind: activity.kind,
+    label: activity.label,
+    technicalName: activity.technical_name,
+    state: activity.state,
+    startedAt: activity.started_at,
+    updatedAt: activity.updated_at,
+    completedAt: activity.completed_at,
+    durationMs: activity.duration_ms,
+    errorCode: activity.error_code,
+    source: 'stream',
+  };
+}
+
+function upsertActivity(
+  current: readonly ClientAgentActivity[],
+  next: ClientAgentActivity,
+): ClientAgentActivity[] {
+  const index = current.findIndex(
+    (activity) => activity.activityId === next.activityId,
+  );
+  if (index === -1) {
+    return [...current, next].sort(
+      (left, right) => left.sequence - right.sequence,
+    );
+  }
+  const existing = current[index];
+  if (existing.updatedAt >= next.updatedAt) {
+    return [...current];
+  }
+  const copy = [...current];
+  copy[index] = next;
+  return copy.sort((left, right) => left.sequence - right.sequence);
+}
+
+function legacyAssistantActivity(
+  event: Extract<SseEvent, {event: 'assistant_status'}>,
+  current: readonly ClientAgentActivity[],
+): ClientAgentActivity {
+  const sequence =
+    Math.max(-1, ...current.map((activity) => activity.sequence)) + 1;
+  return {
+    activityId: event.event_id,
+    runId: event.run_id,
+    sequence,
+    kind: 'assistant',
+    label: event.payload.message,
+    technicalName: null,
+    state: 'running',
+    startedAt: event.timestamp,
+    updatedAt: event.timestamp,
+    completedAt: null,
+    durationMs: null,
+    errorCode: null,
+    source: 'stream',
+  };
+}
+
 function updateAssistantForRun(
   messages: readonly ClientMessage[],
   runId: string,
@@ -130,6 +197,7 @@ function updateAssistantForRun(
           errorCode: null,
           completedAt: null,
           tools: [],
+          activities: [],
         } satisfies ClientRun);
       return updater(msg, run);
     }
@@ -164,6 +232,7 @@ function ensureStreamingAssistant(
             errorCode: null,
             completedAt: null,
             tools: m.run?.tools ?? [],
+            activities: m.run?.activities ?? [],
           },
           isStreaming: true,
         };
@@ -189,6 +258,7 @@ function ensureStreamingAssistant(
       errorCode: null,
       completedAt: null,
       tools: [],
+      activities: [],
     },
     isStreaming: true,
   };
@@ -236,6 +306,7 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
                 errorCode: null,
                 completedAt: null,
                 tools: [],
+                activities: [],
               },
             };
           }
@@ -257,9 +328,35 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
       };
     }
     case 'assistant_status': {
+      const ensured = ensureStreamingAssistant(
+        {...state, seenEventIds},
+        event.run_id,
+        event.timestamp,
+      );
+      const messages = updateAssistantForRun(
+        ensured.messages,
+        event.run_id,
+        ensured.streamingAssistantKey,
+        (message, run) => {
+          const next = event.payload.activity
+            ? streamActivity(event.payload.activity)
+            : legacyAssistantActivity(event, run.activities);
+          return {
+            ...message,
+            run: {
+              ...run,
+              activities: upsertActivity(run.activities, next),
+            },
+            isStreaming: true,
+          };
+        },
+      );
       return {
         ...state,
         seenEventIds,
+        messages,
+        activeRunId: event.run_id,
+        streamingAssistantKey: ensured.streamingAssistantKey,
         assistantStatus: event.payload.message,
         streamPhase:
           state.streamPhase === 'idle' ? 'streaming' : state.streamPhase,
@@ -308,13 +405,23 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         // Live SSE carries status/summary only — compact data arrives via history.
         resultData: null,
       };
+      const activity = event.payload.activity
+        ? streamActivity(event.payload.activity)
+        : null;
       const messages = updateAssistantForRun(
         ensured.messages,
         event.run_id,
         ensured.streamingAssistantKey,
         (msg, run) => ({
           ...msg,
-          run: {...run, tools: upsertTool(run.tools, tool)},
+          run: {
+            ...run,
+            tools: upsertTool(run.tools, tool),
+            activities:
+              activity === null
+                ? run.activities
+                : upsertActivity(run.activities, activity),
+          },
           isStreaming: true,
         }),
       );
