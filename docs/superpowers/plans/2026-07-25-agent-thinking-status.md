@@ -1713,7 +1713,7 @@ git commit -m "test: cover durable agent activity states"
 - No planned source changes. Fix only failures caused by this feature and commit
   each focused repair separately.
 
-- [ ] **Step 1: Run all backend gates**
+- [x] **Step 1: Run all backend gates**
 
 Run:
 
@@ -1727,7 +1727,7 @@ Set-Location backend
 Expected: all pass. Existing dependency deprecation warnings may remain; no new
 activity, migration, or SSE failures are allowed.
 
-- [ ] **Step 2: Run all frontend gates**
+- [x] **Step 2: Run all frontend gates**
 
 Run:
 
@@ -1741,7 +1741,7 @@ npm run build
 
 Expected: all pass. The existing Vite chunk-size advisory may remain.
 
-- [ ] **Step 3: Verify repository hygiene**
+- [x] **Step 3: Verify repository hygiene**
 
 Run from the repository root:
 
@@ -1755,7 +1755,7 @@ rg -n "FRIENDLY_TOOL_LABELS|assistantStatus|message\.content === '' && message\.
 Expected: no whitespace errors, no unexpected tracked changes, and no old
 placeholder/status owner.
 
-- [ ] **Step 4: Rebuild the existing disposable Compose project without deleting volumes**
+- [x] **Step 4: Rebuild the existing disposable Compose project without deleting volumes**
 
 Run:
 
@@ -1769,7 +1769,7 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project 
 Expected: frontend, backend, and Neo4j become healthy. Do not run `down -v`;
 migration `0006` is additive and must preserve current application data.
 
-- [ ] **Step 5: Test the real waiting experience in the default browser**
+- [x] **Step 5: Test the real waiting experience in the default browser**
 
 Use `browser:control-in-app-browser` with the runtime default browser, or the
 current Chrome binding when it is the selected default. Open
@@ -1790,7 +1790,7 @@ Send a prompt that invokes real tools, then verify visible DOM and screenshots:
 Do not inspect cookies, local storage, credentials, raw CV text, provider
 payloads, or database paths. Keep the final app tab as a browser handoff.
 
-- [ ] **Step 6: Inspect container logs only for feature errors**
+- [x] **Step 6: Inspect container logs only for feature errors**
 
 Run bounded log reads:
 
@@ -1803,7 +1803,7 @@ docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project 
 Expected: no activity migration, schema validation, SSE framing, or frontend
 runtime errors. Never print `.env` or provider payloads.
 
-- [ ] **Step 7: Final review and evidence summary**
+- [x] **Step 7: Final review and evidence summary**
 
 Run:
 
