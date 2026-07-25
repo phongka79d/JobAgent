@@ -219,6 +219,24 @@ function historyWithRunningUserOnly(): HistoryPage {
   };
 }
 
+function historyWithFailedUserOnly(): HistoryPage {
+  const page = historyWithRunningUserOnly();
+  const run = page.items[0]?.run;
+  const activity = run?.activities[0];
+  if (!run || !activity) {
+    throw new Error('running history fixture is incomplete');
+  }
+  run.state = 'failed';
+  run.error_code = 'AGENT_EXECUTION_FAILED';
+  run.completed_at = TS_NEW;
+  activity.state = 'failed';
+  activity.updated_at = TS_NEW;
+  activity.completed_at = TS_NEW;
+  activity.duration_ms = 11600;
+  activity.error_code = 'AGENT_EXECUTION_FAILED';
+  return page;
+}
+
 function olderHistoryPage(): HistoryPage {
   return {
     items: [
@@ -443,6 +461,18 @@ describe('ChatPage history and load-older', () => {
     await user.click(disclosure);
     expect(screen.getByText('Generating reply')).toBeInTheDocument();
     expect(screen.getByText('response_generation · running')).toBeInTheDocument();
+  });
+
+  it('shows failed activity when reload history ends without an assistant message', async () => {
+    renderChat({
+      loadHistory: vi.fn().mockResolvedValue(historyWithFailedUserOnly()),
+      sendTurn: vi.fn(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/^Completed ·/)).not.toBeInTheDocument();
   });
 
   it('renders durable failed tool status text without complete/error aliases', async () => {

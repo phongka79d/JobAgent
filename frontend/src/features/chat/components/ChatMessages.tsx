@@ -56,14 +56,14 @@ function isApprovalLocked(
   return (locked as readonly string[]).includes(runId);
 }
 
-function reloadedRunningActivityHost(
+function reloadedActivityHost(
   messages: readonly ClientMessage[],
 ): {message: ClientMessage; run: ClientRun; sourceMessageId: string} | null {
   const latest = messages.at(-1);
   if (
     !latest ||
     latest.role !== 'user' ||
-    latest.run?.state !== 'running'
+    (latest.run?.state !== 'running' && latest.run?.state !== 'failed')
   ) {
     return null;
   }
@@ -161,7 +161,7 @@ export function ChatMessages({
       index > latestUserIndex &&
       activityRunForAssistantDisplay(messages, index) !== null,
   );
-  const reloadedRunningHost = reloadedRunningActivityHost(messages);
+  const reloadedHost = reloadedActivityHost(messages);
   return (
     <ChatMessageList
       density="balanced"
@@ -213,14 +213,14 @@ export function ChatMessages({
           />
         );
       })}
-      {reloadedRunningHost ? (
+      {reloadedHost ? (
         <ChatMessageRow
-          key={reloadedRunningHost.message.clientKey}
-          message={reloadedRunningHost.message}
+          key={reloadedHost.message.clientKey}
+          message={reloadedHost.message}
           tools={[]}
-          activityRun={reloadedRunningHost.run}
+          activityRun={reloadedHost.run}
           streamPhase="disconnected"
-          sourceMessageId={reloadedRunningHost.sourceMessageId}
+          sourceMessageId={reloadedHost.sourceMessageId}
           profileCommit={null}
           jobSaveConfirmation={null}
           approvalLocked={false}
