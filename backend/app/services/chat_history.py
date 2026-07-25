@@ -16,10 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.chat import (
     CHAT_MESSAGE_ROLE_USER,
+    AgentActivity,
     AgentRun,
     ChatMessage,
     ToolExecution,
 )
+from app.repositories import agent_activities as activity_repo
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
@@ -33,6 +35,7 @@ from app.schemas.chat import (
     encode_history_cursor,
 )
 from app.schemas.tools import ToolResult, parse_tool_result
+from app.services.agent_activity import activity_payload, legacy_tool_activity_view
 
 
 class ChatHistoryServiceError(Exception):
@@ -75,7 +78,22 @@ def _tool_view(row: ToolExecution) -> ToolExecutionView:
 def _run_view(
     run: AgentRun,
     tools: list[ToolExecution],
+    activities: list[AgentActivity],
 ) -> AgentRunView:
+    projected = [activity_payload(activity) for activity in activities]
+    stored_ids = {activity.activity_id for activity in projected}
+    next_sequence = max(
+        (activity.sequence for activity in projected), default=-1
+    ) + 1
+    legacy_tools = sorted(
+        (tool for tool in tools if tool.id not in stored_ids),
+        key=lambda tool: (_require_aware_utc(tool.created_at), tool.id),
+    )
+    projected.extend(
+        legacy_tool_activity_view(tool, next_sequence + offset)
+        for offset, tool in enumerate(legacy_tools)
+    )
+    projected.sort(key=lambda activity: (activity.sequence, activity.activity_id))
     return AgentRunView(
         id=run.id,
         user_message_id=run.user_message_id,
@@ -86,6 +104,7 @@ def _run_view(
         created_at=_require_aware_utc(run.created_at),
         updated_at=_require_aware_utc(run.updated_at),
         tool_executions=[_tool_view(t) for t in tools],
+        activities=projected,
     )
 
 
@@ -93,10 +112,15 @@ def _message_view(
     message: ChatMessage,
     run: AgentRun | None,
     tools_by_run: dict[str, list[ToolExecution]],
+    activities_by_run: dict[str, list[AgentActivity]],
 ) -> ChatMessageView:
     run_view: AgentRunView | None = None
     if run is not None and message.role == CHAT_MESSAGE_ROLE_USER:
-        run_view = _run_view(run, tools_by_run.get(run.id, []))
+        run_view = _run_view(
+            run,
+            tools_by_run.get(run.id, []),
+            activities_by_run.get(run.id, []),
+        )
     return ChatMessageView(
         id=message.id,
         role=message.role,  # type: ignore[arg-type]
@@ -165,9 +189,13 @@ async def _hydrate_items(
     run_by_user: dict[str, AgentRun] = {r.user_message_id: r for r in runs}
     run_ids = [r.id for r in runs]
     tools = await tool_repo.list_for_run_ids(session, run_ids)
+    activities = await activity_repo.list_for_run_ids(session, run_ids)
     tools_by_run: dict[str, list[ToolExecution]] = {}
     for tool in tools:
         tools_by_run.setdefault(tool.run_id, []).append(tool)
+    activities_by_run: dict[str, list[AgentActivity]] = {}
+    for activity in activities:
+        activities_by_run.setdefault(activity.run_id, []).append(activity)
 
     items: list[ChatMessageView] = []
     for message in messages:
@@ -177,7 +205,9 @@ async def _hydrate_items(
             if message.role == CHAT_MESSAGE_ROLE_USER
             else None
         )
-        items.append(_message_view(message, run, tools_by_run))
+        items.append(
+            _message_view(message, run, tools_by_run, activities_by_run)
+        )
     return items
 
 

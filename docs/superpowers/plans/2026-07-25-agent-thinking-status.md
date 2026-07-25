@@ -1014,7 +1014,7 @@ git commit -m "feat(backend): stream real agent activity"
 - Modify: `backend/app/services/chat_history.py`
 - Modify: `backend/tests/integration/test_chat_history.py`
 
-- [ ] **Step 1: Write failing history persistence tests**
+- [x] **Step 1: Write failing history persistence tests**
 
 In `backend/tests/integration/test_chat_history.py`, create a completed run with
 one persisted assistant activity and one persisted tool activity. Assert:
@@ -1039,7 +1039,7 @@ must synthesize exactly one safe tool activity whose `activity_id` is the tool
 execution ID, whose label is backend-humanized, and whose projection contains
 no arguments or result data.
 
-- [ ] **Step 2: Run the history test to verify RED**
+- [x] **Step 2: Run the history test to verify RED**
 
 Run:
 
@@ -1050,7 +1050,7 @@ Set-Location backend
 
 Expected: `AgentRunView` has no `activities` field.
 
-- [ ] **Step 3: Add activity to the public history schema**
+- [x] **Step 3: Add activity to the public history schema**
 
 In `backend/app/schemas/chat.py`, import `AgentActivityPayload` and add:
 
@@ -1073,7 +1073,7 @@ class AgentRunView(BaseModel):
 Export the canonical activity type from the schema module only if existing
 callers need it; do not duplicate its validation.
 
-- [ ] **Step 4: Hydrate stored and legacy activities**
+- [x] **Step 4: Hydrate stored and legacy activities**
 
 In `_hydrate_items`, load all activity rows once with
 `activity_repo.list_for_run_ids(session, run_ids)`. Group by run. In `_run_view`,
@@ -1085,7 +1085,7 @@ sequence values after the highest stored sequence, sort fallback tools by
 Do not write fallback rows during a GET. Do not expose `arguments_summary_json`
 or `result_json` in the activity projection.
 
-- [ ] **Step 5: Run history and API regression tests**
+- [x] **Step 5: Run history and API regression tests**
 
 Run:
 
@@ -1098,7 +1098,7 @@ Set-Location backend
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit the history slice**
+- [x] **Step 6: Commit the history slice**
 
 ```powershell
 git add backend/app/schemas/chat.py backend/app/services/chat_history.py backend/tests/integration/test_chat_history.py

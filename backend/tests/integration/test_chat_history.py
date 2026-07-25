@@ -32,6 +32,7 @@ from app.schemas.chat import (
     encode_history_cursor,
 )
 from app.schemas.tools import ToolResult
+from app.services.agent_activity import AgentActivityService
 from app.services.chat_history import get_history_page, history_page_as_dict
 from pydantic import ValidationError
 from sqlalchemy import text
@@ -428,6 +429,10 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
                     role=CHAT_MESSAGE_ROLE_ASSISTANT,
                     content="done",
                 )
+                user.created_at = T0
+                user.updated_at = T0
+                assistant.created_at = T0 + timedelta(seconds=1)
+                assistant.updated_at = T0 + timedelta(seconds=1)
                 run = await runs_repo.create_run(
                     session, user_message_id=user.id
                 )
@@ -488,6 +493,17 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
                 assert te.result.data == {"n": 1}
                 assert te.arguments_summary == {"q": "x"}
 
+                assert len(user_item.run.activities) == 1
+                legacy_activity = user_item.run.activities[0]
+                assert legacy_activity.activity_id == te.id
+                assert legacy_activity.label == "Stub Tool"
+                assert legacy_activity.technical_name == "stub_tool"
+                legacy_projection = legacy_activity.model_dump(mode="json")
+                assert "arguments" not in legacy_projection
+                assert "arguments_summary" not in legacy_projection
+                assert "result" not in legacy_projection
+                assert "data" not in legacy_projection
+
                 # Assistant has no run attachment
                 assert page.items[1].role == CHAT_MESSAGE_ROLE_ASSISTANT
                 assert page.items[1].run is None
@@ -511,6 +527,66 @@ def test_user_turn_run_and_tool_hydration(db_path: Path) -> None:
                         session, conversation_id=CONVERSATION_ID
                     )
                 ))
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_history_hydrates_ordered_persisted_activities(db_path: Path) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="show activity history",
+                )
+                run = await runs_repo.create_run(session, user_message_id=user.id)
+                await session.commit()
+                run_id = run.id
+
+            service = AgentActivityService(factory)
+            assistant = await service.start_assistant(
+                run_id=run_id,
+                label="Generating reply",
+                technical_name="response_generation",
+            )
+            await service.record_tool(
+                run_id=run_id,
+                activity_id=new_uuid(),
+                label="Search jobs",
+                technical_name="query_jobs",
+                state="completed",
+                duration_ms=8,
+                error_code=None,
+            )
+            await service.finish(
+                activity_id=assistant.activity_id,
+                state="completed",
+                duration_ms=12,
+                error_code=None,
+            )
+            async with factory() as session:
+                await runs_repo.complete_run(session, run_id)
+                await session.commit()
+
+            async with factory() as session:
+                page = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=50,
+                )
+            hydrated = next(item.run for item in page.items if item.run is not None)
+            assert [activity.sequence for activity in hydrated.activities] == [0, 1]
+            assert [activity.label for activity in hydrated.activities] == [
+                "Generating reply",
+                "Search jobs",
+            ]
+            assert hydrated.activities[1].technical_name == "query_jobs"
         finally:
             await engine.dispose()
 

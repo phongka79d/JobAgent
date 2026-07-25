@@ -17,6 +17,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from app.schemas.agent_activity import AgentActivityPayload
 from app.schemas.common import (
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_SYSTEM,
@@ -266,6 +267,7 @@ class AgentRunView(BaseModel):
     created_at: AwareUtcDatetime
     updated_at: AwareUtcDatetime
     tool_executions: list[ToolExecutionView] = Field(default_factory=list)
+    activities: list[AgentActivityPayload] = Field(default_factory=list)
 
 
 class ChatMessageView(BaseModel):
