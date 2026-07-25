@@ -311,15 +311,15 @@ async def _stream_agent_run_impl(
                 attachment_ids=attachment_ids,
             )
 
-        with tool_status_publication_scope(_on_tool_status):
-            stream = compiled.astream(
-                stream_input,
-                config,
-                stream_mode="updates",
-                version="v1",
-            )
+        stream = compiled.astream(
+            stream_input,
+            config,
+            stream_mode="updates",
+            version="v1",
+        )
 
-            async def _pump_graph() -> None:
+        async def _pump_graph() -> None:
+            with tool_status_publication_scope(_on_tool_status):
                 try:
                     async for chunk in stream:
                         await merge_q.put(("graph", chunk))
@@ -328,72 +328,72 @@ async def _stream_agent_run_impl(
                 finally:
                     await merge_q.put(("graph_end", _GRAPH_END))
 
-            pump = asyncio.create_task(_pump_graph())
-            try:
-                while True:
-                    msg_kind, item = await merge_q.get()
-                    if msg_kind == "tool_status":
-                        assert isinstance(item, ToolStatusPublication)
-                        yield _tool_status_envelope(run_id, item)
-                        continue
-                    if msg_kind == "graph_error":
-                        graph_error = (
-                            item if isinstance(item, str) else ERROR_AGENT_EXECUTION
-                        )
-                        continue
-                    if msg_kind == "graph_end":
-                        break
-                    if msg_kind != "graph" or not isinstance(item, dict):
-                        continue
-                    interrupt_pa = _pending_approval_from_interrupt_chunk(item)
-                    if interrupt_pa is not None:
-                        pending_approval = interrupt_pa
-                        continue
-                    err = _error_from_update(item)
-                    if err is not None:
-                        graph_error = err
-                    for delta in _extract_text_deltas_from_update(item):
-                        assistant_parts.append(delta)
-                        yield build_sse_event(
-                            "text_delta",
-                            run_id,
-                            {"delta": delta},
-                        )
-                # Drain any statuses published between last graph item and end.
-                while True:
-                    try:
-                        msg_kind, item = merge_q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    if msg_kind == "tool_status":
-                        assert isinstance(item, ToolStatusPublication)
-                        yield _tool_status_envelope(run_id, item)
-                    elif msg_kind == "graph_error" and graph_error is None:
-                        graph_error = (
-                            item if isinstance(item, str) else ERROR_AGENT_EXECUTION
-                        )
-            finally:
-                if not pump.done():
-                    pump.cancel()
-                    try:
-                        await pump
-                    except asyncio.CancelledError:
-                        pass
-                else:
-                    await pump
-
-            if graph_error is None:
+        pump = asyncio.create_task(_pump_graph())
+        try:
+            while True:
+                msg_kind, item = await merge_q.get()
+                if msg_kind == "tool_status":
+                    assert isinstance(item, ToolStatusPublication)
+                    yield _tool_status_envelope(run_id, item)
+                    continue
+                if msg_kind == "graph_error":
+                    graph_error = (
+                        item if isinstance(item, str) else ERROR_AGENT_EXECUTION
+                    )
+                    continue
+                if msg_kind == "graph_end":
+                    break
+                if msg_kind != "graph" or not isinstance(item, dict):
+                    continue
+                interrupt_pa = _pending_approval_from_interrupt_chunk(item)
+                if interrupt_pa is not None:
+                    pending_approval = interrupt_pa
+                    continue
+                err = _error_from_update(item)
+                if err is not None:
+                    graph_error = err
+                for delta in _extract_text_deltas_from_update(item):
+                    assistant_parts.append(delta)
+                    yield build_sse_event(
+                        "text_delta",
+                        run_id,
+                        {"delta": delta},
+                    )
+            # Drain any statuses published between last graph item and end.
+            while True:
                 try:
-                    snap = await compiled.aget_state(config)
-                    values = snap.values if snap is not None else None
-                    if isinstance(values, dict):
-                        err_val = values.get("error")
-                        if isinstance(err_val, str) and err_val.strip():
-                            graph_error = err_val
-                    if pending_approval is None:
-                        pending_approval = _pending_approval_from_snapshot(snap)
-                except Exception:
+                    msg_kind, item = merge_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if msg_kind == "tool_status":
+                    assert isinstance(item, ToolStatusPublication)
+                    yield _tool_status_envelope(run_id, item)
+                elif msg_kind == "graph_error" and graph_error is None:
+                    graph_error = (
+                        item if isinstance(item, str) else ERROR_AGENT_EXECUTION
+                    )
+        finally:
+            if not pump.done():
+                pump.cancel()
+                try:
+                    await pump
+                except asyncio.CancelledError:
                     pass
+            else:
+                await pump
+
+        if graph_error is None:
+            try:
+                snap = await compiled.aget_state(config)
+                values = snap.values if snap is not None else None
+                if isinstance(values, dict):
+                    err_val = values.get("error")
+                    if isinstance(err_val, str) and err_val.strip():
+                        graph_error = err_val
+                if pending_approval is None:
+                    pending_approval = _pending_approval_from_snapshot(snap)
+            except Exception:
+                pass
 
         assistant_text = "".join(assistant_parts) if assistant_parts else None
 

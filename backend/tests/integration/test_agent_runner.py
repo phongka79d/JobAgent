@@ -1173,6 +1173,79 @@ def test_tool_status_concurrent_identities_distinct(
     run_async(_body())
 
 
+def test_timed_out_anext_does_not_reset_tool_status_listener_in_another_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Timed-out consumer reads keep live status delivery and clean token reset."""
+    import app.agent.runner as runner_module
+    from app.services import tool_execution as tool_execution_service
+    from app.services.tool_execution import ToolStatusPublication
+
+    release = asyncio.Event()
+
+    class _BlockingCompiled:
+        def astream(self, *_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+            return self._stream()
+
+        async def _stream(self) -> AsyncIterator[dict[str, Any]]:
+            tool_execution_service._publish(
+                ToolStatusPublication(
+                    tool_execution_id="11111111-1111-4111-8111-111111111111",
+                    tool_call_id="call-1",
+                    tool_name="blocking_echo",
+                    status="pending",
+                )
+            )
+            tool_execution_service._publish(
+                ToolStatusPublication(
+                    tool_execution_id="11111111-1111-4111-8111-111111111111",
+                    tool_call_id="call-1",
+                    tool_name="blocking_echo",
+                    status="running",
+                )
+            )
+            await release.wait()
+            if False:
+                yield {}
+
+        async def aget_state(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        runner_module,
+        "_compile_with_checkpointer",
+        lambda _bundle, _saver: _BlockingCompiled(),
+    )
+
+    async def _body() -> None:
+        gen = stream_agent_run(
+            run_id=RUN_A,
+            user_text="cancel next event",
+            graph_bundle=object(),
+            sqlite_path=tmp_path / "cancelled-anext.db",
+            include_assistant_status=False,
+        )
+        first = await gen.__anext__()
+        assert first.event == "run_started"
+
+        pending = await asyncio.wait_for(gen.__anext__(), timeout=0.5)
+        assert pending.event == "tool_status"
+        assert pending.payload.status == "pending"
+
+        running = await gen.__anext__()
+        assert running.event == "tool_status"
+        assert running.payload.status == "running"
+
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(gen.__anext__(), timeout=0.01)
+
+    try:
+        run_async(_body())
+    finally:
+        release.set()
+
+
 def test_tool_status_live_pending_running_while_side_effect_blocks(
     migrated_sqlite: Path,
     tmp_path: Path,
