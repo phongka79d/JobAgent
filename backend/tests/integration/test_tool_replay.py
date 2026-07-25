@@ -649,6 +649,7 @@ def test_execute_tool_publishes_ordered_statuses_and_terminal_replay(
                 )
             assert first.ok is True
             assert [p.status for p in pubs] == ["pending", "running", "completed"]
+            assert {p.display_label for p in pubs} == {"Stub Side Effect"}
             assert len({p.tool_execution_id for p in pubs}) == 1
             terminal = pubs[-1]
             assert terminal.duration_ms is not None
@@ -674,6 +675,7 @@ def test_execute_tool_publishes_ordered_statuses_and_terminal_replay(
             assert pubs[0].tool_execution_id == terminal.tool_execution_id
             assert pubs[0].duration_ms == terminal.duration_ms
             assert pubs[0].summary == "published ok"
+            assert pubs[0].display_label == "Stub Side Effect"
         finally:
             await engine.dispose()
 

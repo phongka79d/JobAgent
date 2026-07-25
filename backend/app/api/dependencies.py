@@ -40,7 +40,7 @@ class ChatAgentDeps:
     model: ChatModelLike | None
     registry: ToolRegistry
     sqlite_path: str | Path
-    include_assistant_status: bool = False
+    include_assistant_status: bool = True
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -74,7 +74,7 @@ def get_chat_agent_deps(request: Request) -> ChatAgentDeps:
             driver=driver,
         ),
         sqlite_path=settings.SQLITE_PATH,
-        include_assistant_status=False,
+        include_assistant_status=True,
     )
 
 

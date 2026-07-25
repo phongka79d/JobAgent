@@ -15,11 +15,13 @@ runs (no SQLite polling, second executor, or store).
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from time import perf_counter
+from typing import Any, Literal, cast
 
 from anyio import CancelScope
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -45,12 +47,17 @@ from app.agent.graph import (
     initial_graph_state,
 )
 from app.core.settings import Settings
+from app.schemas.agent_activity import AgentActivityPayload
+from app.schemas.common import ToolStatus
 from app.schemas.sse import SseEvent, build_sse_event
+from app.services.agent_activity import AgentActivityService, AgentActivityServiceError
 from app.services.tool_execution import (
     ToolStatusPublication,
     tool_status_publication_scope,
 )
 from app.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 # Sentinel placed on the merge queue when the graph stream ends.
 _GRAPH_END: object = object()
@@ -89,13 +96,20 @@ def _safe_summary(error_code: str) -> str:
     return _SAFE_ERROR_SUMMARIES.get(error_code, "Agent run failed")
 
 
-def _tool_status_envelope(run_id: str, pub: ToolStatusPublication) -> SseEvent:
+def _tool_status_envelope(
+    run_id: str,
+    pub: ToolStatusPublication,
+    activity: AgentActivityPayload | None,
+) -> SseEvent:
     """Frame one compact durable tool_status event (no raw args/result data)."""
     payload: dict[str, Any] = {
         "tool_execution_id": pub.tool_execution_id,
         "tool_call_id": pub.tool_call_id,
         "tool_name": pub.tool_name,
         "status": pub.status,
+        "activity": (
+            activity.model_dump(mode="json") if activity is not None else None
+        ),
     }
     if pub.duration_ms is not None:
         payload["duration_ms"] = pub.duration_ms
@@ -104,6 +118,79 @@ def _tool_status_envelope(run_id: str, pub: ToolStatusPublication) -> SseEvent:
     if pub.error_code is not None:
         payload["error_code"] = pub.error_code
     return build_sse_event("tool_status", run_id, payload)
+
+
+def _warn_activity_persistence(run_id: str, activity_id: str) -> None:
+    logger.warning(
+        "agent activity persistence failed run_id=%s activity_id=%s",
+        run_id,
+        activity_id,
+    )
+
+
+async def _safe_start_assistant_activity(
+    service: AgentActivityService | None,
+    *,
+    run_id: str,
+    label: str,
+) -> AgentActivityPayload | None:
+    if service is None:
+        return None
+    try:
+        return await service.start_assistant(
+            run_id=run_id,
+            label=label,
+            technical_name="response_generation",
+        )
+    except AgentActivityServiceError:
+        _warn_activity_persistence(run_id, "unassigned")
+        return None
+
+
+async def _safe_record_tool_activity(
+    service: AgentActivityService | None,
+    *,
+    run_id: str,
+    publication: ToolStatusPublication,
+) -> AgentActivityPayload | None:
+    if service is None:
+        return None
+    try:
+        return await service.record_tool(
+            run_id=run_id,
+            activity_id=publication.tool_execution_id,
+            label=publication.display_label,
+            technical_name=publication.tool_name,
+            state=cast(ToolStatus, publication.status),
+            duration_ms=publication.duration_ms,
+            error_code=publication.error_code,
+        )
+    except AgentActivityServiceError:
+        _warn_activity_persistence(run_id, publication.tool_execution_id)
+        return None
+
+
+async def _safe_finish_assistant_activity(
+    service: AgentActivityService | None,
+    *,
+    run_id: str,
+    activity_id: str,
+    state: Literal["completed", "failed"],
+    duration_ms: int,
+    error_code: str | None,
+) -> AgentActivityPayload | None:
+    if service is None:
+        return None
+    try:
+        return await service.finish(
+            activity_id=activity_id,
+            state=state,
+            duration_ms=duration_ms,
+            error_code=error_code,
+        )
+    except AgentActivityServiceError:
+        _warn_activity_persistence(run_id, activity_id)
+        return None
 
 
 def _message_text(message: BaseMessage | Any) -> str:
@@ -219,6 +306,7 @@ async def _stream_agent_run_impl(
     sqlite_path: str | Path | None = None,
     graph_bundle: AgentGraphBundle | None = None,
     on_durable_terminal: DurableTerminalCallback | None = None,
+    activity_service: AgentActivityService | None = None,
     include_assistant_status: bool = True,
     assistant_status_message: str = "Generating reply",
     checkpointer_open: CheckpointerOpen | None = None,
@@ -270,11 +358,27 @@ async def _stream_agent_run_impl(
             {"state": "running", "resumed": resumed},
         )
 
-        if include_assistant_status and assistant_status_message.strip():
+        assistant_activity: AgentActivityPayload | None = None
+        assistant_started: float | None = None
+        assistant_label = assistant_status_message.strip()
+        if include_assistant_status and assistant_label:
+            assistant_started = perf_counter()
+            assistant_activity = await _safe_start_assistant_activity(
+                activity_service,
+                run_id=run_id,
+                label=assistant_label,
+            )
             yield build_sse_event(
                 "assistant_status",
                 run_id,
-                {"message": assistant_status_message.strip()},
+                {
+                    "message": assistant_label,
+                    "activity": (
+                        assistant_activity.model_dump(mode="json")
+                        if assistant_activity is not None
+                        else None
+                    ),
+                },
             )
 
         graph_error: str | None = None
@@ -334,7 +438,12 @@ async def _stream_agent_run_impl(
                 msg_kind, item = await merge_q.get()
                 if msg_kind == "tool_status":
                     assert isinstance(item, ToolStatusPublication)
-                    yield _tool_status_envelope(run_id, item)
+                    activity = await _safe_record_tool_activity(
+                        activity_service,
+                        run_id=run_id,
+                        publication=item,
+                    )
+                    yield _tool_status_envelope(run_id, item, activity)
                     continue
                 if msg_kind == "graph_error":
                     graph_error = (
@@ -367,7 +476,12 @@ async def _stream_agent_run_impl(
                     break
                 if msg_kind == "tool_status":
                     assert isinstance(item, ToolStatusPublication)
-                    yield _tool_status_envelope(run_id, item)
+                    activity = await _safe_record_tool_activity(
+                        activity_service,
+                        run_id=run_id,
+                        publication=item,
+                    )
+                    yield _tool_status_envelope(run_id, item, activity)
                 elif msg_kind == "graph_error" and graph_error is None:
                     graph_error = (
                         item if isinstance(item, str) else ERROR_AGENT_EXECUTION
@@ -428,6 +542,29 @@ async def _stream_agent_run_impl(
         if durable_ok and kind in ("completed", "failed"):
             await delete_run_checkpoint(saver, run_id)
 
+        if (
+            durable_ok
+            and assistant_activity is not None
+            and assistant_started is not None
+        ):
+            assistant_terminal = await _safe_finish_assistant_activity(
+                activity_service,
+                run_id=run_id,
+                activity_id=assistant_activity.activity_id,
+                state="failed" if kind == "failed" else "completed",
+                duration_ms=max(0, int((perf_counter() - assistant_started) * 1000)),
+                error_code=error_code if kind == "failed" else None,
+            )
+            if assistant_terminal is not None:
+                yield build_sse_event(
+                    "assistant_status",
+                    run_id,
+                    {
+                        "message": assistant_terminal.label,
+                        "activity": assistant_terminal.model_dump(mode="json"),
+                    },
+                )
+
         if kind == "failed":
             assert error_code is not None and error_summary is not None
             yield build_sse_event(
@@ -470,6 +607,7 @@ async def stream_agent_run(
     sqlite_path: str | Path | None = None,
     graph_bundle: AgentGraphBundle | None = None,
     on_durable_terminal: DurableTerminalCallback | None = None,
+    activity_service: AgentActivityService | None = None,
     include_assistant_status: bool = True,
     assistant_status_message: str = "Generating reply",
     checkpointer_open: CheckpointerOpen | None = None,
@@ -505,6 +643,7 @@ async def stream_agent_run(
         sqlite_path=sqlite_path,
         graph_bundle=graph_bundle,
         on_durable_terminal=_tracked_terminal,
+        activity_service=activity_service,
         include_assistant_status=include_assistant_status,
         assistant_status_message=assistant_status_message,
         checkpointer_open=checkpointer_open,

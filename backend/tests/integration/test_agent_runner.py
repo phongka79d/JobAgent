@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,6 +33,8 @@ from app.agent.graph import (
 from app.agent.runner import ERROR_AGENT_EXECUTION, TerminalOutcome
 from app.agent.runner import stream_agent_run as _production_stream_agent_run
 from app.api.sse import open_sse_response
+from app.core.ids import new_uuid
+from app.core.time import utc_now
 from app.db.models.chat import (
     AGENT_RUN_STATE_FAILED,
     CHAT_MESSAGE_ROLE_USER,
@@ -41,14 +44,17 @@ from app.db.models.chat import (
     AgentRun,
 )
 from app.db.session import build_async_engine
+from app.repositories import agent_activities as activity_repo
 from app.repositories import agent_runs as runs_repo
 from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import tool_executions as tool_repo
+from app.schemas.agent_activity import AgentActivityPayload
 from app.schemas.sse import SseEvent, parse_sse_event
 from app.schemas.tools import ToolResult
 from app.services.activity_gate import assert_profile_idle
+from app.services.agent_activity import AgentActivityServiceError
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 from app.tools.profile import (
@@ -129,6 +135,95 @@ def _names(events: list[SseEvent]) -> list[str]:
     return [e.event for e in events]
 
 
+class _FakeActivityService:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self._next_sequence = 0
+        self._activities: dict[str, AgentActivityPayload] = {}
+
+    def _raise_if_failed(self) -> None:
+        if self.fail:
+            raise AgentActivityServiceError("safe fake persistence failure")
+
+    async def start_assistant(
+        self, *, run_id: str, label: str, technical_name: str
+    ) -> AgentActivityPayload:
+        self._raise_if_failed()
+        now = utc_now()
+        activity = AgentActivityPayload(
+            activity_id=new_uuid(),
+            run_id=run_id,
+            sequence=self._next_sequence,
+            kind="assistant",
+            label=label,
+            technical_name=technical_name,
+            state="running",
+            started_at=now,
+            updated_at=now,
+        )
+        self._next_sequence += 1
+        self._activities[activity.activity_id] = activity
+        return activity
+
+    async def record_tool(
+        self,
+        *,
+        run_id: str,
+        activity_id: str,
+        label: str,
+        technical_name: str,
+        state: str,
+        duration_ms: int | None,
+        error_code: str | None,
+    ) -> AgentActivityPayload:
+        self._raise_if_failed()
+        current = self._activities.get(activity_id)
+        now = utc_now()
+        sequence = current.sequence if current is not None else self._next_sequence
+        if current is None:
+            self._next_sequence += 1
+        terminal = state in {"completed", "failed"}
+        activity = AgentActivityPayload(
+            activity_id=activity_id,
+            run_id=run_id,
+            sequence=sequence,
+            kind="tool",
+            label=label,
+            technical_name=technical_name,
+            state=state,
+            started_at=current.started_at if current is not None else now,
+            updated_at=now,
+            completed_at=now if terminal else None,
+            duration_ms=duration_ms,
+            error_code=error_code,
+        )
+        self._activities[activity_id] = activity
+        return activity
+
+    async def finish(
+        self,
+        *,
+        activity_id: str,
+        state: str,
+        duration_ms: int,
+        error_code: str | None,
+    ) -> AgentActivityPayload:
+        self._raise_if_failed()
+        current = self._activities[activity_id]
+        now = utc_now()
+        activity = current.model_copy(
+            update={
+                "state": state,
+                "updated_at": now,
+                "completed_at": now,
+                "duration_ms": duration_ms,
+                "error_code": error_code,
+            }
+        )
+        self._activities[activity_id] = activity
+        return activity
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint path / lifecycle
 # ---------------------------------------------------------------------------
@@ -199,6 +294,7 @@ def test_direct_answer_event_order_and_validation(tmp_path: Path) -> None:
             durable_calls.append(outcome)
             return True
 
+        activity_service = _FakeActivityService()
         events = await _collect(
             stream_agent_run(
                 run_id=RUN_A,
@@ -208,17 +304,26 @@ def test_direct_answer_event_order_and_validation(tmp_path: Path) -> None:
                 on_durable_terminal=on_terminal,
                 checkpointer_open=spy_open,
                 include_assistant_status=True,
+                activity_service=activity_service,
             )
         )
 
         names = _names(events)
-        assert names[0] == "run_started"
-        assert "text_delta" in names
-        assert names[-1] == "run_completed"
-        if "assistant_status" in names:
-            assert names.index("assistant_status") < names.index("text_delta")
-        assert names.index("run_started") < names.index("text_delta")
-        assert names.index("text_delta") < names.index("run_completed")
+        assert names == [
+            "run_started",
+            "assistant_status",
+            "text_delta",
+            "assistant_status",
+            "run_completed",
+        ]
+        assert events[1].payload.activity is not None
+        assert events[1].payload.activity.state == "running"
+        assert events[-2].payload.activity is not None
+        assert events[-2].payload.activity.state == "completed"
+        assert (
+            events[1].payload.activity.activity_id
+            == events[-2].payload.activity.activity_id
+        )
 
         for event in events:
             reparsed = parse_sse_event(event.model_dump(mode="json"))
@@ -242,6 +347,80 @@ def test_direct_answer_event_order_and_validation(tmp_path: Path) -> None:
 
         async with open_checkpointer(db) as saver:
             assert await thread_has_checkpoints(saver, RUN_A) is False
+
+    run_async(_body())
+
+
+def test_activity_persistence_failure_degrades_without_failing_run(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db = tmp_path / "activity-degraded.db"
+
+    async def _body() -> None:
+        events = await _collect(
+            stream_agent_run(
+                run_id=RUN_A,
+                user_text="sensitive user input must not be logged",
+                model=FakeChatModel(responses=[_ai_text("still completes")]),
+                sqlite_path=db,
+                include_assistant_status=True,
+                activity_service=_FakeActivityService(fail=True),
+            )
+        )
+        assert "text_delta" in _names(events)
+        assert events[-1].event == "run_completed"
+        status = next(event for event in events if event.event == "assistant_status")
+        assert status.payload.activity is None
+
+    runner_logger = logging.getLogger("app.agent.runner")
+    was_disabled = runner_logger.disabled
+    runner_logger.disabled = False
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.agent.runner"):
+            run_async(_body())
+    finally:
+        runner_logger.disabled = was_disabled
+    assert "agent activity persistence failed" in caplog.text
+    assert "sensitive user input" not in caplog.text
+
+
+def test_stream_chat_turn_injects_durable_activity_service(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    from app.services.chat_turns import stream_chat_turn
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            events = await _collect(
+                stream_chat_turn(
+                    conversation_id=CONVERSATION_ID,
+                    message="persist assistant activity",
+                    model=FakeChatModel(responses=[_ai_text("persisted")]),
+                    session_factory=factory,
+                    sqlite_path=tmp_path / "chat-activity.db",
+                    include_assistant_status=True,
+                )
+            )
+            statuses = [
+                event for event in events if event.event == "assistant_status"
+            ]
+            assert [status.payload.activity.state for status in statuses] == [
+                "running",
+                "completed",
+            ]
+            run_id = events[0].run_id
+            async with factory() as session:
+                activities = await activity_repo.list_for_run_ids(
+                    session, [run_id]
+                )
+            assert len(activities) == 1
+            assert activities[0].status == "completed"
+        finally:
+            await engine.dispose()
 
     run_async(_body())
 
@@ -878,6 +1057,7 @@ def _build_durable_echo_tool(
             run_id=run_id,
             tool_call_id=tool_call_id,
             tool_name="durable_echo",
+            display_label="Echo durable value",
             invoke=_invoke,
             arguments_summary_json={"note": note},
             session_factory=factory,
@@ -911,6 +1091,7 @@ def test_tool_status_pending_running_completed_ordered(
                 model=model,
                 registry=ToolRegistry([tool]),
             )
+            activity_service = _FakeActivityService()
             events = await _collect(
                 stream_agent_run(
                     run_id=RUN_A,
@@ -918,6 +1099,7 @@ def test_tool_status_pending_running_completed_ordered(
                     graph_bundle=bundle,
                     sqlite_path=cp,
                     include_assistant_status=False,
+                    activity_service=activity_service,
                 )
             )
             statuses = [e for e in events if e.event == "tool_status"]
@@ -932,6 +1114,23 @@ def test_tool_status_pending_running_completed_ordered(
             assert call_ids == {"call-echo-1"}
             names = {s.payload.tool_name for s in statuses}
             assert names == {"durable_echo"}
+            assert all(status.payload.activity is not None for status in statuses)
+            assert all(
+                status.payload.activity.activity_id
+                == status.payload.tool_execution_id
+                for status in statuses
+            )
+            assert all(
+                status.payload.activity.technical_name == status.payload.tool_name
+                for status in statuses
+            )
+            assert all(
+                status.payload.activity.state == status.payload.status
+                for status in statuses
+            )
+            assert {status.payload.activity.label for status in statuses} == {
+                "Echo durable value"
+            }
 
             completed = statuses[-1]
             assert completed.payload.duration_ms is not None
@@ -1075,6 +1274,7 @@ def test_tool_status_raw_data_excluded_from_sse(
                     "duration_ms",
                     "summary",
                     "error_code",
+                    "activity",
                 }
                 assert "data" not in payload
                 assert "arguments" not in payload
@@ -1194,6 +1394,7 @@ def test_timed_out_anext_does_not_reset_tool_status_listener_in_another_context(
                     tool_execution_id="11111111-1111-4111-8111-111111111111",
                     tool_call_id="call-1",
                     tool_name="blocking_echo",
+                    display_label="Blocking echo",
                     status="pending",
                 )
             )
@@ -1202,6 +1403,7 @@ def test_timed_out_anext_does_not_reset_tool_status_listener_in_another_context(
                     tool_execution_id="11111111-1111-4111-8111-111111111111",
                     tool_call_id="call-1",
                     tool_name="blocking_echo",
+                    display_label="Blocking echo",
                     status="running",
                 )
             )

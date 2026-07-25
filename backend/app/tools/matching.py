@@ -193,6 +193,7 @@ def build_match_jobs_tool(
             run_id=run_id,
             tool_call_id=tool_call_id,
             tool_name=MATCH_JOBS_NAME,
+            display_label="Rank matching jobs",
             invoke=_invoke,
             arguments_summary_json=args_summary,
             session_factory=factory,

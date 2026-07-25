@@ -44,6 +44,24 @@ def _envelope(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def _activity(run_id: str, *, state: str = "running") -> dict[str, Any]:
+    terminal = state in {"completed", "failed"}
+    return {
+        "activity_id": new_uuid(),
+        "run_id": run_id,
+        "sequence": 0,
+        "kind": "assistant",
+        "label": "Generating reply",
+        "technical_name": "response_generation",
+        "state": state,
+        "started_at": utc_now(),
+        "updated_at": utc_now(),
+        "completed_at": utc_now() if terminal else None,
+        "duration_ms": 1 if terminal else None,
+        "error_code": "AGENT_FAILED" if state == "failed" else None,
+    }
+
+
 def test_all_seven_event_names_defined() -> None:
     assert SSE_EVENT_NAMES == frozenset(
         {
@@ -102,6 +120,47 @@ def test_assistant_status_requires_message() -> None:
                 **_envelope(),
                 "event": "assistant_status",
                 "payload": {"message": ""},
+            }
+        )
+
+
+def test_assistant_status_preserves_message_and_nested_activity() -> None:
+    run_id = new_uuid()
+    event = parse_sse_event(
+        {
+            **_envelope(run_id=run_id),
+            "event": "assistant_status",
+            "payload": {
+                "message": "Generating reply",
+                "activity": _activity(run_id),
+            },
+        }
+    )
+    assert event.payload.activity is not None
+    assert event.payload.message == event.payload.activity.label
+
+
+def test_assistant_status_allows_null_activity_for_degraded_delivery() -> None:
+    event = parse_sse_event(
+        {
+            **_envelope(),
+            "event": "assistant_status",
+            "payload": {"message": "Generating reply", "activity": None},
+        }
+    )
+    assert event.payload.activity is None
+
+
+def test_assistant_status_rejects_mismatched_activity_run() -> None:
+    with pytest.raises(ValidationError, match="run_id"):
+        parse_sse_event(
+            {
+                **_envelope(run_id=new_uuid()),
+                "event": "assistant_status",
+                "payload": {
+                    "message": "Generating reply",
+                    "activity": _activity(new_uuid()),
+                },
             }
         )
 
@@ -168,6 +227,89 @@ def test_tool_status_exact_statuses_and_terminal_fields() -> None:
         }
     )
     assert failed.payload.error_code == "TOOL_ERROR"
+
+
+def test_tool_status_preserves_legacy_fields_and_nested_activity() -> None:
+    run_id = new_uuid()
+    tool_execution_id = new_uuid()
+    activity = _activity(run_id) | {
+        "activity_id": tool_execution_id,
+        "kind": "tool",
+        "label": "Search jobs",
+        "technical_name": "query_jobs",
+    }
+    event = parse_sse_event(
+        {
+            **_envelope(run_id=run_id),
+            "event": "tool_status",
+            "payload": {
+                "tool_execution_id": tool_execution_id,
+                "tool_call_id": "call_1",
+                "tool_name": "query_jobs",
+                "status": TOOL_STATUS_RUNNING,
+                "activity": activity,
+            },
+        }
+    )
+    assert event.payload.activity is not None
+    assert event.payload.activity.activity_id == event.payload.tool_execution_id
+    assert event.payload.activity.technical_name == event.payload.tool_name
+    assert event.payload.activity.state == event.payload.status
+
+
+def test_tool_status_allows_null_activity_for_degraded_delivery() -> None:
+    event = parse_sse_event(
+        {
+            **_envelope(),
+            "event": "tool_status",
+            "payload": {
+                "tool_execution_id": new_uuid(),
+                "tool_call_id": "call_1",
+                "tool_name": "query_jobs",
+                "status": TOOL_STATUS_RUNNING,
+                "activity": None,
+            },
+        }
+    )
+    assert event.payload.activity is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", new_uuid()),
+        ("kind", "assistant"),
+        ("activity_id", new_uuid()),
+        ("technical_name", "other_tool"),
+        ("state", "pending"),
+    ],
+)
+def test_tool_status_rejects_mismatched_nested_activity(
+    field: str, value: object
+) -> None:
+    run_id = new_uuid()
+    tool_execution_id = new_uuid()
+    activity = _activity(run_id) | {
+        "activity_id": tool_execution_id,
+        "kind": "tool",
+        "label": "Search jobs",
+        "technical_name": "query_jobs",
+    }
+    activity[field] = value
+    with pytest.raises(ValidationError):
+        parse_sse_event(
+            {
+                **_envelope(run_id=run_id),
+                "event": "tool_status",
+                "payload": {
+                    "tool_execution_id": tool_execution_id,
+                    "tool_call_id": "call_1",
+                    "tool_name": "query_jobs",
+                    "status": TOOL_STATUS_RUNNING,
+                    "activity": activity,
+                },
+            }
+        )
 
 
 def test_tool_status_rejects_complete_and_error_aliases() -> None:

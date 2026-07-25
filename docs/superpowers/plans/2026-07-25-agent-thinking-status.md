@@ -74,7 +74,7 @@ the order below so each commit has a testable contract.
 - Read: `docs/superpowers/specs/2026-07-25-agent-thinking-status-design.md`
 - No tracked files change.
 
-- [ ] **Step 1: Confirm branch and worktree scope**
+- [x] **Step 1: Confirm branch and worktree scope**
 
 Run from the repository root:
 
@@ -87,7 +87,7 @@ Expected: the implementation branch/worktree is clean and contains spec commit
 `c0b4888` or its descendant. Stop if unrelated tracked changes overlap the
 files in this plan.
 
-- [ ] **Step 2: Restore exact frontend dependencies**
+- [x] **Step 2: Restore exact frontend dependencies**
 
 Run:
 
@@ -98,7 +98,7 @@ npm ci --no-audit --no-fund
 
 Expected: exit `0`; Astryx core, CLI, and neutral theme resolve to `0.1.4`.
 
-- [ ] **Step 3: Read the exact Astryx contracts before UI edits**
+- [x] **Step 3: Read the exact Astryx contracts before UI edits**
 
 Run:
 
@@ -121,7 +121,7 @@ Expected facts:
 - continuous motion uses `--duration-slow*`; semantic colors and spacing use Astryx tokens.
 - `ChatToolCalls` makes a single call inline but groups multiple calls. Because this feature requires the same disclosure for one or many mixed assistant/tool activities, use `Collapsible` plus Astryx stack/text/status primitives instead of nesting two disclosures.
 
-- [ ] **Step 4: Run focused baseline tests**
+- [x] **Step 4: Run focused baseline tests**
 
 Run:
 
@@ -145,7 +145,7 @@ failure instead of changing unrelated code.
 - Modify: `backend/tests/unit/test_chat_models.py`
 - Modify: `backend/tests/integration/test_migrations.py`
 
-- [ ] **Step 1: Write failing ORM contract tests**
+- [x] **Step 1: Write failing ORM contract tests**
 
 Append focused assertions to `backend/tests/unit/test_chat_models.py`:
 
@@ -181,7 +181,7 @@ def test_agent_activity_has_run_sequence_uniqueness() -> None:
     assert "uq_agent_activities__run_sequence" in names
 ```
 
-- [ ] **Step 2: Write the failing migration test**
+- [x] **Step 2: Write the failing migration test**
 
 Add to `backend/tests/integration/test_migrations.py`:
 
@@ -218,7 +218,7 @@ def test_migration_0006_adds_only_agent_activity_projection(
     run_async(_body())
 ```
 
-- [ ] **Step 3: Run tests to verify RED**
+- [x] **Step 3: Run tests to verify RED**
 
 Run:
 
@@ -230,7 +230,7 @@ Set-Location backend
 Expected: collection/import fails because `AgentActivity` and migration `0006`
 do not exist.
 
-- [ ] **Step 4: Add the ORM model**
+- [x] **Step 4: Add the ORM model**
 
 In `backend/app/db/models/chat.py`, add exact status/kind constants and the
 model after `AgentRun` and before `ToolExecution`:
@@ -310,7 +310,7 @@ class AgentActivity(Base):
 Update `backend/app/db/models/__init__.py` to import and export
 `AgentActivity` beside the other chat models.
 
-- [ ] **Step 5: Create structural migration 0006**
+- [x] **Step 5: Create structural migration 0006**
 
 Create `backend/migrations/versions/0006_add_agent_activities.py` with an
 explicit `op.create_table` matching the ORM model, the two indexes above,
@@ -331,7 +331,7 @@ Do not import services, write backfill rows, touch checkpoint tables, or require
 a destructive data reset. Existing runs legitimately begin with no assistant
 activity history.
 
-- [ ] **Step 6: Run model and migration tests to verify GREEN**
+- [x] **Step 6: Run model and migration tests to verify GREEN**
 
 Run:
 
@@ -343,7 +343,7 @@ Set-Location backend
 
 Expected: both commands pass.
 
-- [ ] **Step 7: Commit the structural slice**
+- [x] **Step 7: Commit the structural slice**
 
 ```powershell
 git add backend/migrations/versions/0006_add_agent_activities.py backend/app/db/models/chat.py backend/app/db/models/__init__.py backend/tests/unit/test_chat_models.py backend/tests/integration/test_migrations.py
@@ -360,7 +360,7 @@ git commit -m "feat(backend): add durable agent activities"
 - Create: `backend/tests/unit/test_agent_activity.py`
 - Create: `backend/tests/integration/test_agent_activities.py`
 
-- [ ] **Step 1: Write failing canonical-schema tests**
+- [x] **Step 1: Write failing canonical-schema tests**
 
 Create `backend/tests/unit/test_agent_activity.py` with tests that construct a
 running assistant activity and reject unsafe terminal coupling:
@@ -420,7 +420,7 @@ def test_humanize_activity_name_is_generic() -> None:
     assert humanize_activity_name("   ") == "Agent activity"
 ```
 
-- [ ] **Step 2: Write failing repository/service tests**
+- [x] **Step 2: Write failing repository/service tests**
 
 Create `backend/tests/integration/test_agent_activities.py`. Seed a conversation,
 user message, and run with existing repository helpers, then assert:
@@ -464,7 +464,7 @@ Add a second test that writes the same tool `activity_id` as `running` and then
 `completed`, asserting one row remains and its sequence is unchanged. Add a
 third test that deleting the owning run cascades all activity rows.
 
-- [ ] **Step 3: Run tests to verify RED**
+- [x] **Step 3: Run tests to verify RED**
 
 Run:
 
@@ -475,7 +475,7 @@ Set-Location backend
 
 Expected: import failure for the new schema/repository/service modules.
 
-- [ ] **Step 4: Create the canonical Pydantic contract**
+- [x] **Step 4: Create the canonical Pydantic contract**
 
 Create `backend/app/schemas/agent_activity.py` with:
 
@@ -563,7 +563,7 @@ class AgentActivityPayload(BaseModel):
         return self
 ```
 
-- [ ] **Step 5: Implement repository transition ownership**
+- [x] **Step 5: Implement repository transition ownership**
 
 Create `backend/app/repositories/agent_activities.py` with public functions:
 
@@ -677,7 +677,7 @@ async def transition_activity(
     return row
 ```
 
-- [ ] **Step 6: Implement the transaction service**
+- [x] **Step 6: Implement the transaction service**
 
 Create `backend/app/services/agent_activity.py` with one
 `AgentActivityService` class. Its constructor accepts an
@@ -783,7 +783,7 @@ def activity_payload(row: AgentActivity) -> AgentActivityPayload:
     )
 ```
 
-- [ ] **Step 7: Run focused tests and static checks**
+- [x] **Step 7: Run focused tests and static checks**
 
 Run:
 
@@ -796,7 +796,7 @@ Set-Location backend
 
 Expected: all pass.
 
-- [ ] **Step 8: Commit the activity service slice**
+- [x] **Step 8: Commit the activity service slice**
 
 ```powershell
 git add backend/app/schemas/agent_activity.py backend/app/repositories/agent_activities.py backend/app/services/agent_activity.py backend/tests/unit/test_agent_activity.py backend/tests/integration/test_agent_activities.py
@@ -817,7 +817,7 @@ git commit -m "feat(backend): persist agent activity timeline"
 - Modify: `backend/tests/integration/test_tool_replay.py`
 - Modify: `backend/tests/integration/test_agent_runner.py`
 
-- [ ] **Step 1: Write failing nested-activity SSE tests**
+- [x] **Step 1: Write failing nested-activity SSE tests**
 
 Add a helper in `backend/tests/unit/test_sse_contract.py` that returns a valid
 activity dict. Update assistant/tool tests to require compatibility fields and
@@ -860,7 +860,7 @@ def test_assistant_status_preserves_message_and_nested_activity() -> None:
 Add a test that `activity` may be null for a degraded legacy-compatible event,
 and a test that mismatched nested `run_id` is rejected.
 
-- [ ] **Step 2: Write failing runner publication tests**
+- [x] **Step 2: Write failing runner publication tests**
 
 In `backend/tests/integration/test_agent_runner.py`, inject a fake activity
 service with `start_assistant`, `record_tool`, and `finish` methods. Assert the
@@ -883,7 +883,7 @@ tool execution ID, technical name, exact status, and producer label. Add a
 degraded fake that raises `AgentActivityServiceError`; the run must still emit
 text and a terminal run event, with a safe warning captured by `caplog`.
 
-- [ ] **Step 3: Run tests to verify RED**
+- [x] **Step 3: Run tests to verify RED**
 
 Run:
 
@@ -894,7 +894,7 @@ Set-Location backend
 
 Expected: missing nested activity and missing producer label assertions fail.
 
-- [ ] **Step 4: Extend the SSE payloads compatibly**
+- [x] **Step 4: Extend the SSE payloads compatibly**
 
 In `backend/app/schemas/sse.py`, import `AgentActivityPayload`, add
 `activity: AgentActivityPayload | None = None` to both
@@ -908,7 +908,7 @@ run ID is available. An assistant activity must have `kind="assistant"` and
 `activity.state == payload.status`. Preserve all seven event names and every
 existing field.
 
-- [ ] **Step 5: Give tool publications a backend-owned label**
+- [x] **Step 5: Give tool publications a backend-owned label**
 
 In `backend/app/services/tool_execution.py`, add `display_label: str` to
 `ToolStatusPublication`. Add optional `display_label: str | None = None` to
@@ -938,7 +938,7 @@ commit_profile_draft      -> Save CV profile
 The technical name remains the exact registered tool name. Tests and synthetic
 tools may omit the optional label and receive the generic backend fallback.
 
-- [ ] **Step 6: Record activity inside the runner before publication**
+- [x] **Step 6: Record activity inside the runner before publication**
 
 Add optional `activity_service: AgentActivityService | None = None` through
 `stream_agent_run` and `_stream_agent_run_impl`. Implement a safe wrapper that
@@ -978,7 +978,7 @@ the interrupted return. Use `completed` for completed/interrupted outcomes and
 `failed` with the stable run error code for failures. Measure assistant duration
 with `perf_counter()` from start; do not infer tool duration.
 
-- [ ] **Step 7: Inject the service in chat turns and enable production status**
+- [x] **Step 7: Inject the service in chat turns and enable production status**
 
 In `stream_chat_turn` and `stream_resume`, construct
 `AgentActivityService(factory)` and pass it to `stream_agent_run`. Keep direct
@@ -986,7 +986,7 @@ runner tests able to omit the service. In `backend/app/api/dependencies.py`, set
 the production `ChatAgentDeps.include_assistant_status` value to `True` so the
 waiting row always receives a real run-start activity.
 
-- [ ] **Step 8: Run focused backend tests**
+- [x] **Step 8: Run focused backend tests**
 
 Run:
 
@@ -999,7 +999,7 @@ Set-Location backend
 
 Expected: all pass; no existing run/tool status alias changes.
 
-- [ ] **Step 9: Commit the SSE publication slice**
+- [x] **Step 9: Commit the SSE publication slice**
 
 ```powershell
 git add backend/app/schemas/sse.py backend/app/services/tool_execution.py backend/app/agent/runner.py backend/app/services/chat_turns.py backend/app/api/dependencies.py backend/app/tools/active_cv.py backend/app/tools/jobs.py backend/app/tools/matching.py backend/app/tools/profile.py backend/tests/unit/test_sse_contract.py backend/tests/integration/test_tool_replay.py backend/tests/integration/test_agent_runner.py

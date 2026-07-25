@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal, get_args
 
 from app.core.ids import new_uuid
 from app.core.time import utc_now
+from app.schemas.agent_activity import AgentActivityPayload
 from app.schemas.common import (
     TOOL_STATUS_COMPLETED,
     TOOL_STATUS_FAILED,
@@ -63,6 +64,7 @@ class AssistantStatusPayload(BaseModel):
     model_config = StrictModelConfig
 
     message: str = Field(min_length=1)
+    activity: AgentActivityPayload | None = None
 
 
 class ToolStatusPayload(BaseModel):
@@ -77,6 +79,7 @@ class ToolStatusPayload(BaseModel):
     duration_ms: int | None = Field(default=None, ge=0)
     summary: str | None = None
     error_code: str | None = None
+    activity: AgentActivityPayload | None = None
 
     @field_validator("status", mode="before")
     @classmethod
@@ -183,10 +186,40 @@ class AssistantStatusEvent(_SseEnvelopeBase):
     event: Literal["assistant_status"] = "assistant_status"
     payload: AssistantStatusPayload
 
+    @model_validator(mode="after")
+    def activity_matches_envelope(self) -> AssistantStatusEvent:
+        activity = self.payload.activity
+        if activity is None:
+            return self
+        if activity.run_id != self.run_id:
+            raise ValueError("assistant activity run_id must match envelope run_id")
+        if activity.kind != "assistant":
+            raise ValueError("assistant_status activity kind must be assistant")
+        if self.payload.message != activity.label:
+            raise ValueError("assistant status message must match activity label")
+        return self
+
 
 class ToolStatusEvent(_SseEnvelopeBase):
     event: Literal["tool_status"] = "tool_status"
     payload: ToolStatusPayload
+
+    @model_validator(mode="after")
+    def activity_matches_envelope(self) -> ToolStatusEvent:
+        activity = self.payload.activity
+        if activity is None:
+            return self
+        if activity.run_id != self.run_id:
+            raise ValueError("tool activity run_id must match envelope run_id")
+        if activity.kind != "tool":
+            raise ValueError("tool_status activity kind must be tool")
+        if activity.activity_id != self.payload.tool_execution_id:
+            raise ValueError("tool activity_id must match tool_execution_id")
+        if activity.technical_name != self.payload.tool_name:
+            raise ValueError("tool technical_name must match tool_name")
+        if activity.state != self.payload.status:
+            raise ValueError("tool activity state must match status")
+        return self
 
 
 class ApprovalRequiredEvent(_SseEnvelopeBase):

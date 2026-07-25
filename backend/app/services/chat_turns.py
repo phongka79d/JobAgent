@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import Runnable
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.context import (
@@ -56,6 +56,7 @@ from app.repositories import conversations as conversations_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.activity_gate import ActivityBlockedError, assert_conversation_idle
+from app.services.agent_activity import AgentActivityService
 from app.storage.attachments import AttachmentStorage
 from app.tools.registry import ToolRegistry
 
@@ -476,6 +477,8 @@ async def claim_resume(
 
     factory = session_factory or get_session_factory()
     async with session_scope(factory) as session:
+        # Reserve SQLite's writer before validating the interrupted state.
+        await session.execute(text("BEGIN IMMEDIATE"))
         run = await runs_repo.get_run(session, run_id)
         if run is None:
             raise ChatTurnError(ERROR_RUN_NOT_FOUND, f"run {run_id!r} not found")
@@ -669,6 +672,7 @@ async def stream_chat_turn(
         graph_bundle=graph_bundle,
         sqlite_path=sqlite_path,
         on_durable_terminal=on_terminal,
+        activity_service=AgentActivityService(factory),
         include_assistant_status=include_assistant_status,
         resumed=False,
     )
@@ -808,6 +812,7 @@ async def stream_resume(
         graph_bundle=graph_bundle,
         sqlite_path=sqlite_path,
         on_durable_terminal=on_terminal,
+        activity_service=AgentActivityService(factory),
         include_assistant_status=include_assistant_status,
     )
     try:

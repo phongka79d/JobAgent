@@ -39,6 +39,7 @@ from app.repositories.tool_executions import (
     ToolExecutionRepositoryError,
     load_stored_result,
 )
+from app.schemas.agent_activity import humanize_activity_name
 from app.schemas.tools import ToolResult
 
 ToolInvoker = Callable[[], Awaitable[ToolResult]]
@@ -67,6 +68,7 @@ class ToolStatusPublication:
     tool_execution_id: str
     tool_call_id: str
     tool_name: str
+    display_label: str
     status: str
     duration_ms: int | None = None
     summary: str | None = None
@@ -116,6 +118,7 @@ def _publication(
     tool_execution_id: str,
     tool_call_id: str,
     tool_name: str,
+    display_label: str,
     status: str,
     duration_ms: int | None = None,
     summary: str | None = None,
@@ -125,6 +128,7 @@ def _publication(
         tool_execution_id=tool_execution_id,
         tool_call_id=tool_call_id,
         tool_name=tool_name,
+        display_label=display_label,
         status=status,
         duration_ms=duration_ms,
         summary=summary,
@@ -138,6 +142,7 @@ async def execute_tool(
     tool_call_id: str,
     tool_name: str,
     invoke: ToolInvoker,
+    display_label: str | None = None,
     arguments_summary_json: dict[str, Any] | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     allow_running_reentry: bool = False,
@@ -179,6 +184,11 @@ async def execute_tool(
         deletion can cascade ownership-bound terminal results.
     """
     factory = session_factory if session_factory is not None else get_session_factory()
+    resolved_display_label = (
+        display_label.strip()
+        if isinstance(display_label, str) and display_label.strip()
+        else humanize_activity_name(tool_name)
+    )
 
     execution_id: str
     stored_tool_call_id = tool_call_id
@@ -206,6 +216,7 @@ async def execute_tool(
                 tool_execution_id=row.id,
                 tool_call_id=row.tool_call_id,
                 tool_name=row.tool_name,
+                display_label=resolved_display_label,
                 status=row.status,
                 duration_ms=row.duration_ms,
                 summary=stored.summary,
@@ -237,6 +248,7 @@ async def execute_tool(
                 tool_execution_id=execution_id,
                 tool_call_id=stored_tool_call_id,
                 tool_name=stored_tool_name,
+                display_label=resolved_display_label,
                 status=TOOL_EXECUTION_STATUS_PENDING,
             )
         )
@@ -251,6 +263,7 @@ async def execute_tool(
                 tool_execution_id=execution_id,
                 tool_call_id=stored_tool_call_id,
                 tool_name=stored_tool_name,
+                display_label=resolved_display_label,
                 status=TOOL_EXECUTION_STATUS_RUNNING,
             )
         )
@@ -308,6 +321,7 @@ async def execute_tool(
             tool_execution_id=execution_id,
             tool_call_id=stored_tool_call_id,
             tool_name=stored_tool_name,
+            display_label=resolved_display_label,
             status=terminal_status,
             duration_ms=terminal_duration,
             summary=terminal_summary,

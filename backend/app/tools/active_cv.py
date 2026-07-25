@@ -230,6 +230,7 @@ def build_read_active_cv_tool(
             run_id=run_id,
             tool_call_id=tool_call_id,
             tool_name=READ_ACTIVE_CV_NAME,
+            display_label="Read active CV",
             invoke=_invoke,
             arguments_summary_json=args_summary,
             session_factory=factory,
