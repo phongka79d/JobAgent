@@ -527,6 +527,20 @@ describe('Streamed profile_commit approval card', () => {
             duration_ms: 12,
             summary: 'SQLite committed; Neo4j sync failed',
             error_code: 'NEO4J_SYNC_FAILED',
+            activity: {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Save CV profile',
+              technical_name: 'commit_profile_draft',
+              state: 'failed',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: TS,
+              duration_ms: 12,
+              error_code: 'NEO4J_SYNC_FAILED',
+            },
           }),
         );
         cbs.onEvent(
@@ -580,8 +594,11 @@ describe('Streamed profile_commit approval card', () => {
       expect(body).toMatch(/\bfailed\b/);
       expect(body).not.toMatch(/saved successfully/i);
     });
-    // Exact tool status vocabulary remains failed (not complete/error aliases).
-    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'commit_profile_draft · failed · 12ms · NEO4J_SYNC_FAILED',
+      ),
+    ).toBeInTheDocument();
     void container;
   });
 });

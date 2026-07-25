@@ -342,7 +342,7 @@ async function submitMessage(
 describe('ChatPage history and load-older', () => {
   it('loads chronological history and renders backend activity', async () => {
     const loadHistory = vi.fn().mockResolvedValueOnce(historyWithMessages());
-    renderChat({loadHistory, sendTurn: vi.fn()});
+    const firstMount = renderChat({loadHistory, sendTurn: vi.fn()});
 
     await waitFor(() => {
       expect(screen.getByText('Hello from history')).toBeInTheDocument();
@@ -353,11 +353,29 @@ describe('ChatPage history and load-older', () => {
     expect(
       screen.getByText('lookup_status · completed · 42ms'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {name: /Completed · 1 step/i}),
+    ).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('ok short')).not.toBeInTheDocument();
     expect(loadHistory).toHaveBeenCalledWith(
       {limit: 50},
       expect.any(AbortSignal),
     );
+
+    firstMount.unmount();
+    renderChat({
+      loadHistory: vi.fn().mockResolvedValue(historyWithMessages()),
+      sendTurn: vi.fn(),
+    });
+    await waitFor(() => {
+      expect(screen.getByText('History assistant reply')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole('button', {name: /Completed · 1 step/i}),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.getByText('lookup_status · completed · 42ms'),
+    ).toBeInTheDocument();
   });
 
   it('renders durable failed tool status text without complete/error aliases', async () => {
@@ -604,6 +622,7 @@ describe('ChatPage send / stream / lock', () => {
         .find((element) => element.getAttribute('aria-live') === 'polite');
       expect(current).toBeInTheDocument();
       expect(screen.getByText('synthetic_tool · running')).toBeInTheDocument();
+      expect(screen.queryByText('…')).not.toBeInTheDocument();
     });
     // In-flight: contentEditable disabled via isDisabled on ChatComposer.
     await waitFor(() => {
@@ -847,6 +866,25 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
           sse(EVENT_A, 'run_started', {state: 'running', resumed: false}),
         );
         cbs.onEvent(
+          sse(EVENT_B, 'assistant_status', {
+            message: 'Prepare confirmation',
+            activity: {
+              activity_id: EVENT_E,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'assistant',
+              label: 'Prepare confirmation',
+              technical_name: 'response_generation',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
+          }),
+        );
+        cbs.onEvent(
           sse(EVENT_F, 'approval_required', {
             state: 'interrupted',
             kind: 'confirm',
@@ -865,6 +903,13 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
     await submitMessage(container, 'interrupt');
 
     await waitFor(() => {
+      const summary = screen.getByText(
+        'Waiting for your confirmation · 1 step',
+      );
+      expect(summary).toHaveAttribute('data-running', 'false');
+      expect(
+        screen.getByLabelText('Waiting for your confirmation · 1 step'),
+      ).toHaveAttribute('data-variant', 'warning');
       expect(screen.getByText('Run interrupted')).toBeInTheDocument();
       expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
         'false',

@@ -55,6 +55,7 @@ from app.schemas.sse import SseEvent, parse_sse_event
 from app.schemas.tools import ToolResult
 from app.services.activity_gate import assert_profile_idle
 from app.services.agent_activity import AgentActivityServiceError
+from app.services.chat_history import get_history_page
 from app.services.skill_normalization import SkillNormalizer
 from app.services.tool_execution import execute_tool
 from app.tools.profile import (
@@ -385,7 +386,7 @@ def test_activity_persistence_failure_degrades_without_failing_run(
     assert "sensitive user input" not in caplog.text
 
 
-def test_stream_chat_turn_injects_durable_activity_service(
+def test_stream_chat_turn_persists_and_hydrates_durable_activity(
     migrated_sqlite: Path,
     tmp_path: Path,
 ) -> None:
@@ -395,30 +396,65 @@ def test_stream_chat_turn_injects_durable_activity_service(
         engine = build_async_engine(migrated_sqlite)
         factory = session_factory(engine)
         try:
+            side_effect: dict[str, int] = {"n": 0}
+            tool = _build_durable_echo_tool(
+                factory=factory,
+                side_effect=side_effect,
+            )
             events = await _collect(
                 stream_chat_turn(
                     conversation_id=CONVERSATION_ID,
-                    message="persist assistant activity",
-                    model=FakeChatModel(responses=[_ai_text("persisted")]),
+                    message="persist assistant and tool activity",
+                    model=FakeChatModel(
+                        responses=[
+                            _ai_tool_call("durable_echo", call_id="call-history"),
+                            _ai_text("persisted"),
+                        ]
+                    ),
+                    registry=ToolRegistry([tool]),
                     session_factory=factory,
                     sqlite_path=tmp_path / "chat-activity.db",
                     include_assistant_status=True,
                 )
             )
-            statuses = [
+            assert [event.event for event in events].count("assistant_status") == 2
+            status_events = [
+                event
+                for event in events
+                if event.event in {"assistant_status", "tool_status"}
+            ]
+            assert status_events
+            assert all(event.payload.activity is not None for event in status_events)
+            assistant_statuses = [
                 event for event in events if event.event == "assistant_status"
             ]
-            assert [status.payload.activity.state for status in statuses] == [
+            assert [
+                status.payload.activity.state for status in assistant_statuses
+            ] == [
                 "running",
                 "completed",
             ]
+            assert side_effect["n"] == 1
             run_id = events[0].run_id
             async with factory() as session:
                 activities = await activity_repo.list_for_run_ids(
                     session, [run_id]
                 )
-            assert len(activities) == 1
-            assert activities[0].status == "completed"
+                history = await get_history_page(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    limit=50,
+                )
+            assert [activity.status for activity in activities] == [
+                "completed",
+                "completed",
+            ]
+            run = next(item.run for item in history.items if item.run is not None)
+            assert [activity.label for activity in run.activities] == [
+                "Generating reply",
+                "Echo durable value",
+            ]
+            assert all(activity.label for activity in run.activities)
         finally:
             await engine.dispose()
 

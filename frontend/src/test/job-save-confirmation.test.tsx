@@ -1,6 +1,6 @@
 /**
  * Pasted-JD save confirmation parser/card + resume wiring (Plan 12 Batch04 04A).
- * Strict projection, exact Vietnamese copy, shared resume lock, Review JD,
+ * Strict projection, exact Vietnamese copy, shared resume lock,
  * cancel without SavedJobCard/invalidation, committed-only invalidation.
  */
 import {
@@ -28,10 +28,8 @@ import {
   JOB_SAVE_CONFIRMATION_KIND,
   jobSaveConfirmationForRow,
   parseJobSaveConfirmationProjection,
-  REVIEW_JD_LABEL,
   SAVE_JOB_ACTION,
   SAVE_JOB_LABEL,
-  shouldLabelReviewJd,
 } from '../features/chat/jobSaveConfirmation';
 import {JobSaveConfirmationCard} from '../features/chat/components/JobSaveConfirmationCard';
 import type {ClientMessage, ClientRun} from '../features/chat/reducer';
@@ -123,7 +121,22 @@ function interruptedHistory(
           completed_at: null,
           created_at: TS,
           updated_at: TS,
-          activities: [],
+          activities: [
+            {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Save job',
+              technical_name: 'save_job',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
+          ],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -692,17 +705,6 @@ describe('jobSaveConfirmationForRow association', () => {
   });
 });
 
-describe('Review JD presentation helper', () => {
-  it('labels only running/pending save_job while review active', () => {
-    expect(shouldLabelReviewJd('save_job', 'running', true)).toBe(true);
-    expect(shouldLabelReviewJd('save_job', 'pending', true)).toBe(true);
-    expect(shouldLabelReviewJd('save_job', 'completed', true)).toBe(false);
-    expect(shouldLabelReviewJd('save_job', 'running', false)).toBe(false);
-    expect(shouldLabelReviewJd('match_jobs', 'running', true)).toBe(false);
-    expect(REVIEW_JD_LABEL).toBe('Review JD');
-  });
-});
-
 describe('historyPageHasCommittedSaveJob', () => {
   it('requires validated sqlite_committed true for the run', () => {
     expect(
@@ -738,6 +740,20 @@ describe('Live and restart JD confirmation host', () => {
             status: 'running',
             duration_ms: null,
             summary: null,
+            activity: {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Save job',
+              technical_name: 'save_job',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
           }),
         );
         cbs.onEvent(
@@ -771,7 +787,11 @@ describe('Live and restart JD confirmation host', () => {
     expect(
       screen.getByRole('button', {name: CANCEL_SAVE_JOB_LABEL}),
     ).toBeInTheDocument();
-    expect(screen.getByText(REVIEW_JD_LABEL)).toBeInTheDocument();
+    expect(
+      screen.getByText('Waiting for your confirmation · 1 step'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('save_job · running')).toBeInTheDocument();
+    expect(screen.queryByText('Run interrupted')).not.toBeInTheDocument();
     expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
       'false',
     );
@@ -797,7 +817,11 @@ describe('Live and restart JD confirmation host', () => {
     expect(screen.getAllByTestId('jobagent-jd-confirmation-card')).toHaveLength(
       1,
     );
-    expect(screen.getByText(REVIEW_JD_LABEL)).toBeInTheDocument();
+    expect(
+      screen.getByText('Waiting for your confirmation · 1 step'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('save_job · running')).toBeInTheDocument();
+    expect(screen.queryByText('Run interrupted')).not.toBeInTheDocument();
     expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
       'false',
     );

@@ -24,7 +24,6 @@ export const CANCEL_SAVE_JOB_LABEL = 'Không lưu';
 export const JD_CONFIRMATION_HEADING = 'Đã nhận diện nội dung JD';
 export const JD_CONFIRMATION_SENTENCE =
   'JD này chưa được lưu. Bạn có muốn lưu JD này không?';
-export const REVIEW_JD_LABEL = 'Review JD';
 
 export const CURRENT_MESSAGE_SOURCE = 'current_message' as const;
 export const TEXT_LENGTH_MIN = 1;
@@ -95,7 +94,6 @@ function hasForbiddenKey(obj: Record<string, unknown>): boolean {
   }
   return false;
 }
-
 function hasOnlyAllowedKeys(
   obj: Record<string, unknown>,
   allowed: ReadonlySet<string>,
@@ -374,19 +372,4 @@ export function historyPageHasCommittedSaveJob(
     }
   }
   return false;
-}
-
-/**
- * Presentation-only: running/pending save_job under a valid JD interrupt.
- */
-export function shouldLabelReviewJd(
-  toolName: string,
-  status: string,
-  reviewJdActive: boolean,
-): boolean {
-  return (
-    reviewJdActive &&
-    toolName === SAVE_JOB_ACTION &&
-    (status === 'running' || status === 'pending')
-  );
 }

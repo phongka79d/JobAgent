@@ -39,6 +39,9 @@ const EVENT_C = '33333333-3333-4333-8333-333333333333';
 const EVENT_D = '44444444-4444-4444-8444-444444444444';
 const EVENT_E = '55555555-5555-4555-8555-555555555555';
 const EVENT_F = '66666666-6666-4666-8666-666666666666';
+const EVENT_G = '77777777-7777-4777-8777-777777777770';
+const EVENT_H = '77777777-7777-4777-8777-777777777771';
+const EVENT_I = '77777777-7777-4777-8777-777777777772';
 const TOOL_EXEC = '77777777-7777-4777-8777-777777777777';
 const MSG_USER = '88888888-8888-4888-8888-888888888888';
 const MSG_ASST = '99999999-9999-4999-8999-999999999999';
@@ -46,6 +49,7 @@ const MSG_OLD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TS = '2026-07-13T12:00:00.000Z';
 const TS_OLD = '2026-07-13T11:00:00.000Z';
 const TS_NEW = '2026-07-13T12:00:01.000Z';
+const TS_LATER = '2026-07-13T12:00:02.000Z';
 
 function activity(
   overrides: Partial<Record<string, unknown>> = {},
@@ -628,6 +632,12 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
           tool_call_id: 'tc-commit',
           tool_name: 'commit_profile_draft',
           status: 'running',
+          activity: activity({
+            activity_id: TOOL_EXEC,
+            kind: 'tool',
+            label: 'Save CV profile',
+            technical_name: 'commit_profile_draft',
+          }),
         }),
       ),
       parseSseEventData(
@@ -647,6 +657,12 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
     expect(run?.state).toBe('interrupted');
     expect(run?.tools[0]?.status).toBe('running');
     expect(run?.tools[0]?.status).not.toBe('complete');
+    expect(run?.activities).toHaveLength(1);
+    expect(run?.activities[0]).toMatchObject({
+      runId: RUN_ID,
+      label: 'Save CV profile',
+      state: 'running',
+    });
     expect(state.pendingApproval?.kind).toBe('profile_commit');
     expect(state.pendingApproval?.allowed_actions).toEqual([
       'save_profile',
@@ -667,10 +683,47 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
           status: 'completed',
           duration_ms: 10,
           summary: 'saved',
+          activity: activity({
+            activity_id: TOOL_EXEC,
+            kind: 'tool',
+            label: 'Save CV profile',
+            technical_name: 'commit_profile_draft',
+            state: 'completed',
+            updated_at: TS_NEW,
+            completed_at: TS_NEW,
+            duration_ms: 10,
+          }),
         }),
       ),
       parseSseEventData(
-        envelope(EVENT_F, 'run_completed', {state: 'completed'}),
+        envelope(EVENT_F, 'assistant_status', {
+          message: 'Continue response',
+          activity: activity({
+            activity_id: EVENT_G,
+            sequence: 1,
+            label: 'Continue response',
+            started_at: TS_NEW,
+            updated_at: TS_NEW,
+          }),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_H, 'assistant_status', {
+          message: 'Continue response',
+          activity: activity({
+            activity_id: EVENT_G,
+            sequence: 1,
+            label: 'Continue response',
+            state: 'completed',
+            started_at: TS_NEW,
+            updated_at: TS_LATER,
+            completed_at: TS_LATER,
+            duration_ms: 5,
+          }),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_I, 'run_completed', {state: 'completed'}),
       ),
     ]);
     expect(state.pendingApproval).toBeNull();
@@ -678,6 +731,16 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
     const done = state.messages.find((m) => m.role === 'assistant')?.run;
     expect(done?.state).toBe('completed');
     expect(done?.tools[0]?.status).toBe('completed');
+    expect(done?.id).toBe(RUN_ID);
+    expect(done?.activities.map((item) => item.label)).toEqual([
+      'Save CV profile',
+      'Continue response',
+    ]);
+    expect(done?.activities.map((item) => item.state)).toEqual([
+      'completed',
+      'completed',
+    ]);
+    expect(done?.activities.every((item) => item.runId === RUN_ID)).toBe(true);
   });
 
   it('hydrates pending profile_commit from durable history after restart', () => {
@@ -912,12 +975,20 @@ describe('Reducer: tool, interruption, failure, disconnect', () => {
       parseSseEventData(
         envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
       ),
-      parseSseEventData(envelope(EVENT_B, 'text_delta', {delta: 'Hi'})),
+      parseSseEventData(
+        envelope(EVENT_B, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity(),
+        }),
+      ),
+      parseSseEventData(envelope(EVENT_C, 'text_delta', {delta: 'Hi'})),
     ]);
     state = chatReducer(state, {type: 'stream/disconnected'});
     const run = state.messages.find((m) => m.role === 'assistant')?.run;
     expect(state.streamPhase).toBe('disconnected');
     expect(run?.state).toBe('running');
+    expect(run?.activities).toHaveLength(1);
+    expect(run?.activities[0]?.state).toBe('running');
     expect(run?.state).not.toBe('completed');
     expect(run?.state).not.toBe('failed');
   });
@@ -1400,6 +1471,178 @@ describe('History hydration and load-older', () => {
       );
       expect(asstWithRun.run.tools[0].status).toBe('completed');
     }
+  });
+
+  it('restores ordered terminal activities after conversation resets', () => {
+    let state = reduceAll(createInitialChatState(), [
+      parseSseEventData(
+        envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),
+      ),
+      parseSseEventData(
+        envelope(EVENT_B, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity(),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_C, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-reset',
+          tool_name: 'query_jobs',
+          status: 'running',
+          activity: activity({
+            activity_id: TOOL_EXEC,
+            sequence: 1,
+            kind: 'tool',
+            label: 'Search jobs',
+            technical_name: 'query_jobs',
+          }),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_D, 'tool_status', {
+          tool_execution_id: TOOL_EXEC,
+          tool_call_id: 'tc-reset',
+          tool_name: 'query_jobs',
+          status: 'completed',
+          duration_ms: 7,
+          summary: 'Found jobs',
+          error_code: null,
+          activity: activity({
+            activity_id: TOOL_EXEC,
+            sequence: 1,
+            kind: 'tool',
+            label: 'Search jobs',
+            technical_name: 'query_jobs',
+            state: 'completed',
+            updated_at: TS_NEW,
+            completed_at: TS_NEW,
+            duration_ms: 7,
+          }),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_E, 'assistant_status', {
+          message: 'Generating reply',
+          activity: activity({
+            state: 'completed',
+            updated_at: TS_NEW,
+            completed_at: TS_NEW,
+            duration_ms: 12,
+          }),
+        }),
+      ),
+      parseSseEventData(
+        envelope(EVENT_F, 'run_completed', {state: 'completed'}),
+      ),
+    ]);
+    expect(
+      state.messages.find((message) => message.role === 'assistant')?.run
+        ?.activities.map((item) => item.state),
+    ).toEqual(['completed', 'completed']);
+
+    const originalPage = historyPage();
+    const originalRun = originalPage.items[0]?.run;
+    if (!originalRun) {
+      throw new Error('original history run missing');
+    }
+    originalRun.activities = [
+      {
+        activity_id: EVENT_F,
+        run_id: RUN_ID,
+        sequence: 0,
+        kind: 'assistant',
+        label: 'Generating reply',
+        technical_name: 'response_generation',
+        state: 'completed',
+        started_at: TS_OLD,
+        updated_at: TS_NEW,
+        completed_at: TS_NEW,
+        duration_ms: 12,
+        error_code: null,
+      },
+      {
+        activity_id: TOOL_EXEC,
+        run_id: RUN_ID,
+        sequence: 1,
+        kind: 'tool',
+        label: 'Search jobs',
+        technical_name: 'query_jobs',
+        state: 'completed',
+        started_at: TS,
+        updated_at: TS_NEW,
+        completed_at: TS_NEW,
+        duration_ms: 7,
+        error_code: null,
+      },
+    ];
+    state = chatReducer(state, {type: 'history/rehydrate', page: originalPage});
+    expect(
+      state.messages[0]?.run?.activities.map((item) => item.label),
+    ).toEqual(['Generating reply', 'Search jobs']);
+
+    const otherActivityId = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+    const otherPage: HistoryPage = {
+      items: [
+        {
+          id: MSG_OLD,
+          role: 'user',
+          content: 'Other conversation',
+          structured_payload: null,
+          created_at: TS_LATER,
+          updated_at: TS_LATER,
+          run: {
+            id: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+            user_message_id: MSG_OLD,
+            state: 'completed',
+            pending_approval: null,
+            error_code: null,
+            completed_at: TS_LATER,
+            created_at: TS_LATER,
+            updated_at: TS_LATER,
+            tool_executions: [],
+            activities: [
+              {
+                activity_id: otherActivityId,
+                run_id: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+                sequence: 0,
+                kind: 'assistant',
+                label: 'Other conversation activity',
+                technical_name: 'response_generation',
+                state: 'completed',
+                started_at: TS_LATER,
+                updated_at: TS_LATER,
+                completed_at: TS_LATER,
+                duration_ms: 1,
+                error_code: null,
+              },
+            ],
+          },
+        },
+      ],
+      next_cursor: null,
+    };
+    state = chatReducer(state, {type: 'history/reset', page: otherPage});
+    expect(state.messages[0]?.run?.activities.map((item) => item.activityId)).toEqual(
+      [otherActivityId],
+    );
+    expect(
+      state.messages.some((message) =>
+        message.run?.activities.some((item) => item.runId === RUN_ID),
+      ),
+    ).toBe(false);
+
+    state = chatReducer(state, {type: 'history/reset', page: originalPage});
+    expect(
+      state.messages[0]?.run?.activities.map((item) => item.label),
+    ).toEqual(['Generating reply', 'Search jobs']);
+    expect(
+      state.messages.some((message) =>
+        message.run?.activities.some(
+          (item) => item.activityId === otherActivityId,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it('parseHistoryPage rejects role=tool and status aliases', () => {

@@ -392,7 +392,10 @@ export function ChatMessageRow({
 
   // Malformed/unknown interrupt: generic notice only — no JSON or unvalidated actions.
   const showGenericInterrupted =
-    runState === 'interrupted' && !showApprovalCard && !showJdCard;
+    message.role === 'assistant' &&
+    runState === 'interrupted' &&
+    !showApprovalCard &&
+    !showJdCard;
 
   const activeCvEvidence =
     message.role === 'assistant' ? activeCvEvidenceForTools(tools) : null;

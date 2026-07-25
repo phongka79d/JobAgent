@@ -47,6 +47,20 @@ from tests.support.db_migration import (
 T0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
 
 
+def assert_forbidden_keys_absent(
+    value: object,
+    forbidden: set[str],
+) -> None:
+    """Walk response keys without stringifying or exposing response values."""
+    if isinstance(value, dict):
+        assert forbidden.isdisjoint(value.keys())
+        for child in value.values():
+            assert_forbidden_keys_absent(child, forbidden)
+    elif isinstance(value, list):
+        for child in value:
+            assert_forbidden_keys_absent(child, forbidden)
+
+
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
     """Migrated isolated SQLite file (Alembic head + singleton seeds)."""
@@ -587,6 +601,10 @@ def test_history_hydrates_ordered_persisted_activities(db_path: Path) -> None:
                 "Search jobs",
             ]
             assert hydrated.activities[1].technical_name == "query_jobs"
+            assert_forbidden_keys_absent(
+                history_page_as_dict(page),
+                {"arguments", "provider_payload", "prompt", "traceback", "cv_text"},
+            )
         finally:
             await engine.dispose()
 

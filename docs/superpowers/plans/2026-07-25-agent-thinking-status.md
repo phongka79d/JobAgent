@@ -1638,7 +1638,7 @@ git commit -m "feat(frontend): show expandable agent activity"
 - Modify: `frontend/src/test/sse-reducer.test.ts`
 - Modify: `frontend/src/test/chat-page.test.tsx`
 
-- [ ] **Step 1: Add backend end-to-end contract assertions**
+- [x] **Step 1: Add backend end-to-end contract assertions**
 
 Extend the runner/history integration tests so one real fake-model turn with a
 tool call proves:
@@ -1668,7 +1668,7 @@ assert_forbidden_keys_absent(
 Define `assert_forbidden_keys_absent` as a recursive dict/list key walker. It
 must inspect keys only, not stringify or print user content.
 
-- [ ] **Step 2: Add frontend reload and conversation-switch assertions**
+- [x] **Step 2: Add frontend reload and conversation-switch assertions**
 
 In `sse-reducer.test.ts`, stream running/completed activities, hydrate a
 terminal history page, reset to another conversation, then reset back to the
@@ -1679,14 +1679,14 @@ In `chat-page.test.tsx`, assert a streamed activity replaces the ellipsis,
 completion displays `Completed · N steps`, and remounting from history preserves
 the disclosure and technical labels.
 
-- [ ] **Step 3: Add interruption/resume and disconnect assertions**
+- [x] **Step 3: Add interruption/resume and disconnect assertions**
 
 Test that `approval_required` renders `Waiting for your confirmation · N steps`
 without pulsing, resume adds later activity to the same run, and
 `stream/disconnected` renders `Connection lost — Agent may still be running`
 without changing `run.state` from `running`.
 
-- [ ] **Step 4: Run the complete focused regression set**
+- [x] **Step 4: Run the complete focused regression set**
 
 Run:
 
@@ -1699,7 +1699,7 @@ npm run test -- --run src/test/sse-reducer.test.ts src/test/agent-activity-timel
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit the cross-layer regressions**
+- [x] **Step 5: Commit the cross-layer regressions**
 
 ```powershell
 git add backend/tests/integration/test_chat_history.py backend/tests/integration/test_agent_runner.py frontend/src/test/sse-reducer.test.ts frontend/src/test/chat-page.test.tsx
