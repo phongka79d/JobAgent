@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from app.db.models.attachment_text_chunks import AttachmentTextChunk
 from app.db.models.attachments import Attachment
-from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
+from app.db.models.chat import (
+    AgentActivity,
+    AgentRun,
+    ChatMessage,
+    Conversation,
+    ToolExecution,
+)
 from app.db.models.cv_documents import CVDocument, CVDocumentDraft
 from app.db.models.job_evaluations import JobEvaluation
 from app.db.models.jobs import JobPost
@@ -21,6 +27,7 @@ from app.db.models.profiles import (
 )
 
 __all__ = [
+    "AgentActivity",
     "AgentRun",
     "Attachment",
     "AttachmentTextChunk",

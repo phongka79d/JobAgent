@@ -32,7 +32,7 @@ from tests.support.schema_parity import (  # noqa: F401
 T = TypeVar("T")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_HEAD = "0005_cv_profiles_multi_conversation"
+MIGRATION_HEAD = "0006_add_agent_activities"
 EXPECTED_FRESH_TABLES: frozenset[str] = PARITY_APPLICATION_TABLE_NAMES | {
     "alembic_version"
 }

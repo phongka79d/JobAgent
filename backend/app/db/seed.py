@@ -25,6 +25,7 @@ APPLICATION_TABLE_NAMES: frozenset[str] = frozenset(
         "conversations",
         "chat_messages",
         "agent_runs",
+        "agent_activities",
         "tool_executions",
         "job_evaluations",
     }

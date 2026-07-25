@@ -209,6 +209,38 @@ def test_fresh_upgrade_creates_application_tables_and_workspace_seed(
     run_async(_c())
 
 
+def test_migration_0006_adds_only_agent_activity_projection(
+    isolated_sqlite: Path,
+) -> None:
+    command.upgrade(alembic_config(isolated_sqlite), "head")
+
+    async def _body() -> None:
+        engine = build_async_engine(isolated_sqlite)
+        try:
+            async with engine.connect() as connection:
+                rows = (
+                    await connection.execute(
+                        text("PRAGMA foreign_key_list('agent_activities')")
+                    )
+                ).fetchall()
+                assert any(
+                    str(row[2]) == "agent_runs"
+                    and str(row[3]) == "run_id"
+                    and str(row[6] or "").upper() == "CASCADE"
+                    for row in rows
+                )
+                version = (
+                    await connection.execute(
+                        text("SELECT version_num FROM alembic_version")
+                    )
+                ).scalar_one()
+                assert version == "0006_add_agent_activities"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_upgrade_at_head_is_noop_and_does_not_duplicate_seeds(
     isolated_sqlite: Path,
 ) -> None:

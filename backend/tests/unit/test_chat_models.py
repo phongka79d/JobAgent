@@ -10,6 +10,7 @@ from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
 from app.db.models import chat as m
+from app.db.models.chat import AgentActivity
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.sql.schema import Column, Table
@@ -183,6 +184,34 @@ def _assert_json(table: Table, *names: str) -> None:
 
 def _uq_names(table: Table) -> set[str | None]:
     return {c.name for c in table.constraints if isinstance(c, UniqueConstraint)}
+
+
+def test_agent_activity_table_contract() -> None:
+    table = AgentActivity.__table__
+    assert table.name == "agent_activities"
+    assert set(table.columns.keys()) == {
+        "id",
+        "run_id",
+        "sequence",
+        "kind",
+        "label",
+        "technical_name",
+        "status",
+        "duration_ms",
+        "error_code",
+        "started_at",
+        "updated_at",
+        "completed_at",
+    }
+    assert table.c.run_id.foreign_keys
+    fk = next(iter(table.c.run_id.foreign_keys))
+    assert fk.target_fullname == "agent_runs.id"
+    assert fk.ondelete == "CASCADE"
+
+
+def test_agent_activity_has_run_sequence_uniqueness() -> None:
+    names = {constraint.name for constraint in AgentActivity.__table__.constraints}
+    assert "uq_agent_activities__run_sequence" in names
 
 
 def test_chat_models_register_on_shared_base() -> None:

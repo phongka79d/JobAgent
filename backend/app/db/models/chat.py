@@ -54,6 +54,12 @@ AGENT_RUN_STATES: frozenset[str] = frozenset(
 )
 AGENT_RUN_STATE_DEFAULT = AGENT_RUN_STATE_RUNNING
 
+AGENT_ACTIVITY_KIND_ASSISTANT = "assistant"
+AGENT_ACTIVITY_KIND_TOOL = "tool"
+AGENT_ACTIVITY_KINDS = frozenset(
+    {AGENT_ACTIVITY_KIND_ASSISTANT, AGENT_ACTIVITY_KIND_TOOL}
+)
+
 TOOL_EXECUTION_STATUS_PENDING = "pending"
 TOOL_EXECUTION_STATUS_RUNNING = "running"
 TOOL_EXECUTION_STATUS_COMPLETED = "completed"
@@ -220,6 +226,68 @@ class AgentRun(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class AgentActivity(Base):
+    """Durable safe user-facing timeline projection for one Agent run."""
+
+    __tablename__ = "agent_activities"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
+    run_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    technical_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "sequence", name="uq_agent_activities__run_sequence"
+        ),
+        CheckConstraint("sequence >= 0", name="sequence_non_negative"),
+        CheckConstraint("label != ''", name="label_non_empty"),
+        CheckConstraint(
+            "technical_name IS NULL OR technical_name != ''",
+            name="technical_name_non_empty",
+        ),
+        CheckConstraint("kind IN ('assistant', 'tool')", name="kind"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="status",
+        ),
+        CheckConstraint(
+            "duration_ms IS NULL OR duration_ms >= 0",
+            name="duration_ms_non_negative",
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'failed') AND completed_at IS NOT NULL "
+            "OR status NOT IN ('completed', 'failed') AND completed_at IS NULL",
+            name="completed_at_coupling",
+        ),
+        CheckConstraint(
+            "status = 'failed' AND error_code IS NOT NULL "
+            "OR status != 'failed' AND error_code IS NULL",
+            name="error_coupling",
+        ),
+        Index("ix_agent_activities__run_sequence", "run_id", "sequence"),
+        Index("ix_agent_activities__run_status", "run_id", "status"),
     )
 
 
