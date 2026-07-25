@@ -12,6 +12,7 @@ import type {CompactMatchResult} from '../../jobs/matchResult';
 import {jobSaveConfirmationForRow} from '../jobSaveConfirmation';
 import type {
   ClientMessage,
+  ClientRun,
   StreamErrorInfo,
   StreamPhase,
 } from '../reducer';
@@ -53,6 +54,40 @@ function isApprovalLocked(
     return locked.has(runId);
   }
   return (locked as readonly string[]).includes(runId);
+}
+
+function reloadedRunningActivityHost(
+  messages: readonly ClientMessage[],
+): {message: ClientMessage; run: ClientRun; sourceMessageId: string} | null {
+  const latest = messages.at(-1);
+  if (
+    !latest ||
+    latest.role !== 'user' ||
+    latest.run?.state !== 'running'
+  ) {
+    return null;
+  }
+  const ownedByAssistant = messages.some(
+    (message) =>
+      message.role === 'assistant' && message.run?.id === latest.run?.id,
+  );
+  if (ownedByAssistant) {
+    return null;
+  }
+  const key = `assistant:${latest.run.id}`;
+  return {
+    message: {
+      id: key,
+      clientKey: key,
+      role: 'assistant',
+      content: '',
+      createdAt: latest.createdAt,
+      run: null,
+      isStreaming: false,
+    },
+    run: latest.run,
+    sourceMessageId: latest.id,
+  };
 }
 
 /**
@@ -126,6 +161,7 @@ export function ChatMessages({
       index > latestUserIndex &&
       activityRunForAssistantDisplay(messages, index) !== null,
   );
+  const reloadedRunningHost = reloadedRunningActivityHost(messages);
   return (
     <ChatMessageList
       density="balanced"
@@ -177,6 +213,19 @@ export function ChatMessages({
           />
         );
       })}
+      {reloadedRunningHost ? (
+        <ChatMessageRow
+          key={reloadedRunningHost.message.clientKey}
+          message={reloadedRunningHost.message}
+          tools={[]}
+          activityRun={reloadedRunningHost.run}
+          streamPhase="disconnected"
+          sourceMessageId={reloadedRunningHost.sourceMessageId}
+          profileCommit={null}
+          jobSaveConfirmation={null}
+          approvalLocked={false}
+        />
+      ) : null}
       <StreamNotices
         streamPhase={streamPhase}
         streamError={streamError}

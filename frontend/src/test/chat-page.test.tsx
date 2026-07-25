@@ -176,6 +176,49 @@ function historyWithMessages(): HistoryPage {
   };
 }
 
+function historyWithRunningUserOnly(): HistoryPage {
+  return {
+    items: [
+      {
+        id: MSG_USER,
+        role: 'user',
+        content: 'Reloaded while the Agent was working',
+        structured_payload: null,
+        created_at: TS,
+        updated_at: TS,
+        run: {
+          id: RUN_ID,
+          user_message_id: MSG_USER,
+          state: 'running',
+          pending_approval: null,
+          error_code: null,
+          completed_at: null,
+          created_at: TS,
+          updated_at: TS,
+          activities: [
+            {
+              activity_id: EVENT_A,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'assistant',
+              label: 'Generating reply',
+              technical_name: 'response_generation',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
+          ],
+          tool_executions: [],
+        },
+      },
+    ],
+    next_cursor: null,
+  };
+}
+
 function olderHistoryPage(): HistoryPage {
   return {
     items: [
@@ -376,6 +419,30 @@ describe('ChatPage history and load-older', () => {
     expect(
       screen.getByText('lookup_status · completed · 42ms'),
     ).toBeInTheDocument();
+  });
+
+  it('shows disconnected activity when reload history ends with a running user run', async () => {
+    const user = userEvent.setup();
+    renderChat({
+      loadHistory: vi.fn().mockResolvedValue(historyWithRunningUserOnly()),
+      sendTurn: vi.fn(),
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Connection lost — Agent may still be running'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/^Completed ·/)).not.toBeInTheDocument();
+
+    const disclosure = screen.getByRole('button', {
+      name: /Connection lost — Agent may still be running/i,
+    });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(disclosure);
+    expect(screen.getByText('Generating reply')).toBeInTheDocument();
+    expect(screen.getByText('response_generation · running')).toBeInTheDocument();
   });
 
   it('renders durable failed tool status text without complete/error aliases', async () => {
