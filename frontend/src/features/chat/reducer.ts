@@ -44,7 +44,6 @@ export interface ChatState {
   nextCursor: string | null;
   streamPhase: StreamPhase;
   streamError: StreamErrorInfo | null;
-  assistantStatus: string | null;
   pendingApproval: ApprovalRequiredPayload | null;
 }
 
@@ -73,7 +72,6 @@ export function createInitialChatState(): ChatState {
     nextCursor: null,
     streamPhase: 'idle',
     streamError: null,
-    assistantStatus: null,
     pendingApproval: null,
   };
 }
@@ -323,7 +321,6 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         streamingAssistantKey: ensured.streamingAssistantKey,
         streamPhase: 'streaming',
         streamError: null,
-        assistantStatus: null,
         pendingApproval: event.payload.resumed ? state.pendingApproval : null,
       };
     }
@@ -357,7 +354,6 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         messages,
         activeRunId: event.run_id,
         streamingAssistantKey: ensured.streamingAssistantKey,
-        assistantStatus: event.payload.message,
         streamPhase:
           state.streamPhase === 'idle' ? 'streaming' : state.streamPhase,
       };
@@ -466,7 +462,6 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         streamingAssistantKey: ensured.streamingAssistantKey,
         streamPhase: 'idle',
         pendingApproval: event.payload,
-        assistantStatus: null,
       };
     }
     case 'run_completed': {
@@ -494,7 +489,6 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
         streamingAssistantKey: null,
         streamPhase: 'idle',
         streamError: null,
-        assistantStatus: null,
         pendingApproval: null,
       };
     }
@@ -525,7 +519,6 @@ function applySseEvent(state: ChatState, event: SseEvent): ChatState {
           code: event.payload.error_code,
           summary: event.payload.summary,
         },
-        assistantStatus: null,
         pendingApproval: null,
       };
     }
@@ -606,7 +599,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: [...state.messages, user],
         streamPhase: 'connecting',
         streamError: null,
-        assistantStatus: null,
         pendingApproval: null,
         activeRunId: null,
         streamingAssistantKey: null,

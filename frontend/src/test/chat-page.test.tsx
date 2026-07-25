@@ -16,11 +16,6 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {App} from '../app/App';
 import {ChatPage, type ChatPageDeps} from '../features/chat/ChatPage';
-import {
-  friendlyToolLabel,
-  formatToolDuration,
-  toAstryxVisualToolStatus,
-} from '../features/chat/components/ChatToolActivity';
 import type {HistoryPage, SseEvent} from '../features/chat/types';
 import type {StreamCallbacks} from '../lib/api/chat';
 
@@ -36,6 +31,7 @@ const MSG_USER = '88888888-8888-4888-8888-888888888888';
 const MSG_ASST = '99999999-9999-4999-8999-999999999999';
 const MSG_OLD = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TS = '2026-07-13T12:00:00.000Z';
+const TS_NEW = '2026-07-13T12:00:01.000Z';
 const TS_OLD = '2026-07-13T11:00:00.000Z';
 const CONVERSATION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const ATTACHMENT_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -107,9 +103,8 @@ function emptyHistory(): HistoryPage {
 }
 
 /**
- * Real Plan 3 history shape: tool_executions only on the initiating user
- * message run; assistant.run is null. ChatMessages projects user-run tools
- * onto the following assistant row for ChatToolCalls display.
+ * Durable history keeps the run on the initiating user message while
+ * ChatMessages projects its backend-owned activity onto the assistant row.
  */
 function historyWithMessages(): HistoryPage {
   return {
@@ -130,7 +125,22 @@ function historyWithMessages(): HistoryPage {
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
-          activities: [],
+          activities: [
+            {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Check lookup availability',
+              technical_name: 'lookup_status',
+              state: 'completed',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: TS,
+              duration_ms: 42,
+              error_code: null,
+            },
+          ],
           tool_executions: [
             {
               id: TOOL_EXEC,
@@ -329,25 +339,8 @@ async function submitMessage(
   await user.click(send);
 }
 
-describe('tool presentation helpers (status composition)', () => {
-  it('maps JobAgent statuses to Astryx visual props without polluting labels', () => {
-    expect(toAstryxVisualToolStatus('pending')).toBe('pending');
-    expect(toAstryxVisualToolStatus('running')).toBe('running');
-    // Presentation-only mapping — application state stays completed/failed.
-    expect(toAstryxVisualToolStatus('completed')).toBe('complete');
-    expect(toAstryxVisualToolStatus('failed')).toBe('error');
-  });
-
-  it('formats friendly labels and durations', () => {
-    expect(friendlyToolLabel('lookup_status')).toBe('Lookup Status');
-    expect(formatToolDuration(42)).toBe('42ms');
-    expect(formatToolDuration(1500)).toBe('1.5s');
-    expect(formatToolDuration(null)).toBeUndefined();
-  });
-});
-
 describe('ChatPage history and load-older', () => {
-  it('loads chronological history and renders exact tool status', async () => {
+  it('loads chronological history and renders backend activity', async () => {
     const loadHistory = vi.fn().mockResolvedValueOnce(historyWithMessages());
     renderChat({loadHistory, sendTurn: vi.fn()});
 
@@ -355,11 +348,12 @@ describe('ChatPage history and load-older', () => {
       expect(screen.getByText('Hello from history')).toBeInTheDocument();
     });
     expect(screen.getByText('History assistant reply')).toBeInTheDocument();
-    // Exact JobAgent status text (not complete/error aliases in visible state).
-    expect(screen.getByText('completed')).toBeInTheDocument();
-    expect(screen.getByText('Lookup Status')).toBeInTheDocument();
-    expect(screen.getByText('42ms')).toBeInTheDocument();
-    expect(screen.getByText('ok short')).toBeInTheDocument();
+    expect(screen.getByText('Completed · 1 step')).toBeInTheDocument();
+    expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
+    expect(
+      screen.getByText('lookup_status · completed · 42ms'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('ok short')).not.toBeInTheDocument();
     expect(loadHistory).toHaveBeenCalledWith(
       {limit: 50},
       expect.any(AbortSignal),
@@ -385,7 +379,22 @@ describe('ChatPage history and load-older', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
-            activities: [],
+            activities: [
+              {
+                activity_id: TOOL_EXEC,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'tool',
+                label: 'Check lookup availability',
+                technical_name: 'lookup_status',
+                state: 'failed',
+                started_at: TS,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 11,
+                error_code: 'TOOL_ERROR',
+              },
+            ],
             tool_executions: [
               {
                 id: TOOL_EXEC,
@@ -425,9 +434,12 @@ describe('ChatPage history and load-older', () => {
     await waitFor(() => {
       expect(screen.getByText('Try a tool')).toBeInTheDocument();
     });
-    expect(screen.getByText('Lookup Status')).toBeInTheDocument();
-    expect(screen.getByText('failed')).toBeInTheDocument();
-    expect(screen.getByText('lookup failed durably')).toBeInTheDocument();
+    expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
+    expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
+    expect(
+      screen.getByText('lookup_status · failed · 11ms · TOOL_ERROR'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('lookup failed durably')).not.toBeInTheDocument();
     expect(screen.queryByText(/^complete$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^error$/)).not.toBeInTheDocument();
   });
@@ -530,7 +542,20 @@ describe('ChatPage send / stream / lock', () => {
             duration_ms: null,
             summary: null,
             error_code: null,
-            activity: null,
+            activity: {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Use synthetic tool',
+              technical_name: 'synthetic_tool',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
           }),
         );
         await new Promise<void>((resolve) => {
@@ -545,7 +570,20 @@ describe('ChatPage send / stream / lock', () => {
             duration_ms: 120,
             summary: 'done',
             error_code: null,
-            activity: null,
+            activity: {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Use synthetic tool',
+              technical_name: 'synthetic_tool',
+              state: 'completed',
+              started_at: TS,
+              updated_at: TS_NEW,
+              completed_at: TS_NEW,
+              duration_ms: 120,
+              error_code: null,
+            },
           }),
         );
         cbs.onEvent(sse(EVENT_D, 'text_delta', {delta: 'After tools'}));
@@ -561,8 +599,11 @@ describe('ChatPage send / stream / lock', () => {
     await submitMessage(container, 'Run tool');
 
     await waitFor(() => {
-      expect(screen.getByText('Synthetic Tool')).toBeInTheDocument();
-      expect(screen.getByText('running')).toBeInTheDocument();
+      const current = screen
+        .getAllByText('Use synthetic tool')
+        .find((element) => element.getAttribute('aria-live') === 'polite');
+      expect(current).toBeInTheDocument();
+      expect(screen.getByText('synthetic_tool · running')).toBeInTheDocument();
     });
     // In-flight: contentEditable disabled via isDisabled on ChatComposer.
     await waitFor(() => {
@@ -582,8 +623,11 @@ describe('ChatPage send / stream / lock', () => {
 
     await waitFor(() => {
       expect(screen.getByText('After tools')).toBeInTheDocument();
-      expect(screen.getByText('completed')).toBeInTheDocument();
-      expect(screen.getByText('done')).toBeInTheDocument();
+      expect(screen.getByText('Completed · 1 step')).toBeInTheDocument();
+      expect(
+        screen.getByText('synthetic_tool · completed · 120ms'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('done')).not.toBeInTheDocument();
     });
   });
 
@@ -632,7 +676,45 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
           sse(EVENT_A, 'run_started', {state: 'running', resumed: false}),
         );
         cbs.onEvent(
-          sse(EVENT_B, 'run_failed', {
+          sse(EVENT_B, 'assistant_status', {
+            message: 'Generate response',
+            activity: {
+              activity_id: EVENT_F,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'assistant',
+              label: 'Generate response',
+              technical_name: 'response_generation',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
+          }),
+        );
+        cbs.onEvent(
+          sse(EVENT_C, 'assistant_status', {
+            message: 'Generate response',
+            activity: {
+              activity_id: EVENT_F,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'assistant',
+              label: 'Generate response',
+              technical_name: 'response_generation',
+              state: 'failed',
+              started_at: TS,
+              updated_at: TS_NEW,
+              completed_at: TS_NEW,
+              duration_ms: 1000,
+              error_code: 'PROVIDER_TIMEOUT',
+            },
+          }),
+        );
+        cbs.onEvent(
+          sse(EVENT_D, 'run_failed', {
             state: 'failed',
             error_code: 'PROVIDER_TIMEOUT',
             summary: 'Provider timed out',
@@ -649,8 +731,11 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
     await submitMessage(container, 'fail');
 
     await waitFor(() => {
+      expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
       expect(
-        screen.getByText(/Run failed: Provider timed out \(PROVIDER_TIMEOUT\)/),
+        screen.getByText(
+          'response_generation · failed · 1s · PROVIDER_TIMEOUT',
+        ),
       ).toBeInTheDocument();
     });
     expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
@@ -712,7 +797,20 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
             duration_ms: null,
             summary: null,
             error_code: null,
-            activity: null,
+            activity: {
+              activity_id: TOOL_EXEC,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Check lookup availability',
+              technical_name: 'lookup_status',
+              state: 'running',
+              started_at: TS,
+              updated_at: TS,
+              completed_at: null,
+              duration_ms: null,
+              error_code: null,
+            },
           }),
         );
         cbs.onDisconnected?.();
@@ -727,11 +825,10 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText(/Stream disconnected — run is not completed/)
-          .length,
-      ).toBeGreaterThanOrEqual(1);
-      expect(screen.getByText('Lookup Status')).toBeInTheDocument();
-      expect(screen.getByText('running')).toBeInTheDocument();
+        screen.getByText('Connection lost — Agent may still be running'),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
+      expect(screen.getByText('lookup_status · running')).toBeInTheDocument();
     });
     expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
     expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument();

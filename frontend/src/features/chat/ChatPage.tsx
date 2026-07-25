@@ -823,8 +823,7 @@ export function ChatPage({
     state.streamPhase === 'failed' ||
     state.streamPhase === 'disconnected' ||
     state.streamPhase === 'connecting' ||
-    state.streamPhase === 'streaming' ||
-    state.assistantStatus !== null;
+    state.streamPhase === 'streaming';
 
   const scrollToTopAction =
     state.nextCursor !== null && !isLoadingOlder
@@ -922,7 +921,6 @@ export function ChatPage({
             messages={state.messages}
             streamPhase={state.streamPhase}
             streamError={state.streamError}
-            assistantStatus={state.assistantStatus}
             onLoadOlder={scrollToTopAction}
             isStreaming={isStreaming}
             onApprovalAction={handleApprovalAction}

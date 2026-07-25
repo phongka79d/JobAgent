@@ -38,9 +38,10 @@ import type {
   ClientMessage,
   ClientRun,
   ClientToolActivity,
+  StreamPhase,
 } from '../reducer';
 import {AssistantResponse} from './AssistantResponse';
-import {ChatToolActivity} from './ChatToolActivity';
+import {AgentActivityTimeline} from './AgentActivityTimeline';
 import {EmptyMatchResultCard} from './EmptyMatchResultCard';
 import {JobSaveConfirmationCard} from './JobSaveConfirmationCard';
 
@@ -52,6 +53,8 @@ export type ChatApprovalAction =
 export type ChatMessageRowProps = {
   message: ClientMessage;
   tools: readonly ClientToolActivity[];
+  activityRun: ClientRun | null;
+  streamPhase: StreamPhase;
   /** Durable initiating user message for tools projected onto this row. */
   sourceMessageId: string | null;
   profileCommit: {run: ClientRun; pending: JsonObject} | null;
@@ -68,6 +71,40 @@ export type ChatMessageRowProps = {
   recoveryFailureHint?: string | null;
   onSaveAndEvaluate?: (sourceMessageId: string) => void;
 };
+
+export function activityRunForAssistantDisplay(
+  messages: readonly ClientMessage[],
+  index: number,
+): ClientRun | null {
+  const message = messages[index];
+  if (!message || message.role !== 'assistant') {
+    return null;
+  }
+  if (message.run) {
+    return message.run;
+  }
+  let projected: ClientRun | null = null;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const previous = messages[cursor];
+    if (previous.role === 'assistant') {
+      return null;
+    }
+    if (previous.role === 'user') {
+      projected = previous.run;
+      break;
+    }
+  }
+  if (!projected) {
+    return null;
+  }
+  const ownedElsewhere = messages.some(
+    (candidate, candidateIndex) =>
+      candidateIndex !== index &&
+      candidate.role === 'assistant' &&
+      candidate.run?.id === projected?.id,
+  );
+  return ownedElsewhere ? null : projected;
+}
 
 /**
  * Tools for ChatToolCalls on an assistant row (presentation only).
@@ -310,6 +347,8 @@ function senderOf(
 export function ChatMessageRow({
   message,
   tools,
+  activityRun,
+  streamPhase,
   sourceMessageId,
   profileCommit,
   jobSaveConfirmation = null,
@@ -328,8 +367,7 @@ export function ChatMessageRow({
     );
   }
 
-  const runState = message.run?.state;
-  const showTools = message.role === 'assistant' && tools.length > 0;
+  const runState = activityRun?.state ?? message.run?.state;
   const parsed = profileCommit
     ? parseProfileCommitProjection(profileCommit.pending)
     : null;
@@ -362,24 +400,33 @@ export function ChatMessageRow({
   return (
     <ChatMessage key={message.clientKey} sender={senderOf(message.role)}>
       <VStack gap={1}>
-        {showTools ? (
-          <ChatToolActivity tools={tools} reviewJdActive={showJdCard} />
-        ) : null}
-        {message.content !== '' || message.isStreaming ? (
-          <ChatMessageBubble
-            variant={message.role === 'assistant' ? 'ghost' : 'filled'}
-          >
-            {message.content === '' && message.isStreaming
-              ? '…'
-              : message.role === 'assistant' ? (
-                  <AssistantResponse
-                    content={message.content}
-                    isStreaming={message.isStreaming}
-                    evidence={activeCvEvidence}
-                  />
-                ) : (
-                  message.content
-                )}
+        {message.role === 'assistant' &&
+        (message.content !== '' || message.isStreaming || activityRun) ? (
+          <ChatMessageBubble variant="ghost">
+            <VStack gap={1} width="100%">
+              {activityRun ? (
+                <AgentActivityTimeline
+                  run={activityRun}
+                  streamPhase={streamPhase}
+                />
+              ) : message.isStreaming ? (
+                <Text type="label" as="span" aria-live="polite">
+                  Connecting…
+                </Text>
+              ) : null}
+              {message.content !== '' ? (
+                <AssistantResponse
+                  content={message.content}
+                  isStreaming={message.isStreaming}
+                  evidence={activeCvEvidence}
+                />
+              ) : null}
+            </VStack>
+          </ChatMessageBubble>
+        ) : message.role === 'user' &&
+          (message.content !== '' || message.isStreaming) ? (
+          <ChatMessageBubble variant="filled">
+            {message.content}
           </ChatMessageBubble>
         ) : null}
         {savedJob ? (
@@ -428,11 +475,6 @@ export function ChatMessageRow({
         {showGenericInterrupted ? (
           <Text type="supporting" color="secondary" as="p">
             Run interrupted
-          </Text>
-        ) : null}
-        {runState === 'failed' && message.run?.errorCode ? (
-          <Text type="supporting" color="secondary" as="p">
-            Run failed ({message.run.errorCode})
           </Text>
         ) : null}
       </VStack>

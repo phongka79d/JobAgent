@@ -392,6 +392,8 @@ describe('ChatMessageRow role split and composition', () => {
       <ChatMessageRow
         message={userMessage('### not a heading **literal**')}
         tools={[]}
+        activityRun={null}
+        streamPhase="idle"
         sourceMessageId={null}
         profileCommit={null}
         approvalLocked={false}
@@ -412,6 +414,8 @@ describe('ChatMessageRow role split and composition', () => {
       <ChatMessageRow
         message={assistantMessage('**Bold answer** with detail.')}
         tools={tools}
+        activityRun={null}
+        streamPhase="idle"
         sourceMessageId="user-1"
         profileCommit={null}
         approvalLocked={false}
@@ -435,6 +439,8 @@ describe('ChatMessageRow role split and composition', () => {
             errorCode: 'NO_ACTIVE_CV',
           }),
         ]}
+        activityRun={null}
+        streamPhase="idle"
         sourceMessageId="user-1"
         profileCommit={null}
         approvalLocked={false}
@@ -455,6 +461,8 @@ describe('ChatMessageRow role split and composition', () => {
       <ChatMessageRow
         message={message}
         tools={[activity(projected)]}
+        activityRun={null}
+        streamPhase="idle"
         sourceMessageId="user-1"
         profileCommit={null}
         approvalLocked={false}

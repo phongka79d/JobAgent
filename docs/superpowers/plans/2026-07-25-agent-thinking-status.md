@@ -1192,7 +1192,7 @@ Add `activity: AgentActivityPayload | null` to both SSE payload interfaces and
 UTC timestamp, terminal duration/error coupling, exact-key validation, and
 run-ID matching. Reuse it in `parseSseEventData` and `parseHistoryPage`.
 
-- [ ] **Step 4: Add one client activity model**
+- [x] **Step 4: Add one client activity model**
 
 In `frontend/src/features/chat/model.ts`, add:
 
@@ -1292,7 +1292,7 @@ git commit -m "feat(frontend): normalize agent activities"
 - Modify: `frontend/src/test/match-card.test.tsx`
 - Modify: `frontend/src/test/saved-job-card.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `frontend/src/test/agent-activity-timeline.test.tsx`, render through the
 existing neutral Astryx `Theme`, and assert:
@@ -1334,7 +1334,7 @@ Also assert the running `StatusDot` has an accessible label, the current label
 uses `aria-live="polite"`, the disclosure defaults closed, and no tool
 arguments/results appear.
 
-- [ ] **Step 2: Run component tests to verify RED**
+- [x] **Step 2: Run component tests to verify RED**
 
 Run:
 
@@ -1345,7 +1345,7 @@ npm run test -- --run src/test/agent-activity-timeline.test.tsx
 
 Expected: module not found.
 
-- [ ] **Step 3: Implement the Astryx component**
+- [x] **Step 3: Implement the Astryx component**
 
 Create `AgentActivityTimeline.tsx` using only documented public Astryx imports:
 
@@ -1475,7 +1475,7 @@ export function AgentActivityTimeline({
 The `align` and `vAlign` props above are already proven in repository call
 sites. Do not introduce raw layout elements.
 
-- [ ] **Step 4: Add token-only shimmer styling**
+- [x] **Step 4: Add token-only shimmer styling**
 
 Create `agent-activity.css`:
 
@@ -1511,7 +1511,7 @@ Create `agent-activity.css`:
 
 No raw color, spacing, radius, font, or duration values are allowed.
 
-- [ ] **Step 5: Project the durable run onto the assistant row**
+- [x] **Step 5: Project the durable run onto the assistant row**
 
 In `ChatMessageRow.tsx`, add `activityRunForAssistantDisplay(messages, index)`.
 It returns the assistant's own run during streaming, otherwise the immediately
@@ -1591,7 +1591,7 @@ Remove the old standalone failed-run supporting text because the timeline owns
 the safe failed summary. Preserve the generic malformed-interrupt notice only
 when no validated approval card exists.
 
-- [ ] **Step 6: Remove the global assistant-status notice owner**
+- [x] **Step 6: Remove the global assistant-status notice owner**
 
 In `ChatMessages.tsx`, remove the `assistantStatus` prop and its system notice.
 Pass `streamPhase` and the projected activity run into each row. Keep safe
@@ -1606,7 +1606,7 @@ Move any still-needed generic duration/status helpers into
 Update chat-page, match-card, and saved-job-card tests so they no longer import
 or assert frontend tool-name mappings.
 
-- [ ] **Step 7: Run UI tests and static checks**
+- [x] **Step 7: Run UI tests and static checks**
 
 Run:
 
@@ -1622,7 +1622,7 @@ Expected: tests/typecheck/lint pass; `rg` finds no production ellipsis
 placeholder, global assistant status owner, or workflow-specific label table.
 Unrelated prose ellipses are acceptable only outside the replaced placeholder.
 
-- [ ] **Step 8: Commit the Astryx UI slice**
+- [x] **Step 8: Commit the Astryx UI slice**
 
 ```powershell
 git add frontend/src/features/chat/components/AgentActivityTimeline.tsx frontend/src/features/chat/components/agent-activity.css frontend/src/features/chat/components/ChatMessageRow.tsx frontend/src/features/chat/components/ChatMessages.tsx frontend/src/features/chat/ChatPage.tsx frontend/src/features/chat/components/ChatToolActivity.tsx frontend/src/test/agent-activity-timeline.test.tsx frontend/src/test/chat-page.test.tsx frontend/src/test/match-card.test.tsx frontend/src/test/saved-job-card.test.tsx

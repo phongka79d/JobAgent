@@ -23,7 +23,6 @@ import {
   matchJobsResultForTools,
   toolsForAssistantDisplay,
 } from '../features/chat/components/ChatMessageRow';
-import {friendlyToolLabel} from '../features/chat/components/ChatToolActivity';
 import {
   hydrateFromHistoryPage,
   rehydrateWithDurableTruth,
@@ -238,7 +237,22 @@ function historyWithMatchJobs(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
-          activities: [],
+          activities: [
+            {
+              activity_id: tool.id,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Rank matching jobs',
+              technical_name: tool.tool_name,
+              state: tool.status,
+              started_at: tool.created_at,
+              updated_at: tool.updated_at,
+              completed_at: tool.updated_at,
+              duration_ms: tool.duration_ms,
+              error_code: tool.error_code,
+            },
+          ],
           tool_executions: [tool],
         },
       },
@@ -643,10 +657,6 @@ describe('history resultData + friendly Match Jobs label', () => {
     ]);
   });
 
-  it('uses friendly Match Jobs label', () => {
-    expect(friendlyToolLabel('match_jobs')).toBe('Match Jobs');
-    expect(friendlyToolLabel('save_job')).toBe('Save Job');
-  });
 });
 
 describe('ChatPage durable match cards', () => {
@@ -660,8 +670,10 @@ describe('ChatPage durable match cards', () => {
     const cards = screen.getAllByTestId('jobagent-match-card');
     expect(cards[0]).toHaveAttribute('data-job-id', JOB_HIGH);
     expect(cards[1]).toHaveAttribute('data-job-id', JOB_LOW);
-    expect(screen.getByText('Match Jobs')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('Rank matching jobs')).toBeInTheDocument();
+    expect(
+      screen.getByText('match_jobs · completed · 200ms'),
+    ).toBeInTheDocument();
     expect(screen.getByText('81.2%')).toBeInTheDocument();
     expect(screen.getByText('40.1%')).toBeInTheDocument();
     expect(screen.queryByText(/raw_content|embedding_json/i)).not.toBeInTheDocument();
@@ -728,7 +740,6 @@ describe('ChatPage durable match cards', () => {
         messages={state.messages}
         streamPhase="idle"
         streamError={null}
-        assistantStatus={null}
         isStreaming={false}
       />,
     );

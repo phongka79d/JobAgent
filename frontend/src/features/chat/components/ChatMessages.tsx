@@ -16,6 +16,7 @@ import type {
   StreamPhase,
 } from '../reducer';
 import {
+  activityRunForAssistantDisplay,
   ChatMessageRow,
   profileCommitForRow,
   sourceMessageIdForAssistantDisplay,
@@ -28,7 +29,6 @@ export type ChatMessagesProps = {
   messages: readonly ClientMessage[];
   streamPhase: StreamPhase;
   streamError: StreamErrorInfo | null;
-  assistantStatus: string | null;
   /** When set, list offers load-older via scroll-to-top. */
   onLoadOlder?: () => Promise<void>;
   isStreaming: boolean;
@@ -61,16 +61,16 @@ function isApprovalLocked(
 function StreamNotices({
   streamPhase,
   streamError,
-  assistantStatus,
+  hasRunBackedAssistant,
 }: {
   streamPhase: StreamPhase;
   streamError: StreamErrorInfo | null;
-  assistantStatus: string | null;
+  hasRunBackedAssistant: boolean;
 }) {
   const notices: {key: string; text: string}[] = [];
 
-  if (assistantStatus) {
-    notices.push({key: 'assistant-status', text: assistantStatus});
+  if (hasRunBackedAssistant) {
+    return null;
   }
   if (streamPhase === 'connecting') {
     notices.push({key: 'connecting', text: 'Connecting…'});
@@ -107,7 +107,6 @@ export function ChatMessages({
   messages,
   streamPhase,
   streamError,
-  assistantStatus,
   onLoadOlder,
   isStreaming,
   onApprovalAction,
@@ -116,6 +115,17 @@ export function ChatMessages({
   isRecoveryPending,
   onSaveAndEvaluate,
 }: ChatMessagesProps) {
+  let latestUserIndex = -1;
+  messages.forEach((message, index) => {
+    if (message.role === 'user') {
+      latestUserIndex = index;
+    }
+  });
+  const hasRunBackedAssistant = messages.some(
+    (_message, index) =>
+      index > latestUserIndex &&
+      activityRunForAssistantDisplay(messages, index) !== null,
+  );
   return (
     <ChatMessageList
       density="balanced"
@@ -123,6 +133,7 @@ export function ChatMessages({
       scrollToTopAction={onLoadOlder}
     >
       {messages.map((message, index) => {
+        const activityRun = activityRunForAssistantDisplay(messages, index);
         const profileCommit = profileCommitForRow(messages, index);
         const jobSaveConfirmation = jobSaveConfirmationForRow(
           messages,
@@ -148,6 +159,8 @@ export function ChatMessages({
             key={message.clientKey}
             message={message}
             tools={toolsForAssistantDisplay(messages, index)}
+            activityRun={activityRun}
+            streamPhase={streamPhase}
             sourceMessageId={sourceMessageId}
             profileCommit={profileCommit}
             jobSaveConfirmation={jobSaveConfirmation}
@@ -167,7 +180,7 @@ export function ChatMessages({
       <StreamNotices
         streamPhase={streamPhase}
         streamError={streamError}
-        assistantStatus={assistantStatus}
+        hasRunBackedAssistant={hasRunBackedAssistant}
       />
     </ChatMessageList>
   );

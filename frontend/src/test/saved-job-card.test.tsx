@@ -21,7 +21,6 @@ import {ChatMessages} from '../features/chat/components/ChatMessages';
 import {
   toolsForAssistantDisplay,
 } from '../features/chat/components/ChatMessageRow';
-import {friendlyToolLabel} from '../features/chat/components/ChatToolActivity';
 import {
   hydrateFromHistoryPage,
   rehydrateWithDurableTruth,
@@ -135,7 +134,22 @@ function historyWithSaveJob(
           completed_at: TS,
           created_at: TS,
           updated_at: TS,
-          activities: [],
+          activities: [
+            {
+              activity_id: tool.id,
+              run_id: RUN_ID,
+              sequence: 0,
+              kind: 'tool',
+              label: 'Save job',
+              technical_name: tool.tool_name,
+              state: tool.status,
+              started_at: tool.created_at,
+              updated_at: tool.updated_at,
+              completed_at: tool.updated_at,
+              duration_ms: tool.duration_ms,
+              error_code: tool.error_code,
+            },
+          ],
           tool_executions: [tool],
         },
       },
@@ -559,10 +573,6 @@ describe('history resultData + friendly labels', () => {
     expect(cardHostCount(state.messages)).toBe(1);
   });
 
-  it('uses friendly Save Job / Query Jobs labels', () => {
-    expect(friendlyToolLabel('save_job')).toBe('Save Job');
-    expect(friendlyToolLabel('query_jobs')).toBe('Query Jobs');
-  });
 });
 
 describe('ChatPage durable saved-job card', () => {
@@ -574,8 +584,10 @@ describe('ChatPage durable saved-job card', () => {
       expect(screen.getByTestId('jobagent-saved-job-card')).toBeInTheDocument();
     });
     expect(screen.getAllByTestId('jobagent-saved-job-card')).toHaveLength(1);
-    expect(screen.getByText('Save Job')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('Save job')).toBeInTheDocument();
+    expect(
+      screen.getByText('save_job · completed · 120ms'),
+    ).toBeInTheDocument();
     expect(screen.getByText(JOB_ID)).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
       'processed',
@@ -652,7 +664,6 @@ describe('ChatPage durable saved-job card', () => {
         messages={state.messages}
         streamPhase="idle"
         streamError={null}
-        assistantStatus={null}
         isStreaming={false}
       />,
     );
@@ -746,7 +757,22 @@ describe('ChatPage durable saved-job card', () => {
             completed_at: TS,
             created_at: TS,
             updated_at: TS,
-            activities: [],
+            activities: [
+              {
+                activity_id: TOOL_EXEC,
+                run_id: RUN_ID,
+                sequence: 0,
+                kind: 'tool',
+                label: 'Search jobs',
+                technical_name: 'query_jobs',
+                state: 'completed',
+                started_at: TS,
+                updated_at: TS,
+                completed_at: TS,
+                duration_ms: 10,
+                error_code: null,
+              },
+            ],
             tool_executions: [
               {
                 id: TOOL_EXEC,
@@ -798,10 +824,10 @@ describe('ChatPage durable saved-job card', () => {
       sendTurn: vi.fn(),
     });
     await waitFor(() => {
-      expect(screen.getByText('Query Jobs')).toBeInTheDocument();
+      expect(screen.getByText('Search jobs')).toBeInTheDocument();
     });
-    expect(screen.getByText('Found 1 job(s)')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('query_jobs · completed · 10ms')).toBeInTheDocument();
+    expect(screen.queryByText('Found 1 job(s)')).not.toBeInTheDocument();
     expect(screen.queryByTestId('jobagent-saved-job-card')).not.toBeInTheDocument();
     expect(screen.queryByText(/rank|score/i)).not.toBeInTheDocument();
   });
@@ -837,7 +863,11 @@ describe('ChatPage durable saved-job card', () => {
       expect(screen.getByTestId('jobagent-saved-job-card')).toBeInTheDocument();
     });
     expect(screen.getAllByTestId('jobagent-saved-job-card')).toHaveLength(1);
-    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `save_job · failed · 120ms · ${NEO4J_SYNC_FAILED_CODE}`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
       'processed',
     );
