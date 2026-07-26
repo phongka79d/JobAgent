@@ -285,6 +285,8 @@ def _tool_view(row: ToolExecution) -> ObservabilityToolExecution:
 
 
 def _run_view(run: AgentRun, tools: list[ToolExecution]) -> RunHistoryItem:
+    if run.user_message_id is None:
+        raise RuntimeError("chat run has no user-message owner")
     related_att, related_job = _collect_related_ids(tools)
     return RunHistoryItem(
         id=run.id,

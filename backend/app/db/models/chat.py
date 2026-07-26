@@ -54,6 +54,12 @@ AGENT_RUN_STATES: frozenset[str] = frozenset(
 )
 AGENT_RUN_STATE_DEFAULT = AGENT_RUN_STATE_RUNNING
 
+AGENT_RUN_KIND_CHAT = "chat"
+AGENT_RUN_KIND_CV_TAILORING = "cv_tailoring"
+AGENT_RUN_KINDS: frozenset[str] = frozenset(
+    {AGENT_RUN_KIND_CHAT, AGENT_RUN_KIND_CV_TAILORING}
+)
+
 AGENT_ACTIVITY_KIND_ASSISTANT = "assistant"
 AGENT_ACTIVITY_KIND_TOOL = "tool"
 AGENT_ACTIVITY_KINDS = frozenset(
@@ -161,7 +167,7 @@ class ChatMessage(Base):
 
 
 class AgentRun(Base):
-    """One Agent run bound uniquely to its initiating user message."""
+    """One Agent run owned by either chat or a CV-tailoring session."""
 
     __tablename__ = "agent_runs"
     __table_args__ = (
@@ -192,16 +198,47 @@ class AgentRun(Base):
             | (~_TERMINAL_RUN & column("completed_at").is_(None)),
             name="completed_at_coupling",
         ),
+        CheckConstraint(
+            "run_kind IN ('chat', 'cv_tailoring')",
+            name="run_kind",
+        ),
+        CheckConstraint(
+            "(run_kind = 'chat' AND user_message_id IS NOT NULL "
+            "AND tailoring_session_id IS NULL AND parent_run_id IS NULL) "
+            "OR (run_kind = 'cv_tailoring' AND user_message_id IS NULL "
+            "AND tailoring_session_id IS NOT NULL)",
+            name="owner_coupling",
+        ),
         Index("ix_agent_runs__state", "state"),
         Index("ix_agent_runs__source_attachment_id", "source_attachment_id"),
+        Index(
+            "ix_agent_runs__tailoring_session_id", "tailoring_session_id"
+        ),
+        Index("ix_agent_runs__parent_run_id", "parent_run_id"),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
-    user_message_id: Mapped[str] = mapped_column(
+    run_kind: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default=AGENT_RUN_KIND_CHAT,
+        server_default=AGENT_RUN_KIND_CHAT,
+    )
+    user_message_id: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey("chat_messages.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         unique=True,
+    )
+    tailoring_session_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("cv_tailoring_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    parent_run_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
     )
     source_attachment_id: Mapped[str | None] = mapped_column(
         Text,

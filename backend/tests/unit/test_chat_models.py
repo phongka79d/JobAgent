@@ -38,11 +38,13 @@ _COLS: dict[str, tuple[set[str], set[str], str]] = {
     ),
     "agent_runs": (
         {
-            "id", "user_message_id", "source_attachment_id", "state",
+            "id", "run_kind", "user_message_id", "tailoring_session_id",
+            "parent_run_id", "source_attachment_id", "state",
             "pending_approval_json", "error_code", "completed_at", "created_at",
             "updated_at",
         },
         {
+            "user_message_id", "tailoring_session_id", "parent_run_id",
             "source_attachment_id", "pending_approval_json", "error_code",
             "completed_at",
         },
@@ -75,6 +77,14 @@ _CHECKS: dict[str, dict[str, tuple[str, ...]]] = {
         "ck_agent_runs__completed_at_coupling": (
             m.AGENT_RUN_STATE_COMPLETED, m.AGENT_RUN_STATE_FAILED, "completed_at",
         ),
+        "ck_agent_runs__run_kind": tuple(m.AGENT_RUN_KINDS),
+        "ck_agent_runs__owner_coupling": (
+            m.AGENT_RUN_KIND_CHAT,
+            m.AGENT_RUN_KIND_CV_TAILORING,
+            "user_message_id",
+            "tailoring_session_id",
+            "parent_run_id",
+        ),
     },
     "tool_executions": {
         "ck_tool_executions__status": tuple(m.TOOL_EXECUTION_STATUSES),
@@ -99,6 +109,10 @@ _FKS = (
      "chat_messages", "id", "CASCADE"),
     ("agent_runs", "fk_agent_runs__source_attachment_id",
      "source_attachment_id", "attachments", "id", "CASCADE"),
+    ("agent_runs", "fk_agent_runs__tailoring_session_id",
+     "tailoring_session_id", "cv_tailoring_sessions", "id", "CASCADE"),
+    ("agent_runs", "fk_agent_runs__parent_run_id",
+     "parent_run_id", "agent_runs", "id", "SET NULL"),
     ("tool_executions", "fk_tool_executions__run_id", "run_id",
      "agent_runs", "id", "CASCADE"),
     ("tool_executions", "fk_tool_executions__source_attachment_id",
@@ -112,6 +126,9 @@ _IXS = (
     ("agent_runs", "ix_agent_runs__state", ["state"]),
     ("agent_runs", "ix_agent_runs__source_attachment_id",
      ["source_attachment_id"]),
+    ("agent_runs", "ix_agent_runs__tailoring_session_id",
+     ["tailoring_session_id"]),
+    ("agent_runs", "ix_agent_runs__parent_run_id", ["parent_run_id"]),
     ("tool_executions", "ix_tool_executions__run_status", ["run_id", "status"]),
     ("tool_executions", "ix_tool_executions__source_attachment_id",
      ["source_attachment_id"]),
@@ -273,8 +290,13 @@ def test_agent_runs_state_unique_and_completed_at() -> None:
         }
     )
     assert m.AGENT_RUN_STATE_DEFAULT == m.AGENT_RUN_STATE_RUNNING == "running"
+    assert m.AGENT_RUN_KINDS == frozenset({"chat", "cv_tailoring"})
+    assert m.AGENT_RUN_KIND_CHAT == "chat"
+    assert m.AGENT_RUN_KIND_CV_TAILORING == "cv_tailoring"
+    _assert_const_default(_c(table, "run_kind"), m.AGENT_RUN_KIND_CHAT)
     _assert_const_default(_c(table, "state"), m.AGENT_RUN_STATE_DEFAULT)
     assert _c(table, "user_message_id").unique is True
+    assert _c(table, "user_message_id").nullable is True
     assert "uq_agent_runs__user_message_id" in _uq_names(table)
 
 
@@ -325,7 +347,7 @@ def test_chat_family_fks_and_indexes() -> None:
         assert el[0].ondelete == ondelete
     assert len(by_table["conversations"]) == 1
     assert len(by_table["chat_messages"]) == 2
-    assert len(by_table["agent_runs"]) == 2
+    assert len(by_table["agent_runs"]) == 4
     assert len(by_table["tool_executions"]) == 2
     for table_name, ix_name, columns in _IXS:
         matches = [ix for ix in _t(table_name).indexes if ix.name == ix_name]

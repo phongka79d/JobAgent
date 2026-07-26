@@ -15,7 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.attachment_text_chunks import AttachmentTextChunk
 from app.db.models.attachments import Attachment
-from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
+from app.db.models.chat import (
+    AGENT_RUN_KIND_CHAT,
+    AgentRun,
+    ChatMessage,
+    Conversation,
+    ToolExecution,
+)
 
 
 class ObservabilityRepositoryError(Exception):
@@ -130,7 +136,7 @@ async def list_runs_before(
     if limit < 1:
         raise ObservabilityRepositoryError("limit must be >= 1")
 
-    stmt = select(AgentRun)
+    stmt = select(AgentRun).where(AgentRun.run_kind == AGENT_RUN_KIND_CHAT)
     if profile_id is not None:
         stmt = (
             stmt.join(ChatMessage, AgentRun.user_message_id == ChatMessage.id)

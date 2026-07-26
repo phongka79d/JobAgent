@@ -209,7 +209,7 @@ def test_fresh_upgrade_creates_application_tables_and_workspace_seed(
     run_async(_c())
 
 
-def test_migration_0006_adds_only_agent_activity_projection(
+def test_migration_head_adds_tailoring_and_preserves_agent_activity_projection(
     isolated_sqlite: Path,
 ) -> None:
     command.upgrade(alembic_config(isolated_sqlite), "head")
@@ -234,7 +234,23 @@ def test_migration_0006_adds_only_agent_activity_projection(
                         text("SELECT version_num FROM alembic_version")
                     )
                 ).scalar_one()
-                assert version == "0006_add_agent_activities"
+                assert version == "0007_add_cv_tailoring"
+                tables = await _names(engine)
+                assert "cv_tailoring_sessions" in tables
+                assert "cv_tailoring_versions" in tables
+                run_columns = {
+                    str(row[1])
+                    for row in (
+                        await connection.execute(
+                            text("PRAGMA table_info('agent_runs')")
+                        )
+                    ).fetchall()
+                }
+                assert {
+                    "run_kind",
+                    "tailoring_session_id",
+                    "parent_run_id",
+                } <= run_columns
         finally:
             await engine.dispose()
 
@@ -263,6 +279,133 @@ def test_upgrade_at_head_is_noop_and_does_not_duplicate_seeds(
             await e.dispose()
 
     run_async(_c())
+
+
+def test_tailoring_migration_downgrades_and_reupgrades_on_disposable_db(
+    isolated_sqlite: Path,
+) -> None:
+    cfg = alembic_config(isolated_sqlite)
+    command.upgrade(cfg, "0006_add_agent_activities")
+
+    async def _plant_chat_history() -> None:
+        engine = build_async_engine(isolated_sqlite)
+        try:
+            async with engine.begin() as connection:
+                statements = (
+                    "INSERT INTO attachments "
+                    "(id, file_hash, original_name, mime_type, size_bytes, "
+                    "page_count, storage_path, state, failure_code, created_at, "
+                    "updated_at) VALUES ('att-7', 'hash-7', 'cv.pdf', "
+                    "'application/pdf', 10, 1, 'att-7.pdf', 'archived', NULL, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO profiles "
+                    "(id, attachment_id, display_name, profile_json, location, "
+                    "extraction_version, source_hash, state, created_at, updated_at, "
+                    "last_opened_at) VALUES ('profile-7', 'att-7', 'Synthetic', '{}', "
+                    "NULL, 'cv-document-v1', 'source-7', 'ready', CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO conversations "
+                    "(id, profile_id, title, created_at, updated_at, last_opened_at) "
+                    "VALUES ('conversation-7', 'profile-7', 'Synthetic', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO chat_messages "
+                    "(id, conversation_id, role, content, structured_payload, "
+                    "source_attachment_id, redacted_at, created_at, updated_at) "
+                    "VALUES ('message-7', 'conversation-7', 'user', 'Synthetic', "
+                    "NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO agent_runs "
+                    "(id, user_message_id, source_attachment_id, state, "
+                    "pending_approval_json, error_code, completed_at, created_at, "
+                    "updated_at) VALUES ('run-7', 'message-7', NULL, 'completed', "
+                    "NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP)",
+                    "INSERT INTO agent_activities "
+                    "(id, run_id, sequence, kind, label, technical_name, status, "
+                    "duration_ms, error_code, started_at, updated_at, completed_at) "
+                    "VALUES ('activity-7', 'run-7', 0, 'assistant', 'Synthetic', "
+                    "NULL, 'completed', 1, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "INSERT INTO tool_executions "
+                    "(id, run_id, source_attachment_id, tool_call_id, tool_name, "
+                    "arguments_summary_json, status, duration_ms, error_code, "
+                    "result_json, created_at, updated_at) VALUES "
+                    "('tool-7', 'run-7', NULL, 'call-7', 'synthetic_tool', NULL, "
+                    "'completed', 1, NULL, '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                )
+                for statement in statements:
+                    await connection.execute(text(statement))
+        finally:
+            await engine.dispose()
+
+    run_async(_plant_chat_history())
+    command.upgrade(cfg, "head")
+
+    async def _assert_chat_history(*, at_head: bool) -> None:
+        engine = build_async_engine(isolated_sqlite)
+        try:
+            async with engine.connect() as connection:
+                run = (
+                    await connection.execute(
+                        text(
+                            "SELECT user_message_id, state"
+                            + (", run_kind" if at_head else "")
+                            + " FROM agent_runs WHERE id = 'run-7'"
+                        )
+                    )
+                ).one()
+                assert tuple(run[:2]) == ("message-7", "completed")
+                if at_head:
+                    assert run[2] == "chat"
+                assert int(
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT COUNT(*) FROM agent_activities "
+                                "WHERE run_id = 'run-7'"
+                            )
+                        )
+                    ).scalar_one()
+                ) == 1
+                assert int(
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT COUNT(*) FROM tool_executions "
+                                "WHERE run_id = 'run-7'"
+                            )
+                        )
+                    ).scalar_one()
+                ) == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_assert_chat_history(at_head=True))
+    command.downgrade(cfg, "0006_add_agent_activities")
+
+    async def _assert_0006() -> None:
+        engine = build_async_engine(isolated_sqlite)
+        try:
+            assert "cv_tailoring_sessions" not in await _names(engine)
+            async with engine.connect() as connection:
+                columns = {
+                    str(row[1])
+                    for row in (
+                        await connection.execute(
+                            text("PRAGMA table_info('agent_runs')")
+                        )
+                    ).fetchall()
+                }
+                assert "run_kind" not in columns
+                assert "tailoring_session_id" not in columns
+                assert "parent_run_id" not in columns
+        finally:
+            await engine.dispose()
+
+    run_async(_assert_0006())
+    run_async(_assert_chat_history(at_head=False))
+    command.upgrade(cfg, "head")
+    assert _current(isolated_sqlite) == MIGRATION_HEAD
+    run_async(_assert_chat_history(at_head=True))
 
 
 def test_upgrade_preserves_unrelated_checkpoint_like_tables(

@@ -80,6 +80,8 @@ def _run_view(
     tools: list[ToolExecution],
     activities: list[AgentActivity],
 ) -> AgentRunView:
+    if run.user_message_id is None:
+        raise ChatHistoryServiceError("chat run has no user-message owner")
     projected = [activity_payload(activity) for activity in activities]
     stored_ids = {activity.activity_id for activity in projected}
     next_sequence = max(
@@ -186,7 +188,11 @@ async def _hydrate_items(
     """Attach runs and durable tool activity to initiating user messages only."""
     user_ids = [m.id for m in messages if m.role == CHAT_MESSAGE_ROLE_USER]
     runs = await runs_repo.list_runs_for_user_message_ids(session, user_ids)
-    run_by_user: dict[str, AgentRun] = {r.user_message_id: r for r in runs}
+    run_by_user: dict[str, AgentRun] = {
+        run.user_message_id: run
+        for run in runs
+        if run.user_message_id is not None
+    }
     run_ids = [r.id for r in runs]
     tools = await tool_repo.list_for_run_ids(session, run_ids)
     activities = await activity_repo.list_for_run_ids(session, run_ids)

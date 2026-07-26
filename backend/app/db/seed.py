@@ -17,6 +17,8 @@ APPLICATION_TABLE_NAMES: frozenset[str] = frozenset(
         "attachment_text_chunks",
         "cv_documents",
         "cv_document_drafts",
+        "cv_tailoring_sessions",
+        "cv_tailoring_versions",
         "profiles",
         "profile_drafts",
         "profile_preferences",

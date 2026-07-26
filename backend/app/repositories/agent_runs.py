@@ -1,9 +1,8 @@
-"""Agent-run create and transition repository.
+"""Dual-owner Agent-run creation, lookup, and transition repository.
 
-Creates one run per unique user message (``state='running'``) and enforces the
-approved status transitions with exact ``pending_approval_json``,
-``error_code``, and ``completed_at`` coupling. Callers own the async session
-and commit; this module never opens a session or finalizes the unit of work.
+Chat runs remain unique per user message; tailoring runs belong to one
+tailoring session and may reference their initiating chat run. All runs share
+the approved state-transition coupling. Callers own commit and session scope.
 """
 
 from __future__ import annotations
@@ -17,6 +16,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.time import utc_now
 from app.db.models.chat import (
+    AGENT_RUN_KIND_CHAT,
+    AGENT_RUN_KIND_CV_TAILORING,
     AGENT_RUN_STATE_COMPLETED,
     AGENT_RUN_STATE_FAILED,
     AGENT_RUN_STATE_INTERRUPTED,
@@ -25,6 +26,7 @@ from app.db.models.chat import (
     ChatMessage,
     Conversation,
 )
+from app.db.models.cv_tailoring import CVTailoringSession
 from app.repositories import conversations as conversations_repo
 from app.repositories.conversations import ConversationOwner
 
@@ -71,17 +73,19 @@ def _sql_null_json() -> Any:
 async def create_run(
     session: AsyncSession,
     *,
-    user_message_id: str,
+    user_message_id: str | None = None,
+    run_kind: str = AGENT_RUN_KIND_CHAT,
+    tailoring_session_id: str | None = None,
+    parent_run_id: str | None = None,
     source_attachment_id: str | None = None,
 ) -> AgentRun:
-    """Create one ``running`` run bound uniquely to *user_message_id*.
-
-    Initial fields: ``state='running'`` with SQL-null approval/error/completion
-    columns. Optional *source_attachment_id* records CV-scoped ownership without
-    lifecycle logic. Uniqueness is enforced by the ``user_message_id`` unique
-    constraint; a second create for the same message fails at flush. Does not
-    finalize the caller's unit of work.
-    """
+    """Create one validated chat- or tailoring-owned ``running`` run."""
+    validate_run_owner_xor(
+        run_kind=run_kind,
+        user_message_id=user_message_id,
+        tailoring_session_id=tailoring_session_id,
+        parent_run_id=parent_run_id,
+    )
     if source_attachment_id is not None and (
         not isinstance(source_attachment_id, str)
         or source_attachment_id.strip() == ""
@@ -90,7 +94,10 @@ async def create_run(
             "source_attachment_id must be a non-empty string when set"
         )
     kwargs: dict[str, Any] = {
+        "run_kind": run_kind,
         "user_message_id": user_message_id,
+        "tailoring_session_id": tailoring_session_id,
+        "parent_run_id": parent_run_id,
         "state": AGENT_RUN_STATE_RUNNING,
     }
     if source_attachment_id is not None:
@@ -99,6 +106,52 @@ async def create_run(
     session.add(run)
     await session.flush()
     return run
+
+
+def validate_run_owner_xor(
+    *,
+    run_kind: str,
+    user_message_id: str | None,
+    tailoring_session_id: str | None,
+    parent_run_id: str | None,
+) -> None:
+    if run_kind == AGENT_RUN_KIND_CHAT:
+        valid = (
+            isinstance(user_message_id, str)
+            and bool(user_message_id.strip())
+            and tailoring_session_id is None
+            and parent_run_id is None
+        )
+    elif run_kind == AGENT_RUN_KIND_CV_TAILORING:
+        valid = (
+            user_message_id is None
+            and isinstance(tailoring_session_id, str)
+            and bool(tailoring_session_id.strip())
+            and (
+                parent_run_id is None
+                or (isinstance(parent_run_id, str) and bool(parent_run_id.strip()))
+            )
+        )
+    else:
+        valid = False
+    if not valid:
+        raise AgentRunRepositoryError("agent run must have exactly one valid owner")
+
+
+async def create_tailoring_run(
+    session: AsyncSession,
+    *,
+    tailoring_session_id: str,
+    parent_run_id: str | None = None,
+    source_attachment_id: str | None = None,
+) -> AgentRun:
+    return await create_run(
+        session,
+        run_kind=AGENT_RUN_KIND_CV_TAILORING,
+        tailoring_session_id=tailoring_session_id,
+        parent_run_id=parent_run_id,
+        source_attachment_id=source_attachment_id,
+    )
 
 
 async def get_run(session: AsyncSession, run_id: str) -> AgentRun | None:
@@ -139,7 +192,7 @@ async def resolve_run_owner(
     result = await session.execute(
         select(ChatMessage.conversation_id)
         .join(AgentRun, AgentRun.user_message_id == ChatMessage.id)
-        .where(AgentRun.id == run_id)
+        .where(AgentRun.id == run_id, AgentRun.run_kind == AGENT_RUN_KIND_CHAT)
     )
     conversation_id = result.scalar_one_or_none()
     if conversation_id is None:
@@ -166,6 +219,35 @@ async def list_run_ids_for_profile(
         .join(ChatMessage, AgentRun.user_message_id == ChatMessage.id)
         .join(Conversation, ChatMessage.conversation_id == Conversation.id)
         .where(Conversation.profile_id == profile_id)
+    )
+    return list(result.scalars().all())
+
+
+async def list_run_ids_for_tailoring_session(
+    session: AsyncSession, tailoring_session_id: str
+) -> list[str]:
+    result = await session.execute(
+        select(AgentRun.id).where(
+            AgentRun.run_kind == AGENT_RUN_KIND_CV_TAILORING,
+            AgentRun.tailoring_session_id == tailoring_session_id,
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def list_tailoring_run_ids_for_profile(
+    session: AsyncSession, profile_id: str
+) -> list[str]:
+    result = await session.execute(
+        select(AgentRun.id)
+        .join(
+            CVTailoringSession,
+            AgentRun.tailoring_session_id == CVTailoringSession.id,
+        )
+        .where(
+            AgentRun.run_kind == AGENT_RUN_KIND_CV_TAILORING,
+            CVTailoringSession.profile_id == profile_id,
+        )
     )
     return list(result.scalars().all())
 

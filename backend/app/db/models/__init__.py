@@ -17,6 +17,7 @@ from app.db.models.chat import (
     ToolExecution,
 )
 from app.db.models.cv_documents import CVDocument, CVDocumentDraft
+from app.db.models.cv_tailoring import CVTailoringSession, CVTailoringVersion
 from app.db.models.job_evaluations import JobEvaluation
 from app.db.models.jobs import JobPost
 from app.db.models.profiles import (
@@ -33,6 +34,8 @@ __all__ = [
     "AttachmentTextChunk",
     "CVDocument",
     "CVDocumentDraft",
+    "CVTailoringSession",
+    "CVTailoringVersion",
     "ChatMessage",
     "Conversation",
     "JobEvaluation",
