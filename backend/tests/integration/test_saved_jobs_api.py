@@ -1140,12 +1140,22 @@ def test_list_without_profile_marks_existing_eval_stale(
 
 def test_save_and_evaluate_rejects_invalid_source_relationships(
     jobs_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, _, _ = jobs_env
     invoker = FakeJdInvoker([_full_extracted()])
     emb = FakeEmbeddingClient()
     engine = build_async_engine(db_path)
     factory = session_factory(engine)
+
+    async def _allow_source_relationship_test(_session_factory: Any) -> None:
+        return None
+
+    monkeypatch.setattr(
+        saved_jobs_service,
+        "_assert_public_mutation_idle",
+        _allow_source_relationship_test,
+    )
 
     async def _seed() -> dict[str, str]:
         async with factory() as session:

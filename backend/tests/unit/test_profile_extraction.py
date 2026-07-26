@@ -1432,6 +1432,7 @@ def test_tool_boundary_compact_and_not_production_registered(
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     ]
 
     async def _ainvoke_with_identity(
