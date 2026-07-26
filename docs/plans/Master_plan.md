@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 2.2
-**Date:** 2026-07-22
-**Status:** Amended for Plan 16 profession-neutral semantic skill labels, verbatim source evidence, and the selected-JD compatibility map
+**Version:** 2.3
+**Date:** 2026-07-26
+**Status:** Amended for Plan 16 profession-neutral semantic skill labels, verbatim source evidence, the selected-JD compatibility map, controlled multi-Agent governance, and Plan 17 source-grounded derivative CV tailoring with fixed LaTeX rendering
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -104,7 +104,8 @@ Otherwise, it remains outside the MVP.
 - Qdrant.
 - Jina or ShopAIKey reranking in the MVP.
 - Redis, Celery, Kafka, or a separate worker service.
-- Multiple agents or agent handoffs.
+- Unapproved or unbounded Agent topology, model-driven recursive spawning,
+  unrestricted peer handoffs, or an Agent without a coordinator-owned contract.
 - 64K conversation memory injection.
 - LangSmith cloud dependency.
 - GitHub Actions or other CI workflows.
@@ -123,7 +124,7 @@ Otherwise, it remains outside the MVP.
 | Design system | Astryx + neutral theme | App shell, chat, tool calls, buttons, feedback states |
 | Backend | Python + FastAPI | REST, file upload, SSE, application services |
 | Validation | Pydantic v2 | Tool and extraction contracts |
-| Agent orchestration | LangGraph | One controlled tool loop with interrupt/resume |
+| Agent orchestration | LangGraph | Controlled Main-Agent tool loop and bounded coordinator-owned specialist graphs |
 | LLM adapter | `langchain-openai` `ChatOpenAI` | OpenAI-format tool calling through ShopAIKey |
 | LLM provider | ShopAIKey | OpenAI-compatible API |
 | LLM model | `gpt-4o-mini` | Tool choice and structured extraction |
@@ -145,7 +146,7 @@ The exact dependency versions are pinned after Phase 0 compatibility checks. Fas
 ```mermaid
 flowchart TD
     UI["React + Astryx"] --> API["FastAPI API"]
-    API --> AGENT["Single LangGraph Agent"]
+    API --> AGENT["Main Agent + bounded specialist Agents"]
     AGENT --> SERVICES["Application Services"]
     SERVICES --> SQLITE["SQLite source of truth"]
     SERVICES --> NEO4J["Neo4j graph + vectors"]
@@ -1040,9 +1041,12 @@ Replacement preserves Job ID, source type/URL, raw content/hash, and original id
 
 ## 12. Agent Architecture
 
-### 12.1 One Agent, one controlled loop
+### 12.1 Main Agent, one controlled conversation loop
 
-The system uses one `StateGraph` with one LLM decision node and one `ToolNode`. It is not a multi-agent architecture.
+The conversation Main Agent uses one `StateGraph` with one LLM decision node and
+one `ToolNode`. Coordinator-owned specialist Agents may use separate finite
+graphs only under the controlled multi-Agent contract in Section 30.2; they do
+not change or nest the Main Agent's tool loop.
 
 ```mermaid
 flowchart TD
@@ -1143,7 +1147,12 @@ A greeting or general-question turn creates user and assistant messages plus one
 
 ## 13. Agent-Facing Tool Contracts
 
-The Agent sees exactly seven job-specific tools. Before graph execution, the application injects compact `candidate_context` plus `active_cv_context`; raw CV text is never injected. `read_active_cv` is the only Agent-facing path to CV document bodies or raw chunks and can access only the currently active attachment.
+Sections 13.1â€“13.7 define the Main Agent's seven-tool baseline. Plan 17 appends
+`create_tailored_cv` as tool eight under Section 30 without changing the seven
+existing contracts. Before graph execution, the application injects compact
+`candidate_context` plus `active_cv_context`; raw CV text is never injected.
+`read_active_cv` remains the only Main-Agent tool that can return CV document
+bodies or raw chunks and can access only the currently active attachment.
 
 `(run_id, tool_call_id)` is the durable identity of one tool invocation. Re-entering a terminal invocation returns its stored `result_json`; it never repeats a completed side effect. The LLM and frontend do not generate separate idempotency keys.
 
@@ -1919,7 +1928,7 @@ Tasks:
 - [ ] Define SSE Pydantic event contracts.
 - [ ] Implement `POST /api/chat/turns`, cursor-paginated history, and resume endpoints.
 - [ ] Implement per-turn AsyncSqliteSaver lifecycle and checkpoint cleanup.
-- [ ] Build the single LangGraph loop with `ToolNode`, iteration limit, error boundary, and interrupt support.
+- [ ] Build the Main conversation LangGraph loop with `ToolNode`, iteration limit, error boundary, and interrupt support.
 - [ ] Implement ShopAIKey `ChatOpenAI` adapter using the verified Phase 0 mode.
 - [ ] Implement a conversation-first system prompt with explicit JobAgent tool boundaries.
 - [ ] Implement frontend SSE reducer and base Astryx chat shell.
@@ -2108,7 +2117,9 @@ Exit gate:
 - Active-CV source controls appear only for successful durable `read_active_cv` evidence and display exactly what the Agent read.
 - A passive JD paste visibly remains unsaved until one confirmation action; cancel creates no Job/JD-extraction/embedding/graph side effect, while save processes the exact durable initiating message once.
 - The same Job content still deduplicates, save does not evaluate automatically, and existing explicit evaluation/delete/recovery actions remain intact.
-- One Agent, one decision node, one ToolNode, seven tools, six passes, current public APIs/schema/dependencies, and desktop product flows remain green.
+- The Phase 10 Main Agent retains one decision node, one ToolNode, seven tools,
+  and six passes; that phase adds no specialist Agent and keeps its public
+  APIs/schema/dependencies and desktop product flows green.
 
 ---
 
@@ -2217,7 +2228,8 @@ JobAgent MVP is done only when all conditions are true:
 - Failure paths do not report false success.
 - Automated functional tests pass, the bounded synthetic live-provider diagnostic proves semantic extraction invariants, and the developer completes the manual JD acceptance checklist.
 - The project starts locally through Docker Compose and one root `.env`.
-- No Qdrant, OCR, crawler, authentication, multi-agent, Redis, Celery, cloud deployment, or CI has been added.
+- No Qdrant, OCR, crawler, authentication, unapproved or unbounded Agent
+  topology, Redis, Celery, cloud deployment, or CI has been added.
 - No broad JD benchmark/model-selection project, new JD schema field, blind skill splitter, outbox/worker/queue/sync-state machine, or production security subsystem has been added.
 
 ---
@@ -2247,11 +2259,167 @@ Phases 0-11 plus the completed Plan 15 guarded-extraction/re-extraction boundary
 
 The project remains intentionally narrow:
 
-> One user, one natural readable conversation, one approved active CV selected through CV Manager, profession-neutral source-grounded atomic skills, one Agent with bounded evidence-backed active-document access, confirmed passive JD saving, SQLite as source of truth, Neo4j as the rebuildable graph/vector index, a non-technical selected-JD compatibility map plus explicit technical view, a complete inspectable saved-JD detail, and explicit revision-keyed transparent evaluation.
+> One user, one natural readable conversation, one approved active CV selected
+> through CV Manager, profession-neutral source-grounded atomic skills, one Main
+> Agent with bounded evidence-backed active-document access, controlled
+> coordinator-owned specialist Agents where an approved workflow requires them,
+> confirmed passive JD saving, SQLite as source of truth, Neo4j as the
+> rebuildable graph/vector index, a non-technical selected-JD compatibility map
+> plus explicit technical view, a complete inspectable saved-JD detail, and
+> explicit revision-keyed transparent evaluation.
 
 ---
 
-## 30. Evidence Sources
+## 30. Version 2.3 Amendment — Source-Grounded CV Tailoring and Fixed LaTeX Rendering
+
+This amendment is the architecture and public-contract authority for Plan 17. It
+implements the approved [CV tailoring design](../superpowers/specs/2026-07-26-cv-tailoring-latex-design.md);
+that design supplies detailed rationale, while this Master remains the stable
+portfolio authority. Where an earlier Master statement says one Agent, seven
+tools, or no multi-agent work, this amendment controls. Those earlier statements
+describe the historical Main-Agent baseline or their own bounded phase; they do
+not impose a permanent project-wide Agent ceiling.
+
+### 30.1 Product boundary, grounding, and contacts
+
+- A ready profile may create a derivative tailored CV from either one selected
+  saved Job or a bounded natural-language instruction. Both paths use the one
+  `TailoringCoordinator`; selecting or re-extracting a Job never generates a CV
+  automatically. Successful initial generation, AI revision, and manual save
+  each create immutable `resume.tex` and `resume.pdf` artifacts.
+- Approved/archived CVs, `CVDocument`, Candidate Profile, saved Jobs,
+  evaluations, matching, and Neo4j remain read-only source truth. `latex-cv-v1`
+  is the sole visual-template/rendering owner. The source CV owns immutable
+  section IDs, headings, kinds, ordinals, and order, including `Experience` and
+  unknown sections; sections cannot be added, removed, renamed, or reordered.
+- A deterministic baseline projector and one shared grounding guard bind every
+  AI/manual non-empty item to valid source facts from its selected section.
+  Unsupported people, roles, employers, institutions, skills, metrics, dates,
+  URLs, attributes, cross-section evidence, and identity changes are rejected.
+  New real facts require the existing profile correction/approval workflow.
+- `CandidateProfile.phone`, `.email`, and `.github_url` are nullable,
+  backward-compatible approved fields. Contacts are source-grounded,
+  source-ordered, ambiguity-safe, and shown through existing profile approval;
+  GitHub is an optional absolute HTTP(S) `github.com` profile URL. Tailoring
+  requires approved non-empty `full_name`; location, phone, email, and GitHub
+  are independently optional and omitted with their separators when absent.
+
+### 30.2 Controlled multi-Agent governance, Plan 17 topology, and privacy
+
+JobAgent has no global hard cap on product Agents. Every future Agent requires a
+separately approved business use case and coordinator-owned contract that
+defines bounded provider-visible and server-only inputs, structured output or a
+strict tool boundary, excluded private context, a finite cycle-free topology,
+bounded retry/repair/timeout/cancellation/recovery behavior, durable
+parent-child identity and terminal truth, cleanup ownership, and topology,
+privacy, grounding, failure, and recovery tests. A coordinator alone launches
+children, owns their lifecycle and safe result validation, and cannot report
+parent success when its required child failed, was interrupted, or did not reach
+durable completion.
+
+An Agent may delegate only through its approved workflow coordinator.
+Model-driven recursive spawn, unrestricted peer handoffs, arbitrary
+Agent-to-Agent calls, hidden fallback Agents, and a generic Agent framework,
+worker, queue, or service remain unauthorized. Additional Agents stay YAGNI: a
+future plan must add its own explicit ownership, persistence, and test contract
+instead of weakening a current workflow or reserving a generic schema.
+
+Plan 17 implements only the existing Main Agent plus one fixed CV Tailoring
+Agent; this is the Phase 13 topology, not a project-wide maximum. The Main Agent
+remains the chat/intent owner; its production registry changes from seven to
+eight tools by adding `create_tailored_cv`. It accepts only a bounded instruction
+and server-injected optional selected Job state, never raw CV/JD text,
+template/LaTeX, storage paths, or an arbitrary Job ID. Its result is only a safe
+session/version/currentness status.
+
+The Tailoring Agent is a fixed separate workflow:
+`select_sections -> load_selected_sections -> rewrite_sections -> ground_patch
+-> repair_once`. It has no `ToolNode`, dynamic registry, Main-Agent invocation,
+or spawn/handoff edge. It first sees only instruction, selected structured Job
+extraction, and the CV outline; the server later supplies only selected section
+bodies and their fact bank. It never sees contacts, unrelated bodies, raw
+PDF/JD, reference template, Neo4j/embedding data, artifact paths, logs, or
+secrets. One schema-or-grounding repair is the maximum; a second failure is
+terminal.
+
+### 30.3 SQLite, artifact, compiler, and lifecycle contract
+
+Migration `0007_add_cv_tailoring` adds only derivative
+`cv_tailoring_sessions`/immutable `cv_tailoring_versions` records and the
+dual-owner `agent_runs` form. Sessions own ready-profile/source revision,
+optional scorable Job, bounded label/instruction, `latex-cv-v1`, lifecycle, and
+latest version number; versions own parent, creator (`ai|user`), validated
+content/provenance/source revisions, relative artifact paths/hashes, and page
+metadata. Version creation CASes the parent/latest number and returns
+`TAILORING_PARENT_CONFLICT` without overwriting work.
+
+`agent_runs.run_kind` is exactly `chat|cv_tailoring` for Plan 17: chat retains a
+user message, while tailoring retains a tailoring session and may parent only to
+its same-profile Main-Agent chat run. Existing activity/checkpoint/terminal rules
+apply and a tailoring child is parent-owned workspace work. A future Agent needs
+its own approved plan, migration, ownership checks, and tests; it must not
+weaken this XOR contract or introduce a speculative generic type. A session is
+stale when its profile revision, CV hash, selected Job revision, or template
+version changes; old versions remain readable/downloadable but new writes fail
+with `TAILORING_SOURCE_STALE` until an explicit new session.
+
+The backend alone derives UUID-safe `FILES_DIR/cv-tailoring/<profile>/<session>/
+<version>/resume.{tex,pdf}` paths, stages/promotes artifacts before the short CAS
+transaction, and removes only newly promoted artifacts on CAS failure. The fixed
+renderer escapes text and validated URLs and supports Vietnamese/English T5/T1.
+The existing backend image invokes `pdflatex` exactly twice by argv with
+`-no-shell-escape`, `-halt-on-error`, and `-interaction=nonstopmode`; no shell,
+network, client filename, package, image, or arbitrary working directory exists.
+Compiler failure, missing/oversize output, and invalid page count are safe
+`TAILORING_COMPILE_FAILED`; over two pages warns without truncating content.
+
+### 30.4 Public API, SSE, deployment, and frontend authority
+
+The public tailoring API is exactly `POST/GET /api/cv-tailoring/sessions`,
+`GET /api/cv-tailoring/sessions/{session_id}`, `POST`
+`/api/cv-tailoring/sessions/{session_id}/ai-versions`, `POST`
+`/api/cv-tailoring/sessions/{session_id}/manual-versions`, `GET`
+`/api/cv-tailoring/versions/{version_id}/source`, `GET`
+`/api/cv-tailoring/versions/{version_id}/pdf`, and `DELETE`
+`/api/cv-tailoring/sessions/{session_id}`. Session/AI-version creation reuse the
+existing seven SSE event names; no new event or `run_started` field exists.
+Session creation returns `X-CV-Tailoring-Session-Id`, exposed through CORS; a
+disconnect is never success. JSON/errors exclude raw CV/JD, contact values,
+LaTeX/PDF bytes, paths, checkpoints, provider data, and logs.
+
+Compose remains exactly `frontend`, `backend`, and `neo4j`: no fourth service,
+worker, queue, backfill, or tailored-CV Neo4j/embedding projection. Settings
+bound instruction, section/item, TeX, compiler timeout, and PDF size. Stable
+safe errors are `PROFILE_NOT_READY`, `TAILORING_CONTACT_REQUIRED`,
+`JOB_NOT_SCORABLE`, `TAILORING_SESSION_NOT_FOUND`,
+`TAILORING_VERSION_NOT_FOUND`, `TAILORING_SOURCE_STALE`,
+`TAILORING_PARENT_CONFLICT`, `TAILORING_GROUNDING_FAILED`,
+`TAILORING_COMPILE_FAILED`, `TAILORING_ARTIFACT_UNAVAILABLE`, and
+`TAILORING_DELETE_FAILED`.
+
+The frontend uses Astryx's installed neutral theme only: no Tailwind, second UI
+system, raw colors, guessed props, or new layout `div`s. `App` owns the sole
+`useSavedJobsState` and passes `selectedJobId` to chat; sidebar, selected-JD
+button, graph, and editor reuse that owner. Required UI is the selected-JD
+button, Main-Agent editor link, session list, structured source-order editor,
+scoped AI edit, explicit manual save, immutable version/download/PDF preview,
+current/stale/conflict/delete states, desktop split layout, and accessible mobile
+tabs. Header contacts are read-only approved facts.
+
+### 30.5 Phase 13 completion authority
+
+Phase 13 owns contact extraction, derivative content/provenance, migration/run
+ownership, artifact renderer/compiler, fixed Tailoring Agent/coordinator, direct
+API plus eighth Main-Agent tool, one saved-JD state owner, Astryx editor, and
+synthetic acceptance. It must prove privacy, grounding, immutable dual artifacts,
+CAS/currentness/deletion truth, exact three-service Compose topology, argv-only
+compiler behavior, and unchanged approved CV/Profile/JD/evaluation/matching/
+Neo4j truth. `Plan_17.md` is the sole execution and rollout authority for this
+phase.
+
+---
+
+## 31. Evidence Sources
 
 The following primary documentation supports the material technical decisions in this plan:
 

@@ -571,7 +571,7 @@ reruns affected evidence.
 | Future A1 implementation | Test-first PDF/CV/JD/normalizer/matching/sync/map/API/FE rollout sequence | The task reuses named owners and preserves all out-of-scope boundaries. |
 | Future A2/A3 review | Independent functional and scope acceptance | Evidence proves cross-profession behavior, one skill truth, exact cross-store parity, non-technical display, explicit rollout, and no hardcoded domain repair. |
 
-## Completion Contract
+### Historical completion evidence
 
 Plan 16 is complete only when a sufficiently long digital CV from every approved
 synthetic profession passes the same pypdf gate without English identity,
@@ -617,3 +617,12 @@ Neo4j rebuildability, explicit evaluation, and all Plan 15 failure contracts rem
 unchanged. No database migration, provider/model/dependency, global ontology,
 multi-candidate feature, worker/queue, automatic evaluation, real-data fixture, or
 unrelated redesign is introduced.
+
+### Next Consumer
+
+`Plan_17.md` consumes Plan 16's profession-neutral, source-grounded CV/JD skill
+and selected-JD compatibility-map contracts as unchanged prerequisites. It
+implements only the separately authorized Version 2.3 derivative-CV tailoring
+exception: exactly one bounded Tailoring Agent, the eighth Main-Agent tool, and
+SQLite/app-data tailoring records. It must not reimplement Plan 16's skill guards,
+normalizer, matching, evaluation, or Neo4j compatibility owners.

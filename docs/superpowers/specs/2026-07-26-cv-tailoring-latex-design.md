@@ -1,7 +1,7 @@
 # Source-Grounded CV Tailoring and Fixed LaTeX Rendering Design
 
 **Date:** 2026-07-26
-**Status:** Approved in conversation; written-spec review pending
+**Status:** Approved; amended for controlled multi-agent governance
 **Scope:** Create versioned, editable derivative CVs from an approved active CV,
 an optional selected saved JD, and a user instruction without modifying the
 approved CV or allowing an LLM to emit LaTeX.

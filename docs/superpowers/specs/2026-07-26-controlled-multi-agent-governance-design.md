@@ -1,7 +1,7 @@
 # Controlled Multi-Agent Governance Design
 
 **Date:** 2026-07-26
-**Status:** Approved in conversation; written-spec review pending
+**Status:** Approved
 **Scope:** Remove JobAgent's global single-Agent/two-Agent ceiling while keeping every concrete Agent workflow bounded, reviewable, and coordinator-owned.
 
 ## 1. Context
