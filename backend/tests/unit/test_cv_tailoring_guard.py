@@ -6,11 +6,15 @@ from dataclasses import dataclass
 
 from app.schemas.cv_tailoring import (
     SourceBoundText,
+    TailoredCVContent,
     TailoredItemPatch,
     TailoredPatchSet,
     TailoredSectionPatch,
 )
-from app.services.cv_tailoring_guard import guard_tailored_patch
+from app.services.cv_tailoring_guard import (
+    guard_manual_tailored_content,
+    guard_tailored_patch,
+)
 from app.services.cv_tailoring_projection import project_tailoring_baseline
 
 from tests.unit.test_cv_tailoring_projection import _document, _profile
@@ -296,3 +300,116 @@ def test_semantic_checker_only_receives_changed_field_and_cited_evidence() -> No
             ("Public-service systems specialist.",),
         )
     ]
+
+
+def test_changed_non_substring_fails_closed_without_a_semantic_checker() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+
+    guarded, issues = guard_tailored_patch(
+        _patch_for(
+            "summary",
+            body="Specialist in public-service systems.",
+            fact_ids=[fact_id],
+        ),
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+
+    assert guarded is None
+    assert any(issue.code == "UNSUPPORTED_ANCHOR" for issue in issues)
+
+
+def test_duplicate_fact_ids_are_rejected_after_in_memory_mutation() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+    patch = _patch_for(
+        "summary",
+        body="Public-service systems specialist.",
+        fact_ids=[fact_id],
+    )
+    patch.sections[0].items[0].body.source_fact_ids.append(fact_id)
+
+    guarded, issues = guard_tailored_patch(
+        patch,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+
+    assert guarded is None
+    assert any(issue.code == "UNKNOWN_FACT" for issue in issues)
+
+
+def test_manual_content_uses_the_shared_guard_and_ignores_caller_item_ids() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+    manual = baseline.content.model_copy(deep=True)
+    manual.sections[0].items[0].id = "caller-controlled-id"
+    manual.sections[0].items[0].body = _bound("Used Python", fact_id)
+
+    guarded, issues = guard_manual_tailored_content(
+        manual,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+
+    assert guarded is None
+    assert any(issue.code == "UNSUPPORTED_ANCHOR" for issue in issues)
+
+
+def test_manual_content_rejects_section_identity_changes_and_preserves_parent_header(
+) -> None:
+    baseline = _baseline()
+    manual = baseline.content.model_copy(deep=True)
+    manual.sections[0].heading = "Changed Summary"
+
+    guarded, issues = guard_manual_tailored_content(
+        manual,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+
+    assert guarded is None
+    assert any(issue.code == "SECTION_IDENTITY_CHANGED" for issue in issues)
+
+    changed_header = baseline.content.model_copy(deep=True)
+    changed_header.header.full_name = "Changed Candidate"
+    header_guarded, header_issues = guard_manual_tailored_content(
+        changed_header,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+    assert header_guarded is None
+    assert header_issues[0].path == "header"
+
+    unchanged = TailoredCVContent.model_validate(baseline.content.model_dump())
+    unchanged.sections[0].items[0].id = "caller-controlled-id"
+    format_reference = {"marker": "REFERENCE_ONLY_SENTINEL_7429"}
+    preserved, preserved_issues = guard_manual_tailored_content(
+        unchanged,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=None,
+    )
+    assert preserved_issues == ()
+    assert preserved is not None
+    assert preserved.header == baseline.content.header
+    assert preserved.sections[0].items[0].id == baseline.content.sections[0].items[0].id
+    assert format_reference["marker"] not in preserved.model_dump_json()

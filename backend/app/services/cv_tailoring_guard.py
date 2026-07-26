@@ -18,6 +18,7 @@ from app.schemas.cv_tailoring import (
     TailoredItemPatch,
     TailoredPatchSet,
     TailoredSection,
+    TailoredSectionPatch,
 )
 from app.services.skill_assertion_guard import normalize_assertion_text
 
@@ -127,6 +128,64 @@ def _attribute_names_for_section(parent_section: TailoredSection) -> list[str]:
     return names
 
 
+def _manual_content_identity_issues(
+    content: TailoredCVContent, *, parent: TailoredCVContent
+) -> list[GroundingIssue]:
+    if content.header != parent.header:
+        return [GroundingIssue(code="SECTION_IDENTITY_CHANGED", path="header")]
+    if len(content.sections) != len(parent.sections):
+        return [GroundingIssue(code="SECTION_IDENTITY_CHANGED", path="sections")]
+    for index, (section, parent_section) in enumerate(
+        zip(content.sections, parent.sections, strict=True)
+    ):
+        if (
+            section.id,
+            section.heading,
+            section.kind,
+            section.ordinal,
+        ) != (
+            parent_section.id,
+            parent_section.heading,
+            parent_section.kind,
+            parent_section.ordinal,
+        ):
+            return [
+                GroundingIssue(
+                    code="SECTION_IDENTITY_CHANGED",
+                    path=f"sections[{index}]",
+                )
+            ]
+    return []
+
+
+def _manual_content_patch(
+    content: TailoredCVContent, *, allowed_section_ids: Sequence[str]
+) -> TailoredPatchSet:
+    allowed = set(allowed_section_ids)
+    return TailoredPatchSet(
+        sections=[
+            TailoredSectionPatch(
+                section_id=section.id,
+                items=[
+                    TailoredItemPatch(
+                        source_entry_id=item.source_entry_id,
+                        title=item.title,
+                        subtitle=item.subtitle,
+                        date_text=item.date_text,
+                        location=item.location,
+                        body=item.body,
+                        bullets=item.bullets,
+                        attributes=item.attributes,
+                    )
+                    for item in section.items
+                ],
+            )
+            for section in content.sections
+            if section.id in allowed
+        ]
+    )
+
+
 def validate_patch_structure_and_facts(
     patch: TailoredPatchSet,
     *,
@@ -212,6 +271,13 @@ def validate_patch_structure_and_facts(
                         GroundingIssue(code="EMPTY_PROVENANCE", path=field_path)
                     )
                     continue
+                if len(bound_text.source_fact_ids) != len(
+                    set(bound_text.source_fact_ids)
+                ):
+                    issues.append(
+                        GroundingIssue(code="UNKNOWN_FACT", path=field_path)
+                    )
+                    continue
                 cited: list[str] = []
                 valid_facts = True
                 for fact_id in bound_text.source_fact_ids:
@@ -245,9 +311,8 @@ def validate_patch_structure_and_facts(
                     in normalize_assertion_text(evidence)
                     for evidence in cited
                 ):
-                    if semantic_checker is not None and not semantic_checker.supports(
-                        output_text=bound_text.text,
-                        cited_evidence=cited,
+                    if semantic_checker is None or not semantic_checker.supports(
+                        output_text=bound_text.text, cited_evidence=cited
                     ):
                         issues.append(
                             GroundingIssue(code="UNSUPPORTED_ANCHOR", path=field_path)
@@ -316,10 +381,33 @@ def guard_tailored_patch(
     return assemble_guarded_content(patch, parent=parent), ()
 
 
+def guard_manual_tailored_content(
+    content: TailoredCVContent,
+    *,
+    parent: TailoredCVContent,
+    allowed_section_ids: Sequence[str],
+    fact_bank: Mapping[str, TailoredFactEvidence],
+    approved_skill_labels: Sequence[str],
+    semantic_checker: SemanticSupportChecker | None,
+) -> tuple[TailoredCVContent | None, tuple[GroundingIssue, ...]]:
+    identity_issues = _manual_content_identity_issues(content, parent=parent)
+    if identity_issues:
+        return None, tuple(identity_issues)
+    return guard_tailored_patch(
+        _manual_content_patch(content, allowed_section_ids=allowed_section_ids),
+        parent=parent,
+        allowed_section_ids=allowed_section_ids,
+        fact_bank=fact_bank,
+        approved_skill_labels=approved_skill_labels,
+        semantic_checker=semantic_checker,
+    )
+
+
 __all__ = [
     "GroundingIssue",
     "SemanticSupportChecker",
     "assemble_guarded_content",
+    "guard_manual_tailored_content",
     "guard_tailored_patch",
     "validate_patch_structure_and_facts",
 ]

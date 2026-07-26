@@ -221,7 +221,8 @@ def test_projection_is_stable_and_source_revision_changes_fact_ids() -> None:
     assert set(first.fact_bank) != set(changed.fact_bank)
 
 
-def test_empty_structural_text_has_no_fact_and_reference_marker_has_no_route() -> None:
+def test_empty_structural_text_has_no_fact_and_reference_marker_has_no_task_two_route(
+) -> None:
     document = _document()
     summary = document.sections[0]
     empty_entry = summary.entries[0].model_copy(update={"body": ""})
@@ -241,8 +242,15 @@ def test_empty_structural_text_has_no_fact_and_reference_marker_has_no_route() -
         source_hash="revision-a",
     )
 
+    marker = format_reference["marker"]
+    sections, facts = select_section_context(baseline, section_ids=["summary"])
+
     assert baseline.content.sections[0].items[0].body.source_fact_ids == []
-    assert format_reference["marker"] not in str(baseline)
+    assert marker not in baseline.content.model_dump_json()
+    assert marker not in str([section.model_dump(mode="json") for section in sections])
+    assert marker not in str(
+        [evidence.model_dump(mode="json") for evidence in facts.values()]
+    )
 
 
 def test_select_section_context_rejects_unknown_or_duplicate_and_hides_others() -> None:
