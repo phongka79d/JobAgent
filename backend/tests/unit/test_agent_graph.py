@@ -291,7 +291,7 @@ def _bundle(
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_has_exactly_seven_tools() -> None:
+def test_production_registry_has_exactly_eight_tools() -> None:
     """Production registry: profile, jobs, match_jobs, read_active_cv."""
     reg = production_registry()
     assert not reg.is_empty()
@@ -304,6 +304,7 @@ def test_production_registry_has_exactly_seven_tools() -> None:
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     ]
     assert "synthetic_interrupt" not in names
 
@@ -331,7 +332,12 @@ def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:
 
 
 def test_initial_graph_state_matches_agent_state_keys() -> None:
-    state = initial_graph_state(run_id=RUN_ID, user_text="hi")
+    selected_job_id = "99999999-9999-4999-8999-999999999999"
+    state = initial_graph_state(
+        run_id=RUN_ID,
+        user_text="hi",
+        selected_job_id=selected_job_id,
+    )
     assert set(state) == AGENT_STATE_FIELDS
     assert state["conversation_id"] == CONVERSATION_ID
     assert state["profile_id"] == PROFILE_ID
@@ -340,6 +346,7 @@ def test_initial_graph_state_matches_agent_state_keys() -> None:
     assert state["error"] is None
     assert state["candidate_context"] == []
     assert state["active_cv_context"] is None
+    assert state["selected_job_id"] == selected_job_id
     assert isinstance(state["messages_for_this_turn"][0], HumanMessage)
 
 
@@ -584,9 +591,10 @@ def test_injected_tools_without_changing_graph_construction() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
-        "match_jobs",
-        "read_active_cv",
-    ]
+            "match_jobs",
+            "read_active_cv",
+            "create_tailored_cv",
+        ]
     assert not injected.registry.is_empty()
     assert injected.registry.tool_names() == ["echo_tool"]
 
@@ -765,7 +773,7 @@ def test_empty_registry_model_prompt_has_no_tools() -> None:
     assert "synthetic" not in str(system.content).lower()
 
 
-def test_production_registry_model_prompt_lists_seven_tools() -> None:
+def test_production_registry_model_prompt_lists_eight_tools() -> None:
     model = FakeChatModel(responses=[_ai_text("ok")])
     bundle = build_agent_graph(model=model, registry=production_registry())
     bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="hi"))
@@ -1416,7 +1424,7 @@ def test_unrelated_greeting_and_topology_six_pass_unchanged() -> None:
     assert "StateGraph" in graph_text
 
     reg = production_registry()
-    assert len(reg.tool_names()) == 7
+    assert len(reg.tool_names()) == 8
     model = FakeChatModel(responses=[_ai_text("ok")])
     bundle = _bundle(model, [save_job_tool])
     app_nodes = {

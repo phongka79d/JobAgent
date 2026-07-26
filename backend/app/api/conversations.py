@@ -177,6 +177,7 @@ async def post_conversation_turn(
         conversation_id=conversation_id,
         message=body.message,
         attachment_ids=body.attachment_ids,
+        selected_job_id=body.selected_job_id,
         model=deps.model,
         registry=deps.registry,
         sqlite_path=deps.sqlite_path,

@@ -298,6 +298,7 @@ async def _stream_agent_run_impl(
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
     attachment_ids: Sequence[str] | None = None,
+    selected_job_id: str | None = None,
     input_state: AgentGraphState | None = None,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
     registry: ToolRegistry | None = None,
@@ -413,6 +414,7 @@ async def _stream_agent_run_impl(
                 candidate_context=candidate_context,
                 active_cv_context=active_cv_context,
                 attachment_ids=attachment_ids,
+                selected_job_id=selected_job_id,
             )
 
         stream = compiled.astream(
@@ -599,6 +601,7 @@ async def stream_agent_run(
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
     attachment_ids: Sequence[str] | None = None,
+    selected_job_id: str | None = None,
     input_state: AgentGraphState | None = None,
     model: BaseChatModel | Runnable[Any, Any] | None = None,
     registry: ToolRegistry | None = None,
@@ -635,6 +638,7 @@ async def stream_agent_run(
         candidate_context=candidate_context,
         active_cv_context=active_cv_context,
         attachment_ids=attachment_ids,
+        selected_job_id=selected_job_id,
         input_state=input_state,
         model=model,
         registry=registry,

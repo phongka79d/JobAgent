@@ -1,12 +1,13 @@
 """Injected tool registry for the single-Agent graph (Plan 3–9).
 
-Production registers exactly seven tools: three profile tools from
+Production registers exactly eight tools: three profile tools from
 :func:`app.tools.profile.build_production_profile_tools`, then
 ``save_job`` and ``query_jobs`` from
 :func:`app.tools.jobs.build_production_job_tools`, then ``match_jobs`` from
 :func:`app.tools.matching.build_production_match_tools`, then
 ``read_active_cv`` from
-:func:`app.tools.active_cv.build_production_active_cv_tools`. Tests inject
+:func:`app.tools.active_cv.build_production_active_cv_tools`, then
+``create_tailored_cv``. Tests inject
 side-effect-free fakes through the same :class:`ToolRegistry` interface without
 changing graph construction. Synthetic or test-only interrupt helpers are
 never registered here.
@@ -15,7 +16,7 @@ never registered here.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -26,6 +27,9 @@ from app.services.jd_ingestion import UrlFetcher
 from app.services.job_projection import EmbeddingClient, JobSyncFn
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
+
+if TYPE_CHECKING:
+    from app.services.cv_tailoring import TailoringCoordinator
 
 
 class ToolRegistry:
@@ -75,8 +79,9 @@ def production_registry(
     embedding_client: EmbeddingClient | None = None,
     url_fetcher: UrlFetcher | None = None,
     job_sync_fn: JobSyncFn | None = None,
+    tailoring_coordinator: TailoringCoordinator | None = None,
 ) -> ToolRegistry:
-    """Return the production registry: three profile, two Job, match, then CV read.
+    """Return eight production tools, ending in CV read and CV tailoring.
 
     Optional dependencies are closed over by the tools (or resolved at invoke
     time when omitted). Never registers preference-only tools or test-only
@@ -85,6 +90,7 @@ def production_registry(
     # Local imports keep this module free of eager service construction and
     # avoid circular import at package load.
     from app.tools.active_cv import build_production_active_cv_tools
+    from app.tools.cv_tailoring import build_create_tailored_cv_tool
     from app.tools.jobs import build_production_job_tools
     from app.tools.matching import build_production_match_tools
     from app.tools.profile import build_production_profile_tools
@@ -117,6 +123,15 @@ def production_registry(
     active_cv_tools = build_production_active_cv_tools(
         session_factory=session_factory,
     )
+    tailoring_tool = build_create_tailored_cv_tool(
+        coordinator=tailoring_coordinator
+    )
     return ToolRegistry(
-        [*profile_tools, *job_tools, *match_tools, *active_cv_tools]
+        [
+            *profile_tools,
+            *job_tools,
+            *match_tools,
+            *active_cv_tools,
+            tailoring_tool,
+        ]
     )

@@ -177,6 +177,28 @@ def test_chat_turn_forbids_secrets_and_extra_fields() -> None:
         )
 
 
+def test_chat_turn_accepts_only_selected_job_uuid_or_null() -> None:
+    selected_job_id = "99999999-9999-4999-8999-999999999999"
+    parsed = ChatTurnRequest.model_validate(
+        {
+            "message": "Tailor my CV",
+            "attachment_ids": [],
+            "selected_job_id": selected_job_id,
+        }
+    )
+    assert parsed.selected_job_id == selected_job_id
+    assert (
+        ChatTurnRequest(message="Tailor", selected_job_id=None).selected_job_id
+        is None
+    )
+    with pytest.raises(ValidationError):
+        ChatTurnRequest(message="Tailor", selected_job_id="raw JD text")
+    with pytest.raises(ValidationError):
+        ChatTurnRequest.model_validate(
+            {"message": "Tailor", "raw_jd": "private source"}
+        )
+
+
 def test_history_query_limit_bounds() -> None:
     assert HistoryQuery().limit == 50
     assert HistoryQuery(limit=1).limit == 1

@@ -43,6 +43,7 @@ from app.db.models.chat import (
     TOOL_EXECUTION_STATUS_FAILED,
     AgentRun,
 )
+from app.db.models.jobs import JobPost
 from app.db.session import build_async_engine
 from app.repositories import agent_activities as activity_repo
 from app.repositories import agent_runs as runs_repo
@@ -70,6 +71,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.prebuilt import InjectedState
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.fakes.fake_chat_model import FakeChatModel
@@ -134,6 +136,146 @@ def stream_agent_run(
 
 def _names(events: list[SseEvent]) -> list[str]:
     return [e.event for e in events]
+
+
+def test_selected_job_is_validated_with_owner_before_turn_insert(
+    migrated_sqlite: Path,
+) -> None:
+    from app.services.chat_turns import ChatTurnError, create_user_turn
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                job = JobPost(
+                    source_type="text",
+                    source_url=None,
+                    raw_content="synthetic unprocessed JD",
+                    raw_content_hash="a" * 64,
+                    processing_status="received",
+                    failure_code=None,
+                )
+                session.add(job)
+                await session.commit()
+                job_id = job.id
+
+            with pytest.raises(ChatTurnError) as caught:
+                await create_user_turn(
+                    conversation_id=CONVERSATION_ID,
+                    message="Tailor my CV",
+                    selected_job_id=job_id,
+                    session_factory=factory,
+                )
+            assert caught.value.code == "JOB_NOT_SCORABLE"
+            async with factory() as session:
+                assert await session.scalar(select(func.count(AgentRun.id))) == 0
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_create_tailored_cv_tool_replays_exact_durable_result(
+    migrated_sqlite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.schemas.cv_tailoring import TailoringVersionCreateResponse
+    from app.schemas.sse import build_sse_event
+    from app.services.cv_tailoring import TailoringLaunch
+    from app.tools.cv_tailoring import build_create_tailored_cv_tool
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.completed_calls = 0
+
+        async def prepare_session(self, **_kwargs: Any) -> TailoringLaunch:
+            self.prepare_calls += 1
+            return TailoringLaunch(
+                session_id=new_uuid(),
+                run_id=new_uuid(),
+                profile_id=_kwargs["profile_id"],
+            )
+
+        async def stream_initial_version(
+            self, launch: TailoringLaunch
+        ) -> AsyncIterator[SseEvent]:
+            yield build_sse_event(
+                "run_completed", launch.run_id, {"state": "completed"}
+            )
+
+        async def get_completed_version(
+            self, launch: TailoringLaunch
+        ) -> TailoringVersionCreateResponse:
+            self.completed_calls += 1
+            return TailoringVersionCreateResponse(
+                session_id=launch.session_id,
+                version_id=new_uuid(),
+                version_number=1,
+            )
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        fake = FakeCoordinator()
+        try:
+            monkeypatch.setattr(
+                "app.services.tool_execution.get_session_factory",
+                lambda: factory,
+            )
+            async with factory() as session:
+                owner = await conversations_repo.resolve_owner(
+                    session, CONVERSATION_ID
+                )
+                assert owner is not None
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=CONVERSATION_ID,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="Tailor my CV",
+                )
+                run = await runs_repo.create_run(
+                    session, user_message_id=user.id
+                )
+                await session.commit()
+                run_id = run.id
+                profile_id = owner.profile_id
+
+            tool_fn = build_create_tailored_cv_tool(coordinator=fake)  # type: ignore[arg-type]
+
+            async def invoke() -> ToolResult:
+                raw = await tool_fn.ainvoke(
+                    {
+                        "type": "tool_call",
+                        "id": "call-tailor-replay",
+                        "name": tool_fn.name,
+                        "args": {
+                            "instruction": "Emphasize relevant work",
+                            "state": {
+                                "run_id": run_id,
+                                "profile_id": profile_id,
+                                "selected_job_id": None,
+                            },
+                        },
+                    }
+                )
+                if hasattr(raw, "content"):
+                    raw = raw.content
+                if isinstance(raw, str):
+                    raw = json.loads(raw)
+                return ToolResult.model_validate(raw)
+
+            first = await invoke()
+            replay = await invoke()
+            assert replay == first
+            assert first.ok is True
+            assert first.summary == "Tailored CV is ready"
+            assert fake.prepare_calls == 1
+            assert fake.completed_calls == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 class _FakeActivityService:

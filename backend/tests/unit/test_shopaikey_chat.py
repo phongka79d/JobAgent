@@ -548,7 +548,7 @@ def test_normal_model_binding_uses_provider_dict_without_forced_choice(
     repair = binds[1]
     assert "tool_choice" not in normal["kwargs"]
     bound = normal["tools"]
-    assert len(bound) == 7
+    assert len(bound) == 8
     save_defs = [
         item
         for item in bound

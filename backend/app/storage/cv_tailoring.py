@@ -126,11 +126,12 @@ class TailoringArtifactStorage:
         self._require_uuid("profile_id", profile_id)
         self._require_uuid("session_id", session_id)
         self._require_uuid("version_id", version_id)
-        candidate = (
-            self._root / profile_id / session_id / version_id / filename
-        ).resolve()
-        self._assert_under_root(candidate)
-        return candidate
+        candidate = self._root / profile_id / session_id / version_id / filename
+        if candidate.is_symlink():
+            raise PathEscapeError("tailoring artifact symlinks are rejected")
+        resolved = candidate.resolve()
+        self._assert_under_root(resolved)
+        return resolved
 
     def delete_version(
         self, *, profile_id: str, session_id: str, version_id: str

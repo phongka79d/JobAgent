@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 from anyio import CancelScope
@@ -12,7 +12,7 @@ from starlette.types import Send
 from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.services.chat_turns import ChatTurnError
 
-ChatErrorMapper = Callable[[ChatTurnError], HTTPException]
+StreamErrorMapper = Callable[[Any], HTTPException]
 
 
 async def _close_async_iterator(iterator: Any) -> None:
@@ -47,7 +47,9 @@ def format_validated_sse(event: SseEvent) -> bytes:
 async def open_sse_response(
     events: AsyncIterator[SseEvent],
     *,
-    error_mapper: ChatErrorMapper,
+    error_mapper: StreamErrorMapper,
+    error_types: Sequence[type[Exception]] = (ChatTurnError,),
+    headers: Mapping[str, str] | None = None,
 ) -> EventSourceResponse:
     """Prime before headers, then stream validated SSE frames."""
     iterator = events.__aiter__()
@@ -61,8 +63,10 @@ async def open_sse_response(
                 "summary": "Agent stream produced no events",
             },
         ) from None
-    except ChatTurnError as exc:
-        raise error_mapper(exc) from exc
+    except Exception as exc:
+        if isinstance(exc, tuple(error_types)):
+            raise error_mapper(exc) from exc
+        raise
 
     first_bytes = format_validated_sse(first)
 
@@ -74,4 +78,4 @@ async def open_sse_response(
         finally:
             await _close_async_iterator(iterator)
 
-    return ClosingEventSourceResponse(produce())
+    return ClosingEventSourceResponse(produce(), headers=dict(headers or {}))

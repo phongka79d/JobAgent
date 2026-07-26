@@ -520,3 +520,42 @@ def test_approved_graph_failure_is_safe_and_retryable(
             await engine.dispose()
 
     run_async(body())
+
+
+def test_tailoring_directory_cleanup_false_is_retryable(
+    deletion_env: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.profile_deletion import _DeleteInputs, _external_cleanup
+    from app.storage.cv_tailoring import TailoringArtifactStorage
+
+    db_path, files = deletion_env
+
+    async def body() -> None:
+        storage = AttachmentStorage(files)
+        attachment_id = new_uuid()
+        storage_path = storage.write_bytes(attachment_id, b"synthetic")
+        inputs = _DeleteInputs(
+            attachment_id=attachment_id,
+            storage_path=storage_path,
+            run_ids=[],
+            tailoring_session_ids=[new_uuid()],
+            approved_shape=False,
+        )
+        monkeypatch.setattr(
+            TailoringArtifactStorage,
+            "delete_session",
+            lambda *_args, **_kwargs: False,
+        )
+        with pytest.raises(ProfileDeletionError) as caught:
+            await _external_cleanup(
+                profile_id=new_uuid(),
+                inputs=inputs,
+                sqlite_path=db_path,
+                storage=storage,
+                graph_driver=None,
+            )
+        assert caught.value.code == "PROFILE_DELETE_RETRYABLE"
+        assert storage.exists(storage_path)
+
+    run_async(body())

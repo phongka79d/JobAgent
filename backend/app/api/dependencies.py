@@ -4,8 +4,8 @@ Owns injectable seams for the chat Agent model, tool registry, and SQLite path
 so tests can override production defaults without registering synthetic tools
 in production. Routes stay free of construction and business logic.
 
-Production chat deps wire the six production tools (three profile + save_job
-+ query_jobs + match_jobs) through :func:`~app.tools.registry.production_registry`
+Production chat deps wire eight tools through
+:func:`~app.tools.registry.production_registry`
 with request-scoped storage and Neo4j driver from app lifespan state.
 """
 
@@ -18,10 +18,13 @@ from typing import Any
 from fastapi import Request
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import Runnable
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.settings import Settings, get_settings
 from app.db.session import get_session_factory
+from app.services.cv_tailoring import TailoringCoordinator
 from app.storage.attachments import AttachmentStorage
+from app.storage.cv_tailoring import TailoringArtifactStorage
 from app.tools.registry import ToolRegistry, production_registry
 
 # Injectable chat model type (production adapter or test fakes).
@@ -43,6 +46,14 @@ class ChatAgentDeps:
     include_assistant_status: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class CVTailoringDeps:
+    coordinator: TailoringCoordinator
+    storage: TailoringArtifactStorage
+    settings: Settings
+    session_factory: async_sessionmaker[AsyncSession]
+
+
 def get_settings_dep(request: Request) -> Settings:
     """Return process settings (from app.state after lifespan, else cache)."""
     state = getattr(request.app, "state", None)
@@ -53,7 +64,7 @@ def get_settings_dep(request: Request) -> Settings:
 
 
 def get_chat_agent_deps(request: Request) -> ChatAgentDeps:
-    """Production chat deps: six tools, deferred model, SQLite path.
+    """Production chat deps: eight tools, deferred model, SQLite path.
 
     Tools receive session factory, storage, and Neo4j driver from the process
     / lifespan seams. Model construction is deferred to the runner so this
@@ -65,22 +76,51 @@ def get_chat_agent_deps(request: Request) -> ChatAgentDeps:
     if not isinstance(storage, AttachmentStorage):
         storage = AttachmentStorage(settings.FILES_DIR)
     driver = getattr(state, "neo4j_driver", None) if state is not None else None
+    factory = get_session_factory()
+    tailoring_storage = TailoringArtifactStorage(settings.FILES_DIR)
+    tailoring_coordinator = TailoringCoordinator(
+        session_factory=factory,
+        storage=tailoring_storage,
+        settings=settings,
+        sqlite_path=settings.SQLITE_PATH,
+    )
 
     return ChatAgentDeps(
         model=None,
         registry=production_registry(
-            session_factory=get_session_factory(),
+            session_factory=factory,
             storage=storage,
             driver=driver,
+            tailoring_coordinator=tailoring_coordinator,
         ),
         sqlite_path=settings.SQLITE_PATH,
         include_assistant_status=True,
     )
 
 
+def get_cv_tailoring_deps(request: Request) -> CVTailoringDeps:
+    settings = get_settings_dep(request)
+    factory = get_session_factory()
+    storage = TailoringArtifactStorage(settings.FILES_DIR)
+    coordinator = TailoringCoordinator(
+        session_factory=factory,
+        storage=storage,
+        settings=settings,
+        sqlite_path=settings.SQLITE_PATH,
+    )
+    return CVTailoringDeps(
+        coordinator=coordinator,
+        storage=storage,
+        settings=settings,
+        session_factory=factory,
+    )
+
+
 __all__ = [
     "ChatAgentDeps",
     "ChatModelLike",
+    "CVTailoringDeps",
+    "get_cv_tailoring_deps",
     "get_chat_agent_deps",
     "get_settings_dep",
 ]

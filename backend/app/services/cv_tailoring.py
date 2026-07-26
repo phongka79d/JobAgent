@@ -28,7 +28,7 @@ from app.agent.tailoring_graph import (
 from app.core.ids import new_uuid
 from app.core.settings import Settings, get_settings
 from app.core.time import utc_now
-from app.db.models.chat import AGENT_RUN_STATE_RUNNING
+from app.db.models.chat import AGENT_RUN_STATE_COMPLETED, AGENT_RUN_STATE_RUNNING
 from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
@@ -89,6 +89,7 @@ TAILORING_VERSION_NOT_FOUND = "TAILORING_VERSION_NOT_FOUND"
 TAILORING_SOURCE_STALE = "TAILORING_SOURCE_STALE"
 TAILORING_PARENT_CONFLICT = "TAILORING_PARENT_CONFLICT"
 TAILORING_COMPILE_FAILED = "TAILORING_COMPILE_FAILED"
+TAILORING_ARTIFACT_UNAVAILABLE = "TAILORING_ARTIFACT_UNAVAILABLE"
 
 _SAFE_MESSAGES = {
     PROFILE_NOT_READY: "Profile is not ready for CV tailoring",
@@ -100,6 +101,7 @@ _SAFE_MESSAGES = {
     TAILORING_PARENT_CONFLICT: "Tailoring version has changed",
     TAILORING_GROUNDING_FAILED: "Tailored content is not source-supported",
     TAILORING_COMPILE_FAILED: "Tailored CV compilation failed",
+    TAILORING_ARTIFACT_UNAVAILABLE: "Tailoring artifact is unavailable",
 }
 
 
@@ -193,7 +195,7 @@ class TailoringCoordinator:
                 raise ValueError("storage or Settings.FILES_DIR is required")
             storage = TailoringArtifactStorage(files_dir)
         self._storage = storage
-        self._invoker = invoker or ShopAIKeyTailoringStructuredInvoker()
+        self._invoker = invoker
         self._sqlite_path = sqlite_path
         self._compiler = compiler
         self._activity_service = activity_service or AgentActivityService(
@@ -281,7 +283,7 @@ class TailoringCoordinator:
                     launch.run_id, "Selecting relevant sections", "select_sections"
                 )
                 bundle = build_tailoring_graph(
-                    invoker=self._invoker,
+                    invoker=self._structured_invoker(),
                     load_selected_context=lambda section_ids: select_section_context(
                         baseline, section_ids=section_ids
                     ),
@@ -320,7 +322,7 @@ class TailoringCoordinator:
                 yield await self._status_event(
                     launch.run_id, "Generating PDF", "generate_pdf"
                 )
-                response = await self._render_promote_commit(
+                await self._render_promote_commit(
                     prepared=prepared,
                     snapshot=snapshot,
                     baseline=baseline,
@@ -328,15 +330,16 @@ class TailoringCoordinator:
                     targeted_section_ids=selected_ids,
                     created_by=TAILORING_CREATED_BY_AI,
                 )
-                del response
-                await delete_run_checkpoint(saver, launch.run_id)
+                await self._delete_checkpoint(launch.run_id)
         except asyncio.CancelledError:
-            await self._fail_generation(prepared, TAILORING_GROUNDING_FAILED)
-            await self._delete_checkpoint(launch.run_id)
+            if await self._fail_generation(
+                prepared, TAILORING_GROUNDING_FAILED
+            ):
+                await self._delete_checkpoint(launch.run_id)
             raise
         except TailoringError as exc:
-            await self._fail_generation(prepared, exc.code)
-            await self._delete_checkpoint(launch.run_id)
+            if await self._fail_generation(prepared, exc.code):
+                await self._delete_checkpoint(launch.run_id)
             yield build_sse_event(
                 "run_failed",
                 launch.run_id,
@@ -348,8 +351,8 @@ class TailoringCoordinator:
             )
             return
         except TailoringCompileError:
-            await self._fail_generation(prepared, TAILORING_COMPILE_FAILED)
-            await self._delete_checkpoint(launch.run_id)
+            if await self._fail_generation(prepared, TAILORING_COMPILE_FAILED):
+                await self._delete_checkpoint(launch.run_id)
             yield build_sse_event(
                 "run_failed",
                 launch.run_id,
@@ -361,8 +364,10 @@ class TailoringCoordinator:
             )
             return
         except Exception:
-            await self._fail_generation(prepared, TAILORING_GROUNDING_FAILED)
-            await self._delete_checkpoint(launch.run_id)
+            if await self._fail_generation(
+                prepared, TAILORING_GROUNDING_FAILED
+            ):
+                await self._delete_checkpoint(launch.run_id)
             yield build_sse_event(
                 "run_failed",
                 launch.run_id,
@@ -378,6 +383,32 @@ class TailoringCoordinator:
             launch.run_id,
             {"state": "completed"},
         )
+
+    async def get_completed_version(
+        self, launch: TailoringLaunch
+    ) -> TailoringVersionCreateResponse:
+        """Return the exact durable version owned by a completed launch."""
+        async with self._session_factory() as session:
+            run = await runs_repo.get_run(session, launch.run_id)
+            owner = await tailoring_repo.get_session(session, launch.session_id)
+            version = await tailoring_repo.get_latest_version(
+                session, launch.session_id
+            )
+            if (
+                run is None
+                or run.state != AGENT_RUN_STATE_COMPLETED
+                or run.tailoring_session_id != launch.session_id
+                or owner is None
+                or owner.profile_id != launch.profile_id
+                or version is None
+                or version.version_number != owner.latest_version_number
+            ):
+                raise _error(TAILORING_GROUNDING_FAILED)
+            return TailoringVersionCreateResponse(
+                session_id=owner.id,
+                version_id=version.id,
+                version_number=version.version_number,
+            )
 
     async def prepare_ai_version(
         self,
@@ -477,7 +508,7 @@ class TailoringCoordinator:
                 allowed_section_ids=targeted,
                 fact_bank=baseline.fact_bank,
                 approved_skill_labels=baseline.approved_skill_labels,
-                semantic_checker=self._invoker,
+                semantic_checker=self._structured_invoker(),
             )
             if guarded is None or issues:
                 raise _error(TAILORING_GROUNDING_FAILED)
@@ -518,6 +549,11 @@ class TailoringCoordinator:
         if len(cleaned) > self._settings.CV_TAILOR_MAX_INSTRUCTION_CHARS:
             raise _error(TAILORING_GROUNDING_FAILED)
         return cleaned
+
+    def _structured_invoker(self) -> TailoringStructuredInvoker:
+        if self._invoker is None:
+            self._invoker = ShopAIKeyTailoringStructuredInvoker()
+        return self._invoker
 
     async def _assert_start_allowed(
         self,
@@ -797,7 +833,7 @@ class TailoringCoordinator:
 
     async def _fail_generation(
         self, prepared: _PreparedGeneration, error_code: str
-    ) -> None:
+    ) -> bool:
         try:
             async with session_scope(self._session_factory) as session:
                 owner = await tailoring_repo.get_session(
@@ -815,8 +851,9 @@ class TailoringCoordinator:
                     await runs_repo.fail_run(
                         session, run.id, error_code=error_code
                     )
+            return True
         except Exception:
-            return
+            return False
 
     async def _restore_ready(self, session_id: str) -> None:
         try:
@@ -900,6 +937,7 @@ __all__ = [
     "JOB_NOT_SCORABLE",
     "PROFILE_NOT_READY",
     "TAILORING_COMPILE_FAILED",
+    "TAILORING_ARTIFACT_UNAVAILABLE",
     "TAILORING_CONTACT_REQUIRED",
     "TAILORING_GROUNDING_FAILED",
     "TAILORING_PARENT_CONFLICT",

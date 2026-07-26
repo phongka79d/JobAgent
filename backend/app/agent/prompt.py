@@ -19,6 +19,7 @@ PRODUCTION_DOMAIN_TOOL_NAMES: frozenset[str] = frozenset(
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     }
 )
 
@@ -212,6 +213,24 @@ def build_system_prompt(
                     "ToolResult.",
                     "- Do not walk every cursor or exhaust the document "
                     "automatically when the request does not need more pages.",
+                ]
+            )
+        if "create_tailored_cv" in names:
+            sections.extend(
+                [
+                    "",
+                    "Tailored CV creation:",
+                    "- Call create_tailored_cv only for an explicit request to "
+                    "tailor or create a CV for a selected Job or bounded user "
+                    "instruction.",
+                    "- Pass only the user's bounded instruction. The server "
+                    "already owns the selected Job ID and resolves approved CV "
+                    "facts itself; do not call read_active_cv or Job evidence "
+                    "tools to prepare this request.",
+                    "- Never request or pass raw CV/JD text, contacts, template "
+                    "content, LaTeX, storage paths, or provider data.",
+                    "- Claim success only after a successful exact "
+                    "create_tailored_cv ToolResult.",
                 ]
             )
 

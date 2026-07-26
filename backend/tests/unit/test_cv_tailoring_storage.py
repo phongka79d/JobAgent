@@ -224,6 +224,32 @@ def test_symlink_escape_is_rejected(
         store.resolve_artifact(relative_path=relative)
 
 
+def test_artifact_leaf_symlink_is_rejected_before_resolution(
+    store: TailoringArtifactStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile_id, session_id = new_uuid(), new_uuid()
+    linked_version_id = new_uuid()
+    linked_tex, linked_pdf = _stage(store, linked_version_id)
+    linked_paths = store.promote(
+        profile_id=profile_id,
+        session_id=session_id,
+        version_id=linked_version_id,
+        staged_tex=linked_tex,
+        staged_pdf=linked_pdf,
+    )
+    linked = store.resolve_artifact(relative_path=linked_paths.tex_relative_path)
+    real_is_symlink = Path.is_symlink
+
+    def report_link_for_leaf(self: Path) -> bool:
+        return self == linked or real_is_symlink(self)
+
+    monkeypatch.setattr(Path, "is_symlink", report_link_for_leaf)
+
+    with pytest.raises(PathEscapeError, match="symlink"):
+        store.resolve_artifact(relative_path=linked_paths.tex_relative_path)
+
+
 def test_failed_promotion_never_cleans_through_a_symlinked_staging_parent(
     store: TailoringArtifactStorage, tmp_path: Path
 ) -> None:

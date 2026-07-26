@@ -65,14 +65,15 @@ def test_agent_state_has_exactly_eleven_named_fields() -> None:
         "candidate_context",
         "active_cv_context",
         "attachment_ids",
+        "selected_job_id",
         "pending_approval",
         "tool_iteration_count",
         "error",
     }
     assert AGENT_STATE_FIELDS == expected
     assert agent_state_field_names() == expected
-    assert len(AGENT_STATE_FIELDS) == 11
-    # TypedDict annotations expose the same eleven keys.
+    assert len(AGENT_STATE_FIELDS) == 12
+    # TypedDict annotations expose the same twelve keys.
     hints = get_type_hints(AgentState)
     assert set(hints) == expected
 
@@ -115,7 +116,26 @@ def test_build_initial_state_durable_owner_and_run_identity() -> None:
     assert state["conversation_id"] == TEST_CONVERSATION_ID
     assert state["profile_id"] == TEST_PROFILE_ID
     assert state["run_id"] == run_id
+    assert state["selected_job_id"] is None
     assert set(state) == AGENT_STATE_FIELDS
+
+
+def test_build_initial_state_carries_only_a_selected_job_uuid_or_null() -> None:
+    selected_job_id = "99999999-9999-4999-8999-999999999999"
+    state = build_initial_agent_state(
+        run_id="11111111-1111-4111-8111-111111111111",
+        conversation_id=TEST_CONVERSATION_ID,
+        profile_id=TEST_PROFILE_ID,
+        selected_job_id=selected_job_id,
+    )
+    assert state["selected_job_id"] == selected_job_id
+    with pytest.raises(ValueError, match="selected_job_id"):
+        build_initial_agent_state(
+            run_id="11111111-1111-4111-8111-111111111111",
+            conversation_id=TEST_CONVERSATION_ID,
+            profile_id=TEST_PROFILE_ID,
+            selected_job_id="raw JD text",
+        )
 
 
 def test_build_initial_state_rejects_empty_run_id() -> None:

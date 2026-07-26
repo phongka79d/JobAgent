@@ -42,6 +42,12 @@ from app.db.models.chat import (
     AgentRun,
     ChatMessage,
 )
+from app.db.models.jobs import (
+    JOB_JD_QUALITY_FULL,
+    JOB_JD_QUALITY_PARTIAL,
+    JOB_PROCESSING_STATUS_PROCESSED,
+    JobPost,
+)
 from app.db.models.profiles import (
     PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
@@ -179,6 +185,7 @@ async def create_user_turn(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     source_attachment_id: str | None = None,
     attachment_ids: Sequence[str] | None = None,
+    selected_job_id: str | None = None,
 ) -> CreatedTurn:
     """Atomically insert user message + ``running`` run, or reject interruption.
 
@@ -236,6 +243,19 @@ async def create_user_turn(
                 raise ChatTurnError("PROFILE_NOT_READY", "profile is not ready")
         elif profile.state not in {PROFILE_STATE_PENDING, PROFILE_STATE_READY}:
             raise ChatTurnError("PROFILE_NOT_READY", "profile is not ready")
+        if selected_job_id is not None:
+            selected_job = await session.get(JobPost, selected_job_id)
+            if (
+                selected_job is None
+                or selected_job.processing_status
+                != JOB_PROCESSING_STATUS_PROCESSED
+                or selected_job.jd_quality
+                not in {JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL}
+            ):
+                raise ChatTurnError(
+                    "JOB_NOT_SCORABLE",
+                    "selected Job is not ready for tailoring",
+                )
         if (
             source_owner is not None
             and source_owner != resolved_owner.attachment_id
@@ -599,6 +619,7 @@ async def stream_chat_turn(
     sqlite_path: str | Path | None = None,
     include_assistant_status: bool = False,
     source_attachment_id: str | None = None,
+    selected_job_id: str | None = None,
 ) -> AsyncIterator[SseEvent]:
     """Create a durable turn, run the graph, persist terminal/interrupt state.
 
@@ -612,6 +633,7 @@ async def stream_chat_turn(
         source_attachment_id=source_attachment_id,
         conversation_id=conversation_id,
         attachment_ids=attachment_ids,
+        selected_job_id=selected_job_id,
     )
     interrupt_holder: dict[str, Any] = {}
 
@@ -667,6 +689,7 @@ async def stream_chat_turn(
         candidate_context=candidate_context,
         active_cv_context=active_cv_context,
         attachment_ids=effective_attachment_ids,
+        selected_job_id=selected_job_id,
         model=model,
         registry=registry,
         graph_bundle=graph_bundle,

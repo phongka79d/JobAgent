@@ -74,6 +74,7 @@ from app.schemas.jobs import (
 )
 from app.schemas.matching import parse_match_jobs_result_data
 from app.schemas.tools import parse_tool_result
+from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
 from app.services.evaluation_context import (
     MATCHING_CONTRACT_VERSION,
     EvaluationContextFacts,
@@ -133,6 +134,18 @@ class SavedJobsServiceError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+async def _assert_public_mutation_idle(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    try:
+        async with session_scope(session_factory) as session:
+            await assert_workspace_idle(
+                session, code="SAVED_JOB_MUTATION_BLOCKED"
+            )
+    except ActivityBlockedError as exc:
+        raise SavedJobsServiceError(exc.code, exc.summary) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -552,6 +565,7 @@ async def save_and_evaluate_from_source(
     claims evaluation success when scoring is unavailable. Does not open a SQLite
     transaction across ingestion or evaluation external work.
     """
+    await _assert_public_mutation_idle(session_factory)
     skill_normalizer = (
         normalizer if normalizer is not None else SkillNormalizer.production()
     )
@@ -674,6 +688,7 @@ async def evaluate_saved_job(
     normalizer: SkillNormalizer | None = None,
 ) -> EvaluateJobResponse:
     """Explicit current-context evaluation via the accepted evaluation owner."""
+    await _assert_public_mutation_idle(session_factory)
     skill_normalizer = (
         normalizer if normalizer is not None else SkillNormalizer.production()
     )
@@ -726,6 +741,7 @@ async def delete_saved_job(
     graph_absent_fn: object | None = None,
 ) -> None:
     """Complete Job deletion via the accepted graph-first coordinator."""
+    await _assert_public_mutation_idle(session_factory)
     if graph_driver is None:
         raise SavedJobsServiceError(
             ERROR_JOB_DELETE_GRAPH_FAILED,
@@ -767,6 +783,7 @@ async def reextract_saved_job(
     matching. Projects one current saved-list row after SQLite commit; graph
     failure remains HTTP success with coupled ``sync_ok``/code/rebuild fields.
     """
+    await _assert_public_mutation_idle(session_factory)
     if not isinstance(job_id, str) or job_id.strip() == "":
         raise SavedJobsServiceError(ERROR_JOB_NOT_FOUND, JOB_NOT_FOUND_MESSAGE)
     jid = job_id.strip()

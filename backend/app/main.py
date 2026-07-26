@@ -27,6 +27,7 @@ from sqlalchemy import text
 from app.api.attachments import router as attachments_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
+from app.api.cv_tailoring import router as cv_tailoring_router
 from app.api.cvs import router as cvs_router
 from app.api.health import router as health_router
 from app.api.jobs import router as jobs_router
@@ -38,6 +39,7 @@ from app.db.seed import ensure_workspace_seed
 from app.db.session import dispose_engine, get_engine, session_scope
 from app.graph.constraints import ensure_base_schema
 from app.graph.driver import check_connectivity, close_driver, open_driver
+from app.schemas.cv_tailoring import CV_TAILORING_SESSION_HEADER
 from app.storage.attachments import AttachmentStorage
 
 # ponytail: health tests and older startup callers are migrated in Task 13;
@@ -115,6 +117,7 @@ def create_app() -> FastAPI:
         # Starlette owns OPTIONS preflight; DELETE serves CV and Job removal.
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["*"],
+        expose_headers=[CV_TAILORING_SESSION_HEADER],
     )
     application.include_router(health_router, prefix="/api")
     application.include_router(attachments_router, prefix="/api")
@@ -125,6 +128,7 @@ def create_app() -> FastAPI:
     application.include_router(conversations_router, prefix="/api")
     application.include_router(jobs_router, prefix="/api")
     application.include_router(observability_router, prefix="/api")
+    application.include_router(cv_tailoring_router, prefix="/api")
     return application
 
 

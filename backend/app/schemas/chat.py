@@ -100,6 +100,7 @@ class ChatTurnRequest(BaseModel):
 
     message: str
     attachment_ids: list[UuidStr] = Field(default_factory=list)
+    selected_job_id: UuidStr | None = None
 
     @field_validator("message")
     @classmethod

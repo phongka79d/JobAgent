@@ -11,7 +11,7 @@ beyond ``TOOL_LOOP_LIMIT`` (default six) ends with a stable controlled failure.
 
 Graph nodes perform no SQLAlchemy writes, HTTP transport, hidden transactions, or
 provider construction. The factory may bind an injected model/tools; production
-defaults to the seven production tools via :func:`production_registry`.
+defaults to the eight production tools via :func:`production_registry`.
 """
 
 from __future__ import annotations
@@ -145,6 +145,7 @@ class AgentGraphState(TypedDict):
     candidate_context: list[dict[str, Any]]
     active_cv_context: dict[str, Any] | None
     attachment_ids: list[str]
+    selected_job_id: str | None
     pending_approval: dict[str, Any] | None
     tool_iteration_count: int
     error: str | None
@@ -952,7 +953,7 @@ def build_agent_graph(
         Chat model used by the decision node. When omitted, constructed via the
         ShopAIKey adapter (not inside a graph node). Tests inject fakes.
     registry:
-        Tool registry. Defaults to :func:`production_registry` (seven tools).
+        Tool registry. Defaults to :func:`production_registry` (eight tools).
     tool_loop_limit:
         Max ToolNode passes per turn (default ``Settings.TOOL_LOOP_LIMIT`` = 6).
     settings:
@@ -979,7 +980,7 @@ def build_agent_graph(
         save_job_openai_tool_schema() if save_job_available else None
     )
 
-    # Normal binding: all seven capabilities, no forced choice.
+    # Normal binding: all eight capabilities, no forced choice.
     # Repair binding: only compatible save_job + exact canonical tool_choice.
     chat: BaseChatModel | Runnable[Any, Any]
     passive_repair_chat: BaseChatModel | Runnable[Any, Any] | None = None
@@ -1223,6 +1224,7 @@ def initial_graph_state(
     candidate_context: Sequence[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
     attachment_ids: Sequence[str] | None = None,
+    selected_job_id: str | None = None,
     tool_iteration_count: int = 0,
     error: str | None = None,
 ) -> AgentGraphState:
@@ -1242,6 +1244,7 @@ def initial_graph_state(
         "candidate_context": list(candidate_context or ()),
         "active_cv_context": active_cv_context,
         "attachment_ids": list(attachment_ids or ()),
+        "selected_job_id": selected_job_id,
         "pending_approval": None,
         "tool_iteration_count": tool_iteration_count,
         "error": error,

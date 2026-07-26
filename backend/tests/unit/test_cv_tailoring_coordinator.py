@@ -6,7 +6,7 @@ from dataclasses import fields
 import pytest
 
 
-def test_coordinator_exposes_only_the_four_approved_orchestration_methods() -> None:
+def test_coordinator_exposes_only_the_approved_orchestration_methods() -> None:
     from app.services.cv_tailoring import TailoringCoordinator
 
     expected = {
@@ -18,6 +18,7 @@ def test_coordinator_exposes_only_the_four_approved_orchestration_methods() -> N
             "parent_run_id",
         ],
         "stream_initial_version": ["self", "launch"],
+        "get_completed_version": ["self", "launch"],
         "prepare_ai_version": [
             "self",
             "session_id",

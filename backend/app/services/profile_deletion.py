@@ -28,6 +28,7 @@ from app.graph.delete_profile import delete_profile_branch
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
+from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import profiles as profiles_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.profile import ProfileDeleteResponse
@@ -39,6 +40,7 @@ from app.services.profile_activation import (
 )
 from app.services.profile_projection import build_profile_list_response
 from app.storage.attachments import AttachmentStorage
+from app.storage.cv_tailoring import TailoringArtifactStorage
 
 
 class ProfileDeletionError(Exception):
@@ -53,6 +55,7 @@ class _DeleteInputs:
     attachment_id: str
     storage_path: str
     run_ids: list[str]
+    tailoring_session_ids: list[str]
     approved_shape: bool
 
 
@@ -122,10 +125,18 @@ async def _mark_for_deletion(
         attachment.failure_code = None
         await session.flush()
 
+    tailoring_sessions = await tailoring_repo.list_sessions_for_profile(
+        session, profile_id
+    )
+    chat_run_ids = await runs_repo.list_run_ids_for_profile(session, profile_id)
+    tailoring_run_ids = await runs_repo.list_tailoring_run_ids_for_profile(
+        session, profile_id
+    )
     return _DeleteInputs(
         attachment_id=attachment.id,
         storage_path=attachment.storage_path,
-        run_ids=await runs_repo.list_run_ids_for_profile(session, profile_id),
+        run_ids=list(dict.fromkeys([*chat_run_ids, *tailoring_run_ids])),
+        tailoring_session_ids=[item.id for item in tailoring_sessions],
         approved_shape=approved,
     )
 
@@ -141,6 +152,13 @@ async def _external_cleanup(
     try:
         async with open_checkpointer(sqlite_path) as saver:
             await delete_run_checkpoints(saver, inputs.run_ids)
+        tailoring_storage = TailoringArtifactStorage(storage.root)
+        for session_id in inputs.tailoring_session_ids:
+            if not tailoring_storage.delete_session(
+                profile_id=profile_id,
+                session_id=session_id,
+            ):
+                raise OSError("retained tailoring session directory remains")
         if not storage.delete(inputs.storage_path):
             raise OSError("retained file remains")
         if inputs.approved_shape:

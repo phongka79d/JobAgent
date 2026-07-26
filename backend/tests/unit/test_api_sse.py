@@ -65,6 +65,37 @@ async def test_open_sse_response_rejects_empty_stream() -> None:
 
 
 @pytest.mark.asyncio
+async def test_open_sse_response_accepts_custom_error_type_and_headers() -> None:
+    class CustomStreamError(Exception):
+        pass
+
+    async def failed_events() -> AsyncIterator[SseEvent]:
+        raise CustomStreamError("safe")
+        yield _event()
+
+    with pytest.raises(HTTPException) as caught:
+        await open_sse_response(
+            failed_events(),
+            error_mapper=lambda exc: HTTPException(
+                status_code=409, detail={"summary": str(exc)}
+            ),
+            error_types=(CustomStreamError,),
+            headers={"X-CV-Tailoring-Session-Id": RUN_ID},
+        )
+    assert caught.value.status_code == 409
+
+    async def events() -> AsyncIterator[SseEvent]:
+        yield _event()
+
+    response = await open_sse_response(
+        events(),
+        error_mapper=lambda exc: HTTPException(status_code=400),
+        headers={"X-CV-Tailoring-Session-Id": RUN_ID},
+    )
+    assert response.headers["X-CV-Tailoring-Session-Id"] == RUN_ID
+
+
+@pytest.mark.asyncio
 async def test_open_sse_response_closes_underlying_iterator_when_body_closes() -> None:
     class TrackedEvents:
         def __init__(self) -> None:

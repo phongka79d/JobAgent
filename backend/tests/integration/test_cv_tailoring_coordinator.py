@@ -201,6 +201,9 @@ def test_initial_generation_persists_terminal_run_version_and_artifacts(
             assert events[0].event == "run_started"
             assert events[-1].event == "run_completed"
             assert all(event.run_id == launch.run_id for event in events)
+            completed = await coordinator.get_completed_version(launch)
+            assert completed.session_id == launch.session_id
+            assert completed.version_number == 1
             labels = [
                 event.payload.message
                 for event in events
@@ -451,6 +454,51 @@ def test_compile_failure_is_durable_and_cleans_checkpoint_and_staging(
                 assert await thread_has_checkpoints(saver, launch.run_id) is False
             staging_root = storage.root / ".staging"
             assert not staging_root.exists() or list(staging_root.iterdir()) == []
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_failed_terminal_persistence_retains_checkpoint_for_recovery(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _body() -> None:
+        from app.services.cv_tailoring import TailoringCoordinator
+
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            profile_id, document, profile_model = await _seed_ready_source(factory)
+            coordinator = TailoringCoordinator(
+                session_factory=factory,
+                storage=TailoringArtifactStorage(tmp_path / "files"),
+                settings=_Settings(),
+                invoker=_Invoker(_patch_for_summary(document, profile_model)),
+                sqlite_path=db_path,
+                compiler=_failing_compile,
+            )
+            launch = await coordinator.prepare_session(
+                profile_id=profile_id,
+                job_id=None,
+                instruction="Tailor the summary",
+                parent_run_id=None,
+            )
+            deleted: list[str] = []
+
+            async def failed_terminal(*_args: Any, **_kwargs: Any) -> bool:
+                return False
+
+            async def record_delete(run_id: str) -> None:
+                deleted.append(run_id)
+
+            monkeypatch.setattr(coordinator, "_fail_generation", failed_terminal)
+            monkeypatch.setattr(coordinator, "_delete_checkpoint", record_delete)
+            events = [
+                event async for event in coordinator.stream_initial_version(launch)
+            ]
+            assert events[-1].event == "run_failed"
+            assert deleted == []
         finally:
             await engine.dispose()
 

@@ -10,6 +10,12 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
+
+from app.schemas.common import UuidStr
+
+_uuid_adapter = TypeAdapter(UuidStr)
+
 # Exact runtime field set — single owner for Agent input/graph state shape.
 AGENT_STATE_FIELDS: frozenset[str] = frozenset(
     {
@@ -21,6 +27,7 @@ AGENT_STATE_FIELDS: frozenset[str] = frozenset(
         "candidate_context",
         "active_cv_context",
         "attachment_ids",
+        "selected_job_id",
         "pending_approval",
         "tool_iteration_count",
         "error",
@@ -65,6 +72,7 @@ class AgentState(TypedDict):
     candidate_context: list[dict[str, Any]]
     active_cv_context: dict[str, Any] | None
     attachment_ids: list[str]
+    selected_job_id: str | None
     pending_approval: dict[str, Any] | None
     tool_iteration_count: int
     error: str | None
@@ -85,6 +93,7 @@ def build_initial_agent_state(
     candidate_context: list[dict[str, Any]] | None = None,
     active_cv_context: dict[str, Any] | None = None,
     attachment_ids: list[str] | None = None,
+    selected_job_id: str | None = None,
     pending_approval: dict[str, Any] | None = None,
     tool_iteration_count: int = 0,
     error: str | None = None,
@@ -98,6 +107,11 @@ def build_initial_agent_state(
         raise ValueError("profile_id must be a non-empty string")
     if tool_iteration_count < 0:
         raise ValueError("tool_iteration_count must be >= 0")
+    if selected_job_id is not None:
+        try:
+            selected_job_id = str(_uuid_adapter.validate_python(selected_job_id))
+        except ValidationError as exc:
+            raise ValueError("selected_job_id must be a UUID v4 or null") from exc
 
     state: AgentState = {
         "conversation_id": conversation_id.strip(),
@@ -108,6 +122,7 @@ def build_initial_agent_state(
         "candidate_context": list(candidate_context or ()),
         "active_cv_context": active_cv_context,
         "attachment_ids": list(attachment_ids or ()),
+        "selected_job_id": selected_job_id,
         "pending_approval": pending_approval,
         "tool_iteration_count": tool_iteration_count,
         "error": error,

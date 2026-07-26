@@ -21,10 +21,9 @@ from sqlalchemy.types import JSON
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.base import Base
-from app.schemas.cv_tailoring import (
-    TAILORING_SESSION_STATE_GENERATING,
-    TAILORING_TEMPLATE_VERSION,
-)
+
+_TAILORING_SESSION_STATE_GENERATING = "generating"
+_TAILORING_TEMPLATE_VERSION = "latex-cv-v1"
 
 
 class CVTailoringSession(Base):
@@ -84,14 +83,14 @@ class CVTailoringSession(Base):
     template_version: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        default=TAILORING_TEMPLATE_VERSION,
-        server_default=TAILORING_TEMPLATE_VERSION,
+        default=_TAILORING_TEMPLATE_VERSION,
+        server_default=_TAILORING_TEMPLATE_VERSION,
     )
     state: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        default=TAILORING_SESSION_STATE_GENERATING,
-        server_default=TAILORING_SESSION_STATE_GENERATING,
+        default=_TAILORING_SESSION_STATE_GENERATING,
+        server_default=_TAILORING_SESSION_STATE_GENERATING,
     )
     latest_version_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"

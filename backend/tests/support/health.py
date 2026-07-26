@@ -34,6 +34,14 @@ FAKE_NEO4J_USER = "neo4j-health-test"
 BACKEND_APP_ROOT = Path(__file__).resolve().parents[2] / "app"
 
 EXPECTED_PUBLIC_API_ROUTES: tuple[tuple[str, str], ...] = (
+    ("DELETE", "/api/cv-tailoring/sessions/{session_id}"),
+    ("GET", "/api/cv-tailoring/sessions"),
+    ("GET", "/api/cv-tailoring/sessions/{session_id}"),
+    ("GET", "/api/cv-tailoring/versions/{version_id}/pdf"),
+    ("GET", "/api/cv-tailoring/versions/{version_id}/source"),
+    ("POST", "/api/cv-tailoring/sessions"),
+    ("POST", "/api/cv-tailoring/sessions/{session_id}/ai-versions"),
+    ("POST", "/api/cv-tailoring/sessions/{session_id}/manual-versions"),
     ("DELETE", "/api/conversations/{conversation_id}"),
     ("DELETE", "/api/cvs/{attachment_id}"),
     ("DELETE", "/api/jobs/{job_id}"),

@@ -98,6 +98,7 @@ async def post_chat_turn(
     events = stream_chat_turn(
         message=body.message,
         attachment_ids=body.attachment_ids,
+        selected_job_id=body.selected_job_id,
         conversation_id=body.conversation_id,
         model=deps.model,
         registry=deps.registry,
