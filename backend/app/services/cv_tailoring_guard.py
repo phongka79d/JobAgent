@@ -266,6 +266,17 @@ def validate_patch_structure_and_facts(
                 )
 
             for field_path, bound_text in _text_fields(item, path=item_path):
+                if (
+                    len(bound_text.text) > 4_000
+                    or len(bound_text.source_fact_ids) > 64
+                ):
+                    issues.append(
+                        GroundingIssue(
+                            code="CONTENT_BOUNDS_EXCEEDED",
+                            path=field_path,
+                        )
+                    )
+                    continue
                 if bound_text.text and not bound_text.source_fact_ids:
                     issues.append(
                         GroundingIssue(code="EMPTY_PROVENANCE", path=field_path)

@@ -255,6 +255,29 @@ def test_dynamic_generic_sections_links_bullets_and_attributes() -> None:
     assert rendered.count("\\textbullet") == 2
 
 
+def test_valid_link_escapes_tex_significant_dollar_and_tilde() -> None:
+    section = TailoredSection(
+        id="other",
+        ordinal=0,
+        heading="Other",
+        kind="other",
+        items=[
+            _item(
+                "other-1",
+                "Synthetic reference",
+                attributes=[("reference", ["https://example.test/$report~draft"])],
+            )
+        ],
+    )
+
+    rendered = render_latex_cv(_content(sections=[section]))
+
+    assert (
+        r"\href{https://example.test/\$report\textasciitilde{}draft}{[Link]}"
+        in rendered
+    )
+
+
 def test_simple_and_compact_layouts_do_not_drop_optional_source_fields() -> None:
     sections = [
         TailoredSection(

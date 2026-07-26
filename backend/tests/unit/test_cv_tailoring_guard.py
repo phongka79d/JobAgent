@@ -346,6 +346,41 @@ def test_duplicate_fact_ids_are_rejected_after_in_memory_mutation() -> None:
     assert any(issue.code == "UNKNOWN_FACT" for issue in issues)
 
 
+def test_source_bound_text_limits_are_rechecked_after_in_memory_mutation() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+    checker = RecordingSemanticChecker(result=True)
+
+    oversized_text = _patch_for(
+        "summary",
+        body="Public-service systems specialist.",
+        fact_ids=[fact_id],
+    )
+    oversized_text.sections[0].items[0].body.text = "x" * 4_001
+
+    oversized_provenance = _patch_for(
+        "summary",
+        body="Public-service systems specialist.",
+        fact_ids=[fact_id],
+    )
+    oversized_provenance.sections[0].items[0].body.source_fact_ids = [
+        fact_id
+    ] * 65
+
+    for patch in (oversized_text, oversized_provenance):
+        guarded, issues = guard_tailored_patch(
+            patch,
+            parent=baseline.content,
+            allowed_section_ids=["summary"],
+            fact_bank=baseline.fact_bank,
+            approved_skill_labels=baseline.approved_skill_labels,
+            semantic_checker=checker,
+        )
+
+        assert guarded is None
+        assert issues[0].code == "CONTENT_BOUNDS_EXCEEDED"
+
+
 def test_manual_content_uses_the_shared_guard_and_ignores_caller_item_ids() -> None:
     baseline = _baseline()
     fact_id = _body_fact_id("summary")

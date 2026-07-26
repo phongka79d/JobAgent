@@ -45,11 +45,13 @@ _TEXT_ESCAPES = {
 _URL_ESCAPES = {
     "\\": r"\textbackslash{}",
     "#": r"\#",
+    "$": r"\$",
     "%": r"\%",
     "&": r"\&",
     "_": r"\_",
     "{": r"\{",
     "}": r"\}",
+    "~": r"\textasciitilde{}",
 }
 _SIMPLE_KINDS = frozenset({"summary", "interests", "references"})
 _COMPACT_KINDS = frozenset({"skills", "languages"})

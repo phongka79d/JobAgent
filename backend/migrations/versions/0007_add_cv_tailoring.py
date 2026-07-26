@@ -183,7 +183,8 @@ def upgrade() -> None:
             FROM agent_runs parent
             JOIN chat_messages message ON message.id = parent.user_message_id
             JOIN conversations conversation ON conversation.id = message.conversation_id
-            JOIN cv_tailoring_sessions tailoring ON tailoring.id = NEW.tailoring_session_id
+            JOIN cv_tailoring_sessions tailoring
+              ON tailoring.id = NEW.tailoring_session_id
             WHERE parent.id = NEW.parent_run_id
               AND NEW.run_kind = 'cv_tailoring'
               AND parent.run_kind = 'chat'
@@ -203,7 +204,8 @@ def upgrade() -> None:
             FROM agent_runs parent
             JOIN chat_messages message ON message.id = parent.user_message_id
             JOIN conversations conversation ON conversation.id = message.conversation_id
-            JOIN cv_tailoring_sessions tailoring ON tailoring.id = NEW.tailoring_session_id
+            JOIN cv_tailoring_sessions tailoring
+              ON tailoring.id = NEW.tailoring_session_id
             WHERE parent.id = NEW.parent_run_id
               AND NEW.run_kind = 'cv_tailoring'
               AND parent.run_kind = 'chat'
