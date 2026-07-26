@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from app.schemas.profile import CandidateSkill
+from app.services.cv_contact_contracts import ExtractedContactFact
 from app.services.cv_document_extraction import (
     DEFAULT_BATCH_MAX_CHARS,
     EXTRACTION_VERSION,
@@ -79,8 +80,7 @@ def _entry_frag(
     attributes: dict[str, str] | None = None,
 ) -> ExtractedEntryFragment:
     attr_items = [
-        ExtractedAttributeItem(key=k, value=v)
-        for k, v in (attributes or {}).items()
+        ExtractedAttributeItem(key=k, value=v) for k, v in (attributes or {}).items()
     ]
     return ExtractedEntryFragment(
         title=title,
@@ -283,9 +283,7 @@ def test_unknown_heading_kind_other_not_skills() -> None:
 
 def test_build_document_certifications_and_memberships() -> None:
     data = _load_synthetic()
-    chunks = [
-        _chunk(int(c["ordinal"]), str(c["text"])) for c in data["chunks"]
-    ]
+    chunks = [_chunk(int(c["ordinal"]), str(c["text"])) for c in data["chunks"]]
     consolidated = ExtractedConsolidation(
         detected_languages=["en"],
         sections=[
@@ -371,9 +369,7 @@ def test_build_document_certifications_and_memberships() -> None:
 
 def test_projection_profile_facts_only_from_document() -> None:
     data = _load_synthetic()
-    chunks = [
-        _chunk(int(c["ordinal"]), str(c["text"])) for c in data["chunks"]
-    ]
+    chunks = [_chunk(int(c["ordinal"]), str(c["text"])) for c in data["chunks"]]
     consolidated = ExtractedConsolidation(
         detected_languages=["en"],
         sections=[
@@ -453,24 +449,19 @@ def test_projection_never_parses_grouped_skill_entries_locally() -> None:
                 [
                     _entry_frag(
                         title="TECHNICAL SKILLS",
-                        body=(
-                            "Programming & Tools: Python, SQL, Git, Docker, Linux"
-                        ),
+                        body=("Programming & Tools: Python, SQL, Git, Docker, Linux"),
                         ordinals=[0],
                     ),
                     _entry_frag(
                         title="TECHNICAL SKILLS",
                         body=(
-                            "Machine Learning & CV: XGBoost, PyTorch, "
-                            "Model Fine-tuning"
+                            "Machine Learning & CV: XGBoost, PyTorch, Model Fine-tuning"
                         ),
                         ordinals=[0],
                     ),
                     _entry_frag(
                         title="TECHNICAL SKILLS",
-                        body=(
-                            "Generative AI: LangChain, LangGraph, RAG Frameworks"
-                        ),
+                        body=("Generative AI: LangChain, LangGraph, RAG Frameworks"),
                         ordinals=[0],
                     ),
                 ],
@@ -496,6 +487,20 @@ def test_extract_pipeline_bounded_calls_and_no_raw_pdf() -> None:
         _chunk(1, "Skills\nPython, Docker"),
     ]
     batch_payload = ExtractedBatchDocument(
+        contacts=[
+            ExtractedContactFact(
+                kind="email",
+                value="person@example.test",
+                evidence="person@example.test",
+                source_chunk_ordinal=0,
+            ),
+            ExtractedContactFact(
+                kind="phone",
+                value="+12025550147",
+                evidence="+12025550147",
+                source_chunk_ordinal=1,
+            ),
+        ],
         detected_languages=["en"],
         sections=[
             _section_frag(
@@ -567,10 +572,56 @@ def test_extract_pipeline_bounded_calls_and_no_raw_pdf() -> None:
     for call in batch_calls:
         body = call["joined"]
         assert not all(c.text in body for c in chunks)
-    covered = {
-        o for s in outcome.document.sections for o in s.source_chunk_ordinals
-    }
+    covered = {o for s in outcome.document.sections for o in s.source_chunk_ordinals}
     assert covered == {0, 1}
+    assert [fact.kind for fact in outcome.contact_facts] == ["email"]
+
+
+def test_batch_contacts_drop_rows_outside_the_batch() -> None:
+    chunks = [_chunk(0, "person@example.test"), _chunk(1, "next chunk")]
+    batch = ExtractedBatchDocument(
+        contacts=[
+            ExtractedContactFact(
+                kind="email",
+                value="person@example.test",
+                evidence="person@example.test",
+                source_chunk_ordinal=0,
+            ),
+            ExtractedContactFact(
+                kind="phone",
+                value="+12025550147",
+                evidence="+12025550147",
+                source_chunk_ordinal=99,
+            ),
+        ],
+        detected_languages=[],
+        sections=[
+            _section_frag(
+                "Summary",
+                "summary",
+                [_entry_frag(body="person@example.test", ordinals=[0])],
+                [0],
+            )
+        ],
+        extraction_warnings=[],
+        extraction_confidence=0.7,
+    )
+    consolidated = ExtractedConsolidation(
+        detected_languages=[],
+        sections=list(batch.sections),
+        extraction_warnings=[],
+        extraction_confidence=0.7,
+    )
+    invoker = ScriptedCVDocumentInvoker(
+        batch_script=[batch], consolidate_script=[consolidated]
+    )
+    outcome = extract_cv_document_from_chunks(
+        chunks, attachment_id=_ATTACHMENT, invoker=invoker, max_chars=5000
+    )
+    assert outcome.contact_facts == (batch.contacts[0],)
+    batch_call = next(call for call in invoker.calls if call["schema_name"] == "batch")
+    assert "exact evidence" in batch_call["joined"].lower()
+    assert "batch-local ordinal" in batch_call["joined"].lower()
 
 
 def test_one_schema_repair_then_success() -> None:
@@ -673,10 +724,18 @@ def test_hierarchical_consolidation_when_over_ceiling() -> None:
 
 def test_profile_extraction_delegate_document_first() -> None:
     chunks = [
-        _chunk(0, "Summary\nEngineer"),
+        _chunk(0, "Summary\nEngineer\nperson@example.test"),
         _chunk(1, "Skills\nPython"),
     ]
     batch = ExtractedBatchDocument(
+        contacts=[
+            ExtractedContactFact(
+                kind="email",
+                value="person@example.test",
+                evidence="person@example.test",
+                source_chunk_ordinal=0,
+            )
+        ],
         detected_languages=["en"],
         sections=[
             _section_frag(
@@ -714,6 +773,7 @@ def test_profile_extraction_delegate_document_first() -> None:
     )
     assert document.attachment_id == _ATTACHMENT
     assert profile.summary
+    assert profile.email == "person@example.test"
     assert repairs >= 0
     assert retries >= 0
 

@@ -196,9 +196,7 @@ def chunk_parsed_text(
         packed.append(current)
 
     chunks = [
-        CanonicalChunk(ordinal=i, text=body)
-        for i, body in enumerate(packed)
-        if body
+        CanonicalChunk(ordinal=i, text=body) for i, body in enumerate(packed) if body
     ]
     if not chunks:
         raise ProfileExtractionError(
@@ -264,9 +262,7 @@ async def persist_canonical_chunks(
             "refuse to persist empty chunk sequence",
         )
     writes = chunks_to_writes(chunks)
-    return await chunk_repo.replace_for_attachment(
-        session, attachment_id, writes
-    )
+    return await chunk_repo.replace_for_attachment(session, attachment_id, writes)
 
 
 def compute_canonical_source_hash(chunks: Sequence[CanonicalChunk]) -> str:
@@ -362,6 +358,7 @@ def extract_document_publication_from_pdf(
     Performs provider calls, document validation, coverage, projection, and
     source-hash computation. Does **not** open a DB transaction or write rows.
     """
+    from app.services.cv_contact_contracts import validate_and_project_contact_facts
     from app.services.cv_document_extraction import (
         CVDocumentExtractionError,
         extract_cv_document_from_chunks,
@@ -382,9 +379,7 @@ def extract_document_publication_from_pdf(
             "attachment_id is required for document-first extraction",
         )
 
-    chunks, model_input = _parse_and_chunk_pdf(
-        source, extract_text_fn=extract_text_fn
-    )
+    chunks, model_input = _parse_and_chunk_pdf(source, extract_text_fn=extract_text_fn)
     document_invoker = resolve_document_invoker(invoker)
 
     try:
@@ -400,11 +395,21 @@ def extract_document_publication_from_pdf(
             normalizer=normalizer,
             max_chars=max_chars,
         )
+        contacts = validate_and_project_contact_facts(outcome.contact_facts, chunks)
+        document = outcome.document.model_copy(
+            update={
+                "extraction_warnings": list(outcome.document.extraction_warnings)
+                + list(contacts.warnings)
+            }
+        )
         profile = project_candidate_profile(
-            outcome.document,
+            document,
             skills=skill_outcome.skills,
             full_name=outcome.full_name,
             location=outcome.location,
+            phone=contacts.phone,
+            email=contacts.email,
+            github_url=contacts.github_url,
         )
         profile = guard_optional_identity_fields(
             profile,
@@ -422,12 +427,12 @@ def extract_document_publication_from_pdf(
 
     draft = build_draft_from_candidate_profile(profile)
     outline_json: dict[str, Any] = {
-        "sections": project_outline(outcome.document),
+        "sections": project_outline(document),
     }
     source_hash = compute_canonical_source_hash(chunks)
     return DocumentPublicationArtifacts(
         draft=draft,
-        document_json=outcome.document.model_dump(mode="json"),
+        document_json=document.model_dump(mode="json"),
         profile_json=profile.model_dump(mode="json"),
         outline_json=outline_json,
         extraction_version=outcome.extraction_version,
@@ -477,6 +482,7 @@ def extract_document_and_profile_from_chunks(
     Delegates extraction and projection to their owning modules. No
     persistence or network beyond the injected document invoker.
     """
+    from app.services.cv_contact_contracts import validate_and_project_contact_facts
     from app.services.cv_document_extraction import (
         CVDocumentExtractionError,
         extract_cv_document_from_chunks,
@@ -501,11 +507,21 @@ def extract_document_and_profile_from_chunks(
             normalizer=normalizer,
             max_chars=max_chars,
         )
+        contacts = validate_and_project_contact_facts(outcome.contact_facts, chunks)
+        document = outcome.document.model_copy(
+            update={
+                "extraction_warnings": list(outcome.document.extraction_warnings)
+                + list(contacts.warnings)
+            }
+        )
         profile = project_candidate_profile(
-            outcome.document,
+            document,
             skills=skill_outcome.skills,
             full_name=outcome.full_name,
             location=outcome.location,
+            phone=contacts.phone,
+            email=contacts.email,
+            github_url=contacts.github_url,
         )
         profile = guard_optional_identity_fields(
             profile,
@@ -516,7 +532,7 @@ def extract_document_and_profile_from_chunks(
     except CandidateSkillExtractionError as exc:
         raise ProfileExtractionError(exc.code, exc.message) from exc
     return (
-        outcome.document,
+        document,
         profile,
         outcome.schema_repairs_used + skill_outcome.schema_repairs_used,
         outcome.provider_retries_used + skill_outcome.provider_retries_used,

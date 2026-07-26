@@ -54,7 +54,7 @@ def _project_experiences(document: CVDocument) -> list[ExperienceItem]:
     for section in _sections_of_kind(document, "experience"):
         for entry in section.entries:
             title = (entry.title or "").strip() or "Role"
-            company = (entry.subtitle or entry.location or None)
+            company = entry.subtitle or entry.location or None
             if company is not None:
                 company = company.strip() or None
             summary = entry.body.strip()
@@ -141,6 +141,9 @@ def project_candidate_profile(
     skills: Sequence[CandidateSkill],
     full_name: str | None = None,
     location: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    github_url: str | None = None,
 ) -> CandidateProfile:
     """Derive a validated CandidateProfile solely from *document*.
 
@@ -159,6 +162,9 @@ def project_candidate_profile(
     raw: dict[str, Any] = {
         "full_name": full_name,
         "location": location,
+        "phone": phone,
+        "email": email,
+        "github_url": github_url,
         "summary": summary,
         "current_title": current_title,
         "total_experience_years": None,
@@ -184,9 +190,7 @@ def project_outline(document: CVDocument) -> list[dict[str, Any]]:
                 "kind": section.kind,
                 "entry_count": len(section.entries),
                 "source_chunk_ordinals": list(ords),
-                "source_chunk_range": (
-                    [ords[0], ords[-1]] if ords else []
-                ),
+                "source_chunk_range": ([ords[0], ords[-1]] if ords else []),
             }
         )
     return outline

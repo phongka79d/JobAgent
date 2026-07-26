@@ -29,8 +29,13 @@ from app.core.attachments import ATTACHMENT_MIME_TYPE_PDF
 from app.schemas.attachments import AttachmentPublic
 from app.schemas.chat import ConversationSummary
 from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
+from app.schemas.contact import (
+    normalize_email,
+    normalize_github_profile_url,
+    normalize_phone,
+)
 from app.schemas.skills import SkillRef
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Exact enum vocabularies from Master §7.2–7.3 (string Literals, not ORM types).
 SkillProficiency = Literal["beginner", "intermediate", "advanced", "unknown"]
@@ -102,6 +107,9 @@ class CandidateProfile(BaseModel):
 
     full_name: str | None = Field(default=None, max_length=200)
     location: str | None = Field(default=None, max_length=200)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=254)
+    github_url: str | None = Field(default=None, max_length=500)
     summary: str
     current_title: str | None
     total_experience_years: float | None
@@ -110,6 +118,17 @@ class CandidateProfile(BaseModel):
     education: list[EducationItem]
     languages: list[LanguageItem]
     extraction_confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("phone", "email", "github_url")
+    @classmethod
+    def normalize_contact(cls, value: str | None, info: Any) -> str | None:
+        if value is None:
+            return None
+        if info.field_name == "phone":
+            return normalize_phone(value)
+        if info.field_name == "email":
+            return normalize_email(value)
+        return normalize_github_profile_url(value)
 
 
 class JobPreferences(BaseModel):
@@ -188,9 +207,7 @@ class ProfileSkillTag(BaseModel):
     label: str
 
 
-ProfileAttachmentState = Literal[
-    "staged", "active", "archived", "failed", "deleting"
-]
+ProfileAttachmentState = Literal["staged", "active", "archived", "failed", "deleting"]
 ProfileSetupStatus = Literal[
     "awaiting_extraction", "awaiting_approval", "extraction_failed"
 ]

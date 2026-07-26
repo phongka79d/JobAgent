@@ -13,6 +13,7 @@ from app.schemas.profile import (
     JobPreferences,
     LanguageItem,
     ProfileDraftPayload,
+    ProfileListItem,
     SkillProficiency,
     SkillSource,
     TargetSeniority,
@@ -48,6 +49,9 @@ _LANGUAGE_FIELDS = {"name", "proficiency"}
 _PROFILE_FIELDS = {
     "full_name",
     "location",
+    "phone",
+    "email",
+    "github_url",
     "summary",
     "current_title",
     "total_experience_years",
@@ -241,10 +245,38 @@ def test_profile_identity_fields_default_to_none_and_are_length_bounded() -> Non
     assert profile.full_name is None
     assert profile.location is None
 
+    assert profile.phone is None
+    assert profile.email is None
+    assert profile.github_url is None
+
     with pytest.raises(ValidationError):
         CandidateProfile.model_validate(_profile(full_name="x" * 201))
     with pytest.raises(ValidationError):
         CandidateProfile.model_validate(_profile(location="x" * 201))
+
+
+def test_profile_contacts_validate_and_round_trip_without_changing_list_item() -> None:
+    profile = CandidateProfile.model_validate(
+        _profile(
+            phone="+1 (202) 555-0147",
+            email="PERSON@Example.TEST",
+            github_url="https://www.github.com/synthetic-user/",
+        )
+    )
+    dumped = profile.model_dump(mode="json")
+    assert dumped["phone"] == "+12025550147"
+    assert dumped["email"] == "person@example.test"
+    assert dumped["github_url"] == "https://github.com/synthetic-user"
+    assert "phone" not in ProfileListItem.model_fields
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("phone", ""), ("email", "bad-email"), ("github_url", "github.com/user")],
+)
+def test_blank_present_or_invalid_profile_contacts_fail(field: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        CandidateProfile.model_validate(_profile(**{field: value}))
 
 
 def test_empty_lists_valid_on_profile_and_preferences() -> None:
@@ -305,13 +337,9 @@ def test_rejects_unknown_proficiency_source_work_mode_seniority() -> None:
     with pytest.raises(ValidationError):
         CandidateSkill.model_validate(_candidate_skill(source="llm"))
     with pytest.raises(ValidationError):
-        JobPreferences.model_validate(
-            _preferences(acceptable_work_modes=["wfh"])
-        )
+        JobPreferences.model_validate(_preferences(acceptable_work_modes=["wfh"]))
     with pytest.raises(ValidationError):
-        JobPreferences.model_validate(
-            _preferences(target_seniority=["principal"])
-        )
+        JobPreferences.model_validate(_preferences(target_seniority=["principal"]))
 
 
 # --- confidence [0, 1] --------------------------------------------------------
@@ -332,9 +360,7 @@ def test_confidence_out_of_range_rejected(confidence: float) -> None:
     with pytest.raises(ValidationError):
         CandidateSkill.model_validate(_candidate_skill(confidence=confidence))
     with pytest.raises(ValidationError):
-        CandidateProfile.model_validate(
-            _profile(extraction_confidence=confidence)
-        )
+        CandidateProfile.model_validate(_profile(extraction_confidence=confidence))
 
 
 # --- unknown fields / strict config -------------------------------------------
@@ -373,9 +399,7 @@ def test_evidence_is_list_of_strings() -> None:
 
 def test_evidence_rejects_non_string_items() -> None:
     with pytest.raises(ValidationError):
-        CandidateSkill.model_validate(
-            _candidate_skill(evidence=[{"text": "no"}])
-        )
+        CandidateSkill.model_validate(_candidate_skill(evidence=[{"text": "no"}]))
     with pytest.raises(ValidationError):
         CandidateSkill.model_validate(_candidate_skill(evidence=[1, 2]))
 
@@ -392,9 +416,7 @@ def test_nested_invalid_skill_fails_full_profile() -> None:
 
 
 def test_nested_invalid_preferences_fail_full_draft() -> None:
-    payload = _draft(
-        job_preferences=_preferences(acceptable_work_modes=["office"])
-    )
+    payload = _draft(job_preferences=_preferences(acceptable_work_modes=["office"]))
     with pytest.raises(ValidationError):
         ProfileDraftPayload.model_validate(payload)
     with pytest.raises(ValidationError):
@@ -506,7 +528,7 @@ def test_schema_modules_have_no_orm_or_io_imports() -> None:
             module_name = getattr(value, "__module__", "") or ""
             for bad in forbidden_substrings:
                 assert bad not in module_name, f"{mod.__name__}.{name} -> {module_name}"
-        source = (mod.__file__ or "")
+        source = mod.__file__ or ""
         assert source.endswith((".py",))
         text = open(source, encoding="utf-8").read()
         for bad in (

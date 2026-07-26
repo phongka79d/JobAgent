@@ -35,6 +35,7 @@ from app.services.cv_chunk_contracts import (
     FAILURE_EMPTY_CHUNKS,
     CanonicalChunk,
 )
+from app.services.cv_contact_contracts import ExtractedContactFact
 from app.services.provider_retry import (
     FAILURE_PROVIDER_ERROR,
     FAILURE_PROVIDER_RATE_LIMIT,
@@ -63,7 +64,9 @@ _BATCH_SYSTEM: Final[str] = (
     "(3) full_name and location are nullable profile facts and may be returned "
     "only when directly stated in the provided chunks; (4) every entry/section "
     "must list source_chunk_ordinals from the provided "
-    "batch only; (5) keep source order; (6) facts only — do not invent content."
+    "batch only; (5) contacts require exact evidence present in the referenced "
+    "chunk and a batch-local ordinal; (6) keep source order; (7) facts only — "
+    "do not invent content."
 )
 
 _CONSOLIDATE_SYSTEM: Final[str] = (
@@ -148,6 +151,7 @@ class ExtractedBatchDocument(BaseModel):
 
     full_name: str | None = None
     location: str | None = None
+    contacts: list[ExtractedContactFact] = []
     detected_languages: list[str]
     sections: list[ExtractedSectionFragment]
     extraction_warnings: list[str]
@@ -208,6 +212,7 @@ class CVDocumentExtractionOutcome:
     document: CVDocument
     full_name: str | None
     location: str | None
+    contact_facts: tuple[ExtractedContactFact, ...]
     schema_repairs_used: int
     provider_retries_used: int
     batches: tuple[ChunkBatch, ...]
@@ -350,9 +355,7 @@ def _coerce_consolidation(raw: Any) -> ExtractedConsolidation:
     return ExtractedConsolidation.model_validate(raw)
 
 
-def _filter_ordinals(
-    ordinals: Sequence[int], allowed: set[int]
-) -> list[int]:
+def _filter_ordinals(ordinals: Sequence[int], allowed: set[int]) -> list[int]:
     cleaned = sorted({int(o) for o in ordinals if int(o) in allowed})
     return cleaned
 
@@ -499,11 +502,9 @@ def merge_adjacent_sections(sections: Sequence[CVSection]) -> list[CVSection]:
             merged.append(section)
             continue
         prev = merged[-1]
-        same = (
-            prev.kind == section.kind
-            and normalize_heading_key(prev.heading)
-            == normalize_heading_key(section.heading)
-        )
+        same = prev.kind == section.kind and normalize_heading_key(
+            prev.heading
+        ) == normalize_heading_key(section.heading)
         if not same:
             merged.append(section)
             continue
@@ -524,9 +525,7 @@ def merge_adjacent_sections(sections: Sequence[CVSection]) -> list[CVSection]:
                     }
                 )
             )
-        sources = sorted(
-            {o for e in renumbered for o in e.source_chunk_ordinals}
-        )
+        sources = sorted({o for e in renumbered for o in e.source_chunk_ordinals})
         merged[-1] = prev.model_copy(
             update={"entries": renumbered, "source_chunk_ordinals": sources}
         )
@@ -611,18 +610,19 @@ def apply_coverage_recovery(
                 source_chunk_ordinals=[ord_],
             )
         )
-        warnings.append(
-            f"unreferenced chunk ordinal {ord_} recovered as kind=other"
-        )
+        warnings.append(f"unreferenced chunk ordinal {ord_} recovered as kind=other")
 
     if not recovered_entries:
         return list(sections)
 
     result = list(sections)
     # Append or extend a trailing recovered-other section.
-    if result and result[-1].kind == "other" and normalize_heading_key(
-        result[-1].heading
-    ) == normalize_heading_key("Recovered content"):
+    if (
+        result
+        and result[-1].kind == "other"
+        and normalize_heading_key(result[-1].heading)
+        == normalize_heading_key("Recovered content")
+    ):
         base = result[-1]
         entries = list(base.entries)
         for entry in recovered_entries:
@@ -906,14 +906,10 @@ def consolidate_fragments(
         float(left.extraction_confidence),
         float(right.extraction_confidence),
     )
-    langs = list(
-        dict.fromkeys([*left.detected_languages, *right.detected_languages])
-    )
+    langs = list(dict.fromkeys([*left.detected_languages, *right.detected_languages]))
     # If still oversized, accept deterministic merge of the two sides.
     if _fragments_char_size(combined) > max_chars:
-        warnings.append(
-            "hierarchical consolidation used deterministic final merge"
-        )
+        warnings.append("hierarchical consolidation used deterministic final merge")
         return (
             ExtractedConsolidation(
                 full_name=left.full_name or right.full_name,
@@ -1014,6 +1010,7 @@ def extract_cv_document_from_chunks(
     confidences: list[float] = []
     full_names: list[str] = []
     locations: list[str] = []
+    contact_facts: list[ExtractedContactFact] = []
     repairs_total = 0
     retries_total = 0
 
@@ -1032,6 +1029,9 @@ def extract_cv_document_from_chunks(
             full_names.append(extracted.full_name)
         if extracted.location:
             locations.append(extracted.location)
+        contact_facts.extend(
+            fact for fact in extracted.contacts if fact.source_chunk_ordinal in allowed
+        )
         batch_warnings.extend(extracted.extraction_warnings)
         confidences.append(float(extracted.extraction_confidence))
         for section in extracted.sections:
@@ -1083,8 +1083,7 @@ def extract_cv_document_from_chunks(
             location=locations[0] if locations else None,
             detected_languages=list(dict.fromkeys(languages)),
             sections=[],
-            extraction_warnings=batch_warnings
-            + ["no sections extracted from batches"],
+            extraction_warnings=batch_warnings + ["no sections extracted from batches"],
             extraction_confidence=0.0,
         )
 
@@ -1119,6 +1118,7 @@ def extract_cv_document_from_chunks(
         document=document,
         full_name=consolidated.full_name,
         location=consolidated.location,
+        contact_facts=tuple(contact_facts),
         schema_repairs_used=repairs_total,
         provider_retries_used=retries_total,
         batches=tuple(batches),
