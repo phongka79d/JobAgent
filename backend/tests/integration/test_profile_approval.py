@@ -133,7 +133,9 @@ def test_active_profile_missing_then_upsert(db_path: Path) -> None:
                 assert again.active_attachment_id == new_att
                 assert again.profile_json["full_name"] == "Updated"
                 count = (
-                    await session.execute(text("SELECT COUNT(*) FROM profiles"))
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM profiles")
+                    )
                 ).scalar_one()
                 assert int(count) == 1
         finally:
@@ -302,7 +304,9 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                 assert await prof_repo.get_current_draft(session) is None
                 assert await prof_repo.delete_current_draft(session) is False
                 count = (
-                    await session.execute(text("SELECT COUNT(*) FROM profile_drafts"))
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM profile_drafts")
+                    )
                 ).scalar_one()
                 assert int(count) == 0
         finally:
@@ -406,7 +410,9 @@ def test_job_preferences_are_profile_owned_and_upserted(db_path: Path) -> None:
                     session, preferences_json=new_doc
                 )
                 assert updated.profile_id == profile.id
-                assert updated.preferences_json["target_roles"] == ["Backend Engineer"]
+                assert updated.preferences_json["target_roles"] == [
+                    "Backend Engineer"
+                ]
                 updated.updated_at = past
                 await session.flush()
                 updated = await prof_repo.upsert_job_preferences(
@@ -422,7 +428,9 @@ def test_job_preferences_are_profile_owned_and_upserted(db_path: Path) -> None:
             async with factory() as session:
                 again = await prof_repo.get_job_preferences(session)
                 assert again is not None
-                assert again.preferences_json["target_roles"] == ["Backend Engineer"]
+                assert again.preferences_json["target_roles"] == [
+                    "Backend Engineer"
+                ]
                 count = (
                     await session.execute(
                         text("SELECT COUNT(*) FROM profile_preferences")
@@ -465,10 +473,14 @@ def test_profile_mutations_do_not_commit(db_path: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await prof_repo.upsert_current_draft(session, draft_json=MINIMAL_DRAFT)
+                await prof_repo.upsert_current_draft(
+                    session, draft_json=MINIMAL_DRAFT
+                )
                 async with factory() as other:
                     n = (
-                        await other.execute(text("SELECT COUNT(*) FROM profile_drafts"))
+                        await other.execute(
+                            text("SELECT COUNT(*) FROM profile_drafts")
+                        )
                     ).scalar_one()
                     assert int(n) == 0
                 await session.rollback()
@@ -737,6 +749,7 @@ class _CoveringDocumentInvoker:
         ]
         if schema_name == "batch":
             return ExtractedBatchDocument(
+                contacts=[],
                 detected_languages=["en"],
                 sections=sections,
                 extraction_warnings=[],
@@ -1146,10 +1159,18 @@ def test_propose_update_active_context_copy(
                     session, file_hash="upd-active", storage_path="upd-active.pdf"
                 )
                 await att_repo.mark_active(session, att_id)
+                approved_profile = _valid_profile_json()
+                approved_profile.update(
+                    {
+                        "phone": "+1 (202) 555-0147",
+                        "email": "approved@example.test",
+                        "github_url": "https://github.com/approved-user",
+                    }
+                )
                 profile = await prof_repo.upsert_active_profile(
                     session,
                     active_attachment_id=att_id,
-                    profile_json=_valid_profile_json(),
+                    profile_json=approved_profile,
                 )
                 await session.commit()
                 saved_att = att_id
@@ -1159,7 +1180,12 @@ def test_propose_update_active_context_copy(
                 session_factory=factory,
                 normalizer=normalizer,
                 expected_profile_id=owner_id,
-                profile_changes={"summary": "Corrected summary from chat"},
+                profile_changes={
+                    "summary": "Corrected summary from chat",
+                    "phone": "+1 303 555 0199",
+                    "email": "DRAFT@Example.TEST",
+                    "github_url": "https://www.github.com/draft-user/",
+                },
             )
             assert result.tool_result.ok is True
             assert result.base_kind == "active_context"
@@ -1167,6 +1193,12 @@ def test_propose_update_active_context_copy(
             assert result.draft is not None
             assert result.draft.candidate_profile.summary == (
                 "Corrected summary from chat"
+            )
+            assert result.draft.candidate_profile.phone == "+13035550199"
+            assert result.draft.candidate_profile.email == "draft@example.test"
+            assert (
+                result.draft.candidate_profile.github_url
+                == "https://github.com/draft-user"
             )
 
             async with factory() as session:
@@ -1182,6 +1214,12 @@ def test_propose_update_active_context_copy(
                 active = await prof_repo.get_active_profile(session)
                 assert active is not None
                 assert active.profile_json["summary"] == "Backend engineer"
+                assert active.profile_json["phone"] == "+1 (202) 555-0147"
+                assert active.profile_json["email"] == "approved@example.test"
+                assert (
+                    active.profile_json["github_url"]
+                    == "https://github.com/approved-user"
+                )
                 assert active.active_attachment_id == saved_att
                 row = await att_repo.get_by_id(session, saved_att)
                 assert row is not None
@@ -1234,7 +1272,9 @@ def test_propose_update_preference_only_null_source(
             assert result.tool_result.data["preference_only"] is True
             assert result.source_attachment_id is None
             assert result.draft is not None
-            assert result.draft.job_preferences.target_roles == ["Platform Engineer"]
+            assert result.draft.job_preferences.target_roles == [
+                "Platform Engineer"
+            ]
             # Profile facts unchanged from active copy.
             assert result.draft.candidate_profile.summary == "Backend engineer"
 
@@ -1464,7 +1504,6 @@ def test_propose_update_tool_compact_and_no_preference_tool() -> None:
     ]
     assert "propose_profile_update" in names
 
-
 # ---------------------------------------------------------------------------
 # 03A: constraint-safe approval transaction + post-commit sync
 # ---------------------------------------------------------------------------
@@ -1509,7 +1548,9 @@ class _EmptyResult:
         return None
 
 
-def _approval_valid_profile_json(*, exclude_python: bool = False) -> dict[str, Any]:
+def _approval_valid_profile_json(
+    *, exclude_python: bool = False
+) -> dict[str, Any]:
     skills: list[dict[str, Any]] = [
         {
             "skill": {
@@ -1608,7 +1649,9 @@ async def _seed_cv_document_draft(
     chunks = (CanonicalChunk(ordinal=0, text=chunk_text),)
     source_hash = compute_canonical_source_hash(chunks)
     profile = (
-        profile_json if profile_json is not None else _approval_valid_profile_json()
+        profile_json
+        if profile_json is not None
+        else _approval_valid_profile_json()
     )
     await cv_doc_repo.upsert_draft(
         session,
@@ -1818,34 +1861,25 @@ def test_first_approval_promotes_pending_profile_and_preserves_bootstrap_chat(
                 jp = await prof_repo.get_job_preferences(session)
                 assert jp is not None
                 assert jp.preferences_json["target_roles"] == ["Backend Engineer"]
-                assert (
-                    int(
-                        (
-                            await session.execute(
-                                text("SELECT COUNT(*) FROM attachments")
-                            )
-                        ).scalar_one()
-                    )
-                    == 1
-                )
-                assert (
-                    int(
-                        (
-                            await session.execute(text("SELECT COUNT(*) FROM profiles"))
-                        ).scalar_one()
-                    )
-                    == 1
-                )
-                assert (
-                    int(
-                        (
-                            await session.execute(
-                                text("SELECT COUNT(*) FROM conversations")
-                            )
-                        ).scalar_one()
-                    )
-                    == 1
-                )
+                assert int(
+                    (
+                        await session.execute(
+                            text("SELECT COUNT(*) FROM attachments")
+                        )
+                    ).scalar_one()
+                ) == 1
+                assert int(
+                    (
+                        await session.execute(text("SELECT COUNT(*) FROM profiles"))
+                    ).scalar_one()
+                ) == 1
+                assert int(
+                    (
+                        await session.execute(
+                            text("SELECT COUNT(*) FROM conversations")
+                        )
+                    ).scalar_one()
+                ) == 1
             assert storage.exists(rel)
         finally:
             await engine.dispose()
@@ -1908,7 +1942,9 @@ def test_approved_profile_persists_across_engine_restart(
                 await workspace_repo.set_active_profile_id(session, pending.id)
                 await prof_repo.upsert_current_draft(
                     session,
-                    draft_json=_approval_draft_json(prefs=prefs, exclude_python=True),
+                    draft_json=_approval_draft_json(
+                        prefs=prefs, exclude_python=True
+                    ),
                     source_attachment_id=att_id,
                     target_profile_id=pending.id,
                 )
@@ -1947,7 +1983,11 @@ def test_approved_profile_persists_across_engine_restart(
                 assert profile.active_attachment_id == att_id
                 assert profile.profile_json["summary"] == "Backend engineer"
                 skills = profile.profile_json["skills"]
-                py = next(s for s in skills if s["skill"]["canonical_key"] == "python")
+                py = next(
+                    s
+                    for s in skills
+                    if s["skill"]["canonical_key"] == "python"
+                )
                 assert py["excluded"] is True
                 assert py["source"] == "user_correction"
 
@@ -1961,11 +2001,15 @@ def test_approved_profile_persists_across_engine_restart(
 
                 jp = await prof_repo.get_job_preferences(session)
                 assert jp is not None
-                assert jp.preferences_json["target_roles"] == ["Platform Engineer"]
+                assert jp.preferences_json["target_roles"] == [
+                    "Platform Engineer"
+                ]
                 assert await prof_repo.get_current_draft(session) is None
 
                 n = (
-                    await session.execute(text("SELECT COUNT(*) FROM attachments"))
+                    await session.execute(
+                        text("SELECT COUNT(*) FROM attachments")
+                    )
                 ).scalar_one()
                 assert int(n) == 1
         finally:
@@ -2085,11 +2129,16 @@ def test_replacement_archives_old_attachment_and_retains_file(
                 assert await prof_repo.get_current_draft(session) is None
                 active_n = (
                     await session.execute(
-                        text("SELECT COUNT(*) FROM attachments WHERE state = 'active'")
+                        text(
+                            "SELECT COUNT(*) FROM attachments "
+                            "WHERE state = 'active'"
+                        )
                     )
                 ).scalar_one()
                 assert int(active_n) == 1
-                archived_chunks = await chunk_repo.list_for_attachment(session, old_id)
+                archived_chunks = await chunk_repo.list_for_attachment(
+                    session, old_id
+                )
                 assert len(archived_chunks) == 1
                 assert archived_chunks[0].text == "retained archived chunk text"
             assert storage.exists(old_rel)
@@ -2355,7 +2404,9 @@ def test_sync_failure_after_commit_keeps_sqlite_truth(
                 assert profile.active_attachment_id == att_id
                 # Exclusion preserved in SQLite approved JSON.
                 skills = profile.profile_json["skills"]
-                py = next(s for s in skills if s["skill"]["canonical_key"] == "python")
+                py = next(
+                    s for s in skills if s["skill"]["canonical_key"] == "python"
+                )
                 assert py["excluded"] is True
                 assert await prof_repo.get_current_draft(session) is None
                 att = await att_repo.get_by_id(session, att_id)
@@ -2367,7 +2418,9 @@ def test_sync_failure_after_commit_keeps_sqlite_truth(
     run_async(_body())
 
 
-def test_cleanup_failure_reported_sqlite_valid(db_path: Path, tmp_path: Path) -> None:
+def test_cleanup_failure_reported_sqlite_valid(
+    db_path: Path, tmp_path: Path
+) -> None:
     """Cleanup failpoint: committed SQLite ok; cleanup_ok False; sync may pass."""
     from app.core.ids import new_uuid
     from app.services.profile_approval import commit_approved_draft
@@ -2546,10 +2599,14 @@ def test_preference_only_approval_keeps_attachment(
                 assert att.state == ATTACHMENT_STATE_ACTIVE
                 jp = await prof_repo.get_job_preferences(session)
                 assert jp is not None
-                assert jp.preferences_json["target_roles"] == ["Platform Engineer"]
+                assert jp.preferences_json["target_roles"] == [
+                    "Platform Engineer"
+                ]
                 profile = await prof_repo.get_profile(session, ready.id)
                 assert profile is not None
-                assert profile.profile_json["summary"] == ("Corrected backend profile")
+                assert profile.profile_json["summary"] == (
+                    "Corrected backend profile"
+                )
                 assert profile.profile_json["full_name"] == "Ada Lovelace"
                 assert profile.profile_json["location"] is None
                 assert await prof_repo.get_current_draft(session) is None
@@ -2560,7 +2617,9 @@ def test_preference_only_approval_keeps_attachment(
     run_async(_body())
 
 
-def test_missing_draft_preflight_no_neo4j(db_path: Path, tmp_path: Path) -> None:
+def test_missing_draft_preflight_no_neo4j(
+    db_path: Path, tmp_path: Path
+) -> None:
     from app.core.ids import new_uuid
     from app.services.profile_approval import (
         ERROR_DRAFT_NOT_FOUND,
@@ -2613,7 +2672,6 @@ def test_approval_module_boundaries_static() -> None:
     assert "extract_text" not in src
     assert "raw_cv" not in src
     assert "PdfReader" not in src
-
 
 # ---------------------------------------------------------------------------
 # 03B: interrupt-guarded commit_profile_draft full path
@@ -2671,8 +2729,10 @@ def test_commit_profile_draft_missing_draft_fails_before_interrupt(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                _profile_id, conversation_id = await _seed_ready_profile_conversation(
-                    session, attachment_id=att_id
+                _profile_id, conversation_id = (
+                    await _seed_ready_profile_conversation(
+                        session, attachment_id=att_id
+                    )
                 )
                 await session.commit()
 
@@ -2778,11 +2838,13 @@ def test_commit_profile_draft_rejects_cross_profile_owner_before_interrupt(
                     page_count=1,
                     attachment_id=pending_attachment_id,
                 )
-                draft_owner, _conversation_id = await _seed_pending_profile_draft_owner(
-                    session,
-                    attachment_id=pending_attachment_id,
-                    draft_json=_approval_draft_json(),
-                    select_workspace=False,
+                draft_owner, _conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=pending_attachment_id,
+                        draft_json=_approval_draft_json(),
+                        select_workspace=False,
+                    )
                 )
                 await att_repo.create_staged(
                     session,
@@ -2793,9 +2855,11 @@ def test_commit_profile_draft_rejects_cross_profile_owner_before_interrupt(
                     page_count=1,
                     attachment_id=active_attachment_id,
                 )
-                run_owner, conversation_id = await _seed_ready_profile_conversation(
-                    session,
-                    attachment_id=active_attachment_id,
+                run_owner, conversation_id = (
+                    await _seed_ready_profile_conversation(
+                        session,
+                        attachment_id=active_attachment_id,
+                    )
                 )
                 await session.commit()
 
@@ -2867,6 +2931,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
     from app.repositories import agent_runs as runs_repo
     from app.repositories import tool_executions as tool_repo
     from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.profile_drafts import propose_profile_update
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
     from app.tools.profile import (
@@ -2906,18 +2971,32 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                draft_json = _approval_draft_json()
-                draft_json["candidate_profile"]["phone"] = "+1 (202) 555-0147"
-                _pending_id, conversation_id = await _seed_pending_profile_draft_owner(
-                    session,
-                    attachment_id=att_id,
-                    draft_json=draft_json,
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
                     attachment_id=att_id,
                 )
                 await session.commit()
+
+            correction = await propose_profile_update(
+                session_factory=factory,
+                normalizer=normalizer,
+                expected_profile_id=_pending_id,
+                profile_changes={
+                    "phone": "+1 (202) 555-0147",
+                    "email": "CORRECTED@Example.TEST",
+                    "github_url": "https://www.github.com/corrected-user/",
+                },
+            )
+            assert correction.tool_result.ok is True
+            assert correction.draft is not None
+            assert correction.draft.candidate_profile.phone == "+12025550147"
 
             tool = build_commit_profile_draft_tool(
                 session_factory=factory,
@@ -2945,16 +3024,13 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 model=model,
                 registry=ToolRegistry([tool]),
             )
-            events = [
-                e
-                async for e in stream_chat_turn(
-                    conversation_id=conversation_id,
-                    message="commit draft please",
-                    graph_bundle=bundle,
-                    session_factory=factory,
-                    sqlite_path=db_path,
-                )
-            ]
+            events = [e async for e in stream_chat_turn(
+                conversation_id=conversation_id,
+                message="commit draft please",
+                graph_bundle=bundle,
+                session_factory=factory,
+                sqlite_path=db_path,
+            )]
             names = [e.event for e in events]
             assert names[-1] == "approval_required"
             assert "run_completed" not in names
@@ -3031,7 +3107,15 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 assert draft.target_profile_id == _pending_id
                 assert (
                     draft.draft_json["candidate_profile"]["phone"]
-                    == "+1 (202) 555-0147"
+                    == "+12025550147"
+                )
+                assert (
+                    draft.draft_json["candidate_profile"]["email"]
+                    == "corrected@example.test"
+                )
+                assert (
+                    draft.draft_json["candidate_profile"]["github_url"]
+                    == "https://github.com/corrected-user"
                 )
                 draft_json_after = draft.draft_json
 
@@ -3163,10 +3247,12 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                _pending_id, conversation_id = await _seed_pending_profile_draft_owner(
-                    session,
-                    attachment_id=att_id,
-                    draft_json=_approval_draft_json(),
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -3234,7 +3320,9 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
             )
             model2 = FakeChatModel(
                 responses=[
-                    AIMessage(content="Profile saved in SQLite; graph sync failed.")
+                    AIMessage(
+                        content="Profile saved in SQLite; graph sync failed."
+                    )
                 ]
             )
             bundle2 = build_agent_graph(
@@ -3306,6 +3394,7 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
     )
     from app.repositories import tool_executions as tool_repo
     from app.services.chat_turns import stream_chat_turn, stream_resume
+    from app.services.profile_drafts import propose_profile_update
     from app.services.skill_normalization import SkillNormalizer
     from app.storage.attachments import AttachmentStorage
     from app.tools.profile import (
@@ -3339,25 +3428,44 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                     page_count=1,
                     attachment_id=att_id,
                 )
-                draft_json = _approval_draft_json(
-                    prefs={
-                        "target_roles": ["Backend"],
-                        "preferred_locations": [],
-                        "acceptable_work_modes": ["remote"],
-                        "target_seniority": [],
-                    }
-                )
-                draft_json["candidate_profile"]["email"] = "SAVED@Example.TEST"
-                _pending_id, conversation_id = await _seed_pending_profile_draft_owner(
-                    session,
-                    attachment_id=att_id,
-                    draft_json=draft_json,
+                _pending_id, conversation_id = (
+                    await _seed_pending_profile_draft_owner(
+                        session,
+                        attachment_id=att_id,
+                        draft_json=_approval_draft_json(
+                            prefs={
+                                "target_roles": ["Backend"],
+                                "preferred_locations": [],
+                                "acceptable_work_modes": ["remote"],
+                                "target_seniority": [],
+                            }
+                        ),
+                    )
                 )
                 await _seed_cv_document_draft(
                     session,
                     attachment_id=att_id,
                 )
                 await session.commit()
+
+            correction = await propose_profile_update(
+                session_factory=factory,
+                normalizer=normalizer,
+                expected_profile_id=_pending_id,
+                profile_changes={
+                    "phone": "+84 900 000 001",
+                    "email": "SAVED@Example.TEST",
+                    "github_url": "https://www.github.com/saved-user/",
+                },
+            )
+            assert correction.tool_result.ok is True
+            assert correction.draft is not None
+            assert correction.draft.candidate_profile.phone == "+84900000001"
+            assert correction.draft.candidate_profile.email == "saved@example.test"
+            assert (
+                correction.draft.candidate_profile.github_url
+                == "https://github.com/saved-user"
+            )
 
             tool = build_commit_profile_draft_tool(
                 session_factory=factory,
@@ -3381,7 +3489,9 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                     AIMessage(content="Awaiting."),
                 ]
             )
-            bundle = build_agent_graph(model=model, registry=ToolRegistry([tool]))
+            bundle = build_agent_graph(
+                model=model, registry=ToolRegistry([tool])
+            )
             events = [
                 e
                 async for e in stream_chat_turn(
@@ -3403,7 +3513,9 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
             model2 = FakeChatModel(
                 responses=[AIMessage(content="Profile saved successfully.")]
             )
-            bundle2 = build_agent_graph(model=model2, registry=ToolRegistry([tool2]))
+            bundle2 = build_agent_graph(
+                model=model2, registry=ToolRegistry([tool2])
+            )
             resume_events = [
                 e
                 async for e in stream_resume(
@@ -3430,7 +3542,12 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                 assert stored.data.get("committed") is True
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
+                assert profile.profile_json["phone"] == "+84900000001"
                 assert profile.profile_json["email"] == "saved@example.test"
+                assert (
+                    profile.profile_json["github_url"]
+                    == "https://github.com/saved-user"
+                )
                 profile_updated = profile.updated_at
                 assert await prof_repo.get_current_draft(session) is None
 
@@ -3635,7 +3752,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             payload = json.loads(raw)
         elif hasattr(raw, "content"):
             content = raw.content
-            payload = json.loads(content) if isinstance(content, str) else content
+            payload = (
+                json.loads(content) if isinstance(content, str) else content
+            )
         else:
             payload = raw
         return ToolResult.model_validate(payload)
@@ -3763,7 +3882,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             async with factory() as session:
                 draft_before = await prof_repo.get_current_draft(session)
                 assert draft_before is not None
-                draft_json_before = json.dumps(draft_before.draft_json, sort_keys=True)
+                draft_json_before = json.dumps(
+                    draft_before.draft_json, sort_keys=True
+                )
                 draft_updated_before = draft_before.updated_at
 
             pubs.clear()
@@ -3774,7 +3895,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     tool_call_id="call_five_propose_cv",
                     args={"attachment_id": att_id},
                 )
-            assert replay_cv.model_dump(mode="json") == first_cv.model_dump(mode="json")
+            assert replay_cv.model_dump(mode="json") == first_cv.model_dump(
+                mode="json"
+            )
             # Durable replay must not re-extract or re-call the document invoker.
             assert invoker.calls == calls_after_first
             assert [p.status for p in pubs] == ["completed"]
@@ -3795,7 +3918,11 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     propose_upd,
                     run_id=run_id,
                     tool_call_id="call_five_propose_upd",
-                    args={"profile_changes": {"summary": "Corrected summary once."}},
+                    args={
+                        "profile_changes": {
+                            "summary": "Corrected summary once."
+                        }
+                    },
                 )
             assert first_upd.ok is True
             assert [p.status for p in pubs] == [
@@ -3820,7 +3947,11 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     propose_upd,
                     run_id=run_id,
                     tool_call_id="call_five_propose_upd",
-                    args={"profile_changes": {"summary": "Would mutate if re-invoked"}},
+                    args={
+                        "profile_changes": {
+                            "summary": "Would mutate if re-invoked"
+                        }
+                    },
                 )
             assert replay_upd.model_dump(mode="json") == first_upd.model_dump(
                 mode="json"
@@ -3831,7 +3962,10 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             async with factory() as session:
                 draft_final = await prof_repo.get_current_draft(session)
                 assert draft_final is not None
-                assert json.dumps(draft_final.draft_json, sort_keys=True) == mid_json
+                assert (
+                    json.dumps(draft_final.draft_json, sort_keys=True)
+                    == mid_json
+                )
                 assert draft_final.updated_at == mid_updated
                 assert (
                     draft_final.draft_json["candidate_profile"]["summary"]
@@ -3858,7 +3992,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             # Remaining registered tools share the same execute_tool owner.
             assert commit_fn.name == COMMIT_PROFILE_DRAFT_NAME
             assert save_fn.name == SAVE_JOB_NAME
-            assert "execute_tool" in inspect.getsource(build_commit_profile_draft_tool)
+            assert "execute_tool" in inspect.getsource(
+                build_commit_profile_draft_tool
+            )
             assert "execute_tool" in inspect.getsource(build_save_job_tool)
 
             async with factory() as session:
@@ -3876,11 +4012,19 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     assert row.result_json is not None
                 # Exactly one durable row per proposal identity (replay reuse).
                 assert (
-                    sum(1 for r in rows if r.tool_call_id == "call_five_propose_cv")
+                    sum(
+                        1
+                        for r in rows
+                        if r.tool_call_id == "call_five_propose_cv"
+                    )
                     == 1
                 )
                 assert (
-                    sum(1 for r in rows if r.tool_call_id == "call_five_propose_upd")
+                    sum(
+                        1
+                        for r in rows
+                        if r.tool_call_id == "call_five_propose_upd"
+                    )
                     == 1
                 )
                 # Compact arguments summaries only (IDs / keys, never bodies).
@@ -3889,11 +4033,15 @@ def test_five_production_tools_durable_status_and_proposal_replay(
                     "attachment_id": att_id,
                     "reprocess": False,
                 }
-                upd_args = by_call["call_five_propose_upd"].arguments_summary_json
+                upd_args = by_call[
+                    "call_five_propose_upd"
+                ].arguments_summary_json
                 assert upd_args is not None
                 assert upd_args.get("profile_change_keys") == ["summary"]
                 assert "Corrected summary" not in json.dumps(upd_args)
-                assert "%PDF" not in json.dumps(first_cv.model_dump(mode="json"))
+                assert "%PDF" not in json.dumps(
+                    first_cv.model_dump(mode="json")
+                )
         finally:
             await engine.dispose()
 

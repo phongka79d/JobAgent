@@ -50,7 +50,9 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
     pdf = CV_DIR / "digital_cv_01.pdf"
     invoker = CoveringDocumentInvoker()
     scorer = Mock(side_effect=AssertionError("re-extraction must not score"))
-    monkeypatch.setattr("app.services.job_evaluation.project_single_job_match", scorer)
+    monkeypatch.setattr(
+        "app.services.job_evaluation.project_single_job_match", scorer
+    )
 
     async def _unexpected_activation(*args: object, **kwargs: object) -> None:
         raise AssertionError("ready re-extraction must not activate attachments")
@@ -229,7 +231,9 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
 
             async with factory() as session:
                 refreshed = await profile_repo.get_profile(session, profile_id)
-                prefs = await profile_repo.get_profile_preferences(session, profile_id)
+                prefs = await profile_repo.get_profile_preferences(
+                    session, profile_id
+                )
                 document = await cv_doc_repo.get_document(session, attachment_id)
                 conversations = await conversations_repo.list_for_profile(
                     session, profile_id=profile_id, limit=50, before=None

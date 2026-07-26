@@ -146,6 +146,7 @@ class _CoveringDocumentInvoker:
         ]
         if schema_name == "batch":
             return ExtractedBatchDocument(
+                contacts=[],
                 detected_languages=["en"],
                 sections=sections,
                 extraction_warnings=[],

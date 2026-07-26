@@ -207,7 +207,9 @@ class ProfileSkillTag(BaseModel):
     label: str
 
 
-ProfileAttachmentState = Literal["staged", "active", "archived", "failed", "deleting"]
+ProfileAttachmentState = Literal[
+    "staged", "active", "archived", "failed", "deleting"
+]
 ProfileSetupStatus = Literal[
     "awaiting_extraction", "awaiting_approval", "extraction_failed"
 ]

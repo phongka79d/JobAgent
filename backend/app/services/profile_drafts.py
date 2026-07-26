@@ -333,7 +333,8 @@ async def propose_profile_from_cv(
                     kind="new_draft",
                     tool_result=_tool_fail(
                         ERROR_ATTACHMENT_NOT_PROCESSABLE,
-                        f"attachment state {state!r} cannot be processed for proposal",
+                        f"attachment state {state!r} cannot be processed "
+                        "for proposal",
                         {"attachment_id": attachment_id, "state": state},
                     ),
                     attachment_id=attachment_id,
@@ -514,7 +515,9 @@ async def propose_profile_from_cv(
                 ),
                 attachment_id=attachment_id,
             )
-        logger.exception("atomic draft publication failed attachment=%s", attachment_id)
+        logger.exception(
+            "atomic draft publication failed attachment=%s", attachment_id
+        )
         return ProposeFromCvResult(
             kind="new_draft",
             tool_result=_tool_fail(
@@ -589,16 +592,16 @@ def arguments_summary_for_propose_update(
 ) -> dict[str, Any]:
     """Compact ``arguments_summary_json`` — keys/counts only, never raw CV text."""
     profile_keys = sorted(profile_changes.keys()) if profile_changes else []
-    preference_keys = sorted(preference_changes.keys()) if preference_changes else []
+    preference_keys = (
+        sorted(preference_changes.keys()) if preference_changes else []
+    )
     correction_names: list[str] = []
     if skill_corrections:
         for item in skill_corrections:
             if not isinstance(item, Mapping):
                 continue
-            name = (
-                item.get("name")
-                or item.get("display_name")
-                or item.get("canonical_key")
+            name = item.get("name") or item.get("display_name") or item.get(
+                "canonical_key"
             )
             if isinstance(name, str) and name.strip():
                 correction_names.append(name.strip()[:80])
@@ -680,10 +683,8 @@ def _correction_to_skill(
     if proficiency is None:
         proficiency = prior.proficiency if prior is not None else "unknown"
 
-    years = (
-        item.get("years")
-        if "years" in item
-        else (prior.years if prior is not None else None)
+    years = item.get("years") if "years" in item else (
+        prior.years if prior is not None else None
     )
 
     confidence = item.get("confidence")
@@ -692,7 +693,11 @@ def _correction_to_skill(
 
     evidence = item.get("evidence")
     if evidence is None:
-        evidence = list(prior.evidence) if prior is not None else ["user correction"]
+        evidence = (
+            list(prior.evidence)
+            if prior is not None
+            else ["user correction"]
+        )
     if not isinstance(evidence, list):
         evidence = [str(evidence)]
 
@@ -720,7 +725,9 @@ def _apply_skill_corrections(
         for s in base_skills
     }
     # Snapshot excluded keys from the base (same-CV silent re-add protection).
-    base_excluded: set[str] = {key for key, skill in by_key.items() if skill.excluded}
+    base_excluded: set[str] = {
+        key for key, skill in by_key.items() if skill.excluded
+    }
 
     # Track keys the user explicitly re-included (excluded=false in correction).
     explicit_reinclude: set[str] = set()
@@ -732,7 +739,9 @@ def _apply_skill_corrections(
                     f"skill correction must be a mapping, got {type(raw).__name__}"
                 )
             name = (
-                raw.get("name") or raw.get("display_name") or raw.get("canonical_key")
+                raw.get("name")
+                or raw.get("display_name")
+                or raw.get("canonical_key")
             )
             if not isinstance(name, str) or not name.strip():
                 raise SkillTaxonomyError(
@@ -740,7 +749,9 @@ def _apply_skill_corrections(
                 )
             provisional_key = normalizer.normalize_name(name.strip()).canonical_key
             prior = by_key.get(provisional_key)
-            corrected = _correction_to_skill(raw, normalizer=normalizer, prior=prior)
+            corrected = _correction_to_skill(
+                raw, normalizer=normalizer, prior=prior
+            )
             key = corrected.skill.canonical_key
             if raw.get("excluded") is False:
                 explicit_reinclude.add(key)
@@ -823,7 +834,9 @@ def _build_updated_draft(
             name = entry.get("name")
             if name is None and isinstance(entry.get("skill"), Mapping):
                 skill_obj = entry["skill"]
-                name = skill_obj.get("display_name") or skill_obj.get("canonical_key")
+                name = skill_obj.get("display_name") or skill_obj.get(
+                    "canonical_key"
+                )
             correction = dict(entry)
             if name is not None:
                 correction["name"] = name
@@ -869,7 +882,10 @@ async def propose_profile_update(
                 "propose_profile_update requires profile, preference, or skill changes",
             ),
         )
-    if not isinstance(expected_profile_id, str) or expected_profile_id.strip() == "":
+    if (
+        not isinstance(expected_profile_id, str)
+        or expected_profile_id.strip() == ""
+    ):
         return ProposeUpdateResult(
             base_kind=None,
             tool_result=_tool_fail(
@@ -905,7 +921,9 @@ async def propose_profile_update(
             target_profile_id = draft_row.target_profile_id
             base_kind: UpdateBaseKind = "current_draft"
         else:
-            profile_row = await profile_repo.get_profile(session, expected_profile_id)
+            profile_row = await profile_repo.get_profile(
+                session, expected_profile_id
+            )
             if profile_row is None or profile_row.state != PROFILE_STATE_READY:
                 return ProposeUpdateResult(
                     base_kind=None,
@@ -1013,9 +1031,13 @@ async def propose_profile_update(
             source_attachment_id=source_attachment_id,
         )
 
-    excluded_count = sum(1 for s in updated.candidate_profile.skills if s.excluded)
+    excluded_count = sum(
+        1 for s in updated.candidate_profile.skills if s.excluded
+    )
     correction_count = sum(
-        1 for s in updated.candidate_profile.skills if s.source == "user_correction"
+        1
+        for s in updated.candidate_profile.skills
+        if s.source == "user_correction"
     )
     data: dict[str, Any] = {
         "draft_id": PROFILE_DRAFT_ID,

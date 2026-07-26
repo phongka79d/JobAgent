@@ -54,7 +54,7 @@ def _project_experiences(document: CVDocument) -> list[ExperienceItem]:
     for section in _sections_of_kind(document, "experience"):
         for entry in section.entries:
             title = (entry.title or "").strip() or "Role"
-            company = entry.subtitle or entry.location or None
+            company = (entry.subtitle or entry.location or None)
             if company is not None:
                 company = company.strip() or None
             summary = entry.body.strip()
@@ -190,7 +190,9 @@ def project_outline(document: CVDocument) -> list[dict[str, Any]]:
                 "kind": section.kind,
                 "entry_count": len(section.entries),
                 "source_chunk_ordinals": list(ords),
-                "source_chunk_range": ([ords[0], ords[-1]] if ords else []),
+                "source_chunk_range": (
+                    [ords[0], ords[-1]] if ords else []
+                ),
             }
         )
     return outline

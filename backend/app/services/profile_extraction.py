@@ -196,7 +196,9 @@ def chunk_parsed_text(
         packed.append(current)
 
     chunks = [
-        CanonicalChunk(ordinal=i, text=body) for i, body in enumerate(packed) if body
+        CanonicalChunk(ordinal=i, text=body)
+        for i, body in enumerate(packed)
+        if body
     ]
     if not chunks:
         raise ProfileExtractionError(
@@ -262,7 +264,9 @@ async def persist_canonical_chunks(
             "refuse to persist empty chunk sequence",
         )
     writes = chunks_to_writes(chunks)
-    return await chunk_repo.replace_for_attachment(session, attachment_id, writes)
+    return await chunk_repo.replace_for_attachment(
+        session, attachment_id, writes
+    )
 
 
 def compute_canonical_source_hash(chunks: Sequence[CanonicalChunk]) -> str:
@@ -379,7 +383,9 @@ def extract_document_publication_from_pdf(
             "attachment_id is required for document-first extraction",
         )
 
-    chunks, model_input = _parse_and_chunk_pdf(source, extract_text_fn=extract_text_fn)
+    chunks, model_input = _parse_and_chunk_pdf(
+        source, extract_text_fn=extract_text_fn
+    )
     document_invoker = resolve_document_invoker(invoker)
 
     try:
@@ -395,7 +401,10 @@ def extract_document_publication_from_pdf(
             normalizer=normalizer,
             max_chars=max_chars,
         )
-        contacts = validate_and_project_contact_facts(outcome.contact_facts, chunks)
+        contacts = validate_and_project_contact_facts(
+            outcome.contact_facts,
+            chunks=chunks,
+        )
         document = outcome.document.model_copy(
             update={
                 "extraction_warnings": list(outcome.document.extraction_warnings)
@@ -507,7 +516,10 @@ def extract_document_and_profile_from_chunks(
             normalizer=normalizer,
             max_chars=max_chars,
         )
-        contacts = validate_and_project_contact_facts(outcome.contact_facts, chunks)
+        contacts = validate_and_project_contact_facts(
+            outcome.contact_facts,
+            chunks=chunks,
+        )
         document = outcome.document.model_copy(
             update={
                 "extraction_warnings": list(outcome.document.extraction_warnings)

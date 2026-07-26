@@ -24,6 +24,7 @@ from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.tools import ToolResult
+from app.services.cv_contact_contracts import ExtractedContactFact
 from app.services.cv_document_extraction import (
     EXTRACTION_VERSION,
     ExtractedBatchDocument,
@@ -35,6 +36,7 @@ from app.services.cv_document_extraction import (
 from app.services.cv_skill_contracts import ExtractedCandidateSkillBatch
 from app.services.pdf_extraction import (
     NO_EXTRACTABLE_TEXT,
+    PdfTextExtraction,
     extract_pdf_text,
 )
 from app.services.profile_drafts import (
@@ -274,6 +276,7 @@ class CoveringDocumentInvoker:
         sections = _covering_sections(ordinals)
         if schema_name == "batch":
             return ExtractedBatchDocument(
+                contacts=[],
                 detected_languages=["en"],
                 sections=sections,
                 extraction_warnings=[],
@@ -310,6 +313,55 @@ class IdentityDocumentInvoker(CoveringDocumentInvoker):
                 }
             )
         return result
+
+
+class ContactDocumentInvoker(CoveringDocumentInvoker):
+    """Emit source-grounded contacts only from the batch extraction call."""
+
+    def invoke_structured(
+        self,
+        messages: Sequence[Any],
+        *,
+        schema_name: str,
+        is_repair: bool = False,
+    ) -> Any:
+        result = super().invoke_structured(
+            messages,
+            schema_name=schema_name,
+            is_repair=is_repair,
+        )
+        if schema_name != "batch":
+            return result
+        return result.model_copy(
+            update={
+                "contacts": [
+                    ExtractedContactFact(
+                        kind="phone",
+                        value="+1 (202) 555-0147",
+                        evidence="+1 (202) 555-0147",
+                        source_chunk_ordinal=0,
+                    ),
+                    ExtractedContactFact(
+                        kind="email",
+                        value="person@example.test",
+                        evidence="person@example.test",
+                        source_chunk_ordinal=0,
+                    ),
+                    ExtractedContactFact(
+                        kind="email",
+                        value="alternate@example.test",
+                        evidence="alternate@example.test",
+                        source_chunk_ordinal=0,
+                    ),
+                    ExtractedContactFact(
+                        kind="github_url",
+                        value="https://github.com/synthetic-user",
+                        evidence="https://github.com/synthetic-user",
+                        source_chunk_ordinal=0,
+                    ),
+                ]
+            }
+        )
 
 
 class _TimeoutExc(Exception):
@@ -795,6 +847,9 @@ def test_document_publication_pure_path_has_matching_hash() -> None:
     assert artifacts.extraction_version == EXTRACTION_VERSION
     assert "sections" in artifacts.outline_json
     assert artifacts.draft.candidate_profile.summary
+    assert artifacts.draft.candidate_profile.phone is None
+    assert artifacts.draft.candidate_profile.email is None
+    assert artifacts.draft.candidate_profile.github_url is None
     assert [
         item.skill.canonical_key for item in artifacts.draft.candidate_profile.skills
     ] == ["python"]
@@ -803,6 +858,39 @@ def test_document_publication_pure_path_has_matching_hash() -> None:
     ) == 1
     assert is_document_structured_invoker(invoker) is True
     assert is_document_structured_invoker(object()) is False
+
+
+def test_document_publication_projects_grounded_contacts_and_ambiguity() -> None:
+    text = (
+        "Synthetic candidate profile with Python and FastAPI experience. "
+        "Phone +1 (202) 555-0147. Email person@example.test and "
+        "alternate@example.test. GitHub https://github.com/synthetic-user."
+    )
+
+    def extract_text(_: object) -> PdfTextExtraction:
+        return PdfTextExtraction(
+            page_count=1,
+            normal_text=text,
+            layout_text=text,
+            normal_is_meaningful=True,
+            layout_is_meaningful=True,
+        )
+
+    artifacts = extract_document_publication_from_pdf(
+        b"synthetic-pdf-placeholder",
+        attachment_id="11111111-1111-4111-8111-111111111111",
+        invoker=ContactDocumentInvoker(),
+        normalizer=_normalizer(),
+        extract_text_fn=extract_text,
+    )
+
+    profile = artifacts.draft.candidate_profile
+    assert profile.phone == "+12025550147"
+    assert profile.email is None
+    assert profile.github_url == "https://github.com/synthetic-user"
+    assert "ambiguous_contact:email" in artifacts.document_json[
+        "extraction_warnings"
+    ]
 
 
 def test_no_extractable_text_short_circuit() -> None:

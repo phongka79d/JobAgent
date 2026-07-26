@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from app.services.cv_chunk_contracts import CanonicalChunk
 from app.services.cv_contact_contracts import (
     ExtractedContactFact,
@@ -19,7 +20,7 @@ def _fact(kind: str, value: str, evidence: str, ordinal: int) -> ExtractedContac
 def _project(*facts: ExtractedContactFact):
     return validate_and_project_contact_facts(
         facts,
-        [
+        chunks=[
             CanonicalChunk(
                 ordinal=0,
                 text=(
@@ -101,6 +102,35 @@ def test_distinct_contacts_become_ambiguous_in_stable_kind_order() -> None:
     )
 
 
+def test_projects_source_ordered_contacts_and_omits_ambiguous_kind() -> None:
+    chunks = (
+        CanonicalChunk(
+            ordinal=0,
+            text="Ada Example | ada@example.test | +84 900 000 001",
+        ),
+        CanonicalChunk(ordinal=1, text="https://github.com/ada-example"),
+        CanonicalChunk(ordinal=2, text="alternate@example.test"),
+    )
+    facts = (
+        _fact("phone", "+84 900 000 001", "+84 900 000 001", 0),
+        _fact("email", "ada@example.test", "ada@example.test", 0),
+        _fact(
+            "github_url",
+            "https://github.com/ada-example",
+            "https://github.com/ada-example",
+            1,
+        ),
+        _fact("email", "alternate@example.test", "alternate@example.test", 2),
+    )
+
+    result = validate_and_project_contact_facts(facts, chunks=chunks)
+
+    assert result.phone == "+84 900 000 001"
+    assert result.email is None
+    assert result.github_url == "https://github.com/ada-example"
+    assert result.warnings == ("ambiguous_contact:email",)
+
+
 def test_missing_evidence_invalid_ordinal_and_username_inference_are_dropped() -> None:
     accepted = _project(
         _fact("email", "person@example.test", "not present", 0),
@@ -133,3 +163,50 @@ def test_malformed_email_phone_bounds_and_repo_or_non_github_are_dropped() -> No
     assert accepted.phone is None
     assert accepted.email is None
     assert accepted.github_url is None
+
+
+def test_repository_evidence_cannot_support_inferred_github_profile() -> None:
+    accepted = validate_and_project_contact_facts(
+        (
+            _fact(
+                "github_url",
+                "https://github.com/synthetic-user",
+                "https://github.com/synthetic-user/repository",
+                0,
+            ),
+        ),
+        chunks=(
+            CanonicalChunk(
+                ordinal=0,
+                text="Project https://github.com/synthetic-user/repository",
+            ),
+        ),
+    )
+
+    assert accepted.github_url is None
+
+
+def test_phone_plus_must_be_present_in_grounding_evidence() -> None:
+    accepted = validate_and_project_contact_facts(
+        (_fact("phone", "+12025550147", "12025550147", 0),),
+        chunks=(CanonicalChunk(ordinal=0, text="Phone 12025550147"),),
+    )
+
+    assert accepted.phone is None
+
+
+def test_chunks_are_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        validate_and_project_contact_facts((), ())  # type: ignore[misc]
+
+
+def test_no_contact_cv_projects_nullable_fields_without_warnings() -> None:
+    result = validate_and_project_contact_facts(
+        (),
+        chunks=(CanonicalChunk(ordinal=0, text="Synthetic professional summary"),),
+    )
+
+    assert result.phone is None
+    assert result.email is None
+    assert result.github_url is None
+    assert result.warnings == ()

@@ -151,7 +151,7 @@ class ExtractedBatchDocument(BaseModel):
 
     full_name: str | None = None
     location: str | None = None
-    contacts: list[ExtractedContactFact] = []
+    contacts: list[ExtractedContactFact]
     detected_languages: list[str]
     sections: list[ExtractedSectionFragment]
     extraction_warnings: list[str]
@@ -355,7 +355,9 @@ def _coerce_consolidation(raw: Any) -> ExtractedConsolidation:
     return ExtractedConsolidation.model_validate(raw)
 
 
-def _filter_ordinals(ordinals: Sequence[int], allowed: set[int]) -> list[int]:
+def _filter_ordinals(
+    ordinals: Sequence[int], allowed: set[int]
+) -> list[int]:
     cleaned = sorted({int(o) for o in ordinals if int(o) in allowed})
     return cleaned
 
@@ -502,9 +504,11 @@ def merge_adjacent_sections(sections: Sequence[CVSection]) -> list[CVSection]:
             merged.append(section)
             continue
         prev = merged[-1]
-        same = prev.kind == section.kind and normalize_heading_key(
-            prev.heading
-        ) == normalize_heading_key(section.heading)
+        same = (
+            prev.kind == section.kind
+            and normalize_heading_key(prev.heading)
+            == normalize_heading_key(section.heading)
+        )
         if not same:
             merged.append(section)
             continue
@@ -525,7 +529,9 @@ def merge_adjacent_sections(sections: Sequence[CVSection]) -> list[CVSection]:
                     }
                 )
             )
-        sources = sorted({o for e in renumbered for o in e.source_chunk_ordinals})
+        sources = sorted(
+            {o for e in renumbered for o in e.source_chunk_ordinals}
+        )
         merged[-1] = prev.model_copy(
             update={"entries": renumbered, "source_chunk_ordinals": sources}
         )
@@ -610,19 +616,18 @@ def apply_coverage_recovery(
                 source_chunk_ordinals=[ord_],
             )
         )
-        warnings.append(f"unreferenced chunk ordinal {ord_} recovered as kind=other")
+        warnings.append(
+            f"unreferenced chunk ordinal {ord_} recovered as kind=other"
+        )
 
     if not recovered_entries:
         return list(sections)
 
     result = list(sections)
     # Append or extend a trailing recovered-other section.
-    if (
-        result
-        and result[-1].kind == "other"
-        and normalize_heading_key(result[-1].heading)
-        == normalize_heading_key("Recovered content")
-    ):
+    if result and result[-1].kind == "other" and normalize_heading_key(
+        result[-1].heading
+    ) == normalize_heading_key("Recovered content"):
         base = result[-1]
         entries = list(base.entries)
         for entry in recovered_entries:
@@ -906,10 +911,14 @@ def consolidate_fragments(
         float(left.extraction_confidence),
         float(right.extraction_confidence),
     )
-    langs = list(dict.fromkeys([*left.detected_languages, *right.detected_languages]))
+    langs = list(
+        dict.fromkeys([*left.detected_languages, *right.detected_languages])
+    )
     # If still oversized, accept deterministic merge of the two sides.
     if _fragments_char_size(combined) > max_chars:
-        warnings.append("hierarchical consolidation used deterministic final merge")
+        warnings.append(
+            "hierarchical consolidation used deterministic final merge"
+        )
         return (
             ExtractedConsolidation(
                 full_name=left.full_name or right.full_name,
@@ -1030,7 +1039,14 @@ def extract_cv_document_from_chunks(
         if extracted.location:
             locations.append(extracted.location)
         contact_facts.extend(
-            fact for fact in extracted.contacts if fact.source_chunk_ordinal in allowed
+            sorted(
+                (
+                    fact
+                    for fact in extracted.contacts
+                    if fact.source_chunk_ordinal in allowed
+                ),
+                key=lambda fact: fact.source_chunk_ordinal,
+            )
         )
         batch_warnings.extend(extracted.extraction_warnings)
         confidences.append(float(extracted.extraction_confidence))
@@ -1083,7 +1099,8 @@ def extract_cv_document_from_chunks(
             location=locations[0] if locations else None,
             detected_languages=list(dict.fromkeys(languages)),
             sections=[],
-            extraction_warnings=batch_warnings + ["no sections extracted from batches"],
+            extraction_warnings=batch_warnings
+            + ["no sections extracted from batches"],
             extraction_confidence=0.0,
         )
 
