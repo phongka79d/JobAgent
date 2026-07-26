@@ -4,11 +4,17 @@ import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-import {App, selectedScorableJobId} from './App';
+import {
+  App,
+  freshTailoringRequest,
+  reloadLatestTailoring,
+  selectedScorableJobId,
+} from './App';
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('App foundation shell', () => {
@@ -51,6 +57,80 @@ describe('App foundation shell', () => {
         },
       }),
     ).toBeNull();
+
+    const selectedState = {
+      selectedJobId: job.id,
+      list: {
+        phase: 'ready' as const,
+        data: {items: [job], next_cursor: null},
+        error: null,
+        loaded: true,
+      },
+    };
+    expect(freshTailoringRequest(selectedState, '   ')).toEqual({
+      job_id: job.id,
+      instruction: '',
+    });
+    expect(
+      freshTailoringRequest(
+        {
+          ...selectedState,
+          list: {
+            ...selectedState.list,
+            data: {
+              items: [{...job, jd_quality: 'unscorable' as const}],
+              next_cursor: null,
+            },
+          },
+        },
+        '  Focus on evidence  ',
+      ),
+    ).toEqual({job_id: null, instruction: 'Focus on evidence'});
+    expect(
+      freshTailoringRequest(
+        {
+          ...selectedState,
+          list: {
+            ...selectedState.list,
+            data: {
+              items: [{...job, jd_quality: 'unscorable' as const}],
+              next_cursor: null,
+            },
+          },
+        },
+        '   ',
+      ),
+    ).toBeNull();
+  });
+
+  it('reloads the latest parent while preserving the local tailoring draft', async () => {
+    const draft = {
+      header: {
+        full_name: 'Synthetic Candidate',
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+      },
+      sections: [],
+    };
+    const openSession = vi.fn().mockResolvedValue(true);
+    const setDraft = vi.fn();
+
+    expect(
+      await reloadLatestTailoring({
+        state: {
+          selectedSessionId: '11111111-1111-4111-8111-111111111111',
+          draft,
+        },
+        openSession,
+        setDraft,
+      }),
+    ).toBe(true);
+    expect(openSession).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(setDraft).toHaveBeenCalledWith(draft);
   });
 
   it('renders AppShell with CV sidebar and chat page', async () => {
@@ -92,6 +172,7 @@ describe('App foundation shell', () => {
   });
 
   it('switches to a validated tailoring workspace without remounting ChatPage', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
     const profileId = '11111111-1111-4111-8111-111111111111';
     const conversationId = '22222222-2222-4222-8222-222222222222';
     const sessionId = '33333333-3333-4333-8333-333333333333';
@@ -168,9 +249,61 @@ describe('App foundation shell', () => {
     });
 
     const fetchSession = vi.fn().mockResolvedValue({
-      session: {id: sessionId},
-      selected_version: null,
-      content: null,
+      session: {
+        id: sessionId,
+        profile_id: profileId,
+        job_label: null,
+        instruction: 'Focus on verified evidence',
+        template_version: 'latex-cv-v1',
+        state: 'ready',
+        currentness: 'current',
+        latest_version_number: 1,
+        error_code: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+      versions: [
+        {
+          id: versionId,
+          version_number: 1,
+          parent_version_id: null,
+          created_by: 'ai',
+          page_count: 1,
+          page_warning: null,
+          created_at: timestamp,
+        },
+      ],
+      selected_version: {
+        id: versionId,
+        version_number: 1,
+        parent_version_id: null,
+        created_by: 'ai',
+        page_count: 1,
+        page_warning: null,
+        created_at: timestamp,
+      },
+      content: {
+        header: {
+          full_name: 'Synthetic Candidate',
+          location: null,
+          phone: null,
+          email: null,
+          github_url: null,
+        },
+        sections: [
+          {
+            id: 'summary',
+            ordinal: 0,
+            heading: 'Summary',
+            kind: 'summary',
+            items: [],
+          },
+        ],
+      },
+      evidence: [],
+      latest_run: null,
+      source_available: true,
+      pdf_available: true,
     });
     render(
       <Theme theme={neutralTheme}>
@@ -199,7 +332,21 @@ describe('App foundation shell', () => {
     await waitFor(() => {
       expect(fetchSession).toHaveBeenCalledWith(sessionId, undefined, expect.any(AbortSignal));
     });
+    expect(
+      screen.getByRole('heading', {level: 1, name: 'CV đã chỉnh'}),
+    ).toBeInTheDocument();
+    expect(chat.closest('[hidden]')).not.toBeNull();
     expect(screen.getByTestId('jobagent-chat-page')).toBe(chat);
     expect(loadConversationHistory).toHaveBeenCalledTimes(1);
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Quay lại chat'}),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', {level: 1, name: 'CV đã chỉnh'}),
+      ).not.toBeInTheDocument();
+      expect(chat.closest('[hidden]')).toBeNull();
+    });
+    expect(screen.getByTestId('jobagent-chat-page')).toBe(chat);
   });
 });

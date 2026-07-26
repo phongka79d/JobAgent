@@ -32,9 +32,11 @@ import {
 import type {SavedJobsApi} from '../features/jobs/api';
 import {
   useCvTailoringState,
+  type CvTailoringController,
 } from '../features/cv-tailoring/state';
 import type {CvTailoringApi} from '../features/cv-tailoring/api';
 import {TailoringEditor} from '../features/cv-tailoring/TailoringEditor';
+import type {CreateTailoringSessionRequest} from '../features/cv-tailoring/types';
 import {
   useProfileWorkspaceState,
   type ProfileWorkspaceApi,
@@ -74,6 +76,34 @@ export function selectedScorableJobId(
     : null;
 }
 
+export function freshTailoringRequest(
+  state: Pick<SavedJobsController['state'], 'list' | 'selectedJobId'>,
+  retainedInstruction: string,
+): CreateTailoringSessionRequest | null {
+  const jobId = selectedScorableJobId(state);
+  const instruction = retainedInstruction.trim();
+  return jobId !== null || instruction !== ''
+    ? {job_id: jobId, instruction}
+    : null;
+}
+
+export async function reloadLatestTailoring(
+  controller: {
+    readonly state: Pick<
+      CvTailoringController['state'],
+      'draft' | 'selectedSessionId'
+    >;
+    readonly openSession: CvTailoringController['openSession'];
+    readonly setDraft: CvTailoringController['setDraft'];
+  },
+): Promise<boolean> {
+  const {draft, selectedSessionId} = controller.state;
+  if (draft === null || selectedSessionId === null) return false;
+  if (!(await controller.openSession(selectedSessionId))) return false;
+  controller.setDraft(draft);
+  return true;
+}
+
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
   const workspaceApi = useMemo(() => deps?.workspace ?? {}, [deps?.workspace]);
@@ -108,7 +138,10 @@ export function App({deps}: AppProps = {}) {
     api: deps?.tailoring,
   });
   const tailoringLocked = tailoring.state.stream.phase === 'loading';
-  const freshTailoringJobId = selectedScorableJobId(savedJobs.state);
+  const currentFreshTailoringRequest = freshTailoringRequest(
+    savedJobs.state,
+    tailoring.state.detail.data?.session.instruction ?? '',
+  );
   const interactionLocked = uploadLocked || workspaceLocked || tailoringLocked;
   const [mainWorkspace, setMainWorkspace] = useState<MainWorkspace>({
     kind: 'chat',
@@ -134,16 +167,18 @@ export function App({deps}: AppProps = {}) {
     [tailoring.createSession],
   );
   const handleCreateFreshTailoredCv = useCallback(() => {
-    const instruction = tailoring.state.detail.data?.session.instruction?.trim() ?? '';
-    if (instruction === '') return;
+    if (currentFreshTailoringRequest === null) return;
     void tailoring
-      .createSession({job_id: freshTailoringJobId, instruction})
+      .createSession(currentFreshTailoringRequest)
       .then((sessionId) => {
         if (sessionId !== null) {
           setMainWorkspace({kind: 'cv-tailoring', sessionId});
         }
       });
-  }, [freshTailoringJobId, tailoring.createSession, tailoring.state.detail.data]);
+  }, [currentFreshTailoringRequest, tailoring.createSession]);
+  const handleReloadLatestTailoring = useCallback(() => {
+    void reloadLatestTailoring(tailoring);
+  }, [tailoring]);
   const handleEditProfileFromTailoring = useCallback(() => {
     setMainWorkspace({kind: 'chat'});
     queueMicrotask(() => {
@@ -294,8 +329,9 @@ export function App({deps}: AppProps = {}) {
           controller={tailoring}
           onBackToChat={() => setMainWorkspace({kind: 'chat'})}
           onEditProfile={handleEditProfileFromTailoring}
-          canCreateFresh={Boolean(tailoring.state.detail.data?.session.instruction?.trim())}
+          canCreateFresh={currentFreshTailoringRequest !== null}
           onCreateFresh={handleCreateFreshTailoredCv}
+          onReloadLatest={handleReloadLatestTailoring}
         />
       ) : null}
     </AppShell>

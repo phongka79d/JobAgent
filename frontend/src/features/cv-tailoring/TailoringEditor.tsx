@@ -32,6 +32,7 @@ export type TailoringEditorProps = {
   readonly onEditProfile: () => void;
   readonly canCreateFresh: boolean;
   readonly onCreateFresh?: () => void;
+  readonly onReloadLatest: () => void;
   readonly artifactUrls?: {
     readonly source: (versionId: string) => string;
     readonly pdf: (versionId: string) => string;
@@ -119,6 +120,7 @@ export function TailoringEditor({
   onEditProfile,
   canCreateFresh,
   onCreateFresh,
+  onReloadLatest,
   artifactUrls,
   mobileLayout,
 }: TailoringEditorProps) {
@@ -277,6 +279,11 @@ export function TailoringEditor({
                       }).format(new Date(selectedVersion.created_at))
                     : 'Chưa có version'}
                 </Text>
+                {selectedVersion ? (
+                  <Text type="supporting">
+                    {selectedVersion.page_count} trang
+                  </Text>
+                ) : null}
               </VStack>
             </HStack>
           </Section>
@@ -317,9 +324,7 @@ export function TailoringEditor({
                     <Button
                       label="Tải version mới nhất"
                       size="sm"
-                      onClick={() =>
-                        void controller.openSession(detail.session.id)
-                      }
+                      onClick={onReloadLatest}
                     />
                   ) : undefined
                 }

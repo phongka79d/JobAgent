@@ -118,6 +118,7 @@ describe('tailoring UI accessibility and static guards', () => {
           onBackToChat={vi.fn()}
           onEditProfile={vi.fn()}
           canCreateFresh={false}
+          onReloadLatest={vi.fn()}
           mobileLayout={true}
           artifactUrls={{
             source: (versionId) => `/test/versions/${versionId}/source`,

@@ -189,6 +189,7 @@ function renderEditor(
         onEditProfile={vi.fn()}
         canCreateFresh
         onCreateFresh={vi.fn()}
+        onReloadLatest={vi.fn()}
         artifactUrls={{
           source: (versionId) => `/test/versions/${versionId}/source`,
           pdf: (versionId) => `/test/versions/${versionId}/pdf`,
@@ -257,6 +258,7 @@ describe('TailoringEditor', () => {
       expect.stringContaining(`${VERSION_2_ID}/pdf`),
     );
     expect(screen.getByText('CV dài 2 trang')).toBeInTheDocument();
+    expect(screen.getByText('2 trang')).toBeInTheDocument();
   });
 
   it('saves once and sends an AI request for exactly one selected section', async () => {
@@ -307,5 +309,37 @@ describe('TailoringEditor', () => {
     await waitFor(() =>
       expect(value.selectVersion).toHaveBeenCalledWith(VERSION_ID, true),
     );
+  });
+
+  it('delegates conflict reload without discarding the local draft', async () => {
+    const selected = detail('current');
+    const value = controller(
+      'current',
+      {},
+      {
+        draft: selected.content,
+        draftDirty: true,
+        conflict: true,
+        detail: {
+          phase: 'error',
+          data: selected,
+          error: {
+            code: 'TAILORING_PARENT_CONFLICT',
+            summary: 'unsafe detail must not render',
+          },
+        },
+      },
+    );
+    const onReloadLatest = vi.fn();
+    renderEditor(value, {onReloadLatest});
+
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Tải version mới nhất'}),
+    );
+
+    expect(onReloadLatest).toHaveBeenCalledTimes(1);
+    expect(value.openSession).not.toHaveBeenCalled();
+    expect(value.state.draft).toBe(selected.content);
+    expect(value.state.draftDirty).toBe(true);
   });
 });
