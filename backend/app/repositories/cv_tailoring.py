@@ -123,6 +123,18 @@ async def get_version(
     return await session.get(CVTailoringVersion, version_id)
 
 
+async def get_latest_version(
+    session: AsyncSession, session_id: str
+) -> CVTailoringVersion | None:
+    result = await session.execute(
+        select(CVTailoringVersion)
+        .where(CVTailoringVersion.session_id == session_id)
+        .order_by(CVTailoringVersion.version_number.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_version_cas(
     session: AsyncSession,
     *,
@@ -204,6 +216,39 @@ async def mark_session_failed(
     return row
 
 
+async def mark_session_generating(
+    session: AsyncSession, session_id: str
+) -> CVTailoringSession:
+    row = await session.get(CVTailoringSession, session_id)
+    if row is None:
+        raise CVTailoringRepositoryError("tailoring session not found")
+    if row.state not in {
+        TAILORING_SESSION_STATE_READY,
+        TAILORING_SESSION_STATE_FAILED,
+    }:
+        raise CVTailoringRepositoryError("tailoring session cannot start generation")
+    row.state = TAILORING_SESSION_STATE_GENERATING
+    row.error_code = None
+    row.updated_at = utc_now()
+    await session.flush()
+    return row
+
+
+async def restore_session_ready(
+    session: AsyncSession, session_id: str
+) -> CVTailoringSession:
+    row = await session.get(CVTailoringSession, session_id)
+    if row is None:
+        raise CVTailoringRepositoryError("tailoring session not found")
+    if row.latest_version_number <= 0:
+        raise CVTailoringRepositoryError("zero-version session cannot be ready")
+    row.state = TAILORING_SESSION_STATE_READY
+    row.error_code = None
+    row.updated_at = utc_now()
+    await session.flush()
+    return row
+
+
 async def mark_session_deleting(
     session: AsyncSession, session_id: str
 ) -> CVTailoringSession:
@@ -233,9 +278,12 @@ __all__ = [
     "create_version_cas",
     "delete_session",
     "get_session",
+    "get_latest_version",
     "get_version",
     "list_sessions_for_profile",
     "list_versions",
     "mark_session_deleting",
     "mark_session_failed",
+    "mark_session_generating",
+    "restore_session_ready",
 ]
