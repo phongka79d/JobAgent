@@ -11,7 +11,7 @@ credentials, database dumps, or complete logs.
 |---|---|
 | Date | `2026-07-27` |
 | Operator | Local automated synthetic gate |
-| Branch/SHA | `feature/cv-tailoring-latex` (pre-commit) |
+| Branch/SHA | `feature/cv-tailoring-latex` / `01ec0c36c00c7973da56ca211351e02b8ee061a8` |
 | Compose project | `NOT RUN` |
 | Synthetic fixtures only | PASS |
 
@@ -20,10 +20,10 @@ credentials, database dumps, or complete logs.
 | Gate | Status | Sanitized evidence |
 |---|---|---|
 | Task 10 focused E2E/demo/health/compose/registry regression | PASS | Local synthetic Pytest completed: tailoring E2E, demo, health, compose-source, active-CV, Job, interrupt/resume, approval, chat, and agent-graph suites |
-| Focused contact/schema/projection/guard tests | NOT RUN | Pending final gate |
-| Focused Agent/coordinator/API/deletion/E2E tests | NOT RUN | Pending final gate |
+| Focused contact/schema/projection/guard tests | PASS | Plan 17 focused feature command completed with no failures |
+| Focused Agent/coordinator/API/deletion/E2E tests | PASS | Plan 17 focused feature command completed with no failures |
 | Backend Ruff | PASS | `ruff check app tests --no-cache` completed with no findings |
-| Backend Mypy | NOT RUN | Pending final gate |
+| Backend Mypy | PASS | `mypy app --no-incremental` completed with no issues in 172 source files |
 | Backend full Pytest | NOT RUN | Pending final gate |
 | Migration upgrade/downgrade/re-upgrade on disposable DB | NOT RUN | Never downgrade a configured user database |
 | Frontend full Vitest | NOT RUN | Pending final gate |
