@@ -44,9 +44,10 @@ matching data, or Neo4j projection in place.
 6. Contact facts are extracted during normal CV processing, shown in profile
    approval, and reused across derivative CVs. GitHub and every non-name contact
    field are optional.
-7. JobAgent may have exactly two product Agents: the existing Main Agent and one
-   bounded CV Tailoring Agent. No third Agent or open-ended handoff topology is
-   introduced.
+7. Plan 17 adds one bounded CV Tailoring Agent beside the existing Main Agent.
+   This phase adds no third Agent or open-ended handoff topology, but JobAgent has
+   no permanent global Agent-count ceiling; future Agents require an approved,
+   coordinator-owned contract under the controlled multi-agent governance design.
 8. The frontend uses Astryx and the repository's neutral theme. It does not
    introduce Tailwind, a second component system, raw color values, or guessed
    Astryx props.
@@ -138,7 +139,7 @@ the CV, contact details, `.tex`, or PDF bytes.
 
 ### 6.2 CV Tailoring Agent
 
-The second Agent is a separate bounded LangGraph workflow, not a peer chat
+The Plan 17 specialist Agent is a separate bounded LangGraph workflow, not a peer chat
 Agent and not an open ToolNode loop. It has a fixed sequence:
 
 1. Select target section IDs from the approved CV outline, structured saved-JD
@@ -621,7 +622,8 @@ Version 2.2 scope. After written-spec approval, planning requires explicit user
 authorization to:
 
 1. amend `docs/plans/Master_plan.md` to Version 2.3 for derivative CVs, contact
-   extraction, exactly two Agents, eight Main Agent tools, schemas, APIs, TeX
+   extraction, one bounded Tailoring Agent, controlled multi-agent governance,
+   eight Main Agent tools, schemas, APIs, TeX
    dependency, Astryx editor, failure policy, tests, and Definition of Done;
 2. replace only `Plan_16.md`'s terminal `Completion Contract` with the canonical
    handoff to `Plan_17.md`, preserving all historical scope and evidence; and
@@ -663,4 +665,4 @@ The feature is complete only when all of the following are true:
    selection owner.
 10. Full backend, frontend, migration, plan, Docker, compiler, security, and
     synthetic browser gates pass without real CV/JD content, secrets, a fourth
-    service, or a third Agent.
+    service, or an unapproved/unbounded Agent topology.
