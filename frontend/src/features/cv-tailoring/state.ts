@@ -53,6 +53,17 @@ export type UseCvTailoringOptions = {
   readonly api?: Partial<CvTailoringApi>;
 };
 
+type MutationOperation = {
+  readonly scope: string;
+  readonly controller: AbortController;
+};
+
+type StreamRecovery =
+  | {readonly kind: 'completed'; readonly detail: TailoringSessionDetailResponse}
+  | {readonly kind: 'failed'; readonly error: TailoringSafeError}
+  | {readonly kind: 'pending'}
+  | {readonly kind: 'stale'};
+
 const empty = <T,>(): TailoringResource<T> => ({
   phase: 'idle',
   data: null,
@@ -106,6 +117,18 @@ function streamError(event: SseEvent): TailoringSafeError | null {
   };
 }
 
+function isDurableCompletedDetail(
+  detail: TailoringSessionDetailResponse,
+): boolean {
+  return (
+    detail.session.state === 'ready' &&
+    detail.session.currentness === 'current' &&
+    detail.latest_run?.state === 'completed' &&
+    detail.selected_version !== null &&
+    detail.content !== null
+  );
+}
+
 export function useCvTailoringState(options: UseCvTailoringOptions) {
   const key = scopeKey(options.profileId, options.profileReady);
   const api = useMemo<CvTailoringApi>(
@@ -114,23 +137,31 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
   );
   const [state, setState] = useState<CvTailoringState>(() => initialState(key));
   const scopeRef = useRef(key);
-  const requestRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
-  const mutationRef = useRef(false);
+  const listRequestRef = useRef(0);
+  const listAbortRef = useRef<AbortController | null>(null);
+  const detailRequestRef = useRef(0);
+  const detailAbortRef = useRef<AbortController | null>(null);
+  const mutationRef = useRef<MutationOperation | null>(null);
 
   useEffect(() => {
     if (scopeRef.current === key) return;
     scopeRef.current = key;
-    requestRef.current += 1;
-    abortRef.current?.abort();
-    abortRef.current = null;
-    mutationRef.current = false;
+    listRequestRef.current += 1;
+    listAbortRef.current?.abort();
+    listAbortRef.current = null;
+    detailRequestRef.current += 1;
+    detailAbortRef.current?.abort();
+    detailAbortRef.current = null;
+    mutationRef.current?.controller.abort();
+    mutationRef.current = null;
     setState(initialState(key));
   }, [key]);
 
   useEffect(
     () => () => {
-      abortRef.current?.abort();
+      listAbortRef.current?.abort();
+      detailAbortRef.current?.abort();
+      mutationRef.current?.controller.abort();
     },
     [],
   );
@@ -142,17 +173,24 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       setState((current) => ({...current, sessions: empty()}));
       return;
     }
-    const request = ++requestRef.current;
+    const request = ++listRequestRef.current;
+    const requestScope = scopeRef.current;
     const controller = new AbortController();
-    abortRef.current?.abort();
-    abortRef.current = controller;
+    listAbortRef.current?.abort();
+    listAbortRef.current = controller;
     setState((current) => ({
       ...current,
       sessions: {...current.sessions, phase: 'loading', error: null},
     }));
     try {
       const data = await api.fetchSessions(controller.signal);
-      if (request !== requestRef.current || controller.signal.aborted) return;
+      if (
+        request !== listRequestRef.current ||
+        controller.signal.aborted ||
+        requestScope !== scopeRef.current
+      ) {
+        return;
+      }
       setState((current) => ({
         ...current,
         sessions: {
@@ -162,7 +200,13 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         },
       }));
     } catch (error) {
-      if (request !== requestRef.current || controller.signal.aborted) return;
+      if (
+        request !== listRequestRef.current ||
+        controller.signal.aborted ||
+        requestScope !== scopeRef.current
+      ) {
+        return;
+      }
       setState((current) => ({
         ...current,
         sessions: {
@@ -174,17 +218,13 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
     }
   }, [api, canLoad]);
 
-  const fetchAndSelect = useCallback(
-    async (
-      sessionId: string,
-      versionId?: string | null,
+  const applyDetail = useCallback(
+    (
+      detail: TailoringSessionDetailResponse,
+      requestScope: string,
       signal?: AbortSignal,
-    ): Promise<TailoringSessionDetailResponse | null> => {
-      const requestScope = scopeRef.current;
-      const detail = await api.fetchSession(sessionId, versionId, signal);
-      if (signal?.aborted || requestScope !== scopeRef.current) {
-        return null;
-      }
+    ): boolean => {
+      if (signal?.aborted || requestScope !== scopeRef.current) return false;
       setState((current) => ({
         ...current,
         selectedSessionId: detail.session.id,
@@ -194,23 +234,81 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         draftDirty: false,
         conflict: false,
       }));
-      return detail;
+      return true;
     },
-    [api],
+    [],
+  );
+
+  const fetchAndSelect = useCallback(
+    async (
+      sessionId: string,
+      versionId?: string | null,
+      signal?: AbortSignal,
+      requestScope = scopeRef.current,
+    ): Promise<TailoringSessionDetailResponse | null> => {
+      const detail = await api.fetchSession(sessionId, versionId, signal);
+      return applyDetail(detail, requestScope, signal) ? detail : null;
+    },
+    [api, applyDetail],
+  );
+
+  const fetchCompletedAndSelect = useCallback(
+    async (
+      sessionId: string,
+      operation: MutationOperation,
+    ): Promise<boolean> => {
+      const detail = await api.fetchSession(
+        sessionId,
+        null,
+        operation.controller.signal,
+      );
+      return (
+        isDurableCompletedDetail(detail) &&
+        mutationRef.current === operation &&
+        applyDetail(
+          detail,
+          operation.scope,
+          operation.controller.signal,
+        )
+      );
+    },
+    [api, applyDetail],
   );
 
   const openSession = useCallback(
     async (sessionId: string, versionId?: string | null): Promise<boolean> => {
       if (!canLoad) return false;
+      const request = ++detailRequestRef.current;
+      const requestScope = scopeRef.current;
       const controller = new AbortController();
+      detailAbortRef.current?.abort();
+      detailAbortRef.current = controller;
       setState((current) => ({
         ...current,
         detail: {...current.detail, phase: 'loading', error: null},
       }));
       try {
-        return (await fetchAndSelect(sessionId, versionId, controller.signal)) !== null;
+        const detail = await api.fetchSession(
+          sessionId,
+          versionId,
+          controller.signal,
+        );
+        if (
+          request !== detailRequestRef.current ||
+          controller.signal.aborted ||
+          requestScope !== scopeRef.current
+        ) {
+          return false;
+        }
+        return applyDetail(detail, requestScope, controller.signal);
       } catch (error) {
-        if (controller.signal.aborted) return false;
+        if (
+          controller.signal.aborted ||
+          request !== detailRequestRef.current ||
+          requestScope !== scopeRef.current
+        ) {
+          return false;
+        }
         setState((current) => ({
           ...current,
           detail: {
@@ -220,31 +318,76 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           },
         }));
         return false;
+      } finally {
+        if (detailAbortRef.current === controller) {
+          detailAbortRef.current = null;
+        }
       }
     },
-    [canLoad, fetchAndSelect],
+    [api, applyDetail, canLoad],
   );
 
   const recoverDisconnectedStream = useCallback(
-    async (sessionId: string, controller: AbortController): Promise<boolean> => {
+    async (
+      sessionId: string,
+      operation: MutationOperation,
+    ): Promise<StreamRecovery> => {
       try {
-        return (await fetchAndSelect(sessionId, null, controller.signal)) !== null;
+        const detail = await api.fetchSession(
+          sessionId,
+          null,
+          operation.controller.signal,
+        );
+        if (
+          operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current ||
+          mutationRef.current !== operation
+        ) {
+          return {kind: 'stale'};
+        }
+        const failed =
+          detail.session.state === 'failed' || detail.latest_run?.state === 'failed';
+        if (failed) {
+          const code = asTailoringErrorCode(
+            detail.latest_run?.error_code ?? detail.session.error_code,
+          );
+          return {
+            kind: 'failed',
+            error:
+              code === null
+                ? {
+                    code: 'REQUEST_FAILED',
+                    summary: 'CV tailoring request failed',
+                  }
+                : {code, summary: 'CV tailoring request failed'},
+          };
+        }
+        if (isDurableCompletedDetail(detail)) {
+          return {kind: 'completed', detail};
+        }
+        return {kind: 'pending'};
       } catch {
-        return false;
+        return operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current
+          ? {kind: 'stale'}
+          : {kind: 'pending'};
       }
     },
-    [fetchAndSelect],
+    [api],
   );
 
   const createSession = useCallback(
     async (body: CreateTailoringSessionRequest): Promise<string | null> => {
-      if (!canLoad || mutationRef.current) return null;
-      mutationRef.current = true;
+      if (!canLoad || mutationRef.current !== null) return null;
+      const operation: MutationOperation = {
+        scope: scopeRef.current,
+        controller: new AbortController(),
+      };
+      mutationRef.current = operation;
       let pendingSessionId: string | null = null;
       let completed = false;
       let terminalError: TailoringSafeError | null = null;
       let disconnected = false;
-      const controller = new AbortController();
       setState((current) => ({
         ...current,
         stream: {phase: 'loading', data: null, error: null},
@@ -268,19 +411,45 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               };
             },
           },
-          controller.signal,
+          operation.controller.signal,
         );
         if (
-          disconnected &&
-          pendingSessionId !== null &&
-          await recoverDisconnectedStream(pendingSessionId, controller)
+          operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current ||
+          mutationRef.current !== operation
         ) {
-          setState((current) => ({
-            ...current,
-            stream: {phase: 'ready', data: null, error: null},
-          }));
-          await loadSessions();
-          return pendingSessionId;
+          return null;
+        }
+        if (disconnected && pendingSessionId !== null) {
+          const recovery = await recoverDisconnectedStream(
+            pendingSessionId,
+            operation,
+          );
+          if (recovery.kind === 'stale') return null;
+          if (recovery.kind === 'completed') {
+            if (
+              !applyDetail(
+                recovery.detail,
+                operation.scope,
+                operation.controller.signal,
+              )
+            ) {
+              return null;
+            }
+            setState((current) => ({
+              ...current,
+              stream: {phase: 'ready', data: null, error: null},
+            }));
+            await loadSessions();
+            return pendingSessionId;
+          }
+          if (recovery.kind === 'failed') {
+            setState((current) => ({
+              ...current,
+              stream: {phase: 'error', data: null, error: recovery.error},
+            }));
+            return null;
+          }
         }
         if (!completed || pendingSessionId === null || terminalError !== null) {
           setState((current) => ({
@@ -301,7 +470,24 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           return null;
         }
         const selectedId: string = pendingSessionId;
-        if ((await fetchAndSelect(selectedId, null, controller.signal)) === null) {
+        if (!(await fetchCompletedAndSelect(selectedId, operation))) {
+          if (
+            !operation.controller.signal.aborted &&
+            operation.scope === scopeRef.current &&
+            mutationRef.current === operation
+          ) {
+            setState((current) => ({
+              ...current,
+              stream: {
+                phase: 'error',
+                data: null,
+                error: {
+                  code: 'REQUEST_FAILED',
+                  summary: 'CV tailoring did not complete',
+                },
+              },
+            }));
+          }
           return null;
         }
         setState((current) => ({
@@ -311,7 +497,11 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         await loadSessions();
         return selectedId;
       } catch (error) {
-        if (!controller.signal.aborted) {
+        if (
+          !operation.controller.signal.aborted &&
+          operation.scope === scopeRef.current &&
+          mutationRef.current === operation
+        ) {
           setState((current) => ({
             ...current,
             stream: {phase: 'error', data: null, error: safeError(error)},
@@ -319,10 +509,17 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         }
         return null;
       } finally {
-        mutationRef.current = false;
+        if (mutationRef.current === operation) mutationRef.current = null;
       }
     },
-    [api, canLoad, fetchAndSelect, loadSessions, recoverDisconnectedStream],
+    [
+      api,
+      applyDetail,
+      canLoad,
+      fetchCompletedAndSelect,
+      loadSessions,
+      recoverDisconnectedStream,
+    ],
   );
 
   const createAiVersion = useCallback(
@@ -330,12 +527,15 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       sessionId: string,
       body: CreateTailoringAiVersionRequest,
     ): Promise<boolean> => {
-      if (!canLoad || mutationRef.current) return false;
-      mutationRef.current = true;
+      if (!canLoad || mutationRef.current !== null) return false;
+      const operation: MutationOperation = {
+        scope: scopeRef.current,
+        controller: new AbortController(),
+      };
+      mutationRef.current = operation;
       let completed = false;
       let terminalError: TailoringSafeError | null = null;
       let disconnected = false;
-      const controller = new AbortController();
       setState((current) => ({
         ...current,
         stream: {phase: 'loading', data: null, error: null},
@@ -357,18 +557,42 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               };
             },
           },
-          controller.signal,
+          operation.controller.signal,
         );
         if (
-          disconnected &&
-          await recoverDisconnectedStream(sessionId, controller)
+          operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current ||
+          mutationRef.current !== operation
         ) {
-          setState((current) => ({
-            ...current,
-            stream: {phase: 'ready', data: null, error: null},
-          }));
-          await loadSessions();
-          return true;
+          return false;
+        }
+        if (disconnected) {
+          const recovery = await recoverDisconnectedStream(sessionId, operation);
+          if (recovery.kind === 'stale') return false;
+          if (recovery.kind === 'completed') {
+            if (
+              !applyDetail(
+                recovery.detail,
+                operation.scope,
+                operation.controller.signal,
+              )
+            ) {
+              return false;
+            }
+            setState((current) => ({
+              ...current,
+              stream: {phase: 'ready', data: null, error: null},
+            }));
+            await loadSessions();
+            return true;
+          }
+          if (recovery.kind === 'failed') {
+            setState((current) => ({
+              ...current,
+              stream: {phase: 'error', data: null, error: recovery.error},
+            }));
+            return false;
+          }
         }
         if (!completed || terminalError !== null) {
           setState((current) => ({
@@ -388,7 +612,24 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           }));
           return false;
         }
-        if ((await fetchAndSelect(sessionId, null, controller.signal)) === null) {
+        if (!(await fetchCompletedAndSelect(sessionId, operation))) {
+          if (
+            !operation.controller.signal.aborted &&
+            operation.scope === scopeRef.current &&
+            mutationRef.current === operation
+          ) {
+            setState((current) => ({
+              ...current,
+              stream: {
+                phase: 'error',
+                data: null,
+                error: {
+                  code: 'REQUEST_FAILED',
+                  summary: 'CV tailoring did not complete',
+                },
+              },
+            }));
+          }
           return false;
         }
         setState((current) => ({
@@ -398,7 +639,11 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         await loadSessions();
         return true;
       } catch (error) {
-        if (!controller.signal.aborted) {
+        if (
+          !operation.controller.signal.aborted &&
+          operation.scope === scopeRef.current &&
+          mutationRef.current === operation
+        ) {
           setState((current) => ({
             ...current,
             stream: {phase: 'error', data: null, error: safeError(error)},
@@ -406,10 +651,17 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         }
         return false;
       } finally {
-        mutationRef.current = false;
+        if (mutationRef.current === operation) mutationRef.current = null;
       }
     },
-    [api, canLoad, fetchAndSelect, loadSessions, recoverDisconnectedStream],
+    [
+      api,
+      applyDetail,
+      canLoad,
+      fetchCompletedAndSelect,
+      loadSessions,
+      recoverDisconnectedStream,
+    ],
   );
 
   const setDraft = useCallback((draft: TailoredCVContent) => {
@@ -419,28 +671,50 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
   const saveManualVersion = useCallback(async (): Promise<boolean> => {
     if (
       !canLoad ||
-      mutationRef.current ||
+      mutationRef.current !== null ||
       state.selectedSessionId === null ||
       state.selectedVersionId === null ||
       state.draft === null
     ) {
       return false;
     }
-    mutationRef.current = true;
+    const operation: MutationOperation = {
+      scope: scopeRef.current,
+      controller: new AbortController(),
+    };
+    mutationRef.current = operation;
     try {
       const created = await api.createManualVersion(state.selectedSessionId, {
         parent_version_id: state.selectedVersionId,
         content: state.draft,
-      });
-      if ((await fetchAndSelect(
-        state.selectedSessionId,
-        created.version_id,
-      )) === null) {
+      }, operation.controller.signal);
+      if (
+        operation.controller.signal.aborted ||
+        operation.scope !== scopeRef.current ||
+        mutationRef.current !== operation
+      ) {
+        return false;
+      }
+      if (
+        (await fetchAndSelect(
+          state.selectedSessionId,
+          created.version_id,
+          operation.controller.signal,
+          operation.scope,
+        )) === null
+      ) {
         return false;
       }
       await loadSessions();
       return true;
     } catch (error) {
+      if (
+        operation.controller.signal.aborted ||
+        operation.scope !== scopeRef.current ||
+        mutationRef.current !== operation
+      ) {
+        return false;
+      }
       const mapped = safeError(error);
       setState((current) => ({
         ...current,
@@ -453,7 +727,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       }));
       return false;
     } finally {
-      mutationRef.current = false;
+      if (mutationRef.current === operation) mutationRef.current = null;
     }
   }, [api, canLoad, fetchAndSelect, loadSessions, state]);
 
@@ -468,10 +742,21 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
 
   const deleteSession = useCallback(
     async (sessionId: string): Promise<boolean> => {
-      if (mutationRef.current) return false;
-      mutationRef.current = true;
+      if (mutationRef.current !== null) return false;
+      const operation: MutationOperation = {
+        scope: scopeRef.current,
+        controller: new AbortController(),
+      };
+      mutationRef.current = operation;
       try {
-        await api.deleteSession(sessionId);
+        await api.deleteSession(sessionId, operation.controller.signal);
+        if (
+          operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current ||
+          mutationRef.current !== operation
+        ) {
+          return false;
+        }
         setState((current) =>
           current.selectedSessionId === sessionId
             ? initialState(current.profileScopeKey)
@@ -480,6 +765,13 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         await loadSessions();
         return true;
       } catch (error) {
+        if (
+          operation.controller.signal.aborted ||
+          operation.scope !== scopeRef.current ||
+          mutationRef.current !== operation
+        ) {
+          return false;
+        }
         setState((current) => ({
           ...current,
           detail: {
@@ -490,7 +782,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         }));
         return false;
       } finally {
-        mutationRef.current = false;
+        if (mutationRef.current === operation) mutationRef.current = null;
       }
     },
     [api, loadSessions],
