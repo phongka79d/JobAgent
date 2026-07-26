@@ -16,6 +16,24 @@ EXPECTED_DEV = {
     "pytest-asyncio",
     "ruff",
 }
+EXPECTED_RUNTIME = {
+    "aiosqlite",
+    "alembic",
+    "fastapi",
+    "httpx",
+    "langchain-core",
+    "langchain-openai",
+    "langgraph",
+    "langgraph-checkpoint-sqlite",
+    "neo4j",
+    "pydantic",
+    "pydantic-settings",
+    "pypdf",
+    "python-multipart",
+    "sqlalchemy",
+    "trafilatura",
+    "uvicorn",
+}
 
 
 def _name(requirement: str) -> str:
@@ -28,4 +46,5 @@ def test_runtime_and_dev_dependencies_are_separated() -> None:
     runtime = {_name(item) for item in project["dependencies"]}
     dev = {_name(item) for item in project["optional-dependencies"]["dev"]}
     assert runtime.isdisjoint(RUNTIME_FORBIDDEN)
+    assert runtime == EXPECTED_RUNTIME
     assert dev == EXPECTED_DEV

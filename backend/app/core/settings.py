@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     TOOL_LOOP_LIMIT: int = 6
     # Bounded document-first CV extraction batch ceiling (character count).
     CV_DOCUMENT_BATCH_MAX_CHARS: int = 6000
+    CV_TAILOR_MAX_INSTRUCTION_CHARS: int = Field(4_000, gt=0)
+    CV_TAILOR_MAX_SECTIONS: int = Field(20, gt=0)
+    CV_TAILOR_MAX_ITEMS_PER_SECTION: int = Field(30, gt=0)
+    CV_TAILOR_MAX_TEX_CHARS: int = Field(100_000, gt=0)
+    CV_TAILOR_COMPILE_TIMEOUT_SECONDS: int = Field(15, gt=0)
+    CV_TAILOR_MAX_PDF_MB: int = Field(5, gt=0)
 
 
 @lru_cache(maxsize=1)

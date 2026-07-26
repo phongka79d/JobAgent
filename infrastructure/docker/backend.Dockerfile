@@ -22,8 +22,19 @@ COPY alembic.ini /app/alembic.ini
 # (/infrastructure/neo4j/skills_seed.yaml when code lives at /app/app/...).
 COPY --from=neo4j_seed skills_seed.yaml /infrastructure/neo4j/skills_seed.yaml
 
+# Fixed-template PDF compilation stays inside the existing backend image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        texlive-latex-base \
+        texlive-latex-recommended \
+        texlive-latex-extra \
+        texlive-fonts-recommended \
+        texlive-lang-other \
+    && rm -rf /var/lib/apt/lists/*
+
 # Use the base image pip as-is (no floating pip upgrade) for reproducible builds.
 RUN python -m pip install --no-cache-dir .
+RUN python -m app.services.cv_tailoring_smoke
 
 # SQLite + FILES_DIR live under /data (Compose application volume).
 EXPOSE 8000

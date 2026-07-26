@@ -38,6 +38,12 @@ EXPECTED_FIELDS: dict[str, type[Any]] = {
     "TOOL_LOOP_LIMIT": int,
     # Plan 9 document-first batch ceiling.
     "CV_DOCUMENT_BATCH_MAX_CHARS": int,
+    "CV_TAILOR_MAX_INSTRUCTION_CHARS": int,
+    "CV_TAILOR_MAX_SECTIONS": int,
+    "CV_TAILOR_MAX_ITEMS_PER_SECTION": int,
+    "CV_TAILOR_MAX_TEX_CHARS": int,
+    "CV_TAILOR_COMPILE_TIMEOUT_SECONDS": int,
+    "CV_TAILOR_MAX_PDF_MB": int,
 }
 
 EXPECTED_DEFAULTS: dict[str, Any] = {
@@ -52,6 +58,12 @@ EXPECTED_DEFAULTS: dict[str, Any] = {
     "URL_MAX_RESPONSE_MB": 5,
     "TOOL_LOOP_LIMIT": 6,
     "CV_DOCUMENT_BATCH_MAX_CHARS": 6000,
+    "CV_TAILOR_MAX_INSTRUCTION_CHARS": 4_000,
+    "CV_TAILOR_MAX_SECTIONS": 20,
+    "CV_TAILOR_MAX_ITEMS_PER_SECTION": 30,
+    "CV_TAILOR_MAX_TEX_CHARS": 100_000,
+    "CV_TAILOR_COMPILE_TIMEOUT_SECONDS": 15,
+    "CV_TAILOR_MAX_PDF_MB": 5,
 }
 
 REQUIRED_WITHOUT_DEFAULT: frozenset[str] = frozenset(
@@ -295,5 +307,24 @@ def test_secrets_are_masked_in_representations(monkeypatch: pytest.MonkeyPatch) 
 def test_missing_required_field_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in SANITIZED_ENV:
         monkeypatch.delenv(key, raising=False)
+    with pytest.raises(ValidationError):
+        _settings_from_env_only()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "CV_TAILOR_MAX_INSTRUCTION_CHARS",
+        "CV_TAILOR_MAX_SECTIONS",
+        "CV_TAILOR_MAX_ITEMS_PER_SECTION",
+        "CV_TAILOR_MAX_TEX_CHARS",
+        "CV_TAILOR_COMPILE_TIMEOUT_SECONDS",
+        "CV_TAILOR_MAX_PDF_MB",
+    ],
+)
+def test_cv_tailoring_integer_bounds_must_be_positive(
+    monkeypatch: pytest.MonkeyPatch, field_name: str
+) -> None:
+    _apply_sanitized(monkeypatch, **{field_name: "0"})
     with pytest.raises(ValidationError):
         _settings_from_env_only()

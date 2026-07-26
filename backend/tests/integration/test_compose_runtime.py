@@ -60,6 +60,25 @@ def test_compose_source_has_exact_services_and_migrates_before_uvicorn() -> None
     assert "alembic upgrade head && exec uvicorn" in dockerfile
     assert 'revision: str = "0005_cv_profiles_multi_conversation"' in migration
     assert "create_all" not in command
+    for package in (
+        "texlive-latex-base",
+        "texlive-latex-recommended",
+        "texlive-latex-extra",
+        "texlive-fonts-recommended",
+        "texlive-lang-other",
+    ):
+        assert package in dockerfile
+    assert "RUN python -m app.services.cv_tailoring_smoke" in dockerfile
+    assert dockerfile.count("exec uvicorn") == 1
+    for name, default in {
+        "CV_TAILOR_MAX_INSTRUCTION_CHARS": "4000",
+        "CV_TAILOR_MAX_SECTIONS": "20",
+        "CV_TAILOR_MAX_ITEMS_PER_SECTION": "30",
+        "CV_TAILOR_MAX_TEX_CHARS": "100000",
+        "CV_TAILOR_COMPILE_TIMEOUT_SECONDS": "15",
+        "CV_TAILOR_MAX_PDF_MB": "5",
+    }.items():
+        assert f"{name}: ${{{name}:-{default}}}" in compose
 
 
 def _fetch_health() -> dict[str, Any] | None:
