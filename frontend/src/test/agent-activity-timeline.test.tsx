@@ -90,6 +90,50 @@ function terminalRun(state: 'completed' | 'failed' | 'interrupted'): ClientRun {
   };
 }
 
+function markerRun(): ClientRun {
+  return {
+    ...runningRun(),
+    activities: [
+      agentActivity(),
+      agentActivity({
+        activityId: '33333333-3333-4333-8333-333333333333',
+        sequence: 1,
+        label: 'Wait for dependency',
+        technicalName: 'wait_for_dependency',
+        state: 'pending',
+        startedAt: TS_NEW,
+        updatedAt: TS_NEW,
+        completedAt: null,
+        durationMs: null,
+      }),
+      agentActivity({
+        activityId: '44444444-4444-4444-8444-444444444444',
+        sequence: 2,
+        label: 'Check provider response',
+        technicalName: 'check_provider_response',
+        state: 'failed',
+        startedAt: TS_NEW,
+        updatedAt: TS_NEW,
+        completedAt: TS_NEW,
+        durationMs: 40,
+        errorCode: 'PROVIDER_UNAVAILABLE',
+      }),
+      agentActivity({
+        activityId: TOOL_ACTIVITY,
+        sequence: 3,
+        kind: 'tool',
+        label: 'Rank matching jobs',
+        technicalName: 'match_jobs',
+        state: 'running',
+        startedAt: TS_NEW,
+        updatedAt: TS_NEW,
+        completedAt: null,
+        durationMs: null,
+      }),
+    ],
+  };
+}
+
 function timeline(run: ClientRun, streamPhase: StreamPhase = 'streaming') {
   return (
     <Theme theme={neutralTheme}>
@@ -107,7 +151,9 @@ describe('AgentActivityTimeline', () => {
       .getAllByText('Rank matching jobs')
       .find((element) => element.getAttribute('aria-live') === 'polite');
     expect(current).toHaveAttribute('aria-live', 'polite');
-    expect(screen.getByLabelText('Rank matching jobs')).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', {name: 'Running: Rank matching jobs'}),
+    ).toBeInTheDocument();
     const disclosure = screen.getByRole('button', {
       name: /Rank matching jobs/i,
     });
@@ -121,25 +167,162 @@ describe('AgentActivityTimeline', () => {
       screen.getByText('response_generation · completed · 25ms'),
     ).toBeInTheDocument();
     expect(screen.getByText('match_jobs · running')).toBeInTheDocument();
-    expect(screen.queryByText(/arguments|provider_payload|raw result/i)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(
+      /arguments|result|provider_payload|raw cv|cv_text/i,
+    );
+  });
+
+  it('uses one Card and moves the single running Spinner when expanded', async () => {
+    const user = userEvent.setup();
+    render(timeline(runningRun()));
+
+    const card = screen.getByTestId('jobagent-agent-activity-card');
+    expect(card).toHaveClass('astryx-card');
+
+    const disclosure = screen.getByRole('button', {
+      name: /Rank matching jobs/i,
+    });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure.parentElement).toHaveClass(
+      'jobagent-agent-activity-disclosure',
+    );
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'spinner');
+    expect(
+      screen.getAllByRole('status', {name: 'Running: Rank matching jobs'}),
+    ).toHaveLength(1);
+
+    await user.click(disclosure);
+
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('jobagent-agent-activity-list')).toBeVisible();
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'clock');
+    expect(
+      screen.getAllByRole('status', {name: 'Running: Rank matching jobs'}),
+    ).toHaveLength(1);
+  });
+
+  it('maps activity states and exposes connector-safe last-row hooks', async () => {
+    const user = userEvent.setup();
+    render(timeline(markerRun()));
+
+    await user.click(
+      screen.getByRole('button', {name: /Rank matching jobs/i}),
+    );
+
+    const list = screen.getByTestId('jobagent-agent-activity-list');
+    const rows = Array.from(
+      list.querySelectorAll<HTMLElement>(
+        '[data-testid^="jobagent-agent-activity-row-"]',
+      ),
+    );
+    expect(rows).toHaveLength(4);
+    expect(rows.map((row) => row.dataset.last)).toEqual([
+      'false',
+      'false',
+      'false',
+      'true',
+    ]);
+    expect(rows.map((row) => row.dataset.state)).toEqual([
+      'completed',
+      'pending',
+      'failed',
+      'running',
+    ]);
+    expect(
+      rows.map(
+        (row) =>
+          row.querySelector<HTMLElement>('[data-marker]')?.dataset.marker,
+      ),
+    ).toEqual(['success', 'clock', 'error', 'spinner']);
+
+    expect(
+      screen.getByText('response_generation · completed · 25ms'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'check_provider_response · failed · 40ms · PROVIDER_UNAVAILABLE',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('match_jobs · running')).toBeInTheDocument();
+  });
+
+  it('uses warning markers for interrupted and disconnected summaries', () => {
+    const view = render(timeline(terminalRun('interrupted'), 'idle'));
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'warning');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    view.rerender(timeline(runningRun(), 'disconnected'));
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'warning');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('renders an empty activity run in a non-disclosure Card', () => {
+    render(
+      timeline({
+        ...runningRun(),
+        activities: [],
+      }),
+    );
+
+    expect(screen.getByTestId('jobagent-agent-activity-card')).toHaveClass(
+      'astryx-card',
+    );
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('status', {name: 'Running: Connecting…'}),
+    ).toBeInTheDocument();
   });
 
   it('renders completed, interrupted, failed, and disconnected summaries', () => {
     const view = render(timeline(terminalRun('completed'), 'idle'));
     expect(screen.getByText('Completed · 2 steps')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'success');
+    expect(screen.getByText('Completed · 2 steps')).toHaveAttribute(
+      'data-running',
+      'false',
+    );
 
     view.rerender(timeline(terminalRun('interrupted'), 'idle'));
     expect(
       screen.getByText('Waiting for your confirmation · 2 steps'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'warning');
+    expect(
+      screen.getByText('Waiting for your confirmation · 2 steps'),
+    ).toHaveAttribute('data-running', 'false');
 
     view.rerender(timeline(terminalRun('failed'), 'failed'));
     expect(screen.getByText('Unable to complete · 2 steps')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'error');
+    expect(screen.getByText('Unable to complete · 2 steps')).toHaveAttribute(
+      'data-running',
+      'false',
+    );
 
     view.rerender(timeline(runningRun(), 'disconnected'));
     expect(
       screen.getByText('Connection lost — Agent may still be running'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('jobagent-agent-activity-summary-marker'),
+    ).toHaveAttribute('data-marker', 'warning');
+    expect(
+      screen.getByText('Connection lost — Agent may still be running'),
+    ).toHaveAttribute('data-running', 'false');
   });
 
   it('projects one durable user run onto one assistant row', () => {

@@ -1,3 +1,42 @@
+.jobagent-agent-activity-disclosure,
+.jobagent-agent-activity-disclosure > button {
+  width: 100%;
+}
+
+.jobagent-agent-activity-disclosure > button > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.jobagent-agent-activity-step {
+  position: relative;
+  padding-block-end: var(--spacing-2);
+}
+
+.jobagent-agent-activity-step[data-last='true'] {
+  padding-block-end: 0;
+}
+
+.jobagent-agent-activity-marker {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 var(--spacing-5);
+  align-items: center;
+  justify-content: center;
+  width: var(--spacing-5);
+  min-height: var(--spacing-5);
+}
+
+.jobagent-agent-activity-step[data-last='false']::after {
+  position: absolute;
+  inset-block-start: var(--spacing-5);
+  inset-block-end: calc(-1 * var(--spacing-2));
+  inset-inline-start: calc(var(--spacing-2) + var(--spacing-0-5));
+  border-inline-start: var(--border-width) dashed
+    var(--color-border-emphasized);
+  content: '';
+}
+
 .jobagent-agent-activity-label[data-running='true'] {
   color: transparent;
   background-image: linear-gradient(

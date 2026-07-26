@@ -1,6 +1,10 @@
+import {useState} from 'react';
+import {Card} from '@astryxdesign/core/Card';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
+import {Divider} from '@astryxdesign/core/Divider';
 import {HStack} from '@astryxdesign/core/HStack';
-import {StatusDot} from '@astryxdesign/core/StatusDot';
+import {Icon} from '@astryxdesign/core/Icon';
+import {Spinner} from '@astryxdesign/core/Spinner';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
@@ -11,12 +15,7 @@ import type {
 } from '../reducer';
 import './agent-activity.css';
 
-const ACTIVITY_VARIANT = {
-  pending: 'neutral',
-  running: 'accent',
-  completed: 'success',
-  failed: 'error',
-} as const;
+type MarkerKind = 'clock' | 'error' | 'spinner' | 'success' | 'warning';
 
 function countLabel(count: number): string {
   return `${count} ${count === 1 ? 'step' : 'steps'}`;
@@ -70,6 +69,70 @@ function activityDetail(activity: ClientAgentActivity): string {
     .join(' · ');
 }
 
+function activityMarkerKind(
+  state: ClientAgentActivity['state'],
+): MarkerKind {
+  if (state === 'completed') {
+    return 'success';
+  }
+  if (state === 'failed') {
+    return 'error';
+  }
+  if (state === 'running') {
+    return 'spinner';
+  }
+  return 'clock';
+}
+
+function runMarkerKind(
+  run: ClientRun,
+  streamPhase: StreamPhase,
+  isOpen: boolean,
+): MarkerKind {
+  if (streamPhase === 'disconnected' && run.state === 'running') {
+    return 'warning';
+  }
+  if (run.state === 'completed') {
+    return 'success';
+  }
+  if (run.state === 'failed') {
+    return 'error';
+  }
+  if (run.state === 'interrupted') {
+    return 'warning';
+  }
+  return isOpen ? 'clock' : 'spinner';
+}
+
+function StatusMarker({
+  kind,
+  label,
+  testId,
+  clockColor = 'secondary',
+}: {
+  kind: MarkerKind;
+  label: string;
+  testId: string;
+  clockColor?: 'accent' | 'secondary';
+}) {
+  return (
+    <span
+      className="jobagent-agent-activity-marker"
+      data-marker={kind}
+      data-testid={testId}>
+      {kind === 'spinner' ? (
+        <Spinner size="sm" aria-label={`Running: ${label}`} />
+      ) : (
+        <Icon
+          icon={kind}
+          size="sm"
+          color={kind === 'clock' ? clockColor : kind}
+        />
+      )}
+    </span>
+  );
+}
+
 export function AgentActivityTimeline({
   run,
   streamPhase,
@@ -77,70 +140,99 @@ export function AgentActivityTimeline({
   run: ClientRun;
   streamPhase: StreamPhase;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
   const summary = runSummary(run, streamPhase);
   const isRunning = run.state === 'running' && streamPhase !== 'disconnected';
-  const trigger = (
-    <VStack gap={0} width="100%">
-      <HStack gap={1} align="center">
-        <StatusDot
-          variant={
-            streamPhase === 'disconnected'
-              ? 'warning'
-              : run.state === 'failed'
-                ? 'error'
-                : run.state === 'completed'
-                  ? 'success'
-                  : run.state === 'interrupted'
-                    ? 'warning'
-                    : 'accent'
-          }
-          label={summary}
-          isPulsing={isRunning}
-        />
+  const hasActivities = run.activities.length > 0;
+  const summaryMarker = runMarkerKind(run, streamPhase, isOpen);
+  const header = (
+    <HStack gap={1} align="center" width="100%">
+      <StatusMarker
+        kind={summaryMarker}
+        label={summary}
+        testId="jobagent-agent-activity-summary-marker"
+        clockColor="accent"
+      />
+      <VStack gap={0} width="100%">
         <Text
           type="label"
           as="span"
           aria-live="polite"
           aria-atomic="true"
+          aria-label={summary}
           className="jobagent-agent-activity-label"
+          data-variant={
+            summaryMarker === 'clock' || summaryMarker === 'spinner'
+              ? 'accent'
+              : summaryMarker
+          }
           data-running={isRunning ? 'true' : 'false'}
         >
           {summary}
         </Text>
-      </HStack>
-      {run.activities.length > 0 ? (
-        <Text type="supporting" color="secondary" as="span">
-          {run.state === 'running'
-            ? `View activity · ${countLabel(run.activities.length)}`
-            : 'View activity'}
-        </Text>
-      ) : null}
-    </VStack>
+        {hasActivities ? (
+          <Text type="supporting" color="secondary" as="span">
+            {run.state === 'running'
+              ? `View activity · ${countLabel(run.activities.length)}`
+              : 'View activity'}
+          </Text>
+        ) : null}
+      </VStack>
+    </HStack>
   );
 
-  if (run.activities.length === 0) {
-    return trigger;
-  }
-
   return (
-    <Collapsible trigger={trigger} defaultIsOpen={false}>
-      <VStack gap={1} width="100%" data-testid="jobagent-agent-activity-list">
-        {run.activities.map((activity) => (
-          <HStack key={activity.activityId} gap={2} vAlign="start">
-            <StatusDot
-              variant={ACTIVITY_VARIANT[activity.state]}
-              label={activity.state}
-              isPulsing={activity.state === 'running' && isRunning}
-            />
+    <Card
+      width="100%"
+      padding={3}
+      data-testid="jobagent-agent-activity-card">
+      {hasActivities ? (
+        <Collapsible
+          trigger={header}
+          isOpen={isOpen}
+          onOpenChange={setIsOpen}
+          className="jobagent-agent-activity-disclosure">
+          <VStack
+            gap={2}
+            width="100%"
+            data-testid="jobagent-agent-activity-list">
+            <Divider />
             <VStack gap={0} width="100%">
-              <Text type="body">{activity.label}</Text>
-              <Text type="supporting" color="secondary">
-                {activityDetail(activity)}
-              </Text>
+              {run.activities.map((activity, index) => {
+                const isLast = index === run.activities.length - 1;
+                return (
+                  <HStack
+                    key={activity.activityId}
+                    gap={2}
+                    vAlign="start"
+                    className="jobagent-agent-activity-step"
+                    data-testid={`jobagent-agent-activity-row-${activity.activityId}`}
+                    data-state={activity.state}
+                    data-last={isLast ? 'true' : 'false'}>
+                    <StatusMarker
+                      kind={
+                        activity.state === 'running' && !isOpen
+                          ? 'clock'
+                          : activityMarkerKind(activity.state)
+                      }
+                      label={activity.label}
+                      testId={`jobagent-agent-activity-marker-${activity.activityId}`}
+                    />
+                    <VStack gap={0} width="100%">
+                      <Text type="body">{activity.label}</Text>
+                      <Text type="supporting" color="secondary">
+                        {activityDetail(activity)}
+                      </Text>
+                    </VStack>
+                  </HStack>
+                );
+              })}
             </VStack>
-          </HStack>
-        ))}
-      </VStack>
-    </Collapsible>
+          </VStack>
+        </Collapsible>
+      ) : (
+        header
+      )}
+    </Card>
   );
 }

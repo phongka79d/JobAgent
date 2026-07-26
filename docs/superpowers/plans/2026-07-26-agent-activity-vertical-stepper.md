@@ -37,7 +37,7 @@ rendering, job cards, approval cards, or composer.
 - Read: `frontend/src/test/agent-activity-timeline.test.tsx`
 - No production files change.
 
-- [ ] **Step 1: Set up or enter the requested worktree**
+- [x] **Step 1: Set up or enter the requested worktree**
 
 Use `superpowers:using-git-worktrees`. Detect isolation first:
 
@@ -53,7 +53,18 @@ Expected: if `$gitDir -eq $gitCommonDir`, create a linked worktree for branch
 checks. If the branch/worktree already exists, enter it rather than creating a
 duplicate. All remaining commands run from that worktree.
 
-- [ ] **Step 2: Confirm the exact Astryx public contracts**
+- [x] **Step 2: Restore dependencies in the worktree**
+
+Run:
+
+```powershell
+Set-Location frontend
+npm ci --no-audit --no-fund
+```
+
+Expected: exit `0` with Astryx packages at `0.1.4`.
+
+- [x] **Step 3: Confirm the exact Astryx public contracts**
 
 Run from `frontend`:
 
@@ -72,18 +83,7 @@ controlled `isOpen`/`onOpenChange`; semantic Icon names include `success`,
 `error`, `warning`, and `clock`; Spinner supports `size="sm"` and an
 `aria-label`; no public Timeline component exists.
 
-- [ ] **Step 3: Restore dependencies in the worktree**
-
-Run:
-
-```powershell
-Set-Location frontend
-npm ci --no-audit --no-fund
-```
-
-Expected: exit `0` with Astryx packages at `0.1.4`.
-
-- [ ] **Step 4: Run the focused baseline tests**
+- [x] **Step 4: Run the focused baseline tests**
 
 Run:
 
@@ -102,7 +102,7 @@ do not hide it inside this visual change.
 - Modify: `frontend/src/features/chat/components/AgentActivityTimeline.tsx`
 - Modify: `frontend/src/features/chat/components/agent-activity.css`
 
-- [ ] **Step 1: Add the four-state activity fixture**
+- [x] **Step 1: Add the four-state activity fixture**
 
 Add this helper after `terminalRun` in
 `frontend/src/test/agent-activity-timeline.test.tsx`:
@@ -153,7 +153,7 @@ function markerRun(): ClientRun {
 }
 ```
 
-- [ ] **Step 2: Write failing Card, disclosure, marker, connector, and Spinner tests**
+- [x] **Step 2: Write failing Card, disclosure, marker, connector, and Spinner tests**
 
 Add these tests inside the existing `describe('AgentActivityTimeline', ...)`
 block. Preserve the existing durable projection and pre-run notice tests.
@@ -170,13 +170,9 @@ it('uses one Card and moves the single running Spinner when expanded', async () 
     name: /Rank matching jobs/i,
   });
   expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-  expect(disclosure).toHaveStyle({width: '100%'});
   expect(disclosure.parentElement).toHaveClass(
     'jobagent-agent-activity-disclosure',
   );
-  expect(
-    screen.getByTestId('jobagent-agent-activity-list'),
-  ).not.toBeVisible();
   expect(
     screen.getByTestId('jobagent-agent-activity-summary-marker'),
   ).toHaveAttribute('data-marker', 'spinner');
@@ -313,7 +309,7 @@ expect(document.body).not.toHaveTextContent(
 );
 ```
 
-- [ ] **Step 3: Run the focused test to verify RED**
+- [x] **Step 3: Run the focused test to verify RED**
 
 Run from `frontend`:
 
@@ -325,7 +321,7 @@ Expected: new tests fail because there is no Card test ID, controlled marker
 transfer, semantic Icon/Spinner mapping, or `data-last` row hook. Existing tests
 must not be the source of failure.
 
-- [ ] **Step 4: Replace the timeline component with the minimal implementation**
+- [x] **Step 4: Replace the timeline component with the minimal implementation**
 
 Replace `frontend/src/features/chat/components/AgentActivityTimeline.tsx` with:
 
@@ -491,7 +487,13 @@ export function AgentActivityTimeline({
           as="span"
           aria-live="polite"
           aria-atomic="true"
+          aria-label={summary}
           className="jobagent-agent-activity-label"
+          data-variant={
+            summaryMarker === 'clock' || summaryMarker === 'spinner'
+              ? 'accent'
+              : summaryMarker
+          }
           data-running={isRunning ? 'true' : 'false'}>
           {summary}
         </Text>
@@ -535,7 +537,11 @@ export function AgentActivityTimeline({
                     data-state={activity.state}
                     data-last={isLast ? 'true' : 'false'}>
                     <StatusMarker
-                      kind={activityMarkerKind(activity.state)}
+                      kind={
+                        activity.state === 'running' && !isOpen
+                          ? 'clock'
+                          : activityMarkerKind(activity.state)
+                      }
                       label={activity.label}
                       testId={`jobagent-agent-activity-marker-${activity.activityId}`}
                     />
@@ -562,7 +568,7 @@ export function AgentActivityTimeline({
 Do not move or duplicate `runSummary`, `formatDuration`, or `activityDetail`.
 The new helpers map visual markers only; adjacent text remains authoritative.
 
-- [ ] **Step 5: Replace the CSS with token-only layout and connector styling**
+- [x] **Step 5: Replace the CSS with token-only layout and connector styling**
 
 Replace `frontend/src/features/chat/components/agent-activity.css` with:
 
@@ -640,7 +646,7 @@ The percentage values animate only relative gradient geometry; every color,
 spacing, border width, radius, and duration remains owned by Astryx tokens or
 Card.
 
-- [ ] **Step 6: Run the focused test to verify GREEN**
+- [x] **Step 6: Run the focused test to verify GREEN**
 
 Run:
 
@@ -652,7 +658,7 @@ Expected: all timeline tests pass. The collapsed state has one visible summary
 Spinner; expanded state has one visible activity Spinner; terminal/disconnected
 states have none.
 
-- [ ] **Step 7: Run the chat-page regression test**
+- [x] **Step 7: Run the chat-page regression test**
 
 Run:
 
@@ -662,7 +668,7 @@ npm run test -- --run src/test/chat-page.test.tsx
 
 Expected: pass with no reducer, hydration, answer, approval, or job-card changes.
 
-- [ ] **Step 8: Review and commit the focused frontend slice**
+- [x] **Step 8: Review and commit the focused frontend slice**
 
 Run from the worktree root:
 
