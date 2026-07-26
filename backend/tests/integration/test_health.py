@@ -28,16 +28,22 @@ from tests.support.health import (
     setup_unavailable_component,
 )
 
-
 _CV_TAILORING_ROUTE_DECORATORS = (
     "cv_tailoring.py:create_ai_version:router.post('/cv-tailoring/sessions/{session_id}/ai-versions')",
-    "cv_tailoring.py:create_manual_version:router.post('/cv-tailoring/sessions/{session_id}/manual-versions', response_model=TailoringVersionCreateResponse)",
+    "cv_tailoring.py:create_manual_version:router.post("
+    "'/cv-tailoring/sessions/{session_id}/manual-versions', "
+    "response_model=TailoringVersionCreateResponse)",
     "cv_tailoring.py:create_session:router.post('/cv-tailoring/sessions')",
-    "cv_tailoring.py:delete_session:router.delete('/cv-tailoring/sessions/{session_id}', response_model=TailoringDeleteResponse)",
+    "cv_tailoring.py:delete_session:router.delete("
+    "'/cv-tailoring/sessions/{session_id}', "
+    "response_model=TailoringDeleteResponse)",
     "cv_tailoring.py:download_pdf:router.get('/cv-tailoring/versions/{version_id}/pdf')",
     "cv_tailoring.py:download_source:router.get('/cv-tailoring/versions/{version_id}/source')",
-    "cv_tailoring.py:get_session:router.get('/cv-tailoring/sessions/{session_id}', response_model=TailoringSessionDetailResponse)",
-    "cv_tailoring.py:list_sessions:router.get('/cv-tailoring/sessions', response_model=TailoringSessionListResponse)",
+    "cv_tailoring.py:get_session:router.get("
+    "'/cv-tailoring/sessions/{session_id}', "
+    "response_model=TailoringSessionDetailResponse)",
+    "cv_tailoring.py:list_sessions:router.get("
+    "'/cv-tailoring/sessions', response_model=TailoringSessionListResponse)",
 )
 
 
@@ -95,12 +101,18 @@ def test_health_single_component_unavailable_real_boundary(
 
 
 def test_health_payload_shape_and_overall_rule() -> None:
-    assert build_health_response(
-        sqlite="available", filesystem="available", neo4j="available"
-    ).overall == "available"
-    assert build_health_response(
-        sqlite="available", filesystem="unavailable", neo4j="available"
-    ).overall == "unavailable"
+    assert (
+        build_health_response(
+            sqlite="available", filesystem="available", neo4j="available"
+        ).overall
+        == "available"
+    )
+    assert (
+        build_health_response(
+            sqlite="available", filesystem="unavailable", neo4j="available"
+        ).overall
+        == "unavailable"
+    )
     with pytest.raises(ValidationError):
         HealthResponse(
             overall="available",
@@ -276,7 +288,8 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
 
 def test_source_tree_has_no_other_route_decorators() -> None:
     matches = sorted(route_decorator_matches())
-    assert matches == sorted((*EXPECTED_ROUTE_DECORATORS, *_CV_TAILORING_ROUTE_DECORATORS))
+    expected = sorted((*EXPECTED_ROUTE_DECORATORS, *_CV_TAILORING_ROUTE_DECORATORS))
+    assert matches == expected
 
 
 def test_lifespan_opens_resources_once(

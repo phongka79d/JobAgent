@@ -19,10 +19,10 @@ credentials, database dumps, or complete logs.
 
 | Gate | Status | Sanitized evidence |
 |---|---|---|
-| Task 10 focused E2E/demo/health/compose/registry regression | PASS | Local synthetic Pytest completed: `test_cv_tailoring_flow`, `test_demo_flow`, health, compose-source, and exact-registry suites |
+| Task 10 focused E2E/demo/health/compose/registry regression | PASS | Local synthetic Pytest completed: tailoring E2E, demo, health, compose-source, active-CV, Job, interrupt/resume, approval, chat, and agent-graph suites |
 | Focused contact/schema/projection/guard tests | NOT RUN | Pending final gate |
 | Focused Agent/coordinator/API/deletion/E2E tests | NOT RUN | Pending final gate |
-| Backend Ruff | NOT RUN | Pending final gate |
+| Backend Ruff | PASS | `ruff check app tests --no-cache` completed with no findings |
 | Backend Mypy | NOT RUN | Pending final gate |
 | Backend full Pytest | NOT RUN | Pending final gate |
 | Migration upgrade/downgrade/re-upgrade on disposable DB | NOT RUN | Never downgrade a configured user database |
@@ -31,32 +31,32 @@ credentials, database dumps, or complete logs.
 | Frontend TypeScript | NOT RUN | Pending final gate |
 | Frontend production build | NOT RUN | Pending final gate |
 | Plan portfolio validator | PASS | Plans 1-17 validated with no errors; only Plan 17 is terminal |
-| `git diff --check` and scope/secret review | PASS | No whitespace errors; changed/untracked files are all within Task 10 allowlist and synthetic-only |
+| `git diff --check` and scope/secret review | PASS | No whitespace errors; review found only the Task 10 allowlist and synthetic test data. |
 
 ## Synthetic cross-layer matrix
 
 | Scenario | Status | Sanitized evidence |
 |---|---|---|
-| Legacy profile parses with nullable contacts | PASS | Synthetic coordinator E2E projects an approved legacy header with all optional contacts absent |
-| Explicit re-extraction/approval with GitHub present | PASS | Synthetic coordinator E2E renders the approved optional GitHub header |
-| Second approved profile with GitHub absent | NOT RUN | |
-| Selected `full` Job creates initial session | NOT RUN | |
-| Selected `partial` Job creates initial session | NOT RUN | |
-| Instruction-only Main-Agent tool creates initial session | PASS | Synthetic coordinator E2E created the initial session from a bounded instruction only |
-| Tailoring Agent sees outline first and only selected section bodies later | PASS | Synthetic E2E captured provider messages and excluded an unrelated section body |
+| Legacy profile parses with nullable contacts | PASS | Synthetic legacy JSON omits all optional-contact keys and `CandidateProfile` parses each as `None`. |
+| Explicit re-extraction/approval with GitHub present | PASS | Synthetic E2E re-extracted a ready profile, reviewed its draft, and committed it; the approved GitHub value was then persisted. |
+| Second approved profile with GitHub absent | PASS | A distinct synthetic profile was re-extracted, reviewed, and saved with no GitHub value. |
+| Selected `full` Job creates initial session | PASS | Synthetic processed `full` Job created and completed an initial tailored-CV session. |
+| Selected `partial` Job creates initial session | PASS | Synthetic processed `partial` Job created and completed an initial tailored-CV session. |
+| Instruction-only Main-Agent tool creates initial session | PASS | The real `create_tailored_cv` Main-Agent tool was invoked with a durable run, profile state, and bounded instruction; its ToolResult identified the created session/version. |
+| Tailoring Agent sees outline first and only selected section bodies later | PASS | Captured selection prompt contained the outline but no source body; the following rewrite prompt contained only the selected source body and excluded an unrelated body. |
 | Initial AI version is grounded and owns TeX plus PDF | PASS | Synthetic coordinator E2E completed the initial AI version and read both immutable artifacts |
 | Manual edit creates an immutable child version | PASS | Synthetic E2E asserted ordered `ai`, `ai`, `user` version chain |
 | Section-scoped AI edit receives exactly one section ID | PASS | Synthetic E2E scoped the later AI revision to `summary` only |
-| Stale profile/CV/Job revisions block writes and preserve reads | PASS | Synthetic E2E made the profile stale, observed the safe block, and retained prior artifacts |
-| CAS conflict preserves the draft and latest immutable version | PASS | Synthetic E2E rejected an old parent ID after version three |
-| Saved Job deletion preserves existing downloads | NOT RUN | |
-| Session deletion cancel performs zero mutation | NOT RUN | |
+| Stale profile/CV/Job revisions block writes and preserve reads | PASS | Separate profile, CV-document, and saved-Job revision changes each blocked a write while the existing immutable download remained readable. |
+| CAS conflict preserves the draft and latest immutable version | PASS | A stale parent ID was rejected after the later AI and manual immutable versions; UI-local draft preservation is not claimed by this backend E2E. |
+| Saved Job deletion preserves existing downloads | PASS | After real saved-Job deletion, the retained version's exact source and PDF downloads still matched their pre-delete bytes. |
+| Session deletion cancel performs zero mutation | NOT RUN | Cancel is a frontend-only confirmation behavior and is not exercised by this backend E2E. |
 | Session deletion failure stays retryable | PASS | Synthetic E2E forced one artifact-cleanup failure, then deleted successfully on retry |
-| Profile deletion cleans owned sessions and artifacts | NOT RUN | |
-| `latex-cv-v1` escaping and PDF page metadata are exact | NOT RUN | Dedicated renderer/escaping gate not run in this Task 10 focused subset |
-| Evaluations, matching, and Neo4j remain unchanged | NOT RUN | Dedicated cross-projection gate not run in this Task 10 focused subset |
-| Main registry has exactly eight tools | PASS | Focused registry regression suite passed with the fixed eight-tool order |
-| Reference-only sentinel is absent from prompts, results, SQLite, activities, errors, artifacts, and logs | PASS | Synthetic E2E asserted absence from captured prompts/events, ToolExecution/activity records, SQLite bytes, TeX, PDF-extracted text, and fake compiler output |
+| Profile deletion cleans owned sessions and artifacts | PASS | Profile deletion removed its tailored-CV session metadata and UUID-scoped artifacts after the session retry proof. |
+| `latex-cv-v1` escaping and PDF page metadata are exact | PASS | Synthetic E2E asserted the fixed renderer's escaped source tokens and one-page PDF metadata for generated immutable artifacts. |
+| Evaluations, matching, and Neo4j remain unchanged | PASS | Tailoring added no evaluations, did not write to an untouched fake graph, and retained the exact production registry containing the matching tool. |
+| Main registry has exactly eight tools | PASS | Synthetic E2E asserted the exact eight-tool production order. |
+| Reference-only sentinel is absent from prompts, results, SQLite, activities, errors, artifacts, and logs | PASS | Synthetic E2E asserted absence from captured prompts, ToolResult, SQLite JSON/bytes, activities/errors, TeX, PDF text, and captured application logs. The marker exists only in a local fake format-reference object. |
 
 ## Compose and compiler candidate
 

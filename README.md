@@ -31,8 +31,9 @@ The last committed product baseline is **Plan 15 Batch03** at commit
   graph partial-success response.
 - Batch03: complete saved-JD extraction detail groups, accessible
   `JobReextractDialog`, and sole-owner non-optimistic re-extraction through
-  `useSavedJobsState` in `ObservabilitySidebar` (graph-generation invalidation
-  reused; no second state owner).
+  the App-owned `useSavedJobsState` controller passed to
+  `ObservabilitySidebar` (graph-generation invalidation reused; no second
+  state owner).
 
 **Plan 15 Batch04** (Diagnostic and Release Evidence) is on the working tree over
 that base: bounded live synthetic JD diagnostic
@@ -289,8 +290,8 @@ The boundaries are intentionally narrow:
    which names the Job and states identity/raw preservation, pre-commit
    preservation, stale-on-success, and no automatic evaluation. Confirm runs
    only through the sole
-   [`useSavedJobsState`](frontend/src/features/jobs/savedJobsState.ts) owner
-   wired from
+   [`useSavedJobsState`](frontend/src/features/jobs/savedJobsState.ts) owner in
+   [`App.tsx`](frontend/src/app/App.tsx), passed to
    [`ObservabilitySidebar`](frontend/src/features/observability/ObservabilitySidebar.tsx):
    non-optimistic compact-row patch, forced detail GET, currentness refresh,
    and graph-generation bump; graph-warning success still refreshes SQLite
