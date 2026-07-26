@@ -1,0 +1,31 @@
+.jobagent-tailoring-desktop-split {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.jobagent-tailoring-desktop-split > .astryx-stack-item:first-child {
+  flex: 3 1 0;
+  min-inline-size: 0;
+}
+
+.jobagent-tailoring-desktop-split > .astryx-stack-item:last-child {
+  flex: 2 1 0;
+  min-inline-size: 0;
+  border-inline-start: var(--border-width) solid var(--color-border);
+  padding-inline-start: var(--spacing-4);
+}
+
+.jobagent-tailoring-pdf-frame {
+  inline-size: 100%;
+  block-size: 100%;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-surface);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jobagent-tailoring-pdf-frame {
+    transition: none;
+  }
+}

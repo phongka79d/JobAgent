@@ -11,6 +11,8 @@ import {Text} from '@astryxdesign/core/Text';
 
 import {SavedJobsPanel} from '../jobs/SavedJobsPanel';
 import type {SavedJobsController} from '../jobs/savedJobsState';
+import {TailoringSessionsPanel} from '../cv-tailoring/TailoringSessionsPanel';
+import type {CvTailoringController} from '../cv-tailoring/state';
 import {ChunkPanel} from './ChunkPanel';
 import {CvManagerPanel} from './CvManagerPanel';
 import {GraphPanel} from './GraphPanel';
@@ -53,6 +55,8 @@ export type ObservabilitySidebarProps = {
   onProfileDelete?: (profileId: string) => Promise<boolean>;
   onCreateTailoredCv?: (jobId: string) => void;
   isTailoringPending?: boolean;
+  tailoring?: CvTailoringController;
+  onOpenTailoringSession?: (sessionId: string) => void;
 };
 
 export function ObservabilitySidebar({
@@ -70,6 +74,8 @@ export function ObservabilitySidebar({
   onProfileDelete,
   onCreateTailoredCv,
   isTailoringPending = false,
+  tailoring,
+  onOpenTailoringSession,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
@@ -425,6 +431,13 @@ export function ObservabilitySidebar({
             canCreateTailoredCv={!profileSetupInProgress && !isInteractionLocked}
             isTailoringPending={isTailoringPending}
             onCreateTailoredCv={onCreateTailoredCv}
+          />
+        ) : null}
+
+        {!profileSetupInProgress && state.selectedTab === 'tailored-cvs' && tailoring ? (
+          <TailoringSessionsPanel
+            controller={tailoring}
+            onOpenSession={(sessionId) => onOpenTailoringSession?.(sessionId)}
           />
         ) : null}
       </div>

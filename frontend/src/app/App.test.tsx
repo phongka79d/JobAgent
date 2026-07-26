@@ -4,7 +4,7 @@ import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-import {App} from './App';
+import {App, selectedScorableJobId} from './App';
 
 afterEach(() => {
   cleanup();
@@ -12,6 +12,47 @@ afterEach(() => {
 });
 
 describe('App foundation shell', () => {
+  it('retains only a selected scorable Job for fresh tailoring recovery', () => {
+    const job = {
+      id: '11111111-1111-4111-8111-111111111111',
+      title: 'Synthetic job',
+      company: 'Synthetic Co',
+      processing_status: 'processed' as const,
+      jd_quality: 'full' as const,
+      source_type: 'text' as const,
+      source_url: null,
+      created_at: '2026-07-26T00:00:00Z',
+      updated_at: '2026-07-26T00:00:00Z',
+      evaluation_state: 'current' as const,
+      latest_score: null,
+    };
+    expect(
+      selectedScorableJobId({
+        selectedJobId: job.id,
+        list: {
+          phase: 'ready',
+          data: {items: [job], next_cursor: null},
+          error: null,
+          loaded: true,
+        },
+      }),
+    ).toBe(job.id);
+    expect(
+      selectedScorableJobId({
+        selectedJobId: job.id,
+        list: {
+          phase: 'ready',
+          data: {
+            items: [{...job, jd_quality: 'unscorable'}],
+            next_cursor: null,
+          },
+          error: null,
+          loaded: true,
+        },
+      }),
+    ).toBeNull();
+  });
+
   it('renders AppShell with CV sidebar and chat page', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);

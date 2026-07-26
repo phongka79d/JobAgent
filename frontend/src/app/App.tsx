@@ -9,6 +9,7 @@
 
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {AppShell} from '@astryxdesign/core/AppShell';
+import {VStack} from '@astryxdesign/core/VStack';
 
 import {
   ChatPage,
@@ -33,6 +34,7 @@ import {
   useCvTailoringState,
 } from '../features/cv-tailoring/state';
 import type {CvTailoringApi} from '../features/cv-tailoring/api';
+import {TailoringEditor} from '../features/cv-tailoring/TailoringEditor';
 import {
   useProfileWorkspaceState,
   type ProfileWorkspaceApi,
@@ -59,6 +61,18 @@ export const CV_REPROCESS_TURN_MESSAGE =
 export type MainWorkspace =
   | {kind: 'chat'}
   | {kind: 'cv-tailoring'; sessionId: string};
+
+export function selectedScorableJobId(
+  state: Pick<SavedJobsController['state'], 'list' | 'selectedJobId'>,
+): string | null {
+  const selected = state.list.data?.items.find(
+    (item) => item.id === state.selectedJobId,
+  );
+  return selected?.processing_status === 'processed' &&
+    (selected.jd_quality === 'full' || selected.jd_quality === 'partial')
+    ? selected.id
+    : null;
+}
 
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
@@ -94,6 +108,7 @@ export function App({deps}: AppProps = {}) {
     api: deps?.tailoring,
   });
   const tailoringLocked = tailoring.state.stream.phase === 'loading';
+  const freshTailoringJobId = selectedScorableJobId(savedJobs.state);
   const interactionLocked = uploadLocked || workspaceLocked || tailoringLocked;
   const [mainWorkspace, setMainWorkspace] = useState<MainWorkspace>({
     kind: 'chat',
@@ -118,6 +133,28 @@ export function App({deps}: AppProps = {}) {
     },
     [tailoring.createSession],
   );
+  const handleCreateFreshTailoredCv = useCallback(() => {
+    const instruction = tailoring.state.detail.data?.session.instruction?.trim() ?? '';
+    if (instruction === '') return;
+    void tailoring
+      .createSession({job_id: freshTailoringJobId, instruction})
+      .then((sessionId) => {
+        if (sessionId !== null) {
+          setMainWorkspace({kind: 'cv-tailoring', sessionId});
+        }
+      });
+  }, [freshTailoringJobId, tailoring.createSession, tailoring.state.detail.data]);
+  const handleEditProfileFromTailoring = useCallback(() => {
+    setMainWorkspace({kind: 'chat'});
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        const composer = document.querySelector(
+          '[data-testid="jobagent-chat-composer-input"]',
+        );
+        if (composer instanceof HTMLElement) composer.focus();
+      });
+    });
+  }, []);
 
   const handleSidebarUploadSuccess = useCallback(
     (result: CvUploadResponse) => {
@@ -221,31 +258,46 @@ export function App({deps}: AppProps = {}) {
             void handleCreateTailoredCv(jobId);
           }}
           isTailoringPending={tailoringLocked}
+          tailoring={tailoring}
+          onOpenTailoringSession={(sessionId) => {
+            void handleOpenTailoringEditor(sessionId);
+          }}
           deps={deps?.sidebar}
         />
       }
     >
-      <ChatPage
-        key={workspace.state.selectedConversationId ?? 'no-conversation'}
-        conversationId={workspace.state.selectedConversationId}
-        selectedProfileState={selectedProfile?.state ?? null}
-        selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
-        selectedJobId={savedJobs.state.selectedJobId}
-        deps={deps?.chat}
-        onInteractionLockChange={setUploadLocked}
-        sidebarAttachmentTurn={sidebarTurn}
-        onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
-        cvReprocessRequest={reprocessRequest}
-        onCvReprocessHandled={handleCvReprocessHandled}
-        onCvReprocessTerminal={handleCvReprocessTerminal}
-        onProfileSaved={handleProfileSaved}
-        onProfileSetupChanged={workspace.reload}
-        onCvUploadSuccess={handleSidebarUploadSuccess}
-        onSavedJobsInvalidated={handleSavedJobsInvalidated}
-        onOpenTailoringEditor={(sessionId) => {
-          void handleOpenTailoringEditor(sessionId);
-        }}
-      />
+      <VStack hidden={mainWorkspace.kind === 'cv-tailoring'} height="100%" width="100%">
+        <ChatPage
+          key={workspace.state.selectedConversationId ?? 'no-conversation'}
+          conversationId={workspace.state.selectedConversationId}
+          selectedProfileState={selectedProfile?.state ?? null}
+          selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
+          selectedJobId={savedJobs.state.selectedJobId}
+          deps={deps?.chat}
+          onInteractionLockChange={setUploadLocked}
+          sidebarAttachmentTurn={sidebarTurn}
+          onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
+          cvReprocessRequest={reprocessRequest}
+          onCvReprocessHandled={handleCvReprocessHandled}
+          onCvReprocessTerminal={handleCvReprocessTerminal}
+          onProfileSaved={handleProfileSaved}
+          onProfileSetupChanged={workspace.reload}
+          onCvUploadSuccess={handleSidebarUploadSuccess}
+          onSavedJobsInvalidated={handleSavedJobsInvalidated}
+          onOpenTailoringEditor={(sessionId) => {
+            void handleOpenTailoringEditor(sessionId);
+          }}
+        />
+      </VStack>
+      {mainWorkspace.kind === 'cv-tailoring' ? (
+        <TailoringEditor
+          controller={tailoring}
+          onBackToChat={() => setMainWorkspace({kind: 'chat'})}
+          onEditProfile={handleEditProfileFromTailoring}
+          canCreateFresh={Boolean(tailoring.state.detail.data?.session.instruction?.trim())}
+          onCreateFresh={handleCreateFreshTailoredCv}
+        />
+      ) : null}
     </AppShell>
   );
 }

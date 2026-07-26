@@ -283,7 +283,7 @@ describe('observability tab order for JD đã lưu', () => {
     expect(OBSERVABILITY_TABS[savedIndex]?.label).toBe('JD đã lưu');
   });
 
-  it('renders six vertical tabs with JD đã lưu after Agent runs', async () => {
+  it('renders seven vertical tabs with JD đã lưu after Agent runs', async () => {
     const onChange = vi.fn();
     render(
       <Theme theme={neutralTheme}>
@@ -295,7 +295,7 @@ describe('observability tab order for JD đã lưu', () => {
       </Theme>,
     );
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(6);
+    expect(tabs).toHaveLength(7);
     const labels = tabs.map((tab) => tab.textContent ?? '');
     const runsAt = labels.findIndex((label) => label.includes('Agent runs'));
     const savedAt = labels.findIndex((label) => label.includes('JD đã lưu'));
@@ -970,7 +970,7 @@ describe('sidebar composition loads JD đã lưu panel', () => {
       render(<SidebarHarness />);
 
       const tabs = await screen.findAllByRole('tab');
-      expect(tabs).toHaveLength(6);
+      expect(tabs).toHaveLength(7);
       const runs = screen.getByRole('tab', {name: 'Agent runs'});
       const saved = screen.getByRole('tab', {name: 'JD đã lưu'});
       expect(tabs.indexOf(saved)).toBe(tabs.indexOf(runs) + 1);

@@ -26,6 +26,7 @@ import {
   createEmptySavedJobsController,
   type SavedJobsController,
 } from '../jobs/savedJobsState';
+import type {CvTailoringController} from '../cv-tailoring/state';
 import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
 import {useObservabilityState} from '../observability/state';
 import {
@@ -84,6 +85,8 @@ export type CvSidebarProps = {
   savedJobs?: SavedJobsController;
   onCreateTailoredCv?: (jobId: string) => void;
   isTailoringPending?: boolean;
+  tailoring?: CvTailoringController;
+  onOpenTailoringSession?: (sessionId: string) => void;
   deps?: CvSidebarDeps;
 };
 
@@ -171,6 +174,8 @@ function CvSidebarController({
   savedJobs,
   onCreateTailoredCv,
   isTailoringPending = false,
+  tailoring,
+  onOpenTailoringSession,
   deps,
 }: CvSidebarProps) {
   const selectedWorkspaceProfile = workspace?.state.profiles.find(
@@ -440,6 +445,8 @@ function CvSidebarController({
         onCvDeleted={onCvDeleted}
         onCreateTailoredCv={onCreateTailoredCv}
         isTailoringPending={isTailoringPending}
+        tailoring={tailoring}
+        onOpenTailoringSession={onOpenTailoringSession}
       />
     </CvSidebarShell>
   );

@@ -11,7 +11,8 @@ export type ObservabilityTabId =
   | 'chunks'
   | 'graph'
   | 'runs'
-  | 'saved-jobs';
+  | 'saved-jobs'
+  | 'tailored-cvs';
 
 export type ObservabilityTabDefinition = {
   id: ObservabilityTabId;
@@ -24,6 +25,7 @@ export type ObservabilityTabDefinition = {
  * Agent runs → JD đã lưu (Master §15.2).
  */
 export const OBSERVABILITY_TABS: ReadonlyArray<ObservabilityTabDefinition> = [
+  {id: 'tailored-cvs', label: 'CV đã chỉnh', icon: 'copy'},
   {id: 'overview', label: 'Overview', icon: 'info'},
   {id: 'cv-history', label: 'CV Manager', icon: 'clock'},
   {id: 'chunks', label: 'LLM chunks', icon: 'viewColumns'},

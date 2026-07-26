@@ -29,7 +29,7 @@ export function ProfileDeleteDialog({
         if (!isActionLoading || open) onOpenChange(open);
       }}
       title={isPending ? `Discard ${name}?` : `Delete ${name}?`}
-      description={`${name} uses ${cvName}. This permanently removes the CV, profile data, evaluations, and every owned conversation. This action cannot be undone.`}
+      description={`${name} uses ${cvName}. This permanently removes the CV, profile data, evaluations, every owned conversation, and all derivative tailored-CV sessions and artifacts. This action cannot be undone.`}
       actionLabel={label}
       cancelLabel="Cancel"
       actionVariant="destructive"

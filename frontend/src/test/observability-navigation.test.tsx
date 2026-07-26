@@ -85,7 +85,7 @@ describe('observability navigation', () => {
       name: 'Observability inspector',
     });
     expect(tablist).toHaveAttribute('aria-orientation', 'vertical');
-    expect(screen.getAllByRole('tab')).toHaveLength(6);
+    expect(screen.getAllByRole('tab')).toHaveLength(7);
     expect(tablist.firstElementChild).toHaveAttribute('role', 'presentation');
     expect(tablist.firstElementChild).not.toHaveAttribute('aria-label');
     expect(
