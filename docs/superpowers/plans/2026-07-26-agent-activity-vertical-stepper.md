@@ -689,7 +689,7 @@ the commit. Do not include generated files or unrelated changes.
 - No planned source changes. Fix only failures caused by this feature and keep
   any repair within the three approved frontend files.
 
-- [ ] **Step 1: Run all frontend gates**
+- [x] **Step 1: Run all frontend gates**
 
 Run from `frontend`:
 
@@ -703,7 +703,7 @@ npm run build
 Expected: all commands pass. The existing Vite chunk-size advisory is allowed;
 new Astryx, accessibility, CSS, lint, or type errors are not.
 
-- [ ] **Step 2: Verify scope and repository hygiene**
+- [x] **Step 2: Verify scope and repository hygiene**
 
 Run from the worktree root:
 
@@ -718,7 +718,7 @@ Expected: implementation changes remain limited to the three approved frontend
 files plus approved design/plan documentation. No backend, dependency, reducer,
 SSE, history, or generated-artifact changes appear.
 
-- [ ] **Step 3: Rebuild the existing Docker Compose project without deleting volumes**
+- [x] **Step 3: Rebuild the existing Docker Compose project without deleting volumes**
 
 Run from the worktree root:
 
@@ -727,18 +727,18 @@ $project = 'jobagent-cv-profile-reset-smoke'
 if ($project -ne 'jobagent-cv-profile-reset-smoke') {
   throw 'Unexpected Compose project'
 }
-docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project up -d --build
-docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project ps
+docker compose --env-file ../../.env -f infrastructure/docker-compose.yml -p $project up -d --build
+docker compose --env-file ../../.env -f infrastructure/docker-compose.yml -p $project ps
 ```
 
 Expected: frontend, backend, and Neo4j are running/healthy. Do not run
 `down -v`; preserve existing local data.
 
-- [ ] **Step 4: Verify the UI in the default in-app browser**
+- [x] **Step 4: Verify the UI in the approved Chrome fallback**
 
-Use `browser:control-in-app-browser`, not Chrome control. Open
-`http://localhost:5173/`, reuse the current ready profile/conversation, and
-verify:
+The in-app Browser was unavailable. After explicit user approval, use
+`chrome:control-chrome` on the existing `http://localhost:5173/` tab, reuse the
+current ready profile/conversation, and verify:
 
 1. The timeline is enclosed by one rounded Card and the chevron is at the far right.
 2. Collapsed state shows only the summary, `View activity`, and one aggregate marker/Spinner.
@@ -749,20 +749,20 @@ verify:
 Do not inspect cookies, local storage, credentials, raw CV text, provider
 payloads, or database paths. Leave the verified app tab open for handoff.
 
-- [ ] **Step 5: Inspect bounded container logs for feature errors**
+- [x] **Step 5: Inspect bounded container logs for feature errors**
 
 Run:
 
 ```powershell
 $project = 'jobagent-cv-profile-reset-smoke'
-docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project logs --tail 120 frontend
-docker compose --env-file .env -f infrastructure/docker-compose.yml -p $project logs --tail 120 backend
+docker compose --env-file ../../.env -f infrastructure/docker-compose.yml -p $project logs --tail 120 frontend
+docker compose --env-file ../../.env -f infrastructure/docker-compose.yml -p $project logs --tail 120 backend
 ```
 
 Expected: no frontend runtime, Astryx, SSE, or backend regression errors. Never
 print `.env`, credentials, provider payloads, or user content.
 
-- [ ] **Step 6: Mark all successful steps `[x]` and commit the final plan state**
+- [x] **Step 6: Mark all successful steps `[x]` and commit the final plan state**
 
 Update this plan immediately after each successful step, then run:
 
