@@ -5,9 +5,11 @@ import inspect
 from dataclasses import fields
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from app.api.dependencies import CVTailoringDeps, get_cv_tailoring_deps
 from app.core.ids import new_uuid
 from app.db.models.attachments import Attachment
 from app.db.models.profiles import Profile
@@ -15,10 +17,90 @@ from app.db.session import build_async_engine
 from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import workspace_state as workspace_repo
 from app.repositories.cv_tailoring import CVTailoringVersionWrite
-from app.services.cv_tailoring import TAILORING_ARTIFACT_UNAVAILABLE, TailoringError
+from app.schemas.cv_tailoring import TailoringVersionCreateResponse
+from app.schemas.sse import build_sse_event
+from app.services.cv_tailoring import (
+    TAILORING_ARTIFACT_UNAVAILABLE,
+    TailoringError,
+    TailoringLaunch,
+)
 from app.storage.cv_tailoring import TailoringArtifactStorage
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from tests.support.db_migration import run_async, session_factory
+
+
+def _content() -> dict[str, Any]:
+    return {
+        "header": {
+            "full_name": "Synthetic Candidate",
+            "location": None,
+            "phone": None,
+            "email": None,
+            "github_url": None,
+        },
+        "sections": [
+            {
+                "id": "summary",
+                "ordinal": 0,
+                "heading": "Summary",
+                "kind": "summary",
+                "items": [],
+            }
+        ],
+    }
+
+
+class _RouteCoordinator:
+    def __init__(self, *, profile_id: str, session_id: str) -> None:
+        self.profile_id = profile_id
+        self.session_id = session_id
+        self.prepare_error: TailoringError | None = None
+        self.initial_calls: list[dict[str, Any]] = []
+        self.ai_calls: list[dict[str, Any]] = []
+        self.stream_calls: list[str] = []
+        self.manual_calls: list[dict[str, Any]] = []
+
+    async def prepare_session(self, **kwargs: Any) -> TailoringLaunch:
+        if self.prepare_error is not None:
+            raise self.prepare_error
+        self.initial_calls.append(kwargs)
+        return TailoringLaunch(
+            session_id=self.session_id,
+            run_id=new_uuid(),
+            profile_id=self.profile_id,
+        )
+
+    async def prepare_ai_version(self, **kwargs: Any) -> TailoringLaunch:
+        self.ai_calls.append(kwargs)
+        return TailoringLaunch(
+            session_id=self.session_id,
+            run_id=new_uuid(),
+            profile_id=self.profile_id,
+        )
+
+    async def stream_initial_version(self, launch: TailoringLaunch):
+        self.stream_calls.append(launch.run_id)
+        yield build_sse_event(
+            "run_started",
+            launch.run_id,
+            {"state": "running", "resumed": False},
+        )
+        yield build_sse_event(
+            "run_completed", launch.run_id, {"state": "completed"}
+        )
+
+    async def create_manual_version(
+        self, **kwargs: Any
+    ) -> TailoringVersionCreateResponse:
+        self.manual_calls.append(kwargs)
+        return TailoringVersionCreateResponse(
+            session_id=self.session_id,
+            version_id=new_uuid(),
+            version_number=2,
+            currentness="current",
+        )
 
 
 def test_cv_tailoring_router_exposes_exact_authorized_endpoint_shapes() -> None:
@@ -212,3 +294,247 @@ def test_source_download_verifies_hash_and_returns_safe_exact_headers(
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    from app.api.cv_tailoring import router
+    from app.schemas.cv_tailoring import CV_TAILORING_SESSION_HEADER
+
+    async def _seed() -> tuple[
+        CVTailoringDeps,
+        _RouteCoordinator,
+        str,
+        str,
+        str,
+        Any,
+    ]:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        storage = TailoringArtifactStorage(tmp_path / "route-files")
+        async with factory() as session:
+            attachment = Attachment(
+                file_hash="a" * 64,
+                original_name="active.pdf",
+                mime_type="application/pdf",
+                size_bytes=10,
+                page_count=1,
+                storage_path=f"{new_uuid()}.pdf",
+                state="active",
+            )
+            session.add(attachment)
+            await session.flush()
+            profile = Profile(
+                attachment_id=attachment.id,
+                display_name="Synthetic Candidate",
+                profile_json={"full_name": "Synthetic Candidate"},
+                location=None,
+                extraction_version="cv-document-v1",
+                source_hash="source-active",
+                state="ready",
+            )
+            session.add(profile)
+            await session.flush()
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            owner = await tailoring_repo.create_session(
+                session,
+                profile_id=profile.id,
+                source_attachment_id=attachment.id,
+                source_hash=profile.source_hash,
+                profile_updated_at=profile.updated_at,
+                job_id=None,
+                job_updated_at=None,
+                job_label_json=None,
+                instruction="Synthetic tailoring",
+                template_version="latex-cv-v1",
+            )
+            await session.flush()
+            version_id = new_uuid()
+            staging = storage.create_staging_dir(version_id=version_id)
+            tex_bytes = b"synthetic tex"
+            pdf_bytes = b"%PDF-1.4 synthetic route"
+            (staging / "resume.tex").write_bytes(tex_bytes)
+            (staging / "resume.pdf").write_bytes(pdf_bytes)
+            paths = storage.promote(
+                profile_id=profile.id,
+                session_id=owner.id,
+                version_id=version_id,
+                staged_tex=staging / "resume.tex",
+                staged_pdf=staging / "resume.pdf",
+            )
+            await tailoring_repo.create_version_cas(
+                session,
+                session_id=owner.id,
+                expected_latest_version_number=0,
+                expected_parent_version_id=None,
+                version=CVTailoringVersionWrite(
+                    id=version_id,
+                    parent_version_id=None,
+                    created_by="ai",
+                    content_json=_content(),
+                    provenance_json={"targeted_section_ids": [], "facts": []},
+                    source_revision_json={"source_hash": profile.source_hash},
+                    tex_relative_path=paths.tex_relative_path,
+                    pdf_relative_path=paths.pdf_relative_path,
+                    tex_sha256=hashlib.sha256(tex_bytes).hexdigest(),
+                    pdf_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+                    page_count=1,
+                    page_warning=None,
+                    created_at=datetime(2026, 7, 26, tzinfo=UTC),
+                ),
+            )
+
+            other_attachment = Attachment(
+                file_hash="b" * 64,
+                original_name="other.pdf",
+                mime_type="application/pdf",
+                size_bytes=10,
+                page_count=1,
+                storage_path=f"{new_uuid()}.pdf",
+                state="archived",
+            )
+            session.add(other_attachment)
+            await session.flush()
+            other_profile = Profile(
+                attachment_id=other_attachment.id,
+                display_name="Other Candidate",
+                profile_json={"full_name": "Other Candidate"},
+                location=None,
+                extraction_version="cv-document-v1",
+                source_hash="source-other",
+                state="ready",
+            )
+            session.add(other_profile)
+            await session.flush()
+            other_owner = await tailoring_repo.create_session(
+                session,
+                profile_id=other_profile.id,
+                source_attachment_id=other_attachment.id,
+                source_hash=other_profile.source_hash,
+                profile_updated_at=other_profile.updated_at,
+                job_id=None,
+                job_updated_at=None,
+                job_label_json=None,
+                instruction="Other tailoring",
+                template_version="latex-cv-v1",
+            )
+            await session.commit()
+
+        coordinator = _RouteCoordinator(
+            profile_id=profile.id, session_id=owner.id
+        )
+        deps = CVTailoringDeps(
+            coordinator=cast(Any, coordinator),
+            storage=storage,
+            settings=cast(Any, SimpleNamespace(SQLITE_PATH=migrated_sqlite)),
+            session_factory=factory,
+        )
+        return deps, coordinator, owner.id, other_owner.id, version_id, engine
+
+    deps, coordinator, owner_id, other_owner_id, version_id, engine = run_async(
+        _seed()
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    app.dependency_overrides[get_cv_tailoring_deps] = lambda: deps
+    try:
+        with TestClient(app) as client:
+            malformed = client.post(
+                "/api/cv-tailoring/sessions",
+                json={"job_id": None, "instruction": "Tailor", "raw_jd": "no"},
+            )
+            assert malformed.status_code == 422
+            assert coordinator.initial_calls == []
+
+            created = client.post(
+                "/api/cv-tailoring/sessions",
+                json={"job_id": None, "instruction": "Tailor"},
+            )
+            assert created.status_code == 200
+            assert created.headers[CV_TAILORING_SESSION_HEADER] == owner_id
+            assert created.text.index("event: run_started") < created.text.index(
+                "event: run_completed"
+            )
+
+            coordinator.prepare_error = TailoringError(
+                "JOB_NOT_SCORABLE", "Selected Job is not scorable"
+            )
+            rejected = client.post(
+                "/api/cv-tailoring/sessions",
+                json={"job_id": None, "instruction": "Tailor"},
+            )
+            assert rejected.status_code == 409
+            assert rejected.json()["detail"]["code"] == "JOB_NOT_SCORABLE"
+            coordinator.prepare_error = None
+
+            listed = client.get("/api/cv-tailoring/sessions")
+            assert listed.status_code == 200
+            assert [item["id"] for item in listed.json()["items"]] == [owner_id]
+
+            detail = client.get(f"/api/cv-tailoring/sessions/{owner_id}")
+            assert detail.status_code == 200
+            assert detail.json()["selected_version"]["id"] == version_id
+            assert detail.json()["content"] == _content()
+            assert client.get(
+                f"/api/cv-tailoring/sessions/{other_owner_id}"
+            ).status_code == 404
+            assert client.get(
+                "/api/cv-tailoring/sessions/not-a-uuid"
+            ).status_code == 422
+
+            retried = client.post(
+                f"/api/cv-tailoring/sessions/{owner_id}/ai-versions",
+                json={
+                    "parent_version_id": None,
+                    "instruction": "",
+                    "target_section_ids": [],
+                },
+            )
+            assert retried.status_code == 200
+            assert coordinator.ai_calls[-1] == {
+                "session_id": owner_id,
+                "parent_version_id": None,
+                "instruction": "",
+                "target_section_ids": [],
+            }
+
+            manual = client.post(
+                f"/api/cv-tailoring/sessions/{owner_id}/manual-versions",
+                json={"parent_version_id": version_id, "content": _content()},
+            )
+            assert manual.status_code == 200
+            assert manual.json()["session_id"] == owner_id
+            assert coordinator.manual_calls[-1]["parent_version_id"] == version_id
+
+            streams_before_reads = list(coordinator.stream_calls)
+            source = client.get(
+                f"/api/cv-tailoring/versions/{version_id}/source"
+            )
+            assert source.status_code == 200
+            assert source.content == b"synthetic tex"
+            assert source.headers["content-type"] == "text/x-tex; charset=utf-8"
+            assert source.headers["content-disposition"] == (
+                'attachment; filename="resume-v1.tex"'
+            )
+            assert source.headers["content-length"] == str(len(source.content))
+            assert source.headers["x-content-type-options"] == "nosniff"
+            pdf = client.get(f"/api/cv-tailoring/versions/{version_id}/pdf")
+            assert pdf.status_code == 200
+            assert pdf.content == b"%PDF-1.4 synthetic route"
+            assert pdf.headers["content-type"] == "application/pdf"
+            assert pdf.headers["content-disposition"] == (
+                'inline; filename="resume-v1.pdf"'
+            )
+            assert pdf.headers["content-length"] == str(len(pdf.content))
+            assert pdf.headers["x-content-type-options"] == "nosniff"
+            assert coordinator.stream_calls == streams_before_reads
+
+            deleted = client.delete(f"/api/cv-tailoring/sessions/{owner_id}")
+            assert deleted.status_code == 200
+            assert deleted.json() == {"deleted_session_id": owner_id}
+            assert client.get(
+                f"/api/cv-tailoring/versions/{version_id}/pdf"
+            ).status_code == 404
+    finally:
+        run_async(engine.dispose())

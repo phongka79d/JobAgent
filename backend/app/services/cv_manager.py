@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.checkpoint import (
@@ -29,8 +28,6 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.models.chat import AGENT_RUN_KIND_CHAT, AgentRun
-from app.db.models.cv_tailoring import CVTailoringSession
 from app.db.session import get_session_factory, session_scope
 from app.graph.delete_cv import CvGraphDeleteError, delete_cv_branch
 from app.graph.sync_shared import AsyncGraphDriver
@@ -48,7 +45,7 @@ from app.schemas.cv_manager import (
     ERROR_CV_DELETE_FINALIZE_FAILED,
     ERROR_CV_DELETE_GRAPH_FAILED,
 )
-from app.schemas.cv_tailoring import TAILORING_SESSION_STATE_GENERATING
+from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
 from app.services.cv_deletion_ownership import (
     message_owns_attachment,
     tool_record_owns_attachment,
@@ -56,6 +53,8 @@ from app.services.cv_deletion_ownership import (
 from app.storage.attachments import AttachmentStorage, PathEscapeError
 
 logger = logging.getLogger(__name__)
+
+ERROR_CV_DELETE_BLOCKED = "CV_DELETE_BLOCKED"
 
 _ELIGIBLE_STATES: frozenset[str] = frozenset(
     {
@@ -159,39 +158,6 @@ async def _resolve_owned_tool_records(
             seen.add(row.id)
             owned.append(row)
     return owned
-
-
-async def _resolve_deletion_owned_run_ids(
-    session: AsyncSession,
-    attachment_id: str,
-) -> set[str]:
-    """Chat runs that deletion owns through explicit or historical CV links."""
-    candidate_run_ids = {
-        row.id
-        for row in await runs_repo.list_by_source_attachment_id(
-            session, attachment_id
-        )
-    }
-    message_ids = await _resolve_owned_message_ids(session, attachment_id)
-    candidate_run_ids.update(
-        row.id
-        for row in await runs_repo.list_runs_for_user_message_ids(
-            session, message_ids
-        )
-    )
-    candidate_run_ids.update(
-        row.run_id
-        for row in await _resolve_owned_tool_records(session, attachment_id)
-    )
-    if not candidate_run_ids:
-        return set()
-    result = await session.scalars(
-        select(AgentRun.id).where(
-            AgentRun.id.in_(candidate_run_ids),
-            AgentRun.run_kind == AGENT_RUN_KIND_CHAT,
-        )
-    )
-    return set(result.all())
 
 
 async def _resolve_owned_tool_ids(
@@ -398,26 +364,10 @@ async def delete_cv(
                 ERROR_CV_ATTACHMENT_NOT_FOUND,
                 f"attachment {aid!r} is not eligible for deletion",
             )
-        owned_run_ids = await _resolve_deletion_owned_run_ids(probe, aid)
-        active_runs = select(AgentRun.id).where(
-            AgentRun.state.in_(("running", "interrupted"))
-        )
-        if owned_run_ids:
-            active_runs = active_runs.where(AgentRun.id.not_in(owned_run_ids))
-        other_active = await probe.scalar(active_runs.limit(1))
-        active_manual_tailoring = await probe.scalar(
-            select(CVTailoringSession.id)
-            .where(
-                CVTailoringSession.state
-                == TAILORING_SESSION_STATE_GENERATING
-            )
-            .limit(1)
-        )
-        if other_active is not None or active_manual_tailoring is not None:
-            raise CvDeleteError(
-                "CV_DELETE_BLOCKED",
-                "finish or resolve the active run first",
-            )
+        try:
+            await assert_workspace_idle(probe, code=ERROR_CV_DELETE_BLOCKED)
+        except ActivityBlockedError as exc:
+            raise CvDeleteError(exc.code, exc.summary) from exc
 
     async with session_scope(factory) as session:
         _row, run_ids = await _phase_mark_and_redact(session, aid)
@@ -481,6 +431,7 @@ async def delete_cv(
 
 
 __all__ = [
+    "ERROR_CV_DELETE_BLOCKED",
     "CvDeleteError",
     "CvDeleteResult",
     "Failpoint",

@@ -21,7 +21,11 @@ from app.schemas.cv_manager import (
     ERROR_CV_DELETE_FINALIZE_FAILED,
     ERROR_CV_DELETE_GRAPH_FAILED,
 )
-from app.services.cv_manager import CvDeleteError, delete_cv
+from app.services.cv_manager import (
+    ERROR_CV_DELETE_BLOCKED,
+    CvDeleteError,
+    delete_cv,
+)
 from app.storage.attachments import AttachmentStorage
 
 router = APIRouter(tags=["cvs"])
@@ -29,6 +33,7 @@ router = APIRouter(tags=["cvs"])
 _DELETE_ERROR_STATUS: dict[str, int] = {
     ERROR_CV_ATTACHMENT_NOT_FOUND: 404,
     ERROR_CV_ACTIVE_DELETE_FORBIDDEN: 409,
+    ERROR_CV_DELETE_BLOCKED: 409,
     ERROR_CV_DELETE_CHECKPOINT_FAILED: 409,
     ERROR_CV_DELETE_FILE_FAILED: 409,
     ERROR_CV_DELETE_GRAPH_FAILED: 409,

@@ -264,12 +264,12 @@ class TailoringCoordinator:
         prepared = self._prepared.pop(launch.run_id, None)
         if prepared is None or prepared.launch != launch:
             raise _error(TAILORING_SESSION_NOT_FOUND)
-        yield build_sse_event(
-            "run_started",
-            launch.run_id,
-            {"state": "running", "resumed": False},
-        )
         try:
+            yield build_sse_event(
+                "run_started",
+                launch.run_id,
+                {"state": "running", "resumed": False},
+            )
             async with open_checkpointer(
                 self._sqlite_path,
                 settings=(
@@ -331,7 +331,7 @@ class TailoringCoordinator:
                     created_by=TAILORING_CREATED_BY_AI,
                 )
                 await self._delete_checkpoint(launch.run_id)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             if await self._fail_generation(
                 prepared, TAILORING_GROUNDING_FAILED
             ):

@@ -345,6 +345,8 @@ def test_complete_failed_deletion_and_preservation(
                     tool_name="query_jobs",
                     arguments_summary_json={"q": "python"},
                 )
+                await runs_repo.complete_run(session, cv_run.id)
+                await runs_repo.complete_run(session, other_run.id)
                 await session.commit()
                 target = target_row.id
                 active_id = active.id
@@ -481,6 +483,7 @@ def test_fault_injection_retains_deleting_then_retry_succeeds(
                     user_message_id=msg.id,
                     source_attachment_id=row.id,
                 )
+                await runs_repo.complete_run(session, run.id)
                 await session.commit()
                 aid = row.id
                 run_id = run.id
@@ -706,6 +709,56 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
         assert resp3.content == b""
 
 
+def test_delete_api_blocks_when_target_cv_owns_the_active_run(
+    del_env: tuple[Path, Path],
+) -> None:
+    db_path, files = del_env
+    storage = AttachmentStorage(files)
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                _profile, conversation_id = await _seed_ready_conversation(
+                    session, storage, marker="delete-gate"
+                )
+                target = await _seed_attachment(
+                    session,
+                    storage,
+                    state=ATTACHMENT_STATE_FAILED,
+                    file_hash="active-owned-target",
+                )
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content="Process the target CV",
+                )
+                await runs_repo.create_run(
+                    session,
+                    user_message_id=user.id,
+                    source_attachment_id=target.id,
+                )
+                await session.commit()
+                return target.id
+        finally:
+            await engine.dispose()
+
+    target_id = run_async(_seed())
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[ai_text("noop")])
+    ) as client:
+        response = client.delete(f"/api/cvs/{target_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "CV_DELETE_BLOCKED",
+        "summary": "finish or resolve the active run first",
+    }
+    assert storage.exists(target_id)
+
+
 def test_historical_tool_ownership_without_fk(del_env: tuple[Path, Path]) -> None:
     db_path, files = del_env
     storage = AttachmentStorage(files)
@@ -747,6 +800,7 @@ def test_historical_tool_ownership_without_fk(del_env: tuple[Path, Path]) -> Non
                     ),
                     duration_ms=3,
                 )
+                await runs_repo.complete_run(session, run.id)
                 await session.commit()
                 aid = target.id
                 tool_id = tool.id

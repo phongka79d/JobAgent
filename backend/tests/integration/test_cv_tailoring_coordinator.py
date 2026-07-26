@@ -460,6 +460,48 @@ def test_compile_failure_is_durable_and_cleans_checkpoint_and_staging(
     run_async(_body())
 
 
+def test_closing_after_primed_run_started_fails_durable_generation(
+    db_path: Path, tmp_path: Path
+) -> None:
+    async def _body() -> None:
+        from app.services.cv_tailoring import TailoringCoordinator
+
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            profile_id, document, profile_model = await _seed_ready_source(factory)
+            coordinator = TailoringCoordinator(
+                session_factory=factory,
+                storage=TailoringArtifactStorage(tmp_path / "files"),
+                settings=_Settings(),
+                invoker=_Invoker(_patch_for_summary(document, profile_model)),
+                sqlite_path=db_path,
+                compiler=_fake_compile,
+            )
+            launch = await coordinator.prepare_session(
+                profile_id=profile_id,
+                job_id=None,
+                instruction="Tailor the summary",
+                parent_run_id=None,
+            )
+
+            events = coordinator.stream_initial_version(launch)
+            first = await anext(events)
+            assert first.event == "run_started"
+            await events.aclose()
+
+            async with factory() as session:
+                owner = await session.get(CVTailoringSession, launch.session_id)
+                run = await session.get(AgentRun, launch.run_id)
+                assert owner is not None and owner.state == "failed"
+                assert owner.error_code == "TAILORING_GROUNDING_FAILED"
+                assert run is not None and run.state == "failed"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_failed_terminal_persistence_retains_checkpoint_for_recovery(
     db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
