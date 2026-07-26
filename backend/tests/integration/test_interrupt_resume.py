@@ -758,7 +758,7 @@ def test_unrecoverable_failure_retains_user_turn(db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_seven_tools_and_synthetic_is_test_only() -> None:
+def test_production_registry_eight_tools_and_synthetic_is_test_only() -> None:
     reg = production_registry()
     names = reg.tool_names()
     assert names == [
@@ -769,6 +769,7 @@ def test_production_registry_seven_tools_and_synthetic_is_test_only() -> None:
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     ]
     assert SYNTHETIC_TOOL_NAME not in names
 

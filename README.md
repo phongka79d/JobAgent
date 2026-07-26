@@ -51,6 +51,8 @@ Scope, acceptance, and design authority:
 - [Acceptance documents](docs/acceptance/)
 - [Multi-profile destructive rollout](docs/operations/cv-profile-multi-conversation-rollout.md)
 - [Multi-profile acceptance checklist](docs/acceptance/cv-profile-multi-conversation-checklist.md)
+- [CV tailoring operations](docs/operations/cv-tailoring-latex.md)
+- [CV tailoring acceptance checklist](docs/acceptance/cv-tailoring-latex-checklist.md)
 
 ## What This Repository Does
 
@@ -67,6 +69,9 @@ This is a full-stack local application workspace. A user can:
    inspect deterministic score components and skill gaps.
 6. Browse CV history and chunk lists, open retained CVs and chunk
    details, inspect Agent runs and saved Jobs, and view a bounded Neo4j graph.
+7. Create source-grounded, versioned tailored CVs from a selected scorable Job
+   or a bounded natural-language instruction, edit structured source sections,
+   and preview/download fixed `latex-cv-v1` TeX/PDF artifacts.
 
 Runtime behavior is authoritative in source code and configuration. The
 [Master Plan](docs/plans/Master_plan.md) defines stable product contracts;
@@ -85,12 +90,13 @@ accepted baseline was reached.
 └── README.md         # Current architecture and operations guide
 ```
 
-- [`backend/`](backend/) owns the FastAPI API, LangGraph Agent, domain services,
+- [`backend/`](backend/) owns the FastAPI API, Main Agent plus bounded CV
+  Tailoring Agent, domain services,
   SQLAlchemy repositories and models, Alembic migrations, retained-file access,
   Neo4j synchronization/rebuild logic, ShopAIKey adapters, and backend tests.
-- [`frontend/`](frontend/) owns the React/Astryx chat, CV Manager, saved-JD and
-  observability panels, the single SSE reducer, typed API clients, and frontend
-  tests.
+- [`frontend/`](frontend/) owns the React/Astryx chat, CV Manager, saved-JD,
+  observability, and tailored-CV sessions/editor panels, the single SSE
+  reducer, typed API clients, and frontend tests.
 - [`infrastructure/`](infrastructure/) owns Docker Compose, backend/frontend
   Dockerfiles, Neo4j skill seed data, provider/PDF diagnostics, and graph rebuild
   wrappers.
@@ -111,8 +117,8 @@ Neo4j volumes contain derived graph data and logs.
 React/Astryx UI
   -> typed fetch/SSE clients
   -> FastAPI routes
-  -> application services / Agent runner
-  -> LangGraph Agent and seven tools
+  -> application services / Main-Agent runner + tailoring coordinator
+  -> bounded Main Agent (eight tools) + fixed CV Tailoring Agent
   -> SQLite + retained files (authoritative)
   -> Neo4j (derived/rebuildable)
   -> ShopAIKey chat and embeddings
@@ -128,9 +134,11 @@ The boundaries are intentionally narrow:
 - API modules validate transport inputs and delegate. Business rules stay in
   `backend/app/services/`; persistence details stay in repositories and graph
   modules.
-- [`backend/app/agent/graph.py`](backend/app/agent/graph.py) owns one decision
-  node and one ToolNode loop. [`backend/app/tools/registry.py`](backend/app/tools/registry.py)
-  registers exactly seven production tools.
+- [`backend/app/agent/graph.py`](backend/app/agent/graph.py) owns the historical
+  Main-Agent decision node and bounded ToolNode loop. The fixed tailoring graph
+  is coordinator-owned and has no ToolNode or spawn edge.
+  [`backend/app/tools/registry.py`](backend/app/tools/registry.py) registers
+  exactly eight Main-Agent production tools, including `create_tailored_cv`.
 - [`backend/app/agent/runner.py`](backend/app/agent/runner.py) owns request-scoped
   checkpointing and typed SSE publication. Application services persist durable
   run/message/tool truth before terminal checkpoint cleanup.
@@ -289,6 +297,28 @@ The boundaries are intentionally narrow:
    views and shows rebuild guidance; pre-commit failure preserves cached
    list/detail and shows only a safe summary.
 
+### 4c. Source-grounded tailored CVs (Plan 17)
+
+1. Saved-JD detail exposes **Tạo CV theo JD** only for a `processed` Job with
+   `full` or `partial` quality. The Main Agent accepts a bounded instruction
+   plus optional server-injected selected Job state; both paths call the same
+   `TailoringCoordinator` and bounded CV Tailoring Agent.
+2. The sidebar's **CV đã chỉnh** list is scoped to the selected ready profile.
+   Opening a session swaps only the main workspace; `ChatPage` stays mounted and
+   the single `useSavedJobsState` owner is unchanged.
+3. The editor renders every source-owned section in order, keeps approved
+   header facts read-only, allows structured text/bullet edits, exposes
+   section-scoped AI edits and collapsed source evidence, and compiles only on
+   an explicit save action. Keystrokes and version selection never compile.
+4. Versions are immutable. A stale session remains readable/downloadable but
+   blocks writes. A conflict, grounding failure, or compiler failure preserves
+   the local draft and previous successful artifacts. Current-session recovery
+   reuses the selected scorable Job when still present, otherwise a non-empty
+   retained instruction only.
+5. `latex-cv-v1` owns the fixed escaped renderer and the backend compiler. The
+   frontend never accepts or edits LaTeX, and tailored content is not projected
+   into Neo4j or evaluation tables.
+
 ### 5. CV and Job deletion
 
 1. CV deletion enters through the [CV routes](backend/app/api/cvs.py) and
@@ -303,6 +333,10 @@ The boundaries are intentionally narrow:
    Job/evaluation cascade.
 4. A Job graph failure preserves SQLite for a safe retry. Shared Skill seed data,
    Candidate/CV data, other Jobs, and unrelated chat history are preserved.
+5. Profile deletion also removes its derivative tailored-CV sessions, runs,
+   checkpoints, immutable metadata, and UUID-scoped TeX/PDF artifacts. Session
+   deletion is explicit and retryable; deleting a Job preserves existing
+   tailored versions and downloads.
 
 ### 6. Observability and graph rebuild
 
@@ -340,8 +374,12 @@ Key ownership rules:
   complete extraction detail groups, explicit evaluation/re-evaluation,
   confirmation-based same-ID re-extraction (`JobReextractDialog` +
   `confirmReextract`), deterministic match cards, and deletion UI. The sole
-  `useSavedJobsState` instance lives in `ObservabilitySidebar` and is passed
-  into `SavedJobsPanel` by props only.
+  `useSavedJobsState` instance lives in `App.tsx` and is passed into
+  `ObservabilitySidebar` and `SavedJobsPanel` by props only.
+- `features/cv-tailoring/` owns strict tailoring DTO/SSE parsing, the single
+  `useCvTailoringState` controller, source-order structured editing, evidence,
+  immutable version actions, preview, and stale/conflict/delete recovery. It
+  does not create a second saved-JD or chat state owner.
 - `lib/api/chat.ts` owns the frontend API origin and chat/resume/reprocess SSE
   transports; `lib/sse/` validates and consumes stream frames.
 
@@ -358,12 +396,13 @@ adapters. The production container currently uses Python 3.13.7.
 The main layers are:
 
 - `app/api/`: thin HTTP/SSE transport and safe error mapping.
-- `app/agent/`: prompt/context construction, the one-Agent graph, checkpoints,
-  and the request-scoped runner.
-- `app/tools/`: seven Agent-facing tools and durable execution wrappers.
+- `app/agent/`: Main-Agent prompt/context construction and graph, tailoring
+  graph contracts, checkpoints, and the request-scoped runner.
+- `app/tools/`: the eight Main-Agent-facing tools and durable execution
+  wrappers, including bounded `create_tailored_cv`.
 - `app/services/`: CV/JD ingestion, approval, evaluation, matching,
-  same-ID re-extraction (`job_reextraction`), observability, and deletion
-  orchestration.
+  same-ID re-extraction (`job_reextraction`), tailoring coordination and
+  compilation, observability, and deletion orchestration.
 - `app/repositories/`, `app/db/`, `app/schemas/`: persistence access, database
   models/session ownership, and validated public/domain contracts.
 - `app/graph/`: constraints, consistency gates, retrieval, focused sync/delete,
@@ -385,6 +424,7 @@ save-and-evaluate, evaluate, re-extract, and delete routes.
 | --- | --- | --- |
 | SQLite application DB | `app_data:/data/jobagent.db` | Authoritative canonical state, chat/runs/tools, drafts, Jobs, evaluations, checkpoints |
 | Retained CV files | `app_data:/data/files` | Authoritative UUID-relative PDF artifacts; never SQLite blobs |
+| Tailored CV artifacts | Server-owned `cv-tailoring/<profile>/<session>/<version>/` subtree under the files area | Immutable escaped `.tex`/PDF pairs; clients never provide or see paths |
 | Neo4j graph | `neo4j_data:/data` | Derived Candidate/CV/Job/Skill projection and vector index; rebuildable |
 | Neo4j logs | `neo4j_logs:/logs` | Local container logs; not repository evidence |
 | ShopAIKey chat | Configured OpenAI-compatible base URL | Agent decisions and structured extraction |
@@ -431,6 +471,12 @@ Python default.
 | `URL_FETCH_TIMEOUT_SECONDS` | Compose input; Settings default | Public JD URL request timeout | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
 | `URL_MAX_RESPONSE_MB` | Compose input; Settings default | Maximum public JD URL response size | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
 | `TOOL_LOOP_LIMIT` | Compose input; Settings default | Maximum Agent tool-loop passes | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_MAX_INSTRUCTION_CHARS` | Compose input; Settings default | Tailoring instruction bound (`4000`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_MAX_SECTIONS` | Compose input; Settings default | Tailored section bound (`20`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_MAX_ITEMS_PER_SECTION` | Compose input; Settings default | Items per section bound (`30`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_MAX_TEX_CHARS` | Compose input; Settings default | Generated TeX bound (`100000`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_COMPILE_TIMEOUT_SECONDS` | Compose input; Settings default | Compiler timeout (`15`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
+| `CV_TAILOR_MAX_PDF_MB` | Compose input; Settings default | PDF size bound (`5`) | [Settings](backend/app/core/settings.py), [Compose](infrastructure/docker-compose.yml) |
 
 ### Pending CV configuration alignment
 
@@ -514,6 +560,8 @@ the root. These commands use the project virtual environment created above:
 
 ```powershell
 Set-Location backend
+# Plan 17 CV tailoring focused feature subset (synthetic fakes)
+& '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_cv_contact_contracts.py tests/unit/test_cv_tailoring_schemas.py tests/unit/test_cv_tailoring_projection.py tests/unit/test_cv_tailoring_guard.py tests/unit/test_cv_tailoring_models.py tests/unit/test_cv_tailoring_storage.py tests/unit/test_cv_tailoring_renderer.py tests/unit/test_cv_tailoring_compiler.py tests/unit/test_cv_tailoring_agent.py tests/unit/test_cv_tailoring_coordinator.py tests/integration/test_cv_tailoring_repository.py tests/integration/test_cv_tailoring_coordinator.py tests/integration/test_cv_tailoring_api.py tests/integration/test_cv_tailoring_deletion.py tests/e2e/test_cv_tailoring_flow.py -q
 # Plan 15 Batch01 focused backend subset (guard + extraction + ingestion)
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_jd_extraction_guard.py tests/unit/test_jd_extraction.py tests/unit/test_skill_normalization.py tests/unit/test_jd_quality.py tests/integration/test_job_ingestion.py -q
 # Plan 15 Batch02 focused backend subset (CAS repo + re-extraction + API)
@@ -523,6 +571,8 @@ Set-Location backend
 & '..\.venv\Scripts\python.exe' -m pytest -q
 
 Set-Location ..\frontend
+# Plan 17 tailored-CV UI and owner subset
+npm test -- --run src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-accessibility.test.tsx src/test/observability-navigation.test.tsx src/app/App.test.tsx
 # Plan 15 Batch03 focused frontend subset (parser/detail/dialog/state/sidebar)
 npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-sidebar.test.tsx
 npm test -- --run
@@ -631,6 +681,16 @@ sanitized manual and browser procedures.
 - **Job deletion cannot confirm graph removal:** the SQLite Job and evaluations
   are preserved. Restore Neo4j and retry the same delete; do not manually remove
   the SQLite row first.
+- **A tailored-CV write is stale or conflicts:** keep the session readable and
+  downloadable. For `TAILORING_PARENT_CONFLICT`, reload the latest parent while
+  preserving the local draft; for `TAILORING_SOURCE_STALE`, create a new session
+  using the currently selected scorable Job or a non-empty retained instruction.
+  Grounding and compiler failures create no version and preserve the previous
+  PDF. Do not edit LaTeX or retry compilation implicitly.
+- **A tailored artifact is unavailable or deletion is partial:** report only
+  the stable safe error code. Do not regenerate on a read. Restore the files
+  area or SQLite dependency and retry the explicit session/profile deletion;
+  never report success while owned artifacts remain.
 - **A profile or passive-JD confirmation is interrupted:** resume the existing
   run with one allowed UI action. Never bypass confirmation with direct database
   or graph edits. CV activation and passive JD mutation occur only after the
@@ -650,9 +710,12 @@ sanitized manual and browser procedures.
   they disagree.
 - Search for existing owners, helpers, callers, and tests before adding logic.
   Preserve one business-rule owner and avoid parallel service or state paths.
-- Keep the single LangGraph Agent, one decision node, one ToolNode, exactly
-  seven production tools, and `TOOL_LOOP_LIMIT=6` unless the
-  [Master Plan](docs/plans/Master_plan.md) is explicitly amended.
+- Keep the historical Main-Agent chat graph bounded and preserve
+  `TOOL_LOOP_LIMIT=6`. The current Plan 17 production path adds exactly one
+  fixed coordinator-owned CV Tailoring Agent and the eighth Main-Agent tool;
+  it does not add dynamic spawn, peer handoffs, a worker, queue, or generic
+  Agent framework. Future Agents require their own approved contract in the
+  [Master Plan](docs/plans/Master_plan.md).
 - Preserve confirmation before CV activation and before passive pasted-JD
   mutation. Never auto-evaluate a saved JD; evaluation is explicit and keyed to
   the exact Job, CV/profile/preferences, embedding, and scoring revision.

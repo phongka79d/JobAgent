@@ -3,7 +3,7 @@
 Migrated temporary SQLite + injected fakes only. Covers exactly-one input,
 authorization-state independence, compact created/returned/retried and
 failed/sync-failed results, query filters/default/order/ties, raw-data
-exclusion, same-call replay, and exact seven production tool names/order.
+exclusion, same-call replay, and exact eight production tool names/order.
 """
 
 from __future__ import annotations
@@ -423,7 +423,7 @@ def test_job_tool_contract_ownership_no_parallel_vocabularies() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_exactly_seven_tools_order() -> None:
+def test_production_registry_exactly_eight_tools_order() -> None:
     names = production_registry().tool_names()
     assert names == [
         "propose_profile_from_cv",
@@ -433,12 +433,13 @@ def test_production_registry_exactly_seven_tools_order() -> None:
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     ]
     assert "synthetic_interrupt" not in names
 
 
 def test_no_job_route_and_single_registry_owner() -> None:
-    """Agent tools stay transport-free; registry owns the seven tool builders."""
+    """Agent tools stay transport-free; registry owns the eight tool builders."""
     app_root = BACKEND_ROOT / "app"
     # Tools / agent / tool-execution must not hardcode public job HTTP paths.
     for rel in ("tools", "agent"):

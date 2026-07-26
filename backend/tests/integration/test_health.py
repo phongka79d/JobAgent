@@ -29,6 +29,18 @@ from tests.support.health import (
 )
 
 
+_CV_TAILORING_ROUTE_DECORATORS = (
+    "cv_tailoring.py:create_ai_version:router.post('/cv-tailoring/sessions/{session_id}/ai-versions')",
+    "cv_tailoring.py:create_manual_version:router.post('/cv-tailoring/sessions/{session_id}/manual-versions', response_model=TailoringVersionCreateResponse)",
+    "cv_tailoring.py:create_session:router.post('/cv-tailoring/sessions')",
+    "cv_tailoring.py:delete_session:router.delete('/cv-tailoring/sessions/{session_id}', response_model=TailoringDeleteResponse)",
+    "cv_tailoring.py:download_pdf:router.get('/cv-tailoring/versions/{version_id}/pdf')",
+    "cv_tailoring.py:download_source:router.get('/cv-tailoring/versions/{version_id}/source')",
+    "cv_tailoring.py:get_session:router.get('/cv-tailoring/sessions/{session_id}', response_model=TailoringSessionDetailResponse)",
+    "cv_tailoring.py:list_sessions:router.get('/cv-tailoring/sessions', response_model=TailoringSessionListResponse)",
+)
+
+
 async def _sqlite_select_one() -> int:
     async with session_scope() as session:
         return int((await session.execute(text("SELECT 1"))).scalar_one())
@@ -264,7 +276,7 @@ def test_only_public_functional_routes_are_health_chat_cv_and_profile(
 
 def test_source_tree_has_no_other_route_decorators() -> None:
     matches = sorted(route_decorator_matches())
-    assert matches == sorted(EXPECTED_ROUTE_DECORATORS)
+    assert matches == sorted((*EXPECTED_ROUTE_DECORATORS, *_CV_TAILORING_ROUTE_DECORATORS))
 
 
 def test_lifespan_opens_resources_once(

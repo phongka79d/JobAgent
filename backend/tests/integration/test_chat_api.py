@@ -77,7 +77,7 @@ from tests.support.public_api import (
 # ---------------------------------------------------------------------------
 
 
-def test_public_routes_are_exactly_seven_master_endpoints(
+def test_public_routes_match_the_master_endpoint_inventory(
     chat_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     """Public inventory after profile lifecycle routes are registered."""
@@ -786,7 +786,7 @@ def test_public_passive_binding_aware_confirmation_card(
         normalizer=normalizer,
         embedding_client=embedder,
     )
-    # Full production registry so normal bind exposes seven tools; repair
+    # Full production registry so normal bind exposes eight tools; repair
     # substitutes the compatible save_job definition with forced choice.
     registry = production_registry()
     # Replace production save_job with the fake-backed instance for this path.

@@ -1397,7 +1397,7 @@ def test_cancellation_narration_from_tool_result_only() -> None:
 
 
 def test_unrelated_greeting_and_topology_six_pass_unchanged() -> None:
-    """Unrelated turns, one Agent/decision/ToolNode, seven tools, six passes."""
+    """Unrelated turns, one Agent/decision/ToolNode, eight tools, six passes."""
     greet_model = FakeChatModel(responses=[_ai_text("Chào bạn!")])
     greet_bundle = _bundle(greet_model, [save_job_current_message_tool])
     greet_out = greet_bundle.compiled.invoke(

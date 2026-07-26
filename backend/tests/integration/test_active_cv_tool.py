@@ -270,7 +270,7 @@ async def _ainvoke_read(
 # ---------------------------------------------------------------------------
 
 
-def test_production_registry_exactly_seven_tools_order() -> None:
+def test_production_registry_exactly_eight_tools_order() -> None:
     names = production_registry().tool_names()
     assert names == [
         "propose_profile_from_cv",
@@ -280,10 +280,11 @@ def test_production_registry_exactly_seven_tools_order() -> None:
         "query_jobs",
         "match_jobs",
         "read_active_cv",
+        "create_tailored_cv",
     ]
-    assert names[-1] == READ_ACTIVE_CV_NAME
+    assert names[-2] == READ_ACTIVE_CV_NAME
     assert "synthetic_interrupt" not in names
-    assert len(names) == 7
+    assert len(names) == 8
 
 
 def test_graph_topology_one_toolnode_six_iteration_limit() -> None:

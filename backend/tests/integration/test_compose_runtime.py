@@ -29,7 +29,7 @@ _MIGRATION = (
     / "backend"
     / "migrations"
     / "versions"
-    / "0005_cv_profiles_multi_conversation.py"
+    / "0007_add_cv_tailoring.py"
 )
 
 
@@ -58,7 +58,7 @@ def test_compose_source_has_exact_services_and_migrates_before_uvicorn() -> None
 
     assert _compose_service_names(compose) == ["neo4j", "backend", "frontend"]
     assert "alembic upgrade head && exec uvicorn" in dockerfile
-    assert 'revision: str = "0005_cv_profiles_multi_conversation"' in migration
+    assert 'revision: str = "0007_add_cv_tailoring"' in migration
     assert "create_all" not in command
     for package in (
         "texlive-latex-base",
