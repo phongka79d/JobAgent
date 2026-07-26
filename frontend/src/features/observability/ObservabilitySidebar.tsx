@@ -10,7 +10,7 @@ import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 
 import {SavedJobsPanel} from '../jobs/SavedJobsPanel';
-import {useSavedJobsState} from '../jobs/savedJobsState';
+import type {SavedJobsController} from '../jobs/savedJobsState';
 import {ChunkPanel} from './ChunkPanel';
 import {CvManagerPanel} from './CvManagerPanel';
 import {GraphPanel} from './GraphPanel';
@@ -31,6 +31,7 @@ export type ObservabilitySidebarProps = {
     cvName: string | null;
   };
   observability: ReturnType<typeof useObservabilityState>;
+  savedJobs: SavedJobsController;
   /**
    * Activation / zero-result invalidation signal for sidebar-local saved-JD
    * currentness (reducer signal — not a remount key).
@@ -50,12 +51,15 @@ export type ObservabilitySidebarProps = {
   profileId?: string | null;
   profileDisplayName?: string;
   onProfileDelete?: (profileId: string) => Promise<boolean>;
+  onCreateTailoredCv?: (jobId: string) => void;
+  isTailoringPending?: boolean;
 };
 
 export function ObservabilitySidebar({
   overview,
   collapsedStatus,
   observability: obs,
+  savedJobs,
   savedJobsInvalidateKey = 0,
   onCvReprocess,
   onCvDeleted,
@@ -64,13 +68,11 @@ export function ObservabilitySidebar({
   profileId = null,
   profileDisplayName = '',
   onProfileDelete,
+  onCreateTailoredCv,
+  isTailoringPending = false,
 }: ObservabilitySidebarProps) {
   const {isCollapsed, toggle} = useSideNavCollapse();
   const {state} = obs;
-  const savedJobs = useSavedJobsState({
-    profileId,
-    profileReady: !profileSetupInProgress,
-  });
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
 
   const loadSavedJobsList = useCallback(() => {
@@ -420,6 +422,9 @@ export function ObservabilitySidebar({
             onRefreshDetail={(jobId) => {
               void savedJobs.loadDetail(jobId, {force: true});
             }}
+            canCreateTailoredCv={!profileSetupInProgress && !isInteractionLocked}
+            isTailoringPending={isTailoringPending}
+            onCreateTailoredCv={onCreateTailoredCv}
           />
         ) : null}
       </div>

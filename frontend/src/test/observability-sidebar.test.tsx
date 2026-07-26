@@ -16,6 +16,7 @@ import userEvent from '@testing-library/user-event';
 import {afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {CvSidebar} from '../features/profile/CvSidebar';
+import {useSavedJobsState} from '../features/jobs/savedJobsState';
 import type {ProfileListItem} from '../features/profile/conversationTypes';
 import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
 import {
@@ -492,7 +493,27 @@ describe('ObservabilitySidebar composition', () => {
 
     try {
       const api = mockObservabilityApi();
-      renderObservabilitySidebar(api);
+      function SidebarHarness() {
+        const savedJobs = useSavedJobsState({
+          profileId: 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb',
+          profileReady: true,
+        });
+        return (
+          <Theme theme={neutralTheme}>
+            <CvSidebar
+              isUploadDisabled={false}
+              onSidebarUploadSuccess={vi.fn()}
+              savedJobs={savedJobs}
+              deps={{
+                loadProfile: vi.fn().mockResolvedValue(emptyProfile()),
+                uploadCv: vi.fn(),
+                observability: api,
+              }}
+            />
+          </Theme>
+        );
+      }
+      render(<SidebarHarness />);
 
       await userEvent.click(screen.getByTestId('jobagent-obs-tab-saved-jobs'));
       expect(

@@ -21,7 +21,11 @@ import {
   placeActiveCvCitationMarker,
 } from '../features/chat/components/AssistantResponse';
 import {ACTIVE_CV_SOURCE_DIALOG_TITLE} from '../features/chat/components/ActiveCvSourceDialog';
-import {ChatMessageRow} from '../features/chat/components/ChatMessageRow';
+import {
+  ChatMessageRow,
+  tailoredCvResultForTools,
+} from '../features/chat/components/ChatMessageRow';
+import {CREATE_TAILORED_CV_TOOL_NAME} from '../features/cv-tailoring/types';
 import {
   activeCvEvidenceForTools,
   projectActiveCvResultData,
@@ -470,5 +474,55 @@ describe('ChatMessageRow role split and composition', () => {
     );
     expect(message.content).toBe('Stable content.');
     expect(message.content).not.toContain(ACTIVE_CV_CITATION_MARKER);
+  });
+
+  it('projects only a valid completed error-free durable tailored-CV result', () => {
+    const valid = activity(
+      {
+        session_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        version_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+        status: 'ready',
+        currentness: 'current',
+      },
+      {toolName: CREATE_TAILORED_CV_TOOL_NAME},
+    );
+    expect(tailoredCvResultForTools([valid])).toEqual({
+      session_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      version_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+      status: 'ready',
+      currentness: 'current',
+    });
+    expect(
+      tailoredCvResultForTools([
+        activity(valid.resultData, {
+          toolName: CREATE_TAILORED_CV_TOOL_NAME,
+          source: 'stream',
+        }),
+      ]),
+    ).toBeNull();
+    expect(
+      tailoredCvResultForTools([
+        activity(valid.resultData, {
+          toolName: CREATE_TAILORED_CV_TOOL_NAME,
+          status: 'failed',
+        }),
+      ]),
+    ).toBeNull();
+    expect(
+      tailoredCvResultForTools([
+        activity(valid.resultData, {
+          toolName: CREATE_TAILORED_CV_TOOL_NAME,
+          errorCode: 'TAILORING_COMPILE_FAILED',
+        }),
+      ]),
+    ).toBeNull();
+    expect(
+      tailoredCvResultForTools([
+        activity(
+          {...valid.resultData!, version_id: 'not-a-uuid'},
+          {toolName: CREATE_TAILORED_CV_TOOL_NAME},
+        ),
+      ]),
+    ).toBeNull();
   });
 });

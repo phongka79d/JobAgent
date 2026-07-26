@@ -25,6 +25,15 @@ import {
 } from '../features/profile/CvSidebar';
 import type {CvUploadResponse} from '../features/profile/types';
 import {
+  useSavedJobsState,
+  type SavedJobsController,
+} from '../features/jobs/savedJobsState';
+import type {SavedJobsApi} from '../features/jobs/api';
+import {
+  useCvTailoringState,
+} from '../features/cv-tailoring/state';
+import type {CvTailoringApi} from '../features/cv-tailoring/api';
+import {
   useProfileWorkspaceState,
   type ProfileWorkspaceApi,
 } from '../features/profile/workspaceState';
@@ -35,6 +44,8 @@ export type AppDeps = {
   chat?: ChatPageDeps;
   sidebar?: CvSidebarDeps;
   workspace?: Partial<ProfileWorkspaceApi>;
+  savedJobs?: Partial<SavedJobsApi>;
+  tailoring?: Partial<CvTailoringApi>;
 };
 
 export type AppProps = {
@@ -45,12 +56,15 @@ export type AppProps = {
 export const CV_REPROCESS_TURN_MESSAGE =
   'Re-extract the retained CV and prepare the current draft for approval.';
 
+export type MainWorkspace =
+  | {kind: 'chat'}
+  | {kind: 'cv-tailoring'; sessionId: string};
+
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
   const workspaceApi = useMemo(() => deps?.workspace ?? {}, [deps?.workspace]);
   const workspace = useProfileWorkspaceState(workspaceApi, uploadLocked);
   const workspaceLocked = workspace.state.pending.size > 0;
-  const interactionLocked = uploadLocked || workspaceLocked;
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [sidebarTurn, setSidebarTurn] =
     useState<SidebarAttachmentTurnRequest | null>(null);
@@ -68,6 +82,41 @@ export function App({deps}: AppProps = {}) {
   const requestKeyRef = useRef(0);
   const selectedProfile = workspace.state.profiles.find(
     (profile) => profile.id === workspace.state.activeProfileId,
+  );
+  const savedJobs: SavedJobsController = useSavedJobsState({
+    api: deps?.savedJobs,
+    profileId: selectedProfile?.id ?? null,
+    profileReady: selectedProfile?.state === 'ready',
+  });
+  const tailoring = useCvTailoringState({
+    profileId: selectedProfile?.id ?? null,
+    profileReady: selectedProfile?.state === 'ready',
+    api: deps?.tailoring,
+  });
+  const tailoringLocked = tailoring.state.stream.phase === 'loading';
+  const interactionLocked = uploadLocked || workspaceLocked || tailoringLocked;
+  const [mainWorkspace, setMainWorkspace] = useState<MainWorkspace>({
+    kind: 'chat',
+  });
+  const handleOpenTailoringEditor = useCallback(
+    async (sessionId: string) => {
+      if (await tailoring.openSession(sessionId)) {
+        setMainWorkspace({kind: 'cv-tailoring', sessionId});
+      }
+    },
+    [tailoring.openSession],
+  );
+  const handleCreateTailoredCv = useCallback(
+    async (jobId: string) => {
+      const sessionId = await tailoring.createSession({
+        job_id: jobId,
+        instruction: '',
+      });
+      if (sessionId !== null) {
+        setMainWorkspace({kind: 'cv-tailoring', sessionId});
+      }
+    },
+    [tailoring.createSession],
   );
 
   const handleSidebarUploadSuccess = useCallback(
@@ -155,6 +204,7 @@ export function App({deps}: AppProps = {}) {
       contentPadding={0}
       height="fill"
       variant="surface"
+      data-main-workspace={mainWorkspace.kind}
       sideNav={
         <CvSidebar
           isUploadDisabled={interactionLocked}
@@ -166,6 +216,11 @@ export function App({deps}: AppProps = {}) {
           activationKey={activationKey}
           savedJobsInvalidateKey={savedJobsInvalidateKey}
           workspace={workspace}
+          savedJobs={savedJobs}
+          onCreateTailoredCv={(jobId) => {
+            void handleCreateTailoredCv(jobId);
+          }}
+          isTailoringPending={tailoringLocked}
           deps={deps?.sidebar}
         />
       }
@@ -175,6 +230,7 @@ export function App({deps}: AppProps = {}) {
         conversationId={workspace.state.selectedConversationId}
         selectedProfileState={selectedProfile?.state ?? null}
         selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
+        selectedJobId={savedJobs.state.selectedJobId}
         deps={deps?.chat}
         onInteractionLockChange={setUploadLocked}
         sidebarAttachmentTurn={sidebarTurn}
@@ -186,6 +242,9 @@ export function App({deps}: AppProps = {}) {
         onProfileSetupChanged={workspace.reload}
         onCvUploadSuccess={handleSidebarUploadSuccess}
         onSavedJobsInvalidated={handleSavedJobsInvalidated}
+        onOpenTailoringEditor={(sessionId) => {
+          void handleOpenTailoringEditor(sessionId);
+        }}
       />
     </AppShell>
   );

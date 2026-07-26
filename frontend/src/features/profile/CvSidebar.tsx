@@ -22,6 +22,10 @@ import {
 } from '@astryxdesign/core/SideNav';
 
 import type {ObservabilityApi} from '../observability/api';
+import {
+  createEmptySavedJobsController,
+  type SavedJobsController,
+} from '../jobs/savedJobsState';
 import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
 import {useObservabilityState} from '../observability/state';
 import {
@@ -77,6 +81,9 @@ export type CvSidebarProps = {
    */
   savedJobsInvalidateKey?: number;
   workspace?: ProfileWorkspaceController;
+  savedJobs?: SavedJobsController;
+  onCreateTailoredCv?: (jobId: string) => void;
+  isTailoringPending?: boolean;
   deps?: CvSidebarDeps;
 };
 
@@ -161,6 +168,9 @@ function CvSidebarController({
   activationKey = 0,
   savedJobsInvalidateKey = 0,
   workspace,
+  savedJobs,
+  onCreateTailoredCv,
+  isTailoringPending = false,
   deps,
 }: CvSidebarProps) {
   const selectedWorkspaceProfile = workspace?.state.profiles.find(
@@ -409,6 +419,7 @@ function CvSidebarController({
           cvName: displayCvName,
         }}
         observability={observability}
+        savedJobs={savedJobs ?? createEmptySavedJobsController()}
         profileSetupInProgress={Boolean(
           workspace && selectedWorkspaceProfile?.state !== 'ready',
         )}
@@ -427,6 +438,8 @@ function CvSidebarController({
             : onCvReprocess?.(attachmentId) ?? false
         }
         onCvDeleted={onCvDeleted}
+        onCreateTailoredCv={onCreateTailoredCv}
+        isTailoringPending={isTailoringPending}
       />
     </CvSidebarShell>
   );

@@ -10,6 +10,7 @@ import {
 } from '@astryxdesign/core/Chat';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
+import {Button} from '@astryxdesign/core/Button';
 
 import {MatchCard} from '../../jobs/MatchCard';
 import {
@@ -29,6 +30,10 @@ import {
   type ProfileApprovalAction,
 } from '../../profile/ApprovalCard';
 import {activeCvEvidenceForTools} from '../activeCvEvidence';
+import {
+  CREATE_TAILORED_CV_TOOL_NAME,
+  parseCreateTailoredCvResultData,
+} from '../../cv-tailoring/types';
 import {
   type JobSaveConfirmationAction,
   type JobSaveConfirmationProjection,
@@ -70,6 +75,7 @@ export type ChatMessageRowProps = {
   recoveredMatch?: CompactMatchResult | null;
   recoveryFailureHint?: string | null;
   onSaveAndEvaluate?: (sourceMessageId: string) => void;
+  onOpenTailoringEditor?: (sessionId: string) => void;
 };
 
 export function activityRunForAssistantDisplay(
@@ -298,6 +304,24 @@ export function isZeroResultMatchJobs(
   return false;
 }
 
+export function tailoredCvResultForTools(
+  tools: readonly ClientToolActivity[],
+) {
+  for (const tool of tools) {
+    if (
+      tool.toolName !== CREATE_TAILORED_CV_TOOL_NAME ||
+      tool.source !== 'history' ||
+      tool.status !== 'completed' ||
+      tool.errorCode !== null
+    ) {
+      continue;
+    }
+    const parsed = parseCreateTailoredCvResultData(tool.resultData);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
 /**
  * Durable initiating user message id for tools shown on an assistant row.
  * Same user-message/run/tool relationship as toolsForAssistantDisplay —
@@ -358,6 +382,7 @@ export function ChatMessageRow({
   recoveredMatch = null,
   recoveryFailureHint = null,
   onSaveAndEvaluate,
+  onOpenTailoringEditor,
 }: ChatMessageRowProps) {
   if (message.role === 'system') {
     return (
@@ -399,6 +424,8 @@ export function ChatMessageRow({
 
   const activeCvEvidence =
     message.role === 'assistant' ? activeCvEvidenceForTools(tools) : null;
+  const tailoredCv =
+    message.role === 'assistant' ? tailoredCvResultForTools(tools) : null;
 
   return (
     <ChatMessage key={message.clientKey} sender={senderOf(message.role)}>
@@ -444,6 +471,14 @@ export function ChatMessageRow({
               <MatchCard key={result.jobId} data={result} />
             ))
           : null}
+        {tailoredCv && onOpenTailoringEditor ? (
+          <Button
+            label="Mở CV đã chỉnh"
+            size="sm"
+            variant="secondary"
+            onClick={() => onOpenTailoringEditor(tailoredCv.session_id)}
+          />
+        ) : null}
         {showZeroRecovery && sourceMessageId && onSaveAndEvaluate ? (
           <EmptyMatchResultCard
             sourceMessageId={sourceMessageId}

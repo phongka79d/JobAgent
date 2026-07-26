@@ -90,6 +90,7 @@ export type CvReprocessTerminal =
 
 export type ChatPageProps = {
   conversationId?: string | null;
+  selectedJobId?: string | null;
   selectedProfileState?: ProfileListItem['state'] | null;
   selectedProfileSetupStatus?: ProfileSetupStatus | null;
   /** Injectable transport for tests; defaults to Plan 3/4 API clients. */
@@ -117,6 +118,7 @@ export type ChatPageProps = {
   onCvUploadSuccess?: (result: CvUploadResponse) => void;
   /** After zero-result save/evaluate — invalidate saved-JD sidebar caches. */
   onSavedJobsInvalidated?: () => void;
+  onOpenTailoringEditor?: (sessionId: string) => void;
 };
 
 function newClientKey(prefix: string): string {
@@ -130,6 +132,7 @@ const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 export function ChatPage({
   conversationId,
+  selectedJobId = null,
   selectedProfileState,
   selectedProfileSetupStatus,
   deps,
@@ -143,6 +146,7 @@ export function ChatPage({
   onProfileSetupChanged,
   onCvUploadSuccess,
   onSavedJobsInvalidated,
+  onOpenTailoringEditor,
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
@@ -424,7 +428,11 @@ export function ChatPage({
 
       void (async () => {
         try {
-          const body = {message: trimmed, attachment_ids: attachmentIds};
+          const body = {
+            message: trimmed,
+            attachment_ids: attachmentIds,
+            selected_job_id: selectedJobId,
+          };
           if (conversationId === null) {
             throw new ChatApiError(
               409,
@@ -464,7 +472,13 @@ export function ChatPage({
       })();
       return true;
     },
-    [conversationId, makeStreamCallbacks, sendConversationTurn, sendTurn],
+    [
+      conversationId,
+      makeStreamCallbacks,
+      selectedJobId,
+      sendConversationTurn,
+      sendTurn,
+    ],
   );
 
   const handleSubmit = useCallback(
@@ -928,6 +942,7 @@ export function ChatPage({
             getRecoveryEntry={getRecoveryEntry}
             isRecoveryPending={isRecoveryPending}
             onSaveAndEvaluate={handleSaveAndEvaluate}
+            onOpenTailoringEditor={onOpenTailoringEditor}
           />
         ) : null}
       </ChatLayout>

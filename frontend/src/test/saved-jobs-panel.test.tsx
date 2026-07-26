@@ -21,8 +21,10 @@ import {
 import {SavedJobsPanel} from '../features/jobs/SavedJobsPanel';
 import {
   initialSavedJobsActionSlice,
+  useSavedJobsState,
   type CachedResource,
 } from '../features/jobs/savedJobsState';
+import {CvSidebar} from '../features/profile/CvSidebar';
 import type {
   SavedJobDetail,
   SavedJobListItem,
@@ -34,7 +36,6 @@ import {ObservabilityTabList} from '../features/observability/ObservabilityTabLi
 import type {ObservabilityTabId} from '../features/observability/types';
 import {
   mockObservabilityApi,
-  renderObservabilitySidebar,
 } from './support/observability';
 
 const JOB_NONE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -203,6 +204,9 @@ function renderPanel(opts: {
   onConfirmReextract?: (
     id: string,
   ) => Promise<'success' | 'duplicate' | 'error'>;
+  canCreateTailoredCv?: boolean;
+  isTailoringPending?: boolean;
+  onCreateTailoredCv?: (id: string) => void;
 }) {
   const selectedJobId =
     opts.selectedJobId === undefined
@@ -243,6 +247,9 @@ function renderPanel(opts: {
         onConfirmReextract={onConfirmReextract}
         onClearError={onClearError}
         onRefreshDetail={onRefreshDetail}
+        canCreateTailoredCv={opts.canCreateTailoredCv}
+        isTailoringPending={opts.isTailoringPending}
+        onCreateTailoredCv={opts.onCreateTailoredCv}
       />
     </Theme>,
   );
@@ -323,6 +330,31 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('jobagent-match-metadata'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the tailored-CV action only for unlocked processed full or partial JDs', async () => {
+    const onCreateTailoredCv = vi.fn();
+    renderPanel({
+      items: [listItem(JOB_NONE, {jd_quality: 'partial'})],
+      selectedJobId: JOB_NONE,
+      canCreateTailoredCv: true,
+      onCreateTailoredCv,
+    });
+    await userEvent.click(
+      screen.getByTestId(`jobagent-saved-job-tailor-${JOB_NONE}`),
+    );
+    expect(onCreateTailoredCv).toHaveBeenCalledWith(JOB_NONE);
+
+    cleanup();
+    renderPanel({
+      items: [listItem(JOB_NONE, {processing_status: 'processing'})],
+      selectedJobId: JOB_NONE,
+      canCreateTailoredCv: true,
+      onCreateTailoredCv,
+    });
+    expect(
+      screen.queryByTestId(`jobagent-saved-job-tailor-${JOB_NONE}`),
     ).not.toBeInTheDocument();
   });
 
@@ -910,7 +942,32 @@ describe('sidebar composition loads JD đã lưu panel', () => {
           });
         });
 
-      renderObservabilitySidebar(mockObservabilityApi());
+      function SidebarHarness() {
+        const savedJobs = useSavedJobsState({
+          profileId: 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb',
+          profileReady: true,
+        });
+        return (
+          <Theme theme={neutralTheme}>
+            <CvSidebar
+              isUploadDisabled={false}
+              onSidebarUploadSuccess={vi.fn()}
+              savedJobs={savedJobs}
+              deps={{
+                loadProfile: vi.fn().mockResolvedValue({
+                  present: false,
+                  profile: null,
+                  preferences: null,
+                  active_attachment: null,
+                }),
+                uploadCv: vi.fn(),
+                observability: mockObservabilityApi(),
+              }}
+            />
+          </Theme>
+        );
+      }
+      render(<SidebarHarness />);
 
       const tabs = await screen.findAllByRole('tab');
       expect(tabs).toHaveLength(6);

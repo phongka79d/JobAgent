@@ -27,7 +27,7 @@ export type ExperienceDetail = {
 export type EducationDetail = {institution: string; degree: string | null; field: string | null; graduation_year: number | null};
 export type LanguageDetail = {name: string; proficiency: string | null};
 export type CandidateProfileDetail = {
-  full_name: string | null; location: string | null; summary: string; current_title: string | null;
+  full_name: string | null; location: string | null; phone: string | null; email: string | null; github_url: string | null; summary: string; current_title: string | null;
   total_experience_years: number | null; skills: CandidateSkillDetail[]; experiences: ExperienceDetail[];
   education: EducationDetail[]; languages: LanguageDetail[]; extraction_confidence: number;
 };
@@ -136,7 +136,7 @@ export function parseProfileDetail(raw: unknown): ProfileDetail {
   const listKeys = ['id','display_name','cv_filename','attachment_state','location','skill_tags','skill_count','extraction_version','source_hash','state','setup_status','is_active','created_at','updated_at','last_opened_at'] as const;
   const listRaw = Object.fromEntries(listKeys.map((key) => [key, value[key]]));
   const profile = object(value.profile);
-  exact(profile, ['full_name','location','summary','current_title','total_experience_years','skills','experiences','education','languages','extraction_confidence']);
+  exact(profile, ['full_name','location','phone','email','github_url','summary','current_title','total_experience_years','skills','experiences','education','languages','extraction_confidence']);
   const preferences = object(value.preferences);
   exact(preferences, ['target_roles','preferred_locations','acceptable_work_modes','target_seniority']);
   const stringList = (item: unknown, name: string): string[] => { if (!Array.isArray(item) || item.some((entry) => typeof entry !== 'string')) throw new Error(`${name} must be string array`); return item as string[]; };

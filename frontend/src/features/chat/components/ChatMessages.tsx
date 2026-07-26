@@ -41,6 +41,7 @@ export type ChatMessagesProps = {
   getRecoveryEntry?: (sourceMessageId: string) => RecoveryEntry;
   isRecoveryPending?: (sourceMessageId: string) => boolean;
   onSaveAndEvaluate?: (sourceMessageId: string) => void;
+  onOpenTailoringEditor?: (sessionId: string) => void;
 };
 
 function isApprovalLocked(
@@ -149,6 +150,7 @@ export function ChatMessages({
   getRecoveryEntry,
   isRecoveryPending,
   onSaveAndEvaluate,
+  onOpenTailoringEditor,
 }: ChatMessagesProps) {
   let latestUserIndex = -1;
   messages.forEach((message, index) => {
@@ -210,6 +212,7 @@ export function ChatMessages({
             recoveredMatch={recoveredMatch}
             recoveryFailureHint={recovery?.failureHint ?? null}
             onSaveAndEvaluate={onSaveAndEvaluate}
+            onOpenTailoringEditor={onOpenTailoringEditor}
           />
         );
       })}

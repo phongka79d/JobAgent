@@ -142,6 +142,7 @@ export async function fetchConversationHistory(
 export type TurnRequest = {
   message: string;
   attachment_ids?: string[];
+  selected_job_id?: string | null;
 };
 
 export type StreamCallbacks = {
@@ -169,6 +170,7 @@ export async function streamChatTurn(
     body: JSON.stringify({
       message: body.message,
       attachment_ids: body.attachment_ids ?? [],
+      selected_job_id: body.selected_job_id ?? null,
     }),
     signal,
   });
@@ -189,6 +191,7 @@ export async function streamConversationTurn(
       body: JSON.stringify({
         message: body.message,
         attachment_ids: body.attachment_ids ?? [],
+        selected_job_id: body.selected_job_id ?? null,
       }),
       signal,
     },

@@ -39,6 +39,9 @@ export type SavedJobDetailProps = {
   onRequestReextract: (job: SavedJobListItem) => void;
   onClearError: (jobId: string) => void;
   onRefreshDetail: (jobId: string) => void;
+  canCreateTailoredCv?: boolean;
+  isTailoringPending?: boolean;
+  onCreateTailoredCv?: (jobId: string) => void;
 };
 
 type SavedJobDetailTab = 'comparison' | 'overview' | 'source';
@@ -374,6 +377,9 @@ export function SavedJobDetailView({
   onRequestReextract,
   onClearError,
   onRefreshDetail,
+  canCreateTailoredCv = false,
+  isTailoringPending = false,
+  onCreateTailoredCv,
 }: SavedJobDetailProps) {
   const isPending = pendingKind !== undefined;
   const isEvaluatePending = pendingKind === 'evaluate';
@@ -441,6 +447,20 @@ export function SavedJobDetailView({
         aria-label="Thao tác JD"
         data-testid={`jobagent-saved-job-actions-${job.id}`}
       >
+        {canCreateTailoredCv &&
+        job.processing_status === 'processed' &&
+        (job.jd_quality === 'full' || job.jd_quality === 'partial') &&
+        onCreateTailoredCv ? (
+          <Button
+            label="Tạo CV theo JD"
+            variant="primary"
+            size="sm"
+            isDisabled={isPending || isTailoringPending}
+            isLoading={isTailoringPending}
+            onClick={() => onCreateTailoredCv(job.id)}
+            data-testid={`jobagent-saved-job-tailor-${job.id}`}
+          />
+        ) : null}
         {evaluateLabel ? (
           <Button
             label={evaluateLabel}

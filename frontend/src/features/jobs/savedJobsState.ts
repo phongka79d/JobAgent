@@ -965,3 +965,23 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
       isJobActionKindPending(state.actions, jobId, kind),
   };
 }
+
+export type SavedJobsController = ReturnType<typeof useSavedJobsState>;
+
+/** Backward-compatible inert controller for isolated sidebar render tests. */
+export function createEmptySavedJobsController(): SavedJobsController {
+  return {
+    state: initialSavedJobsState,
+    selectJob: () => undefined,
+    clearActionError: () => undefined,
+    loadList: async () => undefined,
+    loadDetail: async () => undefined,
+    loadSkillMap: async () => undefined,
+    evaluateJob: async () => 'duplicate',
+    confirmDelete: async () => 'duplicate',
+    confirmReextract: async () => 'duplicate',
+    invalidateCurrentness: () => undefined,
+    isJobActionPending: () => false,
+    isJobActionKindPending: () => false,
+  } as SavedJobsController;
+}

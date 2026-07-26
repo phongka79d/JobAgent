@@ -8,6 +8,7 @@
 import {projectMatchJobsResultData} from '../jobs/matchResult';
 import {projectCompactResultData} from '../jobs/types';
 import {projectActiveCvResultData} from './activeCvEvidence';
+import {projectCreateTailoredCvResultData} from '../cv-tailoring/types';
 import type {
   AgentActivityPayload,
   AgentRunView,
@@ -36,7 +37,8 @@ export function projectToolResultData(
   return (
     projectCompactResultData(toolName, data) ??
     projectMatchJobsResultData(toolName, data) ??
-    projectActiveCvResultData(toolName, data)
+    projectActiveCvResultData(toolName, data) ??
+    projectCreateTailoredCvResultData(toolName, data)
   );
 }
 

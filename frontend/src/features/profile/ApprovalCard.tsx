@@ -95,6 +95,19 @@ export function summarizeApprovalCard(card: JsonObject): {
     lines.push(body.length > 280 ? `${body.slice(0, 277)}…` : body);
   }
 
+  const phone = profile
+    ? asNonEmptyString(profile.phone)
+    : asNonEmptyString(card.phone);
+  const email = profile
+    ? asNonEmptyString(profile.email)
+    : asNonEmptyString(card.email);
+  const githubUrl = profile
+    ? asNonEmptyString(profile.github_url)
+    : asNonEmptyString(card.github_url);
+  if (phone) lines.push(`Phone: ${phone}`);
+  if (email) lines.push(`Email: ${email}`);
+  if (githubUrl) lines.push(`GitHub: ${githubUrl}`);
+
   const skills = asStringList(card.skills);
   if (skills.length > 0) {
     const preview = skills.slice(0, 6).join(', ');

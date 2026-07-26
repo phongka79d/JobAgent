@@ -188,6 +188,20 @@ async function submitMessage(
 }
 
 describe('ApprovalCard pure helpers', () => {
+  it('shows present approved contacts and omits absent GitHub', () => {
+    const {lines} = summarizeApprovalCard({
+      profile: {
+        summary: 'Synthetic summary',
+        current_title: null,
+        phone: '0123456789',
+        email: 'synthetic@example.test',
+        github_url: null,
+      },
+    });
+    expect(lines).toContain('Phone: 0123456789');
+    expect(lines).toContain('Email: synthetic@example.test');
+    expect(lines.some((line) => line.startsWith('GitHub:'))).toBe(false);
+  });
   it('recognizes only profile_commit with both actions', () => {
     expect(
       isProfileCommitApproval(PROFILE_COMMIT_KIND, [

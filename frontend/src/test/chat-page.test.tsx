@@ -17,7 +17,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {App} from '../app/App';
 import {ChatPage, type ChatPageDeps} from '../features/chat/ChatPage';
 import type {HistoryPage, SseEvent} from '../features/chat/types';
-import type {StreamCallbacks} from '../lib/api/chat';
+import type {StreamCallbacks, TurnRequest} from '../lib/api/chat';
 
 const RUN_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const EVENT_A = '11111111-1111-4111-8111-111111111111';
@@ -634,6 +634,54 @@ describe('ChatPage send / stream / lock', () => {
       const editable = getComposerEditable(container);
       expect(editable.getAttribute('contenteditable')).toBe('true');
     });
+  });
+
+  it('captures the selected Job UUID when a turn is sent', async () => {
+    const selectedAtSend = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const selectedAfterSend = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    let finish: (() => void) | null = null;
+    const sendTurn = vi.fn(
+      async (
+        _body: TurnRequest,
+        callbacks: StreamCallbacks,
+      ) => {
+        await new Promise<void>((resolve) => {
+          finish = () => {
+            callbacks.onEvent(
+              sse(EVENT_D, 'run_completed', {state: 'completed'}),
+            );
+            resolve();
+          };
+        });
+      },
+    );
+    const view = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          selectedJobId={selectedAtSend}
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn}}
+        />
+      </Theme>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Start a conversation')).toBeInTheDocument();
+    });
+    await submitMessage(view.container, 'Tailor this');
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          selectedJobId={selectedAfterSend}
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn}}
+        />
+      </Theme>,
+    );
+    expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      selected_job_id: selectedAtSend,
+    });
+    await act(async () => finish?.());
   });
 
   it('disables composer while streaming and shows exact tool activity', async () => {

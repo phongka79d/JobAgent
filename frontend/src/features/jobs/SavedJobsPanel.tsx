@@ -54,6 +54,9 @@ export type SavedJobsPanelProps = {
   ) => Promise<'success' | 'duplicate' | 'error'>;
   onClearError: (jobId: string) => void;
   onRefreshDetail: (jobId: string) => void;
+  canCreateTailoredCv?: boolean;
+  isTailoringPending?: boolean;
+  onCreateTailoredCv?: (jobId: string) => void;
 };
 
 function processingVariant(
@@ -178,6 +181,9 @@ export function SavedJobsPanel({
   onConfirmReextract,
   onClearError,
   onRefreshDetail,
+  canCreateTailoredCv = false,
+  isTailoringPending = false,
+  onCreateTailoredCv,
 }: SavedJobsPanelProps) {
   const items = list.data?.items ?? [];
   const selectedItem =
@@ -319,6 +325,9 @@ export function SavedJobsPanel({
             onRequestReextract={(job) => setReextractTarget(job)}
             onClearError={onClearError}
             onRefreshDetail={onRefreshDetail}
+            canCreateTailoredCv={canCreateTailoredCv}
+            isTailoringPending={isTailoringPending}
+            onCreateTailoredCv={onCreateTailoredCv}
           />
         ) : (
           <EmptyState

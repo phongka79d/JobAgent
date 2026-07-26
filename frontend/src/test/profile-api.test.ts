@@ -106,6 +106,9 @@ it('parses ready profile detail with the lifecycle setup field', () => {
     profile: {
       full_name: 'Ada Lovelace',
       location: 'London',
+      phone: '0123456789',
+      email: 'ada@example.test',
+      github_url: null,
       summary: 'Engineer',
       current_title: 'Engineer',
       total_experience_years: 5,
@@ -126,6 +129,8 @@ it('parses ready profile detail with the lifecycle setup field', () => {
   });
   expect(parsed.setup_status).toBeNull();
   expect(parsed.selected_conversation_id).toBe(CONVERSATION_ID);
+  expect(parsed.profile.phone).toBe('0123456789');
+  expect(parsed.profile.github_url).toBeNull();
 });
 
 it('sends the profile id in the activation path', async () => {
