@@ -20,12 +20,12 @@ _FIXED_SHELL = r"""\documentclass[11pt]{article}
 \usepackage{hyperref}
 \usepackage{enumitem}
 \usepackage[utf8]{inputenc}
-\usepackage[T5,T1]{fontenc}
+\usepackage[T1,T5]{fontenc}
 \usepackage[vietnamese,english]{babel}
 \usepackage[left=1.06cm,top=1.2cm,right=1.06cm,bottom=1.0cm]{geometry}
 \usepackage{titlesec}
 
-\titleformat{\section}{\large\bfseries\uppercase}{}{0em}{}[\titlerule]
+\titleformat{\section}{\large\bfseries}{}{0em}{\MakeUppercase}[\titlerule]
 \titlespacing*{\section}{0pt}{10pt}{5pt}
 
 \begin{document}"""
