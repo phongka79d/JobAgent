@@ -6,8 +6,10 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
+from app.api.sse import open_sse_response
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.models.attachments import Attachment
@@ -21,6 +23,7 @@ from app.schemas.cv_tailoring import (
     TailoredPatchSet,
     TailoredSectionPatch,
 )
+from app.services.activity_gate import assert_profile_idle
 from app.services.cv_document_projection import project_outline
 from app.services.cv_tailoring_compiler import (
     TailoringCompileError,
@@ -28,6 +31,7 @@ from app.services.cv_tailoring_compiler import (
 )
 from app.services.cv_tailoring_projection import project_tailoring_baseline
 from app.storage.cv_tailoring import TailoringArtifactStorage
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from tests.support.db_migration import run_async, session_factory
@@ -496,6 +500,86 @@ def test_closing_after_primed_run_started_fails_durable_generation(
                 assert owner is not None and owner.state == "failed"
                 assert owner.error_code == "TAILORING_GROUNDING_FAILED"
                 assert run is not None and run.state == "failed"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_asgi_disconnect_durably_fails_active_tailoring_generation(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _body() -> None:
+        from app.services.cv_tailoring import TailoringCoordinator
+
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            profile_id, document, profile_model = await _seed_ready_source(factory)
+            coordinator = TailoringCoordinator(
+                session_factory=factory,
+                storage=TailoringArtifactStorage(tmp_path / "files"),
+                settings=_Settings(),
+                invoker=_Invoker(_patch_for_summary(document, profile_model)),
+                sqlite_path=db_path,
+                compiler=_fake_compile,
+            )
+            launch = await coordinator.prepare_session(
+                profile_id=profile_id,
+                job_id=None,
+                instruction="Tailor the summary",
+                parent_run_id=None,
+            )
+            generation_started = anyio.Event()
+
+            async def block_generation(_prepared: Any) -> Any:
+                generation_started.set()
+                await anyio.sleep_forever()
+
+            original_delete = coordinator._delete_checkpoint
+            deleted_states: list[tuple[str, str]] = []
+
+            async def observe_delete(run_id: str) -> None:
+                async with factory() as session:
+                    owner = await session.get(CVTailoringSession, launch.session_id)
+                    run = await session.get(AgentRun, launch.run_id)
+                    assert owner is not None
+                    assert run is not None
+                    deleted_states.append((owner.state, run.state))
+                await original_delete(run_id)
+
+            monkeypatch.setattr(coordinator, "_generation_context", block_generation)
+            monkeypatch.setattr(coordinator, "_delete_checkpoint", observe_delete)
+            response = await open_sse_response(
+                coordinator.stream_initial_version(launch),
+                error_mapper=lambda exc: HTTPException(status_code=400),
+            )
+
+            async def send(_message: dict[str, object]) -> None:
+                return None
+
+            async def receive() -> dict[str, str]:
+                await generation_started.wait()
+                return {"type": "http.disconnect"}
+
+            await response(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0", "spec_version": "2.3"},
+                },
+                receive,
+                send,
+            )
+
+            async with factory() as session:
+                owner = await session.get(CVTailoringSession, launch.session_id)
+                run = await session.get(AgentRun, launch.run_id)
+                assert owner is not None and owner.state == "failed"
+                assert owner.error_code == "TAILORING_GROUNDING_FAILED"
+                assert run is not None and run.state == "failed"
+                assert run.error_code == "TAILORING_GROUNDING_FAILED"
+                await assert_profile_idle(session, profile_id=profile_id)
+            assert deleted_states == [("failed", "failed")]
         finally:
             await engine.dispose()
 
