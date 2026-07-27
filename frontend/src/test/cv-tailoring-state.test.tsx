@@ -427,4 +427,43 @@ describe('CV tailoring state owner', () => {
     expect(result.current.state.selectedSessionId).toBeNull();
     expect(result.current.state.stream.phase).toBe('error');
   });
+
+  it('clears a prior stream error when opening a durable ready session', async () => {
+    const streamCreate = vi.fn(async (_body, callbacks) => {
+      callbacks.onSessionId(SESSION_ID);
+      callbacks.onEvent({
+        event: 'run_failed',
+        run_id: RUN_ID,
+        payload: {
+          state: 'failed',
+          error_code: 'TAILORING_GROUNDING_FAILED',
+          summary: 'Tailored content is not source-supported',
+        },
+      });
+    });
+    const fetchSession = vi
+      .fn()
+      .mockResolvedValue(durableDetail(OTHER_SESSION_ID));
+    const {result} = renderHook(() =>
+      useCvTailoringState({
+        profileId: PROFILE_ID,
+        profileReady: true,
+        api: {streamCreate, fetchSession},
+      }),
+    );
+
+    await act(async () => {
+      await result.current.createSession({job_id: null, instruction: 'Focus'});
+    });
+    expect(result.current.state.stream.error?.code).toBe(
+      'TAILORING_GROUNDING_FAILED',
+    );
+
+    await act(async () => {
+      expect(await result.current.openSession(OTHER_SESSION_ID)).toBe(true);
+    });
+
+    expect(result.current.state.selectedSessionId).toBe(OTHER_SESSION_ID);
+    expect(result.current.state.stream.error).toBeNull();
+  });
 });

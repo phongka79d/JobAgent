@@ -233,6 +233,10 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         draft: detail.content,
         draftDirty: false,
         conflict: false,
+        stream:
+          isDurableCompletedDetail(detail) && mutationRef.current === null
+            ? empty()
+            : current.stream,
       }));
       return true;
     },

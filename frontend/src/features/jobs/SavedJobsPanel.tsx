@@ -338,36 +338,30 @@ export function SavedJobsPanel({
         )}
       </VStack>
 
-      <JobDeleteDialog
-        isOpen={deleteTarget !== null}
-        jobLabel={
-          deleteTarget ? formatSavedJobLabel(deleteTarget) : ''
-        }
-        isDeleting={
-          deleteTarget !== null &&
-          actions.pendingByJob[deleteTarget.id] === 'delete'
-        }
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeleteTarget(null);
-          }
-        }}
-        onConfirm={() => {
-          if (!deleteTarget) {
-            return;
-          }
-          const target = deleteTarget;
-          void onConfirmDelete(target.id).then((outcome) => {
-            if (
-              outcome === 'success' ||
-              outcome === 'duplicate' ||
-              outcome === 'error'
-            ) {
+      {deleteTarget ? (
+        <JobDeleteDialog
+          isOpen
+          jobLabel={formatSavedJobLabel(deleteTarget)}
+          isDeleting={actions.pendingByJob[deleteTarget.id] === 'delete'}
+          onOpenChange={(open) => {
+            if (!open) {
               setDeleteTarget(null);
             }
-          });
-        }}
-      />
+          }}
+          onConfirm={() => {
+            const target = deleteTarget;
+            void onConfirmDelete(target.id).then((outcome) => {
+              if (
+                outcome === 'success' ||
+                outcome === 'duplicate' ||
+                outcome === 'error'
+              ) {
+                setDeleteTarget(null);
+              }
+            });
+          }}
+        />
+      ) : null}
 
       <JobReextractDialog
         isOpen={reextractTarget !== null}

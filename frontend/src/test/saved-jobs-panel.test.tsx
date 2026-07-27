@@ -12,6 +12,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
+import {StrictMode} from 'react';
 import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -207,6 +208,7 @@ function renderPanel(opts: {
   canCreateTailoredCv?: boolean;
   isTailoringPending?: boolean;
   onCreateTailoredCv?: (id: string) => void;
+  strictMode?: boolean;
 }) {
   const selectedJobId =
     opts.selectedJobId === undefined
@@ -228,7 +230,7 @@ function renderPanel(opts: {
   const onRefresh = vi.fn();
   const onRefreshDetail = vi.fn();
 
-  render(
+  const panel = (
     <Theme theme={neutralTheme}>
       <SavedJobsPanel
         list={readyList(opts.items)}
@@ -251,8 +253,9 @@ function renderPanel(opts: {
         isTailoringPending={opts.isTailoringPending}
         onCreateTailoredCv={opts.onCreateTailoredCv}
       />
-    </Theme>,
+    </Theme>
   );
+  render(opts.strictMode ? <StrictMode>{panel}</StrictMode> : panel);
 
   return {
     onSelect,
@@ -642,6 +645,35 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     await waitFor(() => {
       expect(onConfirmDelete).toHaveBeenCalledWith(JOB_NONE);
     });
+  });
+
+  it('mounts an open delete dialog only after selecting a target in StrictMode', async () => {
+    const job = listItem(JOB_NONE, {
+      title: 'Platform Engineer',
+      company: 'Nimbus',
+    });
+    renderPanel({
+      items: [job],
+      selectedJobId: JOB_NONE,
+      strictMode: true,
+    });
+
+    expect(
+      screen.queryByTestId('jobagent-saved-job-delete-dialog'),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByTestId(`jobagent-saved-job-delete-${JOB_NONE}`),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('jobagent-saved-job-delete-dialog'),
+      ).toHaveAttribute('open');
+    });
+    expect(
+      screen.getByTestId('jobagent-saved-job-delete-dialog'),
+    ).toHaveTextContent('Platform Engineer · Nimbus');
   });
 
   it('keeps prior list data visible when list is in error phase with cached items', () => {

@@ -347,6 +347,11 @@ export function savedJobsReducer(
     case 'list_success':
       return {
         ...state,
+        selectedJobId:
+          state.selectedJobId !== null &&
+          action.data.items.some((item) => item.id === state.selectedJobId)
+            ? state.selectedJobId
+            : null,
         list: applySuccess(action.data, action.data.items.length),
       };
     case 'list_error':

@@ -624,6 +624,21 @@ describe('saved-JD request ordering and stale-on-error', () => {
 });
 
 describe('saved-JD actions, invalidation, and selection', () => {
+  it('clears a selected Job that is absent from a refreshed list', () => {
+    let state = savedJobsReducer(initialSavedJobsState, {
+      type: 'list_success',
+      data: listPage([listItem(JOB_A)]),
+    });
+    state = savedJobsReducer(state, {type: 'select_job', jobId: JOB_A});
+
+    state = savedJobsReducer(state, {
+      type: 'list_success',
+      data: listPage([]),
+    });
+
+    expect(state.selectedJobId).toBeNull();
+  });
+
   it('prevents duplicate pending actions per job', () => {
     let state = initialSavedJobsState;
     state = savedJobsReducer(state, {
