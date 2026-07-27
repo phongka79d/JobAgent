@@ -11,8 +11,8 @@ credentials, database dumps, or complete logs.
 |---|---|
 | Date | `2026-07-27` |
 | Operator | Local automated synthetic gate |
-| Branch/SHA | `feature/cv-tailoring-latex` / `01ec0c36c00c7973da56ca211351e02b8ee061a8` |
-| Compose project | `NOT RUN` |
+| Branch/SHA | `feature/cv-tailoring-latex` / `bbe45d7` |
+| Compose project | Candidate project ran with temporary host-port override; standard host ports were occupied by an existing stack |
 | Synthetic fixtures only | PASS |
 
 ## Automated gates
@@ -24,12 +24,12 @@ credentials, database dumps, or complete logs.
 | Focused Agent/coordinator/API/deletion/E2E tests | PASS | Plan 17 focused feature command completed with no failures |
 | Backend Ruff | PASS | `ruff check app tests --no-cache` completed with no findings |
 | Backend Mypy | PASS | `mypy app --no-incremental` completed with no issues in 172 source files |
-| Backend full Pytest | NOT RUN | Pending final gate |
-| Migration upgrade/downgrade/re-upgrade on disposable DB | NOT RUN | Never downgrade a configured user database |
-| Frontend full Vitest | NOT RUN | Pending final gate |
-| Frontend ESLint | NOT RUN | Pending final gate |
-| Frontend TypeScript | NOT RUN | Pending final gate |
-| Frontend production build | NOT RUN | Pending final gate |
+| Backend full Pytest | PASS | `pytest -q` completed with no failures; existing FastAPI/SQLAlchemy warnings only |
+| Migration upgrade/downgrade/re-upgrade on disposable DB | PASS | `tests/integration/test_migrations.py -q`: 11 passed |
+| Frontend full Vitest | PASS | `npm test -- --run`: 41 files, 450 tests passed |
+| Frontend ESLint | PASS | `npm run lint` completed successfully |
+| Frontend TypeScript | PASS | `npm run typecheck` completed successfully |
+| Frontend production build | PASS | `npm run build` completed; Vite emitted only the existing large-chunk advisory |
 | Plan portfolio validator | PASS | Plans 1-17 validated with no errors; only Plan 17 is terminal |
 | `git diff --check` and scope/secret review | PASS | No whitespace errors; review found only the Task 10 allowlist and synthetic test data. |
 
@@ -62,13 +62,13 @@ credentials, database dumps, or complete logs.
 
 | Check | Status | Sanitized evidence |
 |---|---|---|
-| Services are exactly Neo4j/backend/frontend | NOT RUN | |
-| Startup reaches migration `0007_add_cv_tailoring` before Uvicorn | NOT RUN | |
-| Health reports all components available | NOT RUN | |
-| Image-build compiler smoke passes | NOT RUN | |
-| Running-container compiler smoke passes | NOT RUN | |
-| Compiler runs two argv-only passes with `-no-shell-escape` | NOT RUN | |
-| No fourth service, worker, queue, or runtime compile network | NOT RUN | |
+| Services are exactly Neo4j/backend/frontend | PASS | `docker compose config --services` returned exactly `neo4j`, `backend`, `frontend` |
+| Startup reaches migration `0007_add_cv_tailoring` before Uvicorn | PASS | Candidate backend reached healthy state after image `alembic upgrade head && exec uvicorn` startup path |
+| Health reports all components available | PASS | Candidate `GET /api/health`: overall/sqlite/filesystem/neo4j all `available` |
+| Image-build compiler smoke passes | PASS | `docker compose up --build` completed backend `cv_tailoring_smoke` after TeX installation |
+| Running-container compiler smoke passes | PASS | Candidate `docker compose exec backend python -m app.services.cv_tailoring_smoke` exited 0 |
+| Compiler runs two argv-only passes with `-no-shell-escape` | PASS | Real candidate smoke completed two compiler passes; unit argv/no-shell-escape tests passed |
+| No fourth service, worker, queue, or runtime compile network | PASS | Compose service inventory remained three services; compiler runs inside backend |
 
 ## Browser acceptance
 
