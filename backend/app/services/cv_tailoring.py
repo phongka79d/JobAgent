@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, Protocol, cast
 
+from anyio import CancelScope
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -332,10 +333,11 @@ class TailoringCoordinator:
                 )
                 await self._delete_checkpoint(launch.run_id)
         except (asyncio.CancelledError, GeneratorExit):
-            if await self._fail_generation(
-                prepared, TAILORING_GROUNDING_FAILED
-            ):
-                await self._delete_checkpoint(launch.run_id)
+            with CancelScope(shield=True):
+                if await self._fail_generation(
+                    prepared, TAILORING_GROUNDING_FAILED
+                ):
+                    await self._delete_checkpoint(launch.run_id)
             raise
         except TailoringError as exc:
             if await self._fail_generation(prepared, exc.code):
