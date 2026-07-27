@@ -366,7 +366,7 @@ SSE session creation uses the existing seven event names. `POST /api/cv-tailorin
 - Modify: `backend/tests/integration/test_profile_approval.py`
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 
-- [ ] **Step 1: Write failing backward-compatibility and contact-grounding tests**
+- [x] **Step 1: Write failing backward-compatibility and contact-grounding tests**
 
 Add strict schema tests proving old payloads parse with all three new fields set to `None`, valid fields round-trip, invalid/blank contact values fail, and unknown fields still fail. Add this source-order/ambiguity matrix to `test_cv_contact_contracts.py`:
 
@@ -394,7 +394,7 @@ def test_projects_source_ordered_contacts_and_omits_ambiguous_kind() -> None:
 
 Also cover evidence absent from the referenced chunk, invalid ordinal, malformed email, phone outside 7–15 normalized digits, GitHub repository paths, non-GitHub hosts, username-like inference, duplicate equivalent values, and no-contact CVs.
 
-- [ ] **Step 2: Run the focused tests to verify RED**
+- [x] **Step 2: Run the focused tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -403,7 +403,7 @@ Set-Location backend
 
 Expected: collection fails for `cv_contact_contracts`, and schema/extraction assertions fail because contact fields and provider rows do not exist.
 
-- [ ] **Step 3: Extend `CandidateProfile` without breaking stored JSON**
+- [x] **Step 3: Extend `CandidateProfile` without breaking stored JSON**
 
 Insert nullable fields after `location`; defaults are required so every already-approved profile remains valid without a migration or provider backfill:
 
@@ -428,7 +428,7 @@ class CandidateProfile(BaseModel):
 
 Create `schemas/contact.py` as the sole syntax/normalization owner with `normalize_phone(value)`, `normalize_email(value)`, and `normalize_github_profile_url(value)`, each returning a normalized string or raising `ValueError`. CandidateProfile field validators call these helpers after trimming and reject blank-as-present; `cv_contact_contracts` calls the same helpers before evidence comparison. Phone requires 7–15 normalized digits, email uses bounded local/domain syntax, and GitHub requires the absolute single-profile URL contract. Explicit corrections may change these values only through draft approval. Do not add duplicate SQL columns to `profiles`; `profile_json` remains the only detailed profile-fact owner. Keep `ProfileListItem` unchanged so list endpoints do not expose contacts.
 
-- [ ] **Step 4: Implement the pure contact contract**
+- [x] **Step 4: Implement the pure contact contract**
 
 Create `cv_contact_contracts.py` with these public shapes and one pure projection function:
 
@@ -486,13 +486,13 @@ The implementation must reuse `normalize_assertion_text()` for NFKC/casefold/whi
 
 Define the private `normalize_contact_value(kind, value, evidence) -> str | None` in the same module. It delegates syntax/canonicalization to `schemas.contact`, then returns the comparison key only when that normalized value is represented by normalized evidence; otherwise it returns null. No other module reimplements contact normalization.
 
-- [ ] **Step 5: Carry contact rows through bounded CV extraction**
+- [x] **Step 5: Carry contact rows through bounded CV extraction**
 
 Add `contacts: list[ExtractedContactFact]` to `ExtractedBatchDocument`. Add `contact_facts: Sequence[ExtractedContactFact]` to `CVDocumentExtractionOutcome`. Update `_BATCH_SYSTEM` so each row must cite evidence and a batch-local ordinal. Clamp/drop rows with an ordinal outside the current batch, accumulate them in batch/source order, and return them in the outcome. Consolidation continues to receive section fragments only; it must not become a second contact selector.
 
 Update `project_candidate_profile()` to accept `phone`, `email`, and `github_url` keyword arguments and put them into the validated payload. In both document-publication paths, call `validate_and_project_contact_facts(outcome.contact_facts, chunks=chunks)` before projection, append its ambiguity warnings to document extraction warnings, and pass only accepted values into the profile. Existing profiles acquire contacts only after explicit re-extraction and approval.
 
-- [ ] **Step 6: Permit explicit contact corrections through the existing approval owner**
+- [x] **Step 6: Permit explicit contact corrections through the existing approval owner**
 
 Extend `_PROFILE_PATCH_KEYS` in `profile_drafts.py` to the exact set below; no direct active-profile write is added:
 
@@ -515,7 +515,7 @@ _PROFILE_PATCH_KEYS = frozenset({
 
 Pydantic validates corrections, `propose_profile_update` writes only `profile_drafts`, and `commit_approved_draft` remains the atomic approval boundary. Add integration tests proving Save Profile promotes corrected contacts, Request Changes does not, and re-extraction does not change approved contacts until approval.
 
-- [ ] **Step 7: Run contact/approval regressions and commit**
+- [x] **Step 7: Run contact/approval regressions and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_contact_schemas.py tests/unit/test_profile_schemas.py tests/unit/test_cv_contact_contracts.py tests/unit/test_cv_document_extraction.py tests/unit/test_profile_extraction.py tests/integration/test_profile_approval.py tests/integration/test_profile_reextraction.py -q
@@ -538,7 +538,7 @@ Expected: focused tests pass; no profile list response contains phone, email, or
 - Create: `backend/tests/unit/test_cv_tailoring_projection.py`
 - Create: `backend/tests/unit/test_cv_tailoring_guard.py`
 
-- [ ] **Step 1: Write failing schema, projection, and fact-stability tests**
+- [x] **Step 1: Write failing schema, projection, and fact-stability tests**
 
 Use a synthetic `CVDocument` containing summary, experience, skills, awards, and an unknown `other` heading. Assert the projector keeps every section ID/heading/kind/ordinal and every source text value, maps scalar/list attributes into `TailoredAttribute.values`, copies approved header facts, and assigns stable fact IDs on repeated calls.
 
@@ -566,7 +566,7 @@ def test_source_fact_ids_are_stable_and_revision_bound() -> None:
 
 Add strict-model tests for duplicate section IDs, non-contiguous ordinals, duplicate/empty fact IDs, unbounded text/items, unknown fields, missing full name, and malformed GitHub header values.
 
-- [ ] **Step 2: Run the new tests to verify RED**
+- [x] **Step 2: Run the new tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -575,7 +575,7 @@ Set-Location backend
 
 Expected: collection fails because the new schema/projection/guard modules do not exist.
 
-- [ ] **Step 3: Implement the frozen durable/provider schemas**
+- [x] **Step 3: Implement the frozen durable/provider schemas**
 
 Create `cv_tailoring.py` with the exact frozen models above plus `TailoringSourceRevision`, `TailoredFactEvidence`, `TailoringProvenance`, provider patch models, public DTOs, and parse helpers. `TailoringRunSummary.activities` reuses the existing safe `AgentActivityPayload`; it never exposes checkpoints or provider state:
 
@@ -599,7 +599,7 @@ def parse_tailoring_provenance(payload: Any) -> TailoringProvenance:
 
 `TailoredHeaderSnapshot` validates `github_url` with the same accepted profile-URL rule as Task 1. Source facts and public evidence never include chunk text, source ordinals, raw JD, provider payloads, filesystem paths, or contacts.
 
-- [ ] **Step 4: Build the deterministic baseline and fact bank**
+- [x] **Step 4: Build the deterministic baseline and fact bank**
 
 Implement these public contracts in `cv_tailoring_projection.py`:
 
@@ -613,7 +613,7 @@ select_section_context(baseline, *, section_ids) -> (selected sections, selected
 
 Use field paths `title`, `subtitle`, `date_text`, `location`, `body`, `bullets[i]`, and `attributes.<escaped-key>[i]`. Empty structural text gets no fact ID; every non-empty copied value gets exactly its own fact. Preserve source attribute insertion order and section/entry order. `select_section_context` rejects unknown/duplicate IDs and returns only requested section bodies/facts, proving unrelated sections cannot enter the Agent request.
 
-- [ ] **Step 5: Implement deterministic and semantic grounding gates**
+- [x] **Step 5: Implement deterministic and semantic grounding gates**
 
 Create a guard whose pure validation runs before the optional semantic checker:
 
@@ -664,11 +664,11 @@ Require exact targeted section coverage with immutable IDs/headings/kinds/ordina
 
 Keep both private helpers in this module: `validate_patch_structure_and_facts(patch, parent, allowed_section_ids, fact_bank, approved_skill_labels, semantic_checker) -> list[GroundingIssue]` owns every rejection above in deterministic path order, and `assemble_guarded_content(patch, *, parent) -> TailoredCVContent` copies untargeted sections, replaces accepted targeted items, reuses source item IDs where possible, and assigns `new_uuid()` only to accepted composite items. `project_tailoring_baseline` derives `approved_skill_labels` from non-excluded CandidateProfile skills; it never uses JD-required skills as candidate truth.
 
-- [ ] **Step 6: Prove AI and manual content cannot add unsupported facts**
+- [x] **Step 6: Prove AI and manual content cannot add unsupported facts**
 
 Test reordering/omission/truthful paraphrase success; invented employer, metric, date, link, institution, skill, cross-section fact, attribute key, section, and heading failures. Run the same guard against a manually edited full content document by converting changed targeted sections into a patch; no editor bypass exists. Add a synthetic forbidden marker such as `REFERENCE_ONLY_SENTINEL_7429` to a fake format-reference input that is never passed to projection/guard, then assert it appears in no prompt serialization, output, evidence, or rendered input. Do not use any value from the user's reference CV in the test.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_cv_tailoring_schemas.py tests/unit/test_cv_tailoring_projection.py tests/unit/test_cv_tailoring_guard.py -q
@@ -702,7 +702,7 @@ Expected: focused tests and Ruff pass; neither new service imports ORM, FastAPI,
 - Modify: `backend/tests/integration/test_migrations.py`
 - Modify: `backend/tests/unit/test_activity_gate.py`
 
-- [ ] **Step 1: Write failing model/repository tests**
+- [x] **Step 1: Write failing model/repository tests**
 
 Assert exact table columns, names, JSON/date types, FK actions, checks, indexes, and uniqueness. The required SQL shapes are:
 
@@ -727,7 +727,7 @@ agent_runs additions/changes:
 
 Repository tests must prove: initial session has version number zero; first version CAS changes it to one; each later version requires the exact same-session parent/latest number; stale parents fail without a row; version rows are immutable; Job deletion sets `job_id` null while label/revision/version artifacts remain; profile deletion cascades session/version metadata.
 
-- [ ] **Step 2: Run persistence tests to verify RED**
+- [x] **Step 2: Run persistence tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -736,7 +736,7 @@ Set-Location backend
 
 Expected: new modules/tables are missing and existing Agent-run expectations still require a non-null user message.
 
-- [ ] **Step 3: Add strict ORM models and constants**
+- [x] **Step 3: Add strict ORM models and constants**
 
 Create `cv_tailoring.py` with `CVTailoringSession` and `CVTailoringVersion`. Use Text UUID primary keys with `new_uuid`, timezone-aware timestamps with `utc_now`, JSON columns for validated payloads, and these invariants:
 
@@ -794,7 +794,7 @@ class CVTailoringVersion(Base):
 
 `profile_id` uses `profiles.id ON DELETE CASCADE`; `source_attachment_id` uses `attachments.id ON DELETE CASCADE`; `job_id` uses `job_posts.id ON DELETE SET NULL`; version `session_id` uses `ON DELETE CASCADE`. Store relative paths only, never absolute paths.
 
-- [ ] **Step 4: Generalize `agent_runs` without breaking chat callers**
+- [x] **Step 4: Generalize `agent_runs` without breaking chat callers**
 
 Add `run_kind`, nullable `tailoring_session_id`, and nullable `parent_run_id`; make `user_message_id` nullable. Add the tailoring-session FK with `ON DELETE CASCADE` and the parent-run self-FK with `ON DELETE SET NULL`, plus indexes for tailoring session/parent and these checks. Deleting a conversation therefore detaches historical parent linkage without deleting the session-owned tailoring run:
 
@@ -843,7 +843,7 @@ async def create_run(
 
 Add `create_tailoring_run()`, `list_run_ids_for_tailoring_session()`, and `list_tailoring_run_ids_for_profile()` helpers. Keep `resolve_run_owner()` chat-only and make it explicitly return `None` for a tailoring run; tailoring services resolve their owner from the session instead.
 
-- [ ] **Step 5: Create migration 0007 with database-level ownership guards**
+- [x] **Step 5: Create migration 0007 with database-level ownership guards**
 
 Use revision `0007_add_cv_tailoring`, down revision `0006_add_agent_activities`. Create sessions first, batch-alter `agent_runs`, then create versions. Add an insert-only `trg_cv_tailoring_sessions__job_or_instruction` trigger that rejects a new row when `job_id IS NULL AND trim(instruction) = ''`; do not apply this rule on update, because deleting a retained Job must be able to set a JD-only session's FK to null while preserving its label/artifacts. Add insert/update triggers that make SQLite enforce the two cross-row rules normal CHECK constraints cannot express:
 
@@ -879,7 +879,7 @@ SELECT CASE WHEN NEW.parent_run_id IS NOT NULL AND NOT EXISTS (
 
 Migration code performs structural/data-preserving changes only. It does not scan files, call a provider, compile, backfill contacts, create Neo4j data, or alter approved CV/JD JSON. Downgrade drops triggers and version/session rows (cascading tailoring runs) before restoring chat-only non-null `user_message_id`.
 
-- [ ] **Step 6: Add flush-only repositories and atomic CAS**
+- [x] **Step 6: Add flush-only repositories and atomic CAS**
 
 Implement these repository boundaries; none opens a session, commits, compiles, writes files, or calls a provider:
 
@@ -901,11 +901,11 @@ Define `CVTailoringVersionWrite` as a frozen internal dataclass containing exact
 
 `create_version_cas` validates the parent belongs to the session and has the expected latest version, inserts version `expected + 1`, then performs `UPDATE cv_tailoring_sessions SET latest_version_number=:new, state='ready', error_code=NULL WHERE id=:id AND latest_version_number=:expected`. A row count other than one raises `TailoringParentConflict`; the caller's transaction rolls back both operations. `mark_session_deleting` also clears `error_code` in the same update so failed-session deletion satisfies the state/error coupling.
 
-- [ ] **Step 7: Extend activity gates for both run owners**
+- [x] **Step 7: Extend activity gates for both run owners**
 
 Replace the chat-only inner join with explicit chat and tailoring predicates combined by `union_all` or `exists`. `assert_workspace_idle` sees any running/interrupted run and any tailoring session in `generating` state (manual compilation has no Agent run). `assert_profile_idle` sees chat runs through conversations plus tailoring runs/generating sessions through session profile ownership. `assert_conversation_idle` sees its chat runs plus tailoring runs/generating sessions for the same profile, including direct button runs with no parent. Add `assert_tailoring_start_allowed(profile_id, parent_run_id=None)`: direct/manual starts require the profile idle; a parented start permits exactly the named running Main-Agent chat run owned by that profile and rejects any other active work. Add tests proving null `user_message_id` rows are not dropped, the one authorized child can start under its parent, and active Agent/manual work blocks profile switch, conversation mutation, CV/Job mutation, and further tailoring creation.
 
-- [ ] **Step 8: Update migration/table registries, run green, and commit**
+- [x] **Step 8: Update migration/table registries, run green, and commit**
 
 Update model imports, seed cleanup table names, `MIGRATION_HEAD = "0007_add_cv_tailoring"`, application-table parity, and migration-head assertions in the shared test helpers.
 
@@ -929,7 +929,7 @@ Expected: migration/model/repository/gate tests and Mypy pass; existing chat run
 - Create: `backend/tests/unit/test_cv_tailoring_storage.py`
 - Create: `backend/tests/unit/test_cv_tailoring_renderer.py`
 
-- [ ] **Step 1: Write failing path-safety, escaping, and golden-render tests**
+- [x] **Step 1: Write failing path-safety, escaping, and golden-render tests**
 
 Storage tests must reject non-UUID components, absolute paths, `..`, separators, symlink escapes, unexpected filenames, and deletion outside `FILES_DIR/cv-tailoring`. They must prove staging/promotion is same-filesystem, version paths are unique, reads accept only `source|pdf`, and repeated delete is safe.
 
@@ -948,7 +948,7 @@ def test_escape_latex_text(value: str, escaped: str) -> None:
 
 Assert absent contacts create no blank bullet/separator; arbitrary strings containing `\\input`, `\\write18`, `%`, or environment closers are rendered only as escaped text.
 
-- [ ] **Step 2: Run renderer/storage tests to verify RED**
+- [x] **Step 2: Run renderer/storage tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -957,7 +957,7 @@ Set-Location backend
 
 Expected: collection fails because storage and renderer modules do not exist.
 
-- [ ] **Step 3: Implement a separate artifact-storage owner**
+- [x] **Step 3: Implement a separate artifact-storage owner**
 
 Do not weaken `AttachmentStorage`'s one-segment rule. Create `TailoringArtifactStorage` rooted at `Path(FILES_DIR).resolve() / "cv-tailoring"` with this public surface:
 
@@ -974,7 +974,7 @@ delete_session(*, profile_id, session_id) -> bool
 
 Validate every ID with the existing UUID-v4 contract, derive filenames internally as `resume.tex` and `resume.pdf`, resolve/check every parent beneath the root before create/move/delete, use `os.replace` only within the same filesystem, reject existing final paths, and remove staging on all exits. Return POSIX relative paths under `cv-tailoring/<profile>/<session>/<version>`; never return absolute paths to routes or clients.
 
-- [ ] **Step 4: Implement text and URL escaping with one fixed template owner**
+- [x] **Step 4: Implement text and URL escaping with one fixed template owner**
 
 Expose only:
 
@@ -1005,7 +1005,7 @@ The renderer starts with this literal fixed shell; no provider/user string may a
 
 It ends with `\\end{document}` and one newline. Render the centered bold name and a conditional contact row ordered location, phone, email, GitHub. Insert `\\textbullet` only between adjacent present values. Validate GitHub again, reconstruct the URL from the whitelisted scheme/host/username components, and render it via `\\href{<validated-url>}{GitHub: <escaped-username>}`.
 
-- [ ] **Step 5: Render every source-owned section dynamically**
+- [x] **Step 5: Render every source-owned section dynamically**
 
 Iterate `content.sections` without a heading dictionary. Render escaped `\\section{heading}` in source order. The renderer owns kind-to-layout mapping:
 
@@ -1019,7 +1019,7 @@ For entry links, inspect attribute values generically rather than using professi
 
 The renderer emits no `\\includegraphics`, `\\input`, `\\include`, custom command, package, font, file reference, or user-controlled preamble fragment. `graphicx` remains loaded only because it is part of the locked visual shell.
 
-- [ ] **Step 6: Verify exact golden output and commit**
+- [x] **Step 6: Verify exact golden output and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_cv_tailoring_storage.py tests/unit/test_cv_tailoring_renderer.py -q
@@ -1047,7 +1047,7 @@ Expected: byte-for-byte golden `.tex`, metacharacter, bilingual, path traversal,
 - Modify: `backend/tests/integration/test_compose_runtime.py`
 - Create: `backend/tests/integration/test_cv_tailoring_compiler.py`
 
-- [ ] **Step 1: Write failing settings, argv, timeout, and PDF-bound tests**
+- [x] **Step 1: Write failing settings, argv, timeout, and PDF-bound tests**
 
 Extend exact Settings field/default tests with:
 
@@ -1064,7 +1064,7 @@ EXPECTED_DEFAULTS.update({
 
 Compiler tests inject a fake process factory and assert exactly two invocations with an argv array, no shell, `-no-shell-escape`, `-halt-on-error`, `-interaction=nonstopmode`, a server-owned output directory, and literal `resume.tex`. Cover timeout/kill, nonzero status, missing PDF, oversized TeX/PDF, invalid/zero page count, cleanup, SHA-256, and a valid over-two-page warning.
 
-- [ ] **Step 2: Run focused compiler/runtime tests to verify RED**
+- [x] **Step 2: Run focused compiler/runtime tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -1073,7 +1073,7 @@ Set-Location backend
 
 Expected: settings/compiler assertions fail and the backend image contains no TeX packages.
 
-- [ ] **Step 3: Add bounded Settings as the sole runtime owner**
+- [x] **Step 3: Add bounded Settings as the sole runtime owner**
 
 Append these positive integer fields to `Settings`; validate each is greater than zero with Pydantic `Field(gt=0)` while keeping its annotation `int`:
 
@@ -1088,7 +1088,7 @@ CV_TAILOR_MAX_PDF_MB: int = 5
 
 Expose the same optional overrides in Compose with default expansion and document them in `.env.example`; no secret is added. Schema limits remain at or below these runtime maxima.
 
-- [ ] **Step 4: Implement an async argv-only compiler adapter**
+- [x] **Step 4: Implement an async argv-only compiler adapter**
 
 Create these exact public contracts:
 
@@ -1121,7 +1121,7 @@ Use `asyncio.create_subprocess_exec(*argv, cwd=staging_dir, stdin=DEVNULL, stdou
 
 The staging directory contains only renderer-owned `resume.tex` and TeX-created temporary outputs; it accepts no client filename, package, image, auxiliary input, or network resource. Remove `.aux`, `.log`, `.out`, and all other staging files after promotion/failure.
 
-- [ ] **Step 5: Install TeX Live in the existing backend image**
+- [x] **Step 5: Install TeX Live in the existing backend image**
 
 Before Python package installation, add one noninteractive apt layer with exactly:
 
@@ -1138,11 +1138,11 @@ RUN apt-get update \
 
 Create `cv_tailoring_smoke.py` as a no-network CLI that builds a minimal synthetic `TailoredCVContent` with English/Vietnamese text, calls the real `latex-cv-v1` renderer and `compile_latex_cv` with an in-memory object carrying the approved public default bounds, verifies a non-empty PDF/page count, and removes the directory. It must not load process Settings, root `.env`, contacts, or user/reference facts, and it must not duplicate subprocess/compiler logic. Add `RUN python -m app.services.cv_tailoring_smoke` after application installation so the image build fails unless the real fixed template compiles. Assert the image still has one backend process and Compose still lists exactly `neo4j`, `backend`, `frontend`.
 
-- [ ] **Step 6: Add real-compiler container evidence and dependency guards**
+- [x] **Step 6: Add real-compiler container evidence and dependency guards**
 
 The unit suite uses a fake process. The integration test skips only when `pdflatex` is absent on a non-container developer host; inside the candidate backend image it must render a synthetic `TailoredCVContent`, call the real renderer/compiler, verify Vietnamese text compiles, inspect one positive page count, and assert no `.log`/`.aux` artifact is promoted. Update dependency-manifest tests to prove no new Python package was added for compilation.
 
-- [ ] **Step 7: Run focused gates and commit**
+- [x] **Step 7: Run focused gates and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_settings.py tests/unit/test_cv_tailoring_compiler.py tests/unit/test_dependency_manifest.py tests/integration/test_compose_runtime.py tests/integration/test_cv_tailoring_compiler.py -q
@@ -1167,7 +1167,7 @@ Expected: focused tests pass; Compose prints exactly the existing three services
 - Create: `backend/tests/unit/test_cv_tailoring_coordinator.py`
 - Create: `backend/tests/integration/test_cv_tailoring_coordinator.py`
 
-- [ ] **Step 1: Write failing Agent-topology and prompt-privacy tests**
+- [x] **Step 1: Write failing Agent-topology and prompt-privacy tests**
 
 Assert the tailoring graph has exactly these fixed nodes and no `ToolNode`, dynamic tool registry, Main-Agent call, or spawn edge:
 
@@ -1181,7 +1181,7 @@ repair_once
 
 The first provider call receives only structured JD, bounded instruction, and section outline. The rewrite/repair calls receive only selected sections and their fact bank. Put distinct synthetic sentinels in contact fields, unrelated section bodies, raw Job text, storage paths, and a fake reference format; inspect every fake-model message and assert none appears. Assert one schema-or-grounding rejection invokes exactly one repair total and a second rejection returns `TAILORING_GROUNDING_FAILED`.
 
-- [ ] **Step 2: Run Agent/coordinator tests to verify RED**
+- [x] **Step 2: Run Agent/coordinator tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -1190,7 +1190,7 @@ Set-Location backend
 
 Expected: collection fails because the graph and coordinator do not exist.
 
-- [ ] **Step 3: Define the bounded Agent state and provider seam**
+- [x] **Step 3: Define the bounded Agent state and provider seam**
 
 Use a dedicated typed state; never reuse or expand the Main Agent's messages channel:
 
@@ -1227,11 +1227,11 @@ class TailoringStructuredInvoker(Protocol):
 
 Define it in `tailoring_graph.py` as a strict Pydantic model with `section_ids: list[str] = Field(min_length=1, max_length=20)` plus a validator for non-empty unique IDs. Define `TailoringError(Exception)` in the coordinator with non-empty `code` and safe `message`; no provider exception or compiler log becomes its message.
 
-- [ ] **Step 4: Implement the fixed graph and one shared repair budget**
+- [x] **Step 4: Implement the fixed graph and one shared repair budget**
 
 `select_sections` serializes only outline/JD extraction/instruction. If an editor request supplies `requested_section_ids`, require the selection to equal that validated scope; the provider cannot widen it. `load_selected_sections` calls an injected server loader after selection and puts only those bodies/facts into state. `rewrite_sections` emits `TailoredPatchSet`. `ground_patch` calls Task 2's guard. On schema or grounding failure, store only bounded issue code/path pairs and route to `repair_once` when `repair_count == 0`; otherwise set `TAILORING_GROUNDING_FAILED`. Repair receives the same selected context, prior structured patch, and sanitized issues. Successful grounding ends the graph. Compile with the existing SQLite checkpointer under the tailoring run ID and delete that thread only after durable terminal commit.
 
-- [ ] **Step 5: Resolve authoritative sources before any Agent call**
+- [x] **Step 5: Resolve authoritative sources before any Agent call**
 
 In `cv_tailoring.py`, define:
 
@@ -1260,7 +1260,7 @@ class TailoringLaunch:
 
 The resolver requires a ready profile, approved `cv_documents` row matching attachment/source hash, validated CandidateProfile with non-empty `full_name`, and optional Job with `processing_status='processed'`, `jd_quality in {'full','partial'}`, validated `JobPostExtraction`, and exact `updated_at`. It loads no raw Job content or Neo4j data. At least one of a selected Job or trimmed instruction is required.
 
-- [ ] **Step 6: Implement the coordinator's single orchestration surface**
+- [x] **Step 6: Implement the coordinator's single orchestration surface**
 
 Use one dependency-injected class with these exact call surfaces:
 
@@ -1276,17 +1276,17 @@ create_manual_version(*, session_id, parent_version_id, content)
 
 `prepare_session` calls `assert_tailoring_start_allowed`: a direct start requires idle profile state, while a tool start may ignore only its verified running Main-Agent parent. It then runs one short transaction to create `generating` session plus `cv_tailoring` Agent run; an optional parent is the invoking Main-Agent run. `stream_initial_version` emits existing `run_started`/safe `assistant_status`/terminal events, runs the fixed graph, renders/compiles in staging without a DB transaction, promotes a unique artifact path, then opens `BEGIN IMMEDIATE`, rechecks all source revisions, inserts version 1 with CAS, marks session ready, and completes the tailoring run. A CAS/commit failure removes only the just-promoted version directory.
 
-- [ ] **Step 7: Implement later AI/manual versions, currentness, and failure truth**
+- [x] **Step 7: Implement later AI/manual versions, currentness, and failure truth**
 
 For later AI versions, the existing latest version stays downloadable while the session is temporarily `generating`; failure restores `ready` and creates no version. Initial failure leaves durable session/run `failed` with one safe code. An explicit retry calls `prepare_ai_version` with `parent_version_id=None` and empty target IDs only when `latest_version_number == 0`; the coordinator reuses the session's stored instruction/Job identity (the retry body cannot replace them), clears the safe error, re-enters automatic section selection, and still creates version 1 with null parent. Manual save does no Agent run or repair: after the same start gate it marks the session `generating` in a short transaction, validates header/section identity against the parent, builds a patch from changed sections, runs the same grounding/semantic guard once, renders/compiles/promotes, and applies the same CAS; failure restores `ready` and releases the workspace gate.
 
 Currentness compares current ready profile `updated_at`, approved source hash, current selected Job `updated_at` when retained, and `TAILORING_TEMPLATE_VERSION`. Any mismatch returns stale, blocks AI/manual generation with `TAILORING_SOURCE_STALE`, and leaves old reads/downloads available. If the Job FK has become null, old versions remain readable but a new JD-based revision is blocked; an explicit new instruction-only or selected-Job session is required.
 
-- [ ] **Step 8: Persist safe activities and cleanup checkpoint state**
+- [x] **Step 8: Persist safe activities and cleanup checkpoint state**
 
 Reuse `AgentActivityService` with assistant activities only and safe labels such as `Selecting relevant sections`, `Tailoring selected sections`, `Checking source support`, and `Generating PDF`. Do not use section text, contacts, JD labels, paths, prompts, or provider data as labels. Terminal completion/failure updates the run and activity before checkpoint deletion. Generator cancellation marks initial generation failed or restores a later session to ready; disconnect never marks success.
 
-- [ ] **Step 9: Run focused suites and commit**
+- [x] **Step 9: Run focused suites and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_cv_tailoring_agent.py tests/unit/test_cv_tailoring_coordinator.py tests/integration/test_cv_tailoring_coordinator.py tests/integration/test_agent_activities.py -q
@@ -1335,7 +1335,7 @@ Expected: topology/privacy/repair/currentness/CAS/failure/activity tests and Myp
 - Modify: `backend/tests/integration/test_job_reextraction.py`
 - Modify: `backend/tests/integration/test_cv_manager_deletion.py`
 
-- [ ] **Step 1: Write failing transport/tool/API/deletion tests**
+- [x] **Step 1: Write failing transport/tool/API/deletion tests**
 
 Add tests proving:
 
@@ -1347,7 +1347,7 @@ Add tests proving:
 - all seven endpoints enforce strict bodies/UUIDs/current profile, safe errors, source/PDF types, filenames/content lengths, no paths/logs/raw JD, and no compile-on-read; a failed zero-version session can explicitly retry through `ai-versions` with null parent and empty target IDs.
 - session/profile deletion is retryable; Job delete uses FK `SET NULL` and preserves artifacts.
 
-- [ ] **Step 2: Run focused API/tool tests to verify RED**
+- [x] **Step 2: Run focused API/tool tests to verify RED**
 
 ```powershell
 Set-Location backend
@@ -1356,7 +1356,7 @@ Set-Location backend
 
 Expected: state/tool/route modules and header/deletion behavior are missing.
 
-- [ ] **Step 3: Propagate only a validated selected Job ID through chat**
+- [x] **Step 3: Propagate only a validated selected Job ID through chat**
 
 Add `selected_job_id: UuidStr | None = None` to `ChatTurnRequest`, `selected_job_id: str | None` to `AgentState`, `build_initial_agent_state()`, `AgentGraphState`, and `initial_graph_state()`. Add the keyword to `stream_chat_turn()` and both routes. Before graph execution, resolve the conversation/profile owner and, when present, require the exact saved Job to be processed with `full|partial` quality. Inject only its ID; do not add extraction content to candidate context/system prompt or client request.
 
@@ -1371,7 +1371,7 @@ AGENT_STATE_FIELDS = frozenset({
 })
 ```
 
-- [ ] **Step 4: Add the compact replay-safe Main-Agent tool**
+- [x] **Step 4: Add the compact replay-safe Main-Agent tool**
 
 Create the constant and tool with this exact provider-visible call surface:
 
@@ -1400,11 +1400,11 @@ ToolResult(
 
 On child failure return its stable safe code and no session contents/path. A replay returns the exact prior ToolResult and does not create a second session/version.
 
-- [ ] **Step 5: Register tool eight and update Main-Agent truthfulness policy**
+- [x] **Step 5: Register tool eight and update Main-Agent truthfulness policy**
 
 Append the tool after `read_active_cv` in `production_registry`, add its name to `PRODUCTION_DOMAIN_TOOL_NAMES`, and update registry/dependency docstrings from seven to eight. The prompt says to use `create_tailored_cv` only for an explicit tailoring request; use server-selected JD state when present; pass only the user's bounded instruction; do not call `read_active_cv` or another Job/CV evidence tool to prepare a tailoring request because the bounded child Agent resolves its own sources; never request/provide raw CV/JD/template/LaTeX; and never claim success before a successful exact ToolResult. There is no forced-call heuristic or extra Main-Agent retry loop for tailoring.
 
-- [ ] **Step 6: Generalize SSE response headers without changing event names**
+- [x] **Step 6: Generalize SSE response headers without changing event names**
 
 Change the helper to this exact call surface:
 
@@ -1417,7 +1417,7 @@ open_sse_response(events, *, error_mapper,
 
 Prime before headers exactly as today, catch only `error_types`, and construct `ClosingEventSourceResponse(produce(), headers=dict(headers or {}))`. Existing chat behavior remains default. Tailoring creation passes `(TailoringError,)` and `{CV_TAILORING_SESSION_HEADER: launch.session_id}`. Add `expose_headers=[CV_TAILORING_SESSION_HEADER]` to restricted CORS in `main.py`; no wildcard origin or event type is added.
 
-- [ ] **Step 7: Implement the seven thin tailoring routes**
+- [x] **Step 7: Implement the seven thin tailoring routes**
 
 Create `CVTailoringDeps` in `api/dependencies.py` with one coordinator/artifact store/settings source. Construct provider/model dependencies lazily and reuse process session factory/FILES_DIR/checkpointer path. Add `api/cv_tailoring.py`:
 
@@ -1436,7 +1436,7 @@ Creation and AI routes use typed SSE; manual returns `TailoringVersionCreateResp
 
 Map stable errors to 400/404/409/422/500 without stack/path/log/provider detail. Include the router under `/api` in `main.py`.
 
-- [ ] **Step 8: Add retryable session and profile-owned deletion**
+- [x] **Step 8: Add retryable session and profile-owned deletion**
 
 Implement mark → external cleanup → finalize through this exact call surface:
 
@@ -1451,7 +1451,7 @@ Extend profile deletion inputs to include all tailoring session/run IDs. After t
 
 At the start of the public saved-Job mutation coordinators (`save_and_evaluate_from_source`, `evaluate_saved_job`, `delete_saved_job`, `reextract_saved_job`) and non-profile CV Manager deletion, call the generalized workspace gate in a short session before provider/graph/file work. Map an active child run to the existing stable blocked/retry presentation; do not add a new broad lock or hold a transaction across external work. Main-Agent `save_job`/`match_jobs` tools keep their existing parent-owned paths and do not call these public wrappers, so the gate does not block authorized tools inside their own run.
 
-- [ ] **Step 9: Run backend surface regressions and commit**
+- [x] **Step 9: Run backend surface regressions and commit**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_agent_context.py tests/unit/test_agent_graph.py tests/unit/test_shopaikey_chat.py tests/unit/test_sse_contract.py tests/unit/test_api_sse.py tests/integration/test_chat_api.py tests/integration/test_agent_runner.py tests/integration/test_cv_tailoring_api.py tests/integration/test_cv_tailoring_deletion.py tests/integration/test_profile_deletion.py tests/integration/test_job_deletion.py tests/integration/test_job_evaluations.py tests/integration/test_job_reextraction.py tests/integration/test_cv_manager_deletion.py -q
@@ -1496,13 +1496,13 @@ Expected: focused suites, Ruff, and Mypy pass; production has one Main graph, on
 - Modify: `frontend/src/test/observability-sidebar.test.tsx`
 - Modify: `frontend/src/app/App.test.tsx`
 
-- [ ] **Step 1: Write failing strict parser and single-owner tests**
+- [x] **Step 1: Write failing strict parser and single-owner tests**
 
 Parsers must accept exactly the frozen keys/types, reject extras/malformed UUIDs/timestamps/enums/non-finite bounds/server paths/raw JD/source chunks/LaTeX-in-JSON, and map backend safe errors only. SSE tests require the creation header before body consumption, reject missing/malformed header, and do not select/open a session on disconnect or `run_failed`.
 
 Add a static/composition test proving production contains exactly one `useSavedJobsState(` call, in `App.tsx`; sidebar, graph, selected-JD button, and chat receive the same controller/selection. Add send tests proving both chat endpoints serialize `selected_job_id` as UUID/null and never serialize cached JD detail.
 
-- [ ] **Step 2: Run frontend contract tests to verify RED**
+- [x] **Step 2: Run frontend contract tests to verify RED**
 
 ```powershell
 Set-Location frontend
@@ -1511,7 +1511,7 @@ npm test -- --run src/test/cv-tailoring-api.test.ts src/test/cv-tailoring-state.
 
 Expected: tailoring modules/types are absent and current chat/saved-JD composition has no selected-JD transport or App-level owner.
 
-- [ ] **Step 3: Implement strict tailoring/profile parsers**
+- [x] **Step 3: Implement strict tailoring/profile parsers**
 
 Mirror the frozen backend models with readonly TypeScript types and explicit `exact` parsers. Define:
 
@@ -1537,7 +1537,7 @@ export type TailoredAttribute = {
 
 Keep `TailoredAttribute` identical to backend (`name` + `values`). Add nullable phone/email/GitHub to detailed `CandidateProfile` parsing. The existing profile ApprovalCard shows each present extracted contact for explicit confirmation, omits absent values/separators, and keeps Save Profile/Request Changes as the only commit actions; corrections still go through the existing chat proposal/draft approval flow. Do not add contacts to profile list items, run status, activity labels, or Saved Job DTOs.
 
-- [ ] **Step 4: Implement the fetch/SSE API client**
+- [x] **Step 4: Implement the fetch/SSE API client**
 
 Create JSON functions for list/detail/manual/delete and URL helpers for source/PDF. Create streaming functions using the existing `consumeSseResponse` and chat event parser:
 
@@ -1558,21 +1558,21 @@ export async function streamCreateTailoringAiVersion(
 
 For create, validate `response.headers.get('X-CV-Tailoring-Session-Id')` as UUID before invoking `onSessionId` or consuming the stream. Reuse safe HTTP-body mapping; never parse `.tex`/PDF as JSON or infer completion from body end.
 
-- [ ] **Step 5: Add a profile-scoped tailoring state owner**
+- [x] **Step 5: Add a profile-scoped tailoring state owner**
 
 `useCvTailoringState({profileId, profileReady})` owns session list/detail/version selection, direct/AI stream phases, initial-failure retry, local structured draft, conflicts, and deletion. It uses `useLatestRequest`/AbortController patterns already used by saved jobs, drops stale-profile responses, recovers a disconnected stream from `detail.latest_run`/durable activities, preserves local draft on parent/grounding/compile failure, and clears server data when profile scope changes. Server versions are immutable; selecting a version replaces local draft only after confirmation when unsaved changes exist. Keystrokes never call API/compile.
 
-- [ ] **Step 6: Lift the sole saved-JD controller to `App`**
+- [x] **Step 6: Lift the sole saved-JD controller to `App`**
 
 Export a named `SavedJobsController = ReturnType<typeof useSavedJobsState>`. Instantiate it once in `App` with active profile ID/readiness. Pass the same object through `CvSidebar` to `ObservabilitySidebar`; remove the sidebar hook call while retaining its lazy list/detail/map effects. Pass only `savedJobs.state.selectedJobId` to `ChatPage` and the direct tailoring action. Do not duplicate selection in tailoring state.
 
-- [ ] **Step 7: Add selected-JD chat transport and durable editor links**
+- [x] **Step 7: Add selected-JD chat transport and durable editor links**
 
 Extend `TurnRequest` with `selected_job_id?: string | null`; both serializers always send the current UUID/null. `ChatPageProps.selectedJobId` is read at send time so later selection changes do not rewrite an in-flight turn.
 
 Add strict parsing/projection for completed `create_tailored_cv` ToolResult data (`session_id`, `version_id`, `status='ready'`, `currentness='current'`) in `history.ts`. Thread `onOpenTailoringEditor(sessionId)` through ChatMessages/ChatMessageRow and render the action only for one completed, error-free, durable validated result. Malformed/failed results show no editor link.
 
-- [ ] **Step 8: Wire direct saved-JD creation and workspace mode**
+- [x] **Step 8: Wire direct saved-JD creation and workspace mode**
 
 SavedJobDetail exposes `Tạo CV theo JD` only when the selected Job is processed and `jd_quality` is `full|partial`, profile is ready, and mutations are unlocked. It calls the App tailoring state with the selected ID and empty instruction. After validated `run_completed`, fetch detail and set:
 
@@ -1584,7 +1584,7 @@ type MainWorkspace =
 
 `Quay lại chat` restores chat without remounting ChatPage, saved-job controller, or sidebars. A Main-Agent editor link sets the same workspace state after fetching/validating that session.
 
-- [ ] **Step 9: Run frontend contract/state gates and commit**
+- [x] **Step 9: Run frontend contract/state gates and commit**
 
 ```powershell
 npm test -- --run src/test/cv-tailoring-api.test.ts src/test/cv-tailoring-state.test.tsx src/test/profile-api.test.ts src/test/approval-card.test.tsx src/test/chat-page.test.tsx src/test/assistant-response.test.tsx src/test/saved-jobs-state.test.tsx src/test/saved-jobs-panel.test.tsx src/test/observability-sidebar.test.tsx src/app/App.test.tsx
@@ -1620,7 +1620,7 @@ Expected: focused tests, ESLint, and TypeScript pass; there is one saved-JD stat
 - Modify: `frontend/src/test/observability-navigation.test.tsx`
 - Modify: `frontend/src/app/App.test.tsx`
 
-- [ ] **Step 1: Run mandatory Astryx discovery before UI code**
+- [x] **Step 1: Run mandatory Astryx discovery before UI code**
 
 Run from `frontend/` and save the named component choices in the implementation report:
 
@@ -1650,7 +1650,7 @@ npx astryx component Button
 
 Query every additional component before using it. Copy installed prop names only. Do not introduce `<div>` layout, Tailwind/utility classes, StyleX, another component library, raw hex/px values, or root token overrides. Record desktop region budgets while following Astryx layout guidance; implement spacing/color/radius through Astryx props/tokens.
 
-- [ ] **Step 2: Write failing session/editor/accessibility tests**
+- [x] **Step 2: Write failing session/editor/accessibility tests**
 
 Cover:
 
@@ -1660,7 +1660,7 @@ Cover:
 - desktop split view, mobile `Nội dung`/`Xem trước` tabs, keyboard order, labels, live stream state, Escape/focus restoration, reduced motion, and no overlap;
 - no raw LaTeX, server path, source chunk, raw JD, contact in status/error, or malformed tool result rendered.
 
-- [ ] **Step 3: Run focused UI tests to verify RED**
+- [x] **Step 3: Run focused UI tests to verify RED**
 
 ```powershell
 Set-Location frontend
@@ -1669,37 +1669,37 @@ npm test -- --run src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tail
 
 Expected: the new components/navigation/editor behavior do not exist, so the focused assertions fail before UI implementation.
 
-- [ ] **Step 4: Add the `CV đã chỉnh` navigation panel**
+- [x] **Step 4: Add the `CV đã chỉnh` navigation panel**
 
 Add one tab ID and label through existing `observabilityTabs` ownership. `TailoringSessionsPanel` receives state/actions as props; it does not instantiate a second hook. Use edge-to-edge Astryx List/ListItem rows, `StatusDot`/`Token` for state, bounded Job title/company snapshot or instruction excerpt as label, localized timestamp/version count, and one selected row. Loading/error/empty states use existing neutral patterns. A failed zero-version row exposes explicit retry and delete actions. Opening calls App's shared workspace callback; deletion requires the dedicated AlertDialog.
 
-- [ ] **Step 5: Build the responsive editor shell**
+- [x] **Step 5: Build the responsive editor shell**
 
 `TailoringEditor` accepts the selected detail, local draft, versions, request phases, and callbacks. Desktop composes Astryx Layout with a structured section region and `AspectRatio` PDF region side by side. Mobile composes accessible TabList tabs. `Quay lại chat` changes workspace only; it does not reset session/saved-JD/chat state. The editor shows stale/current state, version selector, creator label, created time, page count/warning, and safe error banner.
 
-- [ ] **Step 6: Implement source-preserving structured field edits**
+- [x] **Step 6: Implement source-preserving structured field edits**
 
 Render header name/location/phone/email/GitHub as read-only approved facts. `Sửa thông tin Profile` returns to chat and focuses the existing composer with a profile-correction affordance; it does not write profile JSON directly.
 
 Render every section from `content.sections` in server order. `TailoredSectionEditor` may update text in existing `SourceBoundText`, reorder/remove items/bullets, and edit values under read-only attribute names. It carries existing `source_fact_ids`/IDs invisibly and cannot add/rename/reorder sections or add arbitrary provenance. `Nhờ AI chỉnh section này` opens an Astryx Dialog with bounded instruction and sends exactly that section ID plus latest parent version. Evidence uses an inspected Astryx disclosure/accordion component and shows only `TailoredFactEvidence.source_text` associated with the selected version.
 
-- [ ] **Step 7: Add explicit save/version/download/preview actions**
+- [x] **Step 7: Add explicit save/version/download/preview actions**
 
 `Lưu version & tạo PDF` sends the full strict local content once; disable duplicate submit with a synchronous in-flight guard. A success selects/refetches the returned immutable version. A 409 parent conflict leaves local draft intact and offers `Tải version mới nhất`; grounding/compile failure leaves draft and previous PDF intact.
 
 `TailoringPdfPreview` uses the exact selected version PDF URL inside an Astryx AspectRatio with a titled native PDF object/iframe and a fallback download link. It never fetches bytes into JSON or recompiles. Version actions use source/PDF URLs; `.tex` is download, PDF supports preview/download. Keystrokes and version selection never compile.
 
-- [ ] **Step 8: Implement retryable delete and stale recovery UX**
+- [x] **Step 8: Implement retryable delete and stale recovery UX**
 
 `TailoringSessionDeleteDialog` uses the inspected AlertDialog props, names the bounded session label, warns that all versions/downloads in that derivative session are removed, and issues zero request on cancel. Loading locks repeated action and focus returns after close. Profile deletion's existing warning is amended to state its tailored CV sessions/artifacts are also removed.
 
 Stale sessions remain viewable/downloadable and disable AI/manual save. `Tạo phiên mới từ dữ liệu hiện tại` creates a new session using the retained instruction and currently selected Job only when still available/scorable; it never mutates the old session or silently substitutes another Job.
 
-- [ ] **Step 9: Add token-only styling and static UI guards**
+- [x] **Step 9: Add token-only styling and static UI guards**
 
 `cv-tailoring.css` may use only Astryx token variables for grid/flex sizing gaps, borders, colors, radius, and motion. Add a test/source audit rejecting raw hex/rgb/hsl, hard-coded pixel declarations, Tailwind-like utility strings, and `<div` in the new feature. Respect `prefers-reduced-motion`; do not override `--color-*` at `:root`.
 
-- [ ] **Step 10: Run focused UI/static gates and commit**
+- [x] **Step 10: Run focused UI/static gates and commit**
 
 ```powershell
 npm test -- --run src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-accessibility.test.tsx src/test/observability-navigation.test.tsx src/app/App.test.tsx
@@ -1727,11 +1727,11 @@ Expected: focused tests, ESLint, TypeScript, and production build pass; new UI u
 - Modify: `backend/tests/integration/test_compose_runtime.py`
 - Modify: `frontend/src/test/setup.ts`
 
-- [ ] **Step 1: Write the operations and recovery contract**
+- [x] **Step 1: Write the operations and recovery contract**
 
 Document TeX Live packages, six Settings, app-data layout as a conceptual server-owned path, migration head `0007_add_cv_tailoring`, health/startup commands, currentness rules, optional contact re-extraction/approval, source/PDF download behavior, session/profile deletion retry, and safe failure codes. State explicitly that the template is fixed, sections remain source-owned, the LLM never emits/sees LaTeX, and existing profiles get contacts only through explicit re-extraction + Save Profile. Do not include reference CV content, real CV/JD text, absolute local paths, logs, or secrets.
 
-- [ ] **Step 2: Add a synthetic cross-layer E2E flow**
+- [x] **Step 2: Add a synthetic cross-layer E2E flow**
 
 Use fake structured providers and generated synthetic CV/JD data only. Exercise:
 
@@ -1748,7 +1748,7 @@ Use fake structured providers and generated synthetic CV/JD data only. Exercise:
 
 Inject `REFERENCE_ONLY_SENTINEL_7429` solely into a fake format-reference object that has no route to the coordinator; assert it is absent from captured prompts, ToolResults, SQLite JSON, activity/error text, `.tex`, PDF-extracted text, and logs.
 
-- [ ] **Step 3: Run focused backend feature gates**
+- [x] **Step 3: Run focused backend feature gates**
 
 ```powershell
 Set-Location backend
@@ -1757,7 +1757,7 @@ Set-Location backend
 
 Expected: all feature unit/integration/E2E tests pass with fakes except the explicitly real compiler test.
 
-- [ ] **Step 4: Run full backend static/test/migration gates**
+- [x] **Step 4: Run full backend static/test/migration gates**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m ruff check app tests --no-cache
@@ -1768,7 +1768,7 @@ Expected: all feature unit/integration/E2E tests pass with fakes except the expl
 
 Expected: Ruff/Mypy/full Pytest pass; migration tests use disposable databases to upgrade/downgrade/re-upgrade with head `0007_add_cv_tailoring`; no approved data is rewritten during upgrade. Never run a downgrade against the user's configured database.
 
-- [ ] **Step 5: Run full frontend gates**
+- [x] **Step 5: Run full frontend gates**
 
 ```powershell
 Set-Location ..\frontend
@@ -1780,7 +1780,7 @@ npm run build
 
 Expected: full Vitest, ESLint, strict TypeScript, and production build pass; one saved-JD controller and one ChatPage chat reducer remain.
 
-- [ ] **Step 6: Validate the approved planning portfolio**
+- [x] **Step 6: Validate the approved planning portfolio**
 
 After the separately authorized Master 2.3/Plan 16/Plan 17 changes exist, run:
 
@@ -1791,7 +1791,7 @@ Set-Location ..
 
 Expected: Plans 1–17 are contiguous; Plans 1–16 have normal handoffs; only Plan 17 is terminal. If portfolio authorization has not occurred, record this gate as blocked and do not start implementation.
 
-- [ ] **Step 7: Build and verify the real three-service candidate**
+- [x] **Step 7: Build and verify the real three-service candidate**
 
 ```powershell
 docker compose --env-file .env -f infrastructure/docker-compose.yml config --services
@@ -1806,7 +1806,7 @@ Expected: service list is exactly Neo4j/backend/frontend; health is available; m
 
 Use the in-app browser against `http://localhost:5173`. Record sanitized route/status/screenshot evidence for: selected-JD button; natural-language Main-Agent creation; editor link; GitHub present/absent separators; Experience/Awards/unknown headings; desktop split/mobile tabs; manual and scoped AI versions; evidence disclosure; `.tex` download/PDF preview; two-page warning; stale state/new-session action; CAS conflict; grounding/compile failure preserving draft/previous PDF; saved Job deletion; cancel/confirm session deletion; profile delete warning/cleanup; keyboard/focus/reduced-motion behavior. Confirm no raw template/CV/JD, server path, UUID label, secret, console error, overlap, automatic evaluation, or Neo4j tailoring data.
 
-- [ ] **Step 9: Run final scope/data/secret review and commit documentation**
+- [x] **Step 9: Run final scope/data/secret review and commit documentation**
 
 ```powershell
 Set-Location ..
@@ -1826,15 +1826,15 @@ Expected: one production saved-JD hook call; exactly eight Main-Agent tools and 
 
 ## Final self-review checklist
 
-- [ ] Every approved design section maps to a task: contacts (1), content/provenance/grounding (2), persistence/run ownership (3), artifact/template (4), compiler/runtime (5), bounded Agent/coordinator (6), API/tool/transport/deletion (7), frontend contracts/state (8), Astryx editor (9), rollout/acceptance (10).
-- [ ] `TailoredAttribute` is consistently `name + values`; section IDs/headings/kinds/ordinals and attribute names are immutable across schema, Agent patch, manual edit, renderer, API, and TypeScript.
-- [ ] Session creation exposes its durable ID through `X-CV-Tailoring-Session-Id`; the seven existing SSE event names remain unchanged and disconnect is never success.
-- [ ] The Tailoring Agent first sees outline/JD/instruction, then only selected bodies/facts; reference format, contacts, raw PDFs/JDs, unrelated bodies, paths, Neo4j, and secrets are absent.
-- [ ] Exactly one schema-or-grounding repair is shared; deterministic anchor checks and scoped semantic support apply to both AI and manual changes.
-- [ ] Every successful generation/save creates immutable `.tex` and PDF artifacts; promotion/CAS cleanup cannot commit missing files or overwrite a newer version.
-- [ ] Renderer owns one fixed preamble/layout and dynamic source-owned sections; absent optional contacts render no placeholders or stray separators.
-- [ ] `pdflatex` runs twice through argv-only async execution with `-no-shell-escape`, bounds, safe failures, no persisted logs, and a mandatory container smoke.
-- [ ] Main Agent and direct button use the same coordinator; the Plan 17 production path contains the Main Agent and bounded CV Tailoring Agent, eight Main tools, one saved-JD state owner, and no unapproved Agent topology or extra service/worker/queue. This phase does not create a project-wide Agent-count ceiling.
-- [ ] Approved CV/Profile/JD, evaluations, matching, and Neo4j remain unchanged; old versions survive source/Job staleness and Job deletion.
-- [ ] Frontend uses inspected Astryx components/tokens only, keeps ChatPage mounted, and covers responsive/accessibility/error/conflict/delete behavior.
+- [x] Every approved design section maps to a task: contacts (1), content/provenance/grounding (2), persistence/run ownership (3), artifact/template (4), compiler/runtime (5), bounded Agent/coordinator (6), API/tool/transport/deletion (7), frontend contracts/state (8), Astryx editor (9), rollout/acceptance (10).
+- [x] `TailoredAttribute` is consistently `name + values`; section IDs/headings/kinds/ordinals and attribute names are immutable across schema, Agent patch, manual edit, renderer, API, and TypeScript.
+- [x] Session creation exposes its durable ID through `X-CV-Tailoring-Session-Id`; the seven existing SSE event names remain unchanged and disconnect is never success.
+- [x] The Tailoring Agent first sees outline/JD/instruction, then only selected bodies/facts; reference format, contacts, raw PDFs/JDs, unrelated bodies, paths, Neo4j, and secrets are absent.
+- [x] Exactly one schema-or-grounding repair is shared; deterministic anchor checks and scoped semantic support apply to both AI and manual changes.
+- [x] Every successful generation/save creates immutable `.tex` and PDF artifacts; promotion/CAS cleanup cannot commit missing files or overwrite a newer version.
+- [x] Renderer owns one fixed preamble/layout and dynamic source-owned sections; absent optional contacts render no placeholders or stray separators.
+- [x] `pdflatex` runs twice through argv-only async execution with `-no-shell-escape`, bounds, safe failures, no persisted logs, and a mandatory container smoke.
+- [x] Main Agent and direct button use the same coordinator; the Plan 17 production path contains the Main Agent and bounded CV Tailoring Agent, eight Main tools, one saved-JD state owner, and no unapproved Agent topology or extra service/worker/queue. This phase does not create a project-wide Agent-count ceiling.
+- [x] Approved CV/Profile/JD, evaluations, matching, and Neo4j remain unchanged; old versions survive source/Job staleness and Job deletion.
+- [x] Frontend uses inspected Astryx components/tokens only, keeps ChatPage mounted, and covers responsive/accessibility/error/conflict/delete behavior.
 - [ ] Full backend/frontend/migration/portfolio/Docker/compiler/browser/scope/data/secret gates are recorded before completion is claimed.
