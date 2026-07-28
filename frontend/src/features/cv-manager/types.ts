@@ -127,3 +127,161 @@ export function parseCvManagerListResponse(raw: unknown): CvManagerListResponse 
   if (!Array.isArray(value.items)) throw new Error('items must be an array');
   return {items: value.items.map(parseCvManagerItem)};
 }
+
+export type ProfileReextractStage =
+  | 'validating_source'
+  | 'extracting_document'
+  | 'projecting_profile'
+  | 'publishing_review';
+
+export type ProfileReextractEvent = {
+  event_id: string;
+  operation_id: string;
+  profile_id: string;
+  timestamp: string;
+} & (
+  | {event: 'reextract_progress'; payload: {stage: ProfileReextractStage; message: string}}
+  | {event: 'reextract_review_ready'; payload: {revision: string}}
+  | {event: 'reextract_failed'; payload: {code: string; summary: string; draft_available: boolean}}
+);
+
+export type PublicProfileSnapshot = {
+  full_name: string | null;
+  location: string | null;
+  phone: string | null;
+  email: string | null;
+  github_url: string | null;
+  summary: string;
+  current_title: string | null;
+  skill_labels: string[];
+};
+
+export type ProfileFieldChange = {
+  field: 'full_name' | 'location' | 'phone' | 'email' | 'github_url' | 'summary' | 'current_title';
+  before: string | number | null;
+  after: string | number | null;
+};
+
+export type ProfileReextractReview = {
+  profile_id: string;
+  revision: string;
+  current: PublicProfileSnapshot;
+  proposed: PublicProfileSnapshot;
+  changed_fields: ProfileFieldChange[];
+  skills_added: string[];
+  skills_removed: string[];
+  collection_deltas: {experiences: number; education: number; languages: number; certifications: number};
+  extraction_confidence: {before: number; after: number} | null;
+  can_approve: boolean;
+  can_discard: boolean;
+};
+
+export type ProfileReextractApprovalResponse = {
+  profile_id: string;
+  approved: boolean;
+  sync_ok: boolean;
+  warning: {code: string; summary: string; guidance: string} | null;
+};
+
+const EVENT_KEYS = ['event_id', 'operation_id', 'profile_id', 'timestamp', 'event', 'payload'] as const;
+const REVIEW_KEYS = ['profile_id', 'revision', 'current', 'proposed', 'changed_fields', 'skills_added', 'skills_removed', 'collection_deltas', 'extraction_confidence', 'can_approve', 'can_discard'] as const;
+const SNAPSHOT_KEYS = ['full_name', 'location', 'phone', 'email', 'github_url', 'summary', 'current_title', 'skill_labels'] as const;
+
+function stringList(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error(`${name} must be a string array`);
+  return value as string[];
+}
+
+function bool(value: unknown, name: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`${name} must be boolean`);
+  return value;
+}
+
+function finite(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${name} must be a number`);
+  return value;
+}
+
+function parseSnapshot(raw: unknown): PublicProfileSnapshot {
+  const value = record(raw, 'profile snapshot');
+  exact(value, SNAPSHOT_KEYS, 'profile snapshot');
+  return {
+    full_name: nullableString(value.full_name, 'full_name'),
+    location: nullableString(value.location, 'location'),
+    phone: nullableString(value.phone, 'phone'),
+    email: nullableString(value.email, 'email'),
+    github_url: nullableString(value.github_url, 'github_url'),
+    summary: typeof value.summary === 'string' ? value.summary : (() => { throw new Error('summary must be a string'); })(),
+    current_title: nullableString(value.current_title, 'current_title'),
+    skill_labels: stringList(value.skill_labels, 'skill_labels'),
+  };
+}
+
+export function parseProfileReextractEvent(raw: unknown): ProfileReextractEvent {
+  const value = record(raw, 'profile re-extract event');
+  exact(value, EVENT_KEYS, 'profile re-extract event');
+  const common = {
+    event_id: uuid(value.event_id, 'event_id'),
+    operation_id: uuid(value.operation_id, 'operation_id'),
+    profile_id: uuid(value.profile_id, 'profile_id'),
+    timestamp: timestamp(value.timestamp, 'timestamp'),
+  };
+  const payload = record(value.payload, 'profile re-extract payload');
+  if (value.event === 'reextract_progress') {
+    exact(payload, ['stage', 'message'], 'profile re-extract progress');
+    const stages: ProfileReextractStage[] = ['validating_source', 'extracting_document', 'projecting_profile', 'publishing_review'];
+    if (!stages.includes(payload.stage as ProfileReextractStage)) throw new Error('invalid re-extract stage');
+    return {...common, event: value.event, payload: {stage: payload.stage as ProfileReextractStage, message: requiredString(payload.message, 'message')}};
+  }
+  if (value.event === 'reextract_review_ready') {
+    exact(payload, ['revision'], 'profile re-extract review-ready');
+    return {...common, event: value.event, payload: {revision: timestamp(payload.revision, 'revision')}};
+  }
+  if (value.event === 'reextract_failed') {
+    exact(payload, ['code', 'summary', 'draft_available'], 'profile re-extract failure');
+    return {...common, event: value.event, payload: {code: requiredString(payload.code, 'code'), summary: requiredString(payload.summary, 'summary'), draft_available: bool(payload.draft_available, 'draft_available')}};
+  }
+  throw new Error('invalid profile re-extract event');
+}
+
+export function parseProfileReextractReview(raw: unknown): ProfileReextractReview {
+  const value = record(raw, 'profile re-extract review');
+  exact(value, REVIEW_KEYS, 'profile re-extract review');
+  if (!Array.isArray(value.changed_fields)) throw new Error('changed_fields must be an array');
+  const changed_fields = value.changed_fields.map((rawChange) => {
+    const change = record(rawChange, 'profile field change');
+    exact(change, ['field', 'before', 'after'], 'profile field change');
+    const fields = ['full_name', 'location', 'phone', 'email', 'github_url', 'summary', 'current_title'] as const;
+    if (!fields.includes(change.field as (typeof fields)[number])) throw new Error('invalid changed field');
+    const validValue = (item: unknown) => item === null || typeof item === 'string' || typeof item === 'number';
+    if (!validValue(change.before) || !validValue(change.after)) throw new Error('invalid field change value');
+    return {field: change.field as ProfileFieldChange['field'], before: change.before as ProfileFieldChange['before'], after: change.after as ProfileFieldChange['after']};
+  });
+  const deltas = record(value.collection_deltas, 'collection deltas');
+  exact(deltas, ['experiences', 'education', 'languages', 'certifications'], 'collection deltas');
+  let extraction_confidence: ProfileReextractReview['extraction_confidence'] = null;
+  if (value.extraction_confidence !== null) {
+    const confidence = record(value.extraction_confidence, 'confidence delta');
+    exact(confidence, ['before', 'after'], 'confidence delta');
+    extraction_confidence = {before: finite(confidence.before, 'confidence before'), after: finite(confidence.after, 'confidence after')};
+  }
+  return {
+    profile_id: uuid(value.profile_id, 'profile_id'), revision: timestamp(value.revision, 'revision'),
+    current: parseSnapshot(value.current), proposed: parseSnapshot(value.proposed), changed_fields,
+    skills_added: stringList(value.skills_added, 'skills_added'), skills_removed: stringList(value.skills_removed, 'skills_removed'),
+    collection_deltas: {experiences: finite(deltas.experiences, 'experiences'), education: finite(deltas.education, 'education'), languages: finite(deltas.languages, 'languages'), certifications: finite(deltas.certifications, 'certifications')},
+    extraction_confidence, can_approve: bool(value.can_approve, 'can_approve'), can_discard: bool(value.can_discard, 'can_discard'),
+  };
+}
+
+export function parseProfileReextractApproval(raw: unknown): ProfileReextractApprovalResponse {
+  const value = record(raw, 'profile re-extract approval');
+  exact(value, ['profile_id', 'approved', 'sync_ok', 'warning'], 'profile re-extract approval');
+  let warning: ProfileReextractApprovalResponse['warning'] = null;
+  if (value.warning !== null) {
+    const item = record(value.warning, 'approval warning');
+    exact(item, ['code', 'summary', 'guidance'], 'approval warning');
+    warning = {code: requiredString(item.code, 'warning code'), summary: requiredString(item.summary, 'warning summary'), guidance: requiredString(item.guidance, 'warning guidance')};
+  }
+  return {profile_id: uuid(value.profile_id, 'profile_id'), approved: bool(value.approved, 'approved'), sync_ok: bool(value.sync_ok, 'sync_ok'), warning};
+}

@@ -45,28 +45,16 @@ export type CvSidebarDeps = {
   cvManager?: Partial<CvManagerApi>;
 };
 
-/** Terminal notice from ChatPage reprocess stream (clear pending / record error). */
-export type CvReprocessTerminalNotice = {
-  requestKey: number;
-  profileId: string;
-  kind: 'completed' | 'failed' | 'interrupted' | 'http_error';
-  error?: {code: string; summary: string};
-};
-
 export type CvSidebarProps = {
   /** True while a run is connecting/streaming/interrupted - disables upload. */
   isUploadDisabled: boolean;
   /** Called after a successful upload so the chat can start an ID-only turn. */
   onSidebarUploadSuccess: (result: CvUploadResponse) => void;
-  /**
-   * CV Manager reprocess request → App → ChatPage stream path.
-   * Returns false when composition refuses (locked/duplicate).
-   */
-  onCvReprocess?: (profileId: string) => boolean;
   /** After confirmed delete success (profile summary may need refresh). */
   onCvDeleted?: () => void;
-  /** Latest reprocess terminal event from ChatPage (via App). */
-  reprocessTerminal?: CvReprocessTerminalNotice | null;
+  onProfileApproved?: () => void;
+  cvManagerRequest?: {requestKey: number; profileId: string; startAt: 'reextract'} | null;
+  onCvManagerRequestHandled?: (requestKey: number) => void;
   /** Increment / change to force a profile reload (e.g. after Save Profile). */
   refreshKey?: number;
   /**
@@ -162,9 +150,10 @@ export function CvSidebar(props: CvSidebarProps) {
 function CvSidebarController({
   isUploadDisabled,
   onSidebarUploadSuccess,
-  onCvReprocess,
   onCvDeleted,
-  reprocessTerminal = null,
+  onProfileApproved,
+  cvManagerRequest = null,
+  onCvManagerRequestHandled,
   refreshKey = 0,
   activationKey = 0,
   savedJobsInvalidateKey,
@@ -185,6 +174,7 @@ function CvSidebarController({
     profileReady: selectedWorkspaceProfile?.state === 'ready',
   });
   const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
+  const handledCvManagerRequests = useRef(new Set<number>());
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
@@ -202,12 +192,18 @@ function CvSidebarController({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const loadedRefreshKey = useRef(refreshKey);
   const loadedActivationKey = useRef(activationKey);
-  const handledTerminalKey = useRef<number | null>(null);
-
   useEffect(() => {
     loadedActivationKey.current = activationKey;
-    handledTerminalKey.current = reprocessTerminal?.requestKey ?? null;
-  }, [activationKey, reprocessTerminal]);
+  }, [activationKey]);
+
+  useEffect(() => {
+    if (!cvManagerRequest || handledCvManagerRequests.current.has(cvManagerRequest.requestKey)) return;
+    if (cvManagerRequest.profileId !== workspace.state.activeProfileId) return;
+    handledCvManagerRequests.current.add(cvManagerRequest.requestKey);
+    setIsCvManagerOpen(true);
+    void cvManager.open().then(() => cvManager.startReextract(cvManagerRequest.profileId));
+    onCvManagerRequestHandled?.(cvManagerRequest.requestKey);
+  }, [cvManager, cvManagerRequest, onCvManagerRequestHandled, workspace.state.activeProfileId]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -368,7 +364,8 @@ function CvSidebarController({
             target.id === workspace.state.activeProfileId &&
             scopedProfile?.active_attachment
           ) {
-            onCvReprocess?.(target.id);
+            setIsCvManagerOpen(true);
+            void cvManager.startReextract(target.id);
           }
         }}
         onRetryUpload={handleRetryUpload}
@@ -398,15 +395,12 @@ function CvSidebarController({
         isOpen={isCvManagerOpen}
         onOpenChange={setIsCvManagerOpen}
         controller={cvManager}
-        onCvReprocess={(attachmentId) => {
-          const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
-          if (item?.profile_id) onCvReprocess?.(item.profile_id);
-        }}
         onActivateProfile={(attachmentId) => {
           const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
           if (item?.profile_id) void workspace.activate(item.profile_id);
         }}
         onDeleted={handleCvManagerDeleted}
+        onProfileApproved={onProfileApproved}
       />
     </VStack>
   );

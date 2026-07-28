@@ -1013,7 +1013,7 @@ git commit -m "feat: make CV re-extraction a direct review workflow"
 - Modify: `frontend/src/test/sse-reducer.test.ts`
 - Modify: `frontend/src/app/App.test.tsx`
 
-- [ ] **Step 1: Write direct-stream, review-diff, and no-synthetic-chat tests**
+- [x] **Step 1: Write direct-stream, review-diff, and no-synthetic-chat tests**
 
 ```tsx
 it('renders progress and a recoverable review without touching the chat reducer', async () => {
@@ -1051,7 +1051,7 @@ npm test -- --run src/test/cv-manager-api.test.ts src/test/cv-manager-reextract.
 
 Expected: FAIL because `streamProfileReextract` still feeds the chat SSE reducer and `ChatPage` still owns `CvReprocessRequest`.
 
-- [ ] **Step 3: Add strict direct event parsing and controller transitions**
+- [x] **Step 3: Add strict direct event parsing and controller transitions**
 
 Implement `parseProfileReextractEvent` with exact event/payload keys and a feature-specific stream consumer built on the generic wire parser. State transitions are:
 
@@ -1065,7 +1065,7 @@ type ReextractPhase = 'idle' | 'loading' | 'review' | 'error';
 
 Every mutation carries `{profileId, revision}` and ignores late responses after profile scope changes. Approve success calls `workspace.reload`, invalidates Saved Jobs/tailoring through existing App callbacks, and closes the drawer. Discard success closes only the review. A stream disconnect calls `getReview` before reporting failure; it never marks approval complete from a missing terminal event.
 
-- [ ] **Step 4: Remove the old reprocess chat path and wire Edit Profile Information**
+- [x] **Step 4: Remove the old reprocess chat path and wire Edit Profile Information**
 
 Delete `CvReprocessRequest`, `CvReprocessTerminal`, `CV_REPROCESS_TURN_MESSAGE`, `onCvReprocess`, and `onCvReprocessTerminal` from `App.tsx`, `CvSidebar.tsx`, `ChatPage.tsx`, and their tests. `CvSidebar` opens the CV Manager drawer for the selected profile. `TailoringEditor`'s `onEditProfile` callback must call `openCvManager({profileId, startAt: 'reextract'})`, leaving the tailored workspace state intact until the user explicitly returns.
 
@@ -1084,7 +1084,7 @@ npm run typecheck
 
 Expected: all selected tests PASS and typecheck exits 0.
 
-- [ ] **Step 6: Commit the direct review UI**
+- [x] **Step 6: Commit the direct review UI**
 
 ```powershell
 Set-Location ..

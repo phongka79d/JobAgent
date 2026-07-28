@@ -140,6 +140,10 @@ function drawerController(
     openDeleteDialog: vi.fn(),
     closeDeleteDialog: vi.fn(),
     confirmDelete: vi.fn().mockResolvedValue(true),
+    startReextract: vi.fn().mockResolvedValue(true),
+    approveReview: vi.fn().mockResolvedValue(true),
+    discardReview: vi.fn().mockResolvedValue(true),
+    closeReview: vi.fn(),
     ...overrides,
   };
 }
@@ -388,7 +392,6 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
           isOpen
           onOpenChange={vi.fn()}
           controller={controller}
-          onCvReprocess={vi.fn()}
           onActivateProfile={vi.fn()}
           onRetryUpload={vi.fn()}
         />

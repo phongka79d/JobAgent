@@ -8,6 +8,7 @@ import {
 import {
   parseCvManagerItem,
   parseCvManagerListResponse,
+  parseProfileReextractEvent,
 } from '../features/cv-manager/types';
 import type {
   CvManagerItem,
@@ -361,5 +362,21 @@ describe('CV Manager API transport', () => {
     expect(cvFileUrl(ACTIVE_CV_ID, 'attachment')).toBe(
       `http://api.test/api/cvs/${ACTIVE_CV_ID}/file?disposition=attachment`,
     );
+  });
+});
+
+describe('profile re-extract event parsing', () => {
+  const event = {
+    event_id: '11111111-1111-4111-8111-111111111111', operation_id: '22222222-2222-4222-8222-222222222222', profile_id: ACTIVE_PROFILE_ID,
+    timestamp: '2026-07-28T10:00:00Z', event: 'reextract_review_ready', payload: {revision: '2026-07-28T10:00:00Z'},
+  };
+
+  it('accepts the direct review-ready event with exact keys', () => {
+    expect(parseProfileReextractEvent(event)).toEqual(event);
+  });
+
+  it('rejects chat-shaped or extra-key events instead of coupling the stream to the chat reducer', () => {
+    expect(() => parseProfileReextractEvent({...event, run_id: 'chat-run'})).toThrow();
+    expect(() => parseProfileReextractEvent({...event, payload: {revision: event.payload.revision, state: 'completed'}})).toThrow();
   });
 });

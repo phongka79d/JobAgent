@@ -220,24 +220,6 @@ export async function streamChatResume(
   await consumeWithMappedErrors(response, callbacks, signal);
 }
 
-/** POST /api/profiles/{profile_id}/reextract through the shared SSE consumer. */
-export async function streamProfileReextract(
-  profileId: string,
-  callbacks: StreamCallbacks,
-  signal?: AbortSignal,
-): Promise<void> {
-  const response = await fetch(
-    apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract`),
-    {
-      method: 'POST',
-      headers: {Accept: 'text/event-stream', 'Content-Type': 'application/json'},
-      body: JSON.stringify({}),
-      signal,
-    },
-  );
-  await consumeWithMappedErrors(response, callbacks, signal);
-}
-
 async function consumeWithMappedErrors(
   response: Response,
   callbacks: StreamCallbacks,

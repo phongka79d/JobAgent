@@ -16,15 +16,12 @@ import {VStack} from '@astryxdesign/core/VStack';
 import {
   ChatPage,
   type ChatPageDeps,
-  type CvReprocessRequest,
-  type CvReprocessTerminal,
   type SidebarAttachmentTurnRequest,
 } from '../features/chat/ChatPage';
 import {SIDEBAR_CV_TURN_MESSAGE} from '../features/profile/api';
 import {
   CvSidebar,
   type CvSidebarDeps,
-  type CvReprocessTerminalNotice,
 } from '../features/profile/CvSidebar';
 import type {CvUploadResponse} from '../features/profile/types';
 import {
@@ -58,10 +55,6 @@ export type AppDeps = {
 export type AppProps = {
   deps?: AppDeps;
 };
-
-/** Concise user-visible reprocess intent (domain-agnostic; attachment_id drives tools). */
-export const CV_REPROCESS_TURN_MESSAGE =
-  'Re-extract the retained CV and prepare the current draft for approval.';
 
 export type MainWorkspace =
   | {kind: 'chat'}
@@ -149,10 +142,11 @@ export function App({deps}: AppProps = {}) {
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [sidebarTurn, setSidebarTurn] =
     useState<SidebarAttachmentTurnRequest | null>(null);
-  const [reprocessRequest, setReprocessRequest] =
-    useState<CvReprocessRequest | null>(null);
-  const [reprocessTerminal, setReprocessTerminal] =
-    useState<CvReprocessTerminalNotice | null>(null);
+  const [cvManagerRequest, setCvManagerRequest] = useState<{
+    requestKey: number;
+    profileId: string;
+    startAt: 'reextract';
+  } | null>(null);
   /** Bumps after activation/delete so sidebar invalidates profile + CV caches. */
   const [activationKey, setActivationKey] = useState(0);
   /**
@@ -231,17 +225,18 @@ export function App({deps}: AppProps = {}) {
   const handleReloadLatestTailoring = useCallback(() => {
     void reloadLatestTailoring(tailoring);
   }, [tailoring]);
-  const handleEditProfileFromTailoring = useCallback(() => {
-    setMainWorkspace({kind: 'chat'});
-    queueMicrotask(() => {
-      requestAnimationFrame(() => {
-        const composer = document.querySelector(
-          '[data-testid="jobagent-chat-composer-input"]',
-        );
-        if (composer instanceof HTMLElement) composer.focus();
-      });
-    });
+  const openCvManager = useCallback((request: {profileId: string; startAt: 'reextract'}) => {
+    requestKeyRef.current += 1;
+    setCvManagerRequest({requestKey: requestKeyRef.current, ...request});
   }, []);
+
+  const handleCvManagerRequestHandled = useCallback((requestKey: number) => {
+    setCvManagerRequest((current) => current?.requestKey === requestKey ? null : current);
+  }, []);
+
+  const handleEditProfileFromTailoring = useCallback(() => {
+    if (selectedProfile?.id) openCvManager({profileId: selectedProfile.id, startAt: 'reextract'});
+  }, [openCvManager, selectedProfile?.id]);
 
   const handleSidebarUploadSuccess = useCallback(
     (result: CvUploadResponse) => {
@@ -269,38 +264,6 @@ export function App({deps}: AppProps = {}) {
       current && current.requestKey === requestKey ? null : current,
     );
   }, []);
-
-  /**
-   * CV Manager re-extract → ChatPage profile stream (same SSE callbacks/reducer).
-   * Returns false when composition should refuse (caller already pending).
-   */
-  const handleCvReprocess = useCallback((profileId: string): boolean => {
-    requestKeyRef.current += 1;
-    setReprocessRequest({
-      requestKey: requestKeyRef.current,
-      profileId,
-      message: CV_REPROCESS_TURN_MESSAGE,
-    });
-    return true;
-  }, []);
-
-  const handleCvReprocessHandled = useCallback((requestKey: number) => {
-    setReprocessRequest((current) =>
-      current && current.requestKey === requestKey ? null : current,
-    );
-  }, []);
-
-  const handleCvReprocessTerminal = useCallback(
-    (
-      requestKey: number,
-      profileId: string,
-      kind: CvReprocessTerminal,
-      error?: {code: string; summary: string},
-    ) => {
-      setReprocessTerminal({requestKey, profileId, kind, error});
-    },
-    [],
-  );
 
   /**
    * Save Profile success → one coherent activation fan-out: profile refresh,
@@ -335,9 +298,10 @@ export function App({deps}: AppProps = {}) {
         <CvSidebar
           isUploadDisabled={interactionLocked}
           onSidebarUploadSuccess={handleSidebarUploadSuccess}
-          onCvReprocess={handleCvReprocess}
           onCvDeleted={handleCvDeleted}
-          reprocessTerminal={reprocessTerminal}
+          onProfileApproved={handleProfileSaved}
+          cvManagerRequest={cvManagerRequest}
+          onCvManagerRequestHandled={handleCvManagerRequestHandled}
           refreshKey={profileRefreshKey}
           activationKey={activationKey}
           savedJobsInvalidateKey={savedJobsInvalidateKey}
@@ -372,9 +336,6 @@ export function App({deps}: AppProps = {}) {
             onInteractionLockChange={setUploadLocked}
             sidebarAttachmentTurn={sidebarTurn}
             onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
-            cvReprocessRequest={reprocessRequest}
-            onCvReprocessHandled={handleCvReprocessHandled}
-            onCvReprocessTerminal={handleCvReprocessTerminal}
             onProfileSaved={handleProfileSaved}
             onProfileSetupChanged={workspace.reload}
             onCvUploadSuccess={handleSidebarUploadSuccess}

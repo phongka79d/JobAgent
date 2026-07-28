@@ -22,6 +22,7 @@ import {
   SIDEBAR_CV_TURN_MESSAGE,
 } from '../features/profile/api';
 import type {CvTailoringController} from '../features/cv-tailoring/state';
+import type {ProfileReextractStreamHandlers} from '../features/cv-manager/api';
 import {createEmptySavedJobsController} from '../features/jobs/savedJobsState';
 import {
   CvSidebar,
@@ -596,7 +597,16 @@ describe('CvSidebar empty / active states', () => {
       reload: vi.fn(),
       adoptBootstrap: vi.fn(),
     };
-    const reextract = vi.fn().mockReturnValue(true);
+    const reextract = vi.fn(async (profileId: string, handlers: ProfileReextractStreamHandlers) => {
+      handlers.onEvent({
+        event_id: '11111111-1111-4111-8111-111111111111',
+        operation_id: '22222222-2222-4222-8222-222222222222',
+        profile_id: profileId,
+        timestamp: '2026-07-28T10:00:00Z',
+        event: 'reextract_failed',
+        payload: {code: 'TEST_FAILURE', summary: 'Test failure', draft_available: false},
+      });
+    });
 
     render(
       <Theme theme={neutralTheme}>
@@ -604,11 +614,11 @@ describe('CvSidebar empty / active states', () => {
           {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
-          onCvReprocess={reextract}
           workspace={workspace}
           deps={{
             loadProfile: vi.fn().mockResolvedValue(activeProfile('selected.pdf')),
             uploadCv: vi.fn(),
+            cvManager: {streamProfileReextract: reextract},
           }}
         />
       </Theme>,
@@ -620,7 +630,11 @@ describe('CvSidebar empty / active states', () => {
     await userEvent.click(await screen.findByText('Re-extract CV'));
 
     expect(reextract).toHaveBeenCalledTimes(1);
-    expect(reextract).toHaveBeenCalledWith(PROFILE_ID);
+    expect(reextract).toHaveBeenCalledWith(
+      PROFILE_ID,
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
   });
 });
 

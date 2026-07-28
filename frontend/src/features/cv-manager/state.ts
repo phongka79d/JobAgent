@@ -1,9 +1,16 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 
 import {defaultCvManagerApi, type CvManagerApi} from './api';
-import type {CvManagerItem} from './types';
+import type {CvManagerItem, ProfileReextractReview, ProfileReextractStage} from './types';
 
 export type CvManagerSafeError = {code: string; summary: string};
+type ProfileReextractState = {
+  phase: 'idle' | 'loading' | 'review' | 'error';
+  profileId: string | null;
+  stage: ProfileReextractStage | null;
+  review: ProfileReextractReview | null;
+  error: CvManagerSafeError | null;
+};
 export type CvManagerViewState = {
   phase: 'closed' | 'loading' | 'ready' | 'error';
   items: CvManagerItem[];
@@ -11,10 +18,14 @@ export type CvManagerViewState = {
   pendingByAttachment: Record<string, true>;
   errorsByAttachment: Record<string, CvManagerSafeError>;
   deleteTargetId: string | null;
+  reextract?: ProfileReextractState;
 };
+
+const EMPTY_REEXTRACT: ProfileReextractState = {phase: 'idle', profileId: null, stage: null, review: null, error: null};
 
 const CLOSED: CvManagerViewState = {
   phase: 'closed', items: [], selectedId: null, pendingByAttachment: {}, errorsByAttachment: {}, deleteTargetId: null,
+  reextract: EMPTY_REEXTRACT,
 };
 
 function safeError(error: unknown): CvManagerSafeError {
@@ -31,13 +42,14 @@ export type UseCvManagerStateOptions = {
 };
 
 export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
-  const api: CvManagerApi = {...defaultCvManagerApi, ...options.api};
+  const api = {...defaultCvManagerApi, ...options.api} as Required<CvManagerApi>;
   const profileScope = options.profileId ?? 'legacy';
   const scopeRef = useRef(profileScope);
   const listControllerRef = useRef<AbortController | null>(null);
   const mutationControllersRef = useRef(new Map<string, AbortController>());
   const mutationInFlightRef = useRef(new Set<string>());
   const generationRef = useRef(0);
+  const reextractGenerationRef = useRef(0);
   const stateRef = useRef<CvManagerViewState>(CLOSED);
   const [state, setState] = useState<CvManagerViewState>(CLOSED);
 
@@ -58,6 +70,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     for (const controller of mutationControllersRef.current.values()) controller.abort();
     mutationControllersRef.current.clear();
     mutationInFlightRef.current.clear();
+    reextractGenerationRef.current += 1;
     publish(CLOSED);
   }, [profileScope, publish]);
 
@@ -95,6 +108,8 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     generationRef.current += 1;
     listControllerRef.current?.abort();
     listControllerRef.current = null;
+    reextractGenerationRef.current += 1;
+    mutationControllersRef.current.get('reextract')?.abort();
     publish((previous) => ({...previous, phase: 'closed', deleteTargetId: null}));
   }, [publish]);
   const select = useCallback((id: string | null) => {
@@ -143,7 +158,101 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     }
   }, [api, publish, refresh]);
 
-  return {state, open, close, refresh, select, openDeleteDialog, closeDeleteDialog, confirmDelete};
+  const loadReview = useCallback(async (profileId: string, expectedRevision?: string, signal?: AbortSignal): Promise<boolean> => {
+    const scope = scopeRef.current;
+    const reextractGeneration = reextractGenerationRef.current;
+    try {
+      const review = await api.getProfileReextractReview(profileId, signal);
+      if (signal?.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration || review.profile_id !== profileId || (expectedRevision !== undefined && review.revision !== expectedRevision)) return false;
+      publish((previous) => ({...previous, reextract: {phase: 'review', profileId, stage: null, review, error: null}}));
+      return true;
+    } catch (error) {
+      if (signal?.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, error: safeError(error)}}));
+      return false;
+    }
+  }, [api, publish]);
+
+  const startReextract = useCallback(async (profileId: string): Promise<boolean> => {
+    const key = 'reextract';
+    mutationControllersRef.current.get(key)?.abort();
+    const controller = new AbortController();
+    mutationControllersRef.current.set(key, controller);
+    const scope = scopeRef.current;
+    const reextractGeneration = reextractGenerationRef.current + 1;
+    reextractGenerationRef.current = reextractGeneration;
+    publish((previous) => ({...previous, reextract: {phase: 'loading', profileId, stage: 'validating_source', review: null, error: null}}));
+    let reviewRevision: string | null = null;
+    let failed = false;
+    try {
+      await api.streamProfileReextract(profileId, {
+        onEvent: (event) => {
+          if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration || event.profile_id !== profileId) return;
+          if (event.event === 'reextract_progress') {
+            publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'loading', profileId, stage: event.payload.stage, error: null}}));
+          } else if (event.event === 'reextract_review_ready') {
+            reviewRevision = event.payload.revision;
+          } else {
+            failed = true;
+            publish((previous) => ({...previous, reextract: {phase: 'error', profileId, stage: null, review: previous.reextract?.profileId === profileId ? previous.reextract.review : null, error: {code: event.payload.code, summary: event.payload.summary}}}));
+          }
+        },
+        onMalformed: () => undefined,
+        onDisconnected: () => undefined,
+      }, controller.signal);
+      if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
+      if (failed) return false;
+      return await loadReview(profileId, reviewRevision ?? undefined, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
+      if (await loadReview(profileId, undefined, controller.signal)) return true;
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, error: safeError(error)}}));
+      return false;
+    } finally {
+      mutationControllersRef.current.delete(key);
+    }
+  }, [api, loadReview, publish]);
+
+  const approveReview = useCallback(async (): Promise<boolean> => {
+    const review = stateRef.current.reextract?.review;
+    if (!review?.can_approve) return false;
+    const scope = scopeRef.current;
+    const generation = reextractGenerationRef.current;
+    const controller = new AbortController();
+    try {
+      await api.approveProfileReextractReview(review.profile_id, review.revision, controller.signal);
+      if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
+      publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}}));
+      await refresh();
+      return true;
+    } catch (error) {
+      if (scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', error: safeError(error)}}));
+      return false;
+    }
+  }, [api, publish, refresh]);
+
+  const discardReview = useCallback(async (): Promise<boolean> => {
+    const review = stateRef.current.reextract?.review;
+    if (!review?.can_discard) return false;
+    const scope = scopeRef.current;
+    const generation = reextractGenerationRef.current;
+    const controller = new AbortController();
+    try {
+      await api.discardProfileReextractReview(review.profile_id, review.revision, controller.signal);
+      if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
+      publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}}));
+      return true;
+    } catch (error) {
+      if (scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', error: safeError(error)}}));
+      return false;
+    }
+  }, [api, publish]);
+
+  const closeReview = useCallback(() => publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}})), [publish]);
+
+  return {state, open, close, refresh, select, openDeleteDialog, closeDeleteDialog, confirmDelete, startReextract, loadReview, approveReview, discardReview, closeReview};
 }
 
 export type CvManagerController = ReturnType<typeof useCvManagerState>;

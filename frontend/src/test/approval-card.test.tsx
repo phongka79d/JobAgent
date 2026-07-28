@@ -202,6 +202,28 @@ describe('ApprovalCard pure helpers', () => {
     expect(lines).toContain('Email: synthetic@example.test');
     expect(lines.some((line) => line.startsWith('GitHub:'))).toBe(false);
   });
+  it('renders nested initial proposal profile and preference values', () => {
+    const {title, lines} = summarizeApprovalCard({
+      profile: {
+        summary: 'Platform engineer focused on reliable services',
+        current_title: 'Platform Engineer',
+        phone: '0123456789',
+        email: 'platform@example.test',
+      },
+      preferences: {
+        target_roles: ['Backend Engineer'],
+        preferred_locations: ['Remote'],
+      },
+    });
+    expect(title).toBe('Platform Engineer');
+    expect(lines).toEqual(expect.arrayContaining([
+      'Platform engineer focused on reliable services',
+      'Phone: 0123456789',
+      'Email: platform@example.test',
+      'Target roles: Backend Engineer',
+      'Locations: Remote',
+    ]));
+  });
   it('recognizes only profile_commit with both actions', () => {
     expect(
       isProfileCommitApproval(PROFILE_COMMIT_KIND, [
