@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 from app.core.ids import new_uuid
 from app.schemas.cv_tailoring import (
     SourceBoundText,
@@ -49,25 +50,51 @@ async def test_real_fixed_bilingual_template_compiles_when_pdflatex_exists(
             "fixed bilingual template requires missing TeX inputs: "
             + ", ".join(missing_inputs)
         )
-    text = SourceBoundText(text="Dịch vụ công cộng", source_fact_ids=["sf_test"])
+    def item(item_id: str, body: str, title: str | None = None) -> TailoredItem:
+        return TailoredItem(
+            id=item_id,
+            source_entry_id=item_id,
+            title=(
+                SourceBoundText(text=title, source_fact_ids=["sf_test"])
+                if title
+                else None
+            ),
+            body=SourceBoundText(text=body, source_fact_ids=["sf_test"]),
+            bullets=[],
+            attributes=[],
+        )
+
     content = TailoredCVContent(
         header=TailoredHeaderSnapshot(full_name="Ứng viên Synthetic"),
         sections=[
             TailoredSection(
                 id="summary",
                 ordinal=0,
-                heading="Tóm tắt",
+                heading="SUMMARY",
                 kind="summary",
-                items=[
-                    TailoredItem(
-                        id="summary-1",
-                        source_entry_id="summary-1",
-                        body=text,
-                        bullets=[],
-                        attributes=[],
-                    )
-                ],
-            )
+                items=[item("summary-1", "Synthetic summary")],
+            ),
+            TailoredSection(
+                id="education",
+                ordinal=1,
+                heading="EDUCATION",
+                kind="education",
+                items=[item("education-1", "Synthetic University")],
+            ),
+            TailoredSection(
+                id="skills",
+                ordinal=2,
+                heading="TECHNICAL SKILLS",
+                kind="skills",
+                items=[item("skills-1", "Python", "technical skills")],
+            ),
+            TailoredSection(
+                id="projects",
+                ordinal=3,
+                heading="PROJECTS",
+                kind="projects",
+                items=[item("projects-1", "Built parser", "Resume parser")],
+            ),
         ],
     )
     staging = TailoringArtifactStorage(tmp_path).create_staging_dir(
@@ -80,5 +107,11 @@ async def test_real_fixed_bilingual_template_compiles_when_pdflatex_exists(
     )
     assert result.page_count > 0
     assert result.pdf_path.stat().st_size > 0
+    pdf_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(result.pdf_path).pages
+    )
+    for heading in ("SUMMARY", "EDUCATION", "TECHNICAL SKILLS", "PROJECTS"):
+        assert pdf_text.count(heading) == 1
+    assert pdf_text.count("Resume parser") == 1
     assert not (staging / "resume.log").exists()
     assert not (staging / "resume.aux").exists()

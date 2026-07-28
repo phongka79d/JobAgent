@@ -1549,7 +1549,7 @@ git commit -m "feat: add grounded tailoring recovery actions"
 - Modify: `backend/tests/unit/test_cv_tailoring_renderer.py`
 - Modify: `backend/tests/integration/test_cv_tailoring_compiler.py`
 
-- [ ] **Step 1: Write renderer and real-PDF assertions**
+- [x] **Step 1: Write renderer and real-PDF assertions**
 
 ```py
 def test_item_title_equal_to_section_heading_is_omitted_case_and_unicode_insensitive() -> None:
@@ -1584,7 +1584,7 @@ Set-Location backend
 
 Expected: FAIL because every item renderer currently emits its title unconditionally.
 
-- [ ] **Step 3: Implement one comparison-only normalizer at the renderer seam**
+- [x] **Step 3: Implement one comparison-only normalizer at the renderer seam**
 
 ```py
 import unicodedata

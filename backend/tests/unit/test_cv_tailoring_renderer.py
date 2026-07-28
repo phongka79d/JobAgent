@@ -96,6 +96,31 @@ def test_escape_latex_text(value: str, escaped: str) -> None:
     assert escape_latex_text(value) == escaped
 
 
+def test_item_title_equal_to_section_heading_is_omitted_unicode_insensitive() -> None:
+    section = TailoredSection(
+        id="skills",
+        ordinal=0,
+        heading="TECHNICAL SKILLS",
+        kind="skills",
+        items=[_item("skills-1", "Python", title="  technical\u00a0skills ")],
+    )
+    rendered = render_latex_cv(_content(sections=[section]))
+    assert "technical\u00a0skills" not in rendered.casefold()
+    assert "Python" in rendered
+
+
+def test_genuine_item_title_is_retained() -> None:
+    section = TailoredSection(
+        id="projects",
+        ordinal=0,
+        heading="PROJECTS",
+        kind="projects",
+        items=[_item("project-1", "Built parser", title="Resume parser")],
+    )
+    rendered = render_latex_cv(_content(sections=[section]))
+    assert "Resume parser" in rendered
+
+
 def test_minimal_bilingual_render_is_byte_for_byte_stable() -> None:
     expected = r"""\documentclass[11pt]{article}
 \usepackage{graphicx}

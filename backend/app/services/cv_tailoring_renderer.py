@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -181,10 +182,24 @@ def _render_optional_metadata(item: TailoredItem) -> list[str]:
     return lines
 
 
-def _render_simple_item(item: TailoredItem) -> list[str]:
+def _comparison_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def _display_item_title(
+    item: TailoredItem, section_heading: str
+) -> SourceBoundText | None:
+    title = item.title
+    if title is None or _comparison_text(title.text) == _comparison_text(section_heading):
+        return None
+    return title
+
+
+def _render_simple_item(item: TailoredItem, section_heading: str) -> list[str]:
     lines: list[str] = []
-    if item.title is not None and item.title.text:
-        lines.append(rf"\textbf{{{escape_latex_text(item.title.text)}}}")
+    title = _display_item_title(item, section_heading)
+    if title is not None and title.text:
+        lines.append(rf"\textbf{{{escape_latex_text(title.text)}}}")
     lines.extend(_render_optional_metadata(item))
     if item.body.text:
         lines.append(escape_latex_text(item.body.text))
@@ -196,11 +211,12 @@ def _render_simple_item(item: TailoredItem) -> list[str]:
     return lines
 
 
-def _render_compact_item(item: TailoredItem) -> list[str]:
+def _render_compact_item(item: TailoredItem, section_heading: str) -> list[str]:
     body = escape_latex_text(item.body.text) if item.body.text else ""
     lines: list[str] = []
-    if item.title is not None and item.title.text:
-        prefix = rf"\textbf{{{escape_latex_text(item.title.text)}:}}"
+    title = _display_item_title(item, section_heading)
+    if title is not None and title.text:
+        prefix = rf"\textbf{{{escape_latex_text(title.text)}:}}"
         lines.append(f"{prefix} {body}".rstrip())
     elif body:
         lines.append(body)
@@ -226,12 +242,13 @@ def _first_link(
     return None, None
 
 
-def _render_generic_item(item: TailoredItem) -> list[str]:
+def _render_generic_item(item: TailoredItem, section_heading: str) -> list[str]:
     has_date = item.date_text is not None and bool(item.date_text.text)
     link, consumed = _first_link(item.attributes, enabled=not has_date)
     left = ""
-    if item.title is not None and item.title.text:
-        left = rf"\textbf{{{escape_latex_text(item.title.text)}}}"
+    title = _display_item_title(item, section_heading)
+    if title is not None and title.text:
+        left = rf"\textbf{{{escape_latex_text(title.text)}}}"
     right = ""
     if has_date and item.date_text is not None:
         right = escape_latex_text(item.date_text.text)
@@ -280,11 +297,11 @@ def render_latex_cv(content: TailoredCVContent) -> str:
         item_blocks: list[list[str]] = []
         for item in section.items:
             if section.kind in _SIMPLE_KINDS:
-                block = _render_simple_item(item)
+                block = _render_simple_item(item, section.heading)
             elif section.kind in _COMPACT_KINDS:
-                block = _render_compact_item(item)
+                block = _render_compact_item(item, section.heading)
             else:
-                block = _render_generic_item(item)
+                block = _render_generic_item(item, section.heading)
             if block:
                 item_blocks.append(block)
         for index, block in enumerate(item_blocks):
