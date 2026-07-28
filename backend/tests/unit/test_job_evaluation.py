@@ -118,6 +118,7 @@ def _job(
         extraction=extraction,
         jd_quality=quality,
         source_url=source_url,
+        saved_at=datetime(2026, 7, 28, tzinfo=UTC),
     )
 
 
@@ -183,6 +184,7 @@ def test_exact_and_top_n_share_component_map_and_explanation(
     assert multi.count == 1
     assert multi.results[0] == exact_result
     assert multi.results[0].job_id == job.job_id
+    assert multi.results[0].display_label == "Backend Engineer · Acme"
     assert multi.results[0].components.semantic_similarity == 0.88
     assert multi.results[0].quality_multiplier == 0.85
     assert multi.results[0].matched_required_skills
@@ -367,6 +369,7 @@ class _FakeJobFacts:
     extraction: Any
     jd_quality: str
     source_url: str | None
+    saved_at: datetime
 
 
 def test_job_scoring_facts_protocol_accepts_plain_hydrated_facts(
@@ -380,6 +383,7 @@ def test_job_scoring_facts_protocol_accepts_plain_hydrated_facts(
         extraction=extraction,
         jd_quality=JOB_JD_QUALITY_FULL,
         source_url="https://example.com/j",
+        saved_at=datetime(2026, 7, 28, tzinfo=UTC),
     )
     result = project_single_job_match(
         profile=_profile(),

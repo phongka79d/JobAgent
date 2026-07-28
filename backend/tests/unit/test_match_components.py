@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from app.schemas.matching import MatchResult
 from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
@@ -192,3 +193,30 @@ def test_partial_quality_multiplier_applies_after_unrounded_base_score() -> None
 def test_unscorable_quality_is_rejected_without_final_score() -> None:
     with pytest.raises(ValueError, match="unscorable"):
         score_match_candidate(_candidate(jd_quality=JOB_JD_QUALITY_UNSCORABLE))
+
+
+def test_match_result_label_is_backward_compatible() -> None:
+    result = MatchResult.model_validate(
+        {
+            "job_id": "job-1",
+            "work_mode": "unknown",
+            "final_score": 0.5,
+            "matched_required_skills": [],
+            "related_skills": [],
+            "missing_required_skills": [],
+            "missing_preferred_skills": [],
+            "components": {
+                "semantic_similarity": 0.5,
+                "skill_score": 0.5,
+                "seniority_score": None,
+                "experience_score": None,
+                "location_score": None,
+                "work_mode_score": None,
+            },
+            "effective_weights": {"semantic_similarity": 0.5, "skill_score": 0.5},
+            "quality_multiplier": 1.0,
+            "matched_preferred_skills": [],
+            "summary": "A compatible legacy result",
+        }
+    )
+    assert result.display_label is None

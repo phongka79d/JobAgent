@@ -16,6 +16,7 @@ from app.schemas.cv_tailoring import (
     TailoredItem,
     TailoredSection,
     TailoringSourceRevision,
+    TailoringJobLabel,
     TailoringVersionMutationResponse,
     parse_tailored_content,
     tailored_content_equal,
@@ -173,3 +174,10 @@ def test_source_revision_uses_frozen_template_literal_and_aware_times() -> None:
             job_updated_at=None,
             template_version="latex-cv-v2",
         )
+
+
+def test_tailoring_job_label_accepts_old_snapshots_and_server_display_label() -> None:
+    old = TailoringJobLabel.model_validate({"title": "Engineer", "company": "Acme"})
+    assert old.display_label is None
+    current = TailoringJobLabel(title="Engineer", company="Acme", display_label="Engineer · Acme")
+    assert current.display_label == "Engineer · Acme"

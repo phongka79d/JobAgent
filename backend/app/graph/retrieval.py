@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from app.graph.consistency import AsyncGraphReadDriver
@@ -43,6 +44,7 @@ class RetrievedJobCandidate:
     extraction: JobPostExtraction
     jd_quality: str
     source_url: str | None
+    saved_at: datetime
 
 
 def _clamp_similarity(value: object) -> float:
@@ -138,6 +140,7 @@ async def retrieve_job_candidates(
             extraction=facts[job_id].extraction,
             jd_quality=facts[job_id].jd_quality,
             source_url=facts[job_id].source_url,
+            saved_at=facts[job_id].created_at,
         )
         for job_id, score in ids_and_scores
     ]
@@ -212,6 +215,7 @@ async def retrieve_exact_job_candidate(
         extraction=facts[job_id].extraction,
         jd_quality=facts[job_id].jd_quality,
         source_url=facts[job_id].source_url,
+        saved_at=facts[job_id].created_at,
     )
 
 

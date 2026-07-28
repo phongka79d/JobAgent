@@ -95,6 +95,7 @@ class SavedJobListItem(BaseModel):
     id: UuidStr
     title: str | None = None
     company: str | None = None
+    display_label: str = Field(min_length=1, max_length=140)
     processing_status: JobProcessingStatus
     jd_quality: JobJdQuality | None = None
     source_type: JobSourceTypeLiteral

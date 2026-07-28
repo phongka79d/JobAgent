@@ -1796,7 +1796,7 @@ git commit -m "fix: align tailored editor layout and navigation"
 - Modify: `backend/tests/integration/test_cv_tailoring_api.py`
 - Modify: `backend/tests/integration/test_cv_tailoring_repository.py`
 
-- [ ] **Step 1: Write pure display-label tests**
+- [x] **Step 1: Write pure display-label tests**
 
 ```py
 def test_saved_job_label_prefers_title_and_company() -> None:
@@ -1818,7 +1818,7 @@ Set-Location backend
 
 Expected: FAIL because `display_label` is not in the strict saved-job or match contracts.
 
-- [ ] **Step 3: Implement the pure label helper and Saved Job projection**
+- [x] **Step 3: Implement the pure label helper and Saved Job projection**
 
 ```py
 def derive_saved_job_display_label(*, title: str | None, company: str | None, summary: str | None, saved_at: datetime) -> str:
@@ -1836,7 +1836,7 @@ def derive_saved_job_display_label(*, title: str | None, company: str | None, su
 
 Call it only from `saved_jobs.py::_list_item`, using validated extraction summary and the persisted `created_at`. Add `display_label: str = Field(min_length=1, max_length=140)` to `SavedJobListItem` and keep `SavedJobDetail.compact` as the sole detail source.
 
-- [ ] **Step 4: Add backward-compatible match/session snapshots**
+- [x] **Step 4: Add backward-compatible match/session snapshots**
 
 Add optional `display_label: str | None = Field(default=None, max_length=140)` to `MatchResult`; populate it in `match_scoring.py` from the same helper without changing scores, ordering, weights, or formula. Old stored results remain valid because the field is optional. Add optional `display_label` to `TailoringJobLabel`; `_resolve_new_snapshot` stores the same server projection. Parsers accept old `{title, company}` JSON and derive the label at display time.
 

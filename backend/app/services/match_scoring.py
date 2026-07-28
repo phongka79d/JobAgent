@@ -8,6 +8,7 @@ similarity score. Provider, graph, and SQLite work stay outside this module.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 
 from app.schemas.jobs import JobPostExtraction
@@ -27,6 +28,7 @@ from app.services.match_explanations import (
     project_match_jobs_result,
     project_match_result,
 )
+from app.services.job_display import derive_saved_job_display_label
 from app.services.skill_matching import SkillCoverageResult, compute_skill_coverage
 from app.services.skill_normalization import SkillNormalizer
 
@@ -52,6 +54,9 @@ class JobScoringFacts(Protocol):
 
     @property
     def source_url(self) -> str | None: ...
+
+    @property
+    def saved_at(self) -> datetime: ...
 
 
 def build_match_score_components(
@@ -116,6 +121,12 @@ def score_single_job(
         location=job.extraction.location,
         work_mode=job.extraction.work_mode,
         source_url=job.source_url,
+        display_label=derive_saved_job_display_label(
+            title=job.extraction.title,
+            company=job.extraction.company,
+            summary=job.extraction.summary,
+            saved_at=job.saved_at,
+        ),
     )
 
 
@@ -179,6 +190,12 @@ def score_retrieved_candidates(
             location=meta_by_id[scored.components.job_id].extraction.location,
             work_mode=meta_by_id[scored.components.job_id].extraction.work_mode,
             source_url=meta_by_id[scored.components.job_id].source_url,
+            display_label=derive_saved_job_display_label(
+                title=meta_by_id[scored.components.job_id].extraction.title,
+                company=meta_by_id[scored.components.job_id].extraction.company,
+                summary=meta_by_id[scored.components.job_id].extraction.summary,
+                saved_at=meta_by_id[scored.components.job_id].saved_at,
+            ),
         )
         for scored in ranked
     ]

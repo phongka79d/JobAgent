@@ -82,6 +82,7 @@ from app.services.cv_tailoring_projection import (
     select_section_context,
 )
 from app.services.cv_tailoring_renderer import render_latex_cv
+from app.services.job_display import derive_saved_job_display_label
 from app.services.tailoring_issue_projection import project_grounding_issues
 from app.storage.cv_tailoring import TailoringArtifactStorage
 
@@ -802,6 +803,12 @@ class TailoringCoordinator:
             job_label = TailoringJobLabel(
                 title=job_context.title,
                 company=job_context.company,
+                display_label=derive_saved_job_display_label(
+                    title=job_context.title,
+                    company=job_context.company,
+                    summary=job_context.summary,
+                    saved_at=_aware_utc(job.created_at),
+                ),
             )
         return TailoringSourceSnapshot(
             profile_id=profile.id,

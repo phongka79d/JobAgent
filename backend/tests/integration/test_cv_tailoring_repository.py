@@ -19,6 +19,7 @@ from app.repositories.cv_tailoring import (
     CVTailoringVersionWrite,
     TailoringParentConflict,
 )
+from app.schemas.cv_tailoring import TailoringJobLabel
 from sqlalchemy import func, select
 
 from tests.support.db_migration import run_async, session_factory
@@ -255,6 +256,10 @@ def test_job_delete_retains_snapshot_and_profile_delete_cascades_derivatives(
                     "title": "Synthetic Role",
                     "company": "Lab",
                 }
+                assert (
+                    TailoringJobLabel.model_validate(retained.job_label_json).display_label
+                    is None
+                )
                 version = await tailoring_repo.get_version(session, version_id)
                 assert version is not None
                 assert version.tex_relative_path.endswith("resume.tex")

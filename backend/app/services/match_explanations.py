@@ -42,6 +42,7 @@ class MatchExplanationInput:
     location: str | None
     work_mode: JobWorkMode
     source_url: str | None
+    display_label: str | None = None
 
 
 def project_match_result(item: MatchExplanationInput) -> MatchResult:
@@ -88,6 +89,7 @@ def project_match_result(item: MatchExplanationInput) -> MatchResult:
         job_id=components.job_id,
         title=item.title,
         company=item.company,
+        display_label=item.display_label,
         location=item.location,
         work_mode=item.work_mode,
         source_url=item.source_url,

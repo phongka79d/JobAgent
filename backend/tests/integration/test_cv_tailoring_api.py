@@ -156,6 +156,139 @@ def test_main_app_registers_tailoring_routes_and_exposes_session_header() -> Non
     assert CV_TAILORING_SESSION_HEADER in cors.kwargs["expose_headers"]
 
 
+def test_job_backed_session_persists_shared_display_label(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    from app.api.cv_tailoring import router
+    from app.db.models.cv_documents import CVDocument as CVDocumentRow
+    from app.repositories import jobs as jobs_repo
+    from app.services.cv_tailoring import TailoringCoordinator
+    from app.services.cv_tailoring_projection import project_outline
+    from app.services.job_display import derive_saved_job_display_label
+    from tests.support.graph_rebuild import extraction_payload
+    from tests.unit.test_cv_tailoring_projection import _document, _profile
+
+    async def _seed_and_prepare() -> tuple[CVTailoringDeps, str, str, Any]:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        storage = TailoringArtifactStorage(tmp_path / "job-backed-files")
+        async with factory() as session:
+            attachment = Attachment(
+                file_hash="c" * 64,
+                original_name="job-backed.pdf",
+                mime_type="application/pdf",
+                size_bytes=10,
+                page_count=1,
+                storage_path=f"{new_uuid()}.pdf",
+                state="active",
+            )
+            session.add(attachment)
+            await session.flush()
+            profile_model = _profile()
+            document = _document().model_copy(
+                update={"attachment_id": attachment.id}
+            )
+            profile = Profile(
+                attachment_id=attachment.id,
+                display_name="Synthetic Candidate",
+                profile_json=profile_model.model_dump(mode="json"),
+                location=profile_model.location,
+                extraction_version="cv-document-v1",
+                source_hash="source-revision-a",
+                state="ready",
+            )
+            session.add(profile)
+            session.add(
+                CVDocumentRow(
+                    attachment_id=attachment.id,
+                    document_json=document.model_dump(mode="json"),
+                    profile_json=profile_model.model_dump(mode="json"),
+                    outline_json={"sections": project_outline(document)},
+                    extraction_version="cv-document-v1",
+                    source_hash="source-revision-a",
+                )
+            )
+            await session.flush()
+            await workspace_repo.set_active_profile_id(session, profile.id)
+
+            job = await jobs_repo.create_text_job(
+                session,
+                raw_content="Synthetic Role at Lab.",
+                raw_content_hash="job-backed-label-hash",
+            )
+            await jobs_repo.mark_processing(session, job.id)
+            extraction = extraction_payload()
+            extraction.update(
+                {
+                    "title": "Synthetic Role",
+                    "company": "Lab",
+                    "summary": "Build trusted systems.",
+                }
+            )
+            processed = await jobs_repo.mark_processed(
+                session,
+                job.id,
+                extraction_json=extraction,
+                jd_quality="full",
+                embedding_json=[0.01 + (index * 1e-6) for index in range(1536)],
+                embedding_model="text-embedding-3-small",
+                embedding_dimensions=1536,
+            )
+            expected_label = derive_saved_job_display_label(
+                title=extraction["title"],
+                company=extraction["company"],
+                summary=extraction["summary"],
+                saved_at=processed.created_at,
+            )
+            await session.commit()
+
+        coordinator = TailoringCoordinator(
+            session_factory=factory,
+            storage=storage,
+            settings=SimpleNamespace(CV_TAILOR_MAX_INSTRUCTION_CHARS=4_000),
+            sqlite_path=migrated_sqlite,
+        )
+        launch = await coordinator.prepare_session(
+            profile_id=profile.id,
+            job_id=job.id,
+            instruction="",
+            parent_run_id=None,
+        )
+        async with factory() as session:
+            persisted = await tailoring_repo.get_session(session, launch.session_id)
+            assert persisted is not None
+            assert persisted.job_label_json == {
+                "title": "Synthetic Role",
+                "company": "Lab",
+                "display_label": expected_label,
+            }
+        return (
+            CVTailoringDeps(
+                coordinator=coordinator,
+                storage=storage,
+                settings=SimpleNamespace(SQLITE_PATH=migrated_sqlite),
+                session_factory=factory,
+            ),
+            launch.session_id,
+            expected_label,
+            engine,
+        )
+
+    deps, session_id, expected_label, engine = run_async(_seed_and_prepare())
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    app.dependency_overrides[get_cv_tailoring_deps] = lambda: deps
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/cv-tailoring/sessions")
+            assert response.status_code == 200
+            item = response.json()["items"][0]
+            assert item["id"] == session_id
+            assert item["job_label"]["display_label"] == expected_label
+    finally:
+        run_async(engine.dispose())
+
+
 def test_artifact_hashing_uses_bounded_streaming_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

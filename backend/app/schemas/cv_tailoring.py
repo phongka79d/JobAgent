@@ -228,6 +228,7 @@ class TailoringJobLabel(BaseModel):
 
     title: str | None = Field(default=None, max_length=300)
     company: str | None = Field(default=None, max_length=300)
+    display_label: str | None = Field(default=None, max_length=140)
 
 
 class TailoringVersionSummary(BaseModel):

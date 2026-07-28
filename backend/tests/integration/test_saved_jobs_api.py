@@ -235,13 +235,16 @@ async def _create_processed_job(
     *,
     raw_content: str,
     raw_hash: str,
-    title: str = "Backend Engineer",
-    company: str = "Acme",
+    title: str | None = "Backend Engineer",
+    company: str | None = "Acme",
+    summary: str | None = None,
     created_at: datetime | None = None,
 ) -> str:
     extraction = extraction_payload()
     extraction["title"] = title
     extraction["company"] = company
+    if summary is not None:
+        extraction["summary"] = summary
     row = await jobs_repo.create_text_job(
         session,
         raw_content=raw_content,
@@ -826,6 +829,7 @@ def test_detail_extraction_evaluation_and_not_found(
         assert detail.compact.id == job_id
         assert detail.compact.title == "Detail Role"
         assert detail.compact.company == "Detail Co"
+        assert detail.compact.display_label == "Detail Role · Detail Co"
         assert detail.compact.evaluation_state == "current"
         assert detail.compact.latest_score == pytest.approx(0.77)
         assert detail.raw_content == "Selected JD body text"
@@ -884,11 +888,13 @@ def test_list_redaction_no_raw_or_embeddings(
         page = SavedJobListPage.model_validate(resp.json())
         assert len(page.items) == 1
         item = page.items[0]
+        assert item.display_label == "Redact Me · Acme"
         dumped = item.model_dump(mode="json")
         assert set(dumped.keys()) == {
             "id",
             "title",
             "company",
+            "display_label",
             "processing_status",
             "jd_quality",
             "source_type",
@@ -898,6 +904,91 @@ def test_list_redaction_no_raw_or_embeddings(
             "evaluation_state",
             "latest_score",
         }
+
+
+def test_saved_job_fallback_label_is_stable_and_uuid_free(
+    jobs_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    db_path, _, _ = jobs_env
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await _seed_profile(session)
+                job_id = await _create_processed_job(
+                    session,
+                    raw_content="metadata-free saved job",
+                    raw_hash="hash-label-fallback",
+                    title=None,
+                    company=None,
+                    summary="   ",
+                    created_at=datetime(2026, 7, 28, tzinfo=UTC),
+                )
+                await session.commit()
+                return job_id
+        finally:
+            await engine.dispose()
+
+    job_id = run_async(_seed())
+    with _client() as client:
+        item = SavedJobListPage.model_validate(
+            client.get("/api/jobs").json()
+        ).items[0]
+        detail = SavedJobDetail.model_validate(
+            client.get(f"/api/jobs/{job_id}").json()
+        )
+        assert item.id == job_id
+        assert item.display_label == "Untitled saved job · 2026-07-28"
+        assert detail.compact.display_label == item.display_label
+        assert job_id.split("-", maxsplit=1)[0] not in item.display_label
+
+
+def test_malformed_extraction_metadata_cannot_supply_display_label(
+    jobs_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    db_path, _, _ = jobs_env
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                await _seed_profile(session)
+                job_id = await _create_processed_job(
+                    session,
+                    raw_content="malformed metadata saved job",
+                    raw_hash="hash-malformed-label",
+                    created_at=datetime(2026, 7, 28, tzinfo=UTC),
+                )
+                row = await jobs_repo.get_by_id(session, job_id)
+                assert row is not None
+                row.extraction_json = {
+                    "title": "Tempting Raw Title",
+                    "company": "Tempting Raw Company",
+                }
+                await session.commit()
+                return job_id
+        finally:
+            await engine.dispose()
+
+    job_id = run_async(_seed())
+    with _client() as client:
+        item = SavedJobListPage.model_validate(
+            client.get("/api/jobs").json()
+        ).items[0]
+        detail = SavedJobDetail.model_validate(
+            client.get(f"/api/jobs/{job_id}").json()
+        )
+        expected = "Untitled saved job · 2026-07-28"
+        assert item.id == job_id
+        assert item.title == "Tempting Raw Title"
+        assert item.company == "Tempting Raw Company"
+        assert item.display_label == expected
+        assert detail.compact.display_label == expected
+        assert "Tempting Raw Title" not in item.display_label
+        assert "Tempting Raw Company" not in item.display_label
 
 
 def test_gets_do_not_mutate_or_call_external_work(
@@ -1540,6 +1631,7 @@ def test_evaluate_reuses_current_without_provider_calls(
         assert body.outcome == "reused"
         assert body.evaluation.evaluation_state == "current"
         assert body.evaluation.result.final_score == pytest.approx(0.77)
+        assert body.job.display_label == "Backend Engineer · Acme"
         assert emb.call_count == 0
 
         second = client.post(f"/api/jobs/{job_id}/evaluate")
@@ -1596,6 +1688,13 @@ def test_delete_delegates_to_coordinator_and_not_found(
     )
 
     with _client() as client:
+        before_delete = SavedJobDetail.model_validate(
+            client.get(f"/api/jobs/{job_id}").json()
+        )
+        listed = SavedJobListPage.model_validate(client.get("/api/jobs").json())
+        assert before_delete.compact.display_label == "Backend Engineer · Acme"
+        assert listed.items[0].id == job_id
+        assert listed.items[0].display_label == before_delete.compact.display_label
         resp = client.delete(f"/api/jobs/{job_id}")
         assert resp.status_code == 204
         assert resp.content == b""
@@ -1673,6 +1772,7 @@ def test_reextract_response_schema_sync_coupling() -> None:
         id=new_uuid(),
         title="T",
         company="C",
+        display_label="T · C",
         processing_status="processed",
         jd_quality="full",
         source_type="text",
@@ -1758,6 +1858,7 @@ def test_reextract_absent_empty_and_forbidden_bodies(
             id=job_id,
             title="Backend Engineer",
             company="Acme",
+            display_label="Backend Engineer · Acme",
             processing_status="processed",
             jd_quality="full",
             source_type="text",
@@ -1887,6 +1988,7 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert body.job.evaluation_state == "stale"
         assert body.job.latest_score == pytest.approx(0.77)
         assert body.job.title == "Backend Engineer"
+        assert body.job.display_label == "Backend Engineer · Acme"
         _assert_no_forbidden_list(ok.json())
         assert evaluate_calls == []
         assert invoker.call_count >= 1
@@ -1915,6 +2017,7 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert warn.code == "NEO4J_SYNC_FAILED"
         assert warn.rebuild_instruction == NEO4J_REBUILD_INSTRUCTION
         assert warn.job.evaluation_state == "stale"
+        assert warn.job.display_label == "Backend Engineer · Acme"
         _assert_no_forbidden_list(partial.json())
         assert evaluate_calls == []
 

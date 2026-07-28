@@ -92,6 +92,7 @@ from app.services.job_deletion import (
     JobDeleteError,
     delete_job,
 )
+from app.services.job_display import derive_saved_job_display_label
 from app.services.job_deletion import (
     ERROR_JOB_NOT_FOUND as DELETE_JOB_NOT_FOUND,
 )
@@ -289,6 +290,7 @@ def _list_item(
     evaluation: JobEvaluationRecord | None,
 ) -> SavedJobListItem:
     title, company = _title_company(row)
+    extraction = _validated_extraction(row)
     latest_score: float | None = None
     if evaluation is not None:
         latest_score = evaluation.result.final_score
@@ -296,6 +298,12 @@ def _list_item(
         id=row.id,
         title=title,
         company=company,
+        display_label=derive_saved_job_display_label(
+            title=extraction.title if extraction is not None else None,
+            company=extraction.company if extraction is not None else None,
+            summary=extraction.summary if extraction is not None else None,
+            saved_at=_as_aware_utc(row.created_at),
+        ),
         processing_status=row.processing_status,  # type: ignore[arg-type]
         jd_quality=row.jd_quality,  # type: ignore[arg-type]
         source_type=row.source_type,  # type: ignore[arg-type]

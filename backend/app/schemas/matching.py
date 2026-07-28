@@ -99,6 +99,7 @@ class MatchResult(BaseModel):
     job_id: str = Field(min_length=1)
     title: str | None = None
     company: str | None = None
+    display_label: str | None = Field(default=None, max_length=140)
     location: str | None = None
     work_mode: JobWorkMode
     source_url: str | None = None

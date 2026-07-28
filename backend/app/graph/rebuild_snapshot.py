@@ -73,6 +73,7 @@ class ScorableJobFacts:
     extraction: JobPostExtraction
     jd_quality: str
     source_url: str | None
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +326,7 @@ async def load_scorable_job_facts(
             extraction=extraction,
             jd_quality=quality,
             source_url=row.source_url,
+            created_at=row.created_at,
         )
     return facts
 
