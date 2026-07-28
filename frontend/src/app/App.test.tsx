@@ -335,7 +335,12 @@ describe('App foundation shell', () => {
     expect(
       screen.getByRole('heading', {level: 1, name: 'CV đã chỉnh'}),
     ).toBeInTheDocument();
-    expect(chat.closest('[hidden]')).not.toBeNull();
+    const hiddenChatWorkspace = chat.closest('[hidden]');
+    expect(hiddenChatWorkspace).not.toBeNull();
+    expect(hiddenChatWorkspace).toHaveClass('jobagent-chat-workspace');
+    expect(getComputedStyle(hiddenChatWorkspace as HTMLElement).display).toBe(
+      'none',
+    );
     expect(screen.getByTestId('jobagent-chat-page')).toBe(chat);
     expect(loadConversationHistory).toHaveBeenCalledTimes(1);
     await userEvent.click(

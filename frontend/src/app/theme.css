@@ -25,3 +25,8 @@ body,
   min-height: 100%;
   height: 100%;
 }
+
+/** Keep the mounted chat workspace out of layout while the CV editor is active. */
+#root .jobagent-chat-workspace[hidden] {
+  display: none;
+}

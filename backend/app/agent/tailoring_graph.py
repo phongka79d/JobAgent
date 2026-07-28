@@ -45,14 +45,24 @@ _SELECTION_SYSTEM = (
     "Select the CV section IDs relevant to the structured role context and "
     "bounded user instruction. Return only the strict structured response."
 )
+_IDENTITY_CONTRACT_RULES = (
+    "Treat identity_skeleton as a server-owned structural contract. Emit its "
+    "sections in the listed order. A non-null source_entry_id may appear only "
+    "under its listed section_id, and a retained source-backed item must keep "
+    "its listed attribute_names in order. Existing items may be reordered or "
+    "omitted; a genuinely new item must use source_entry_id null. Every cited "
+    "fact must have a fact_bank section_id equal to the output section_id."
+)
 _REWRITE_SYSTEM = (
     "Rewrite only the supplied selected CV sections using only their supplied "
     "source facts. Preserve section scope and cite source_fact_ids for every "
-    "non-empty output field. Return only the strict structured response."
+    "non-empty output field. Return only the strict structured response. "
+    + _IDENTITY_CONTRACT_RULES
 )
 _REPAIR_SYSTEM = (
     "Repair the prior structured patch once. Use only the supplied selected "
-    "sections, source facts, prior patch, and sanitized issue code/path pairs."
+    "sections, source facts, prior patch, and sanitized issue code/path pairs. "
+    + _IDENTITY_CONTRACT_RULES
 )
 _SUPPORT_SYSTEM = (
     "Decide whether the output assertion is supported by the cited evidence. "
@@ -89,6 +99,7 @@ class TailoringAgentState(TypedDict):
     requested_section_ids: list[str]
     selected_section_ids: list[str]
     selected_sections: list[dict[str, Any]]
+    identity_skeleton: list[dict[str, Any]]
     fact_bank: dict[str, dict[str, Any]]
     patch: dict[str, Any] | None
     repair_count: int
@@ -139,6 +150,26 @@ def _coerce_patch(value: Any) -> TailoredPatchSet:
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="python")
     return TailoredPatchSet.model_validate(value)
+
+
+def _identity_skeleton(
+    sections: Sequence[TailoredSection],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "section_id": section.id,
+            "items": [
+                {
+                    "source_entry_id": item.source_entry_id,
+                    "attribute_names": [
+                        attribute.name for attribute in item.attributes
+                    ],
+                }
+                for item in section.items
+            ],
+        }
+        for section in sections
+    ]
 
 
 class ShopAIKeyTailoringStructuredInvoker:
@@ -217,6 +248,7 @@ def initial_tailoring_state(
         requested_section_ids=list(requested_section_ids),
         selected_section_ids=[],
         selected_sections=[],
+        identity_skeleton=[],
         fact_bank={},
         patch=None,
         repair_count=0,
@@ -236,25 +268,26 @@ def build_tailoring_graph(
     """Compile the five-node graph; dependencies stay in server-owned closures."""
 
     def select_sections(state: TailoringAgentState) -> dict[str, Any]:
-        messages = [
-            SystemMessage(content=_SELECTION_SYSTEM),
-            HumanMessage(
-                content=_json(
-                    {
-                        "instruction": state["instruction"],
-                        "job_context": state["job_context"],
-                        "outline": state["outline"],
-                    }
-                )
-            ),
-        ]
-        try:
-            selected = invoker.select_sections(messages).section_ids
-        except Exception:
-            return {"error": TAILORING_GROUNDING_FAILED}
         requested = state["requested_section_ids"]
-        if requested and selected != requested:
-            return {"error": TAILORING_GROUNDING_FAILED}
+        if requested:
+            selected = list(requested)
+        else:
+            messages = [
+                SystemMessage(content=_SELECTION_SYSTEM),
+                HumanMessage(
+                    content=_json(
+                        {
+                            "instruction": state["instruction"],
+                            "job_context": state["job_context"],
+                            "outline": state["outline"],
+                        }
+                    )
+                ),
+            ]
+            try:
+                selected = invoker.select_sections(messages).section_ids
+            except Exception:
+                return {"error": TAILORING_GROUNDING_FAILED}
         outline_ids = [item.get("id") for item in state["outline"]]
         if any(section_id not in outline_ids for section_id in selected):
             return {"error": TAILORING_GROUNDING_FAILED}
@@ -271,6 +304,7 @@ def build_tailoring_graph(
             "selected_sections": [
                 section.model_dump(mode="json") for section in sections
             ],
+            "identity_skeleton": _identity_skeleton(sections),
             "fact_bank": {
                 fact_id: evidence.model_dump(mode="json")
                 for fact_id, evidence in facts.items()
@@ -284,6 +318,7 @@ def build_tailoring_graph(
                 content=_json(
                     {
                         "selected_sections": state["selected_sections"],
+                        "identity_skeleton": state["identity_skeleton"],
                         "fact_bank": state["fact_bank"],
                     }
                 )
@@ -346,6 +381,7 @@ def build_tailoring_graph(
                 content=_json(
                     {
                         "selected_sections": state["selected_sections"],
+                        "identity_skeleton": state["identity_skeleton"],
                         "fact_bank": state["fact_bank"],
                         "prior_patch": state["patch"],
                         "issues": state["issues"],

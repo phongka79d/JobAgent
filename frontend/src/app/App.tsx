@@ -301,7 +301,12 @@ export function App({deps}: AppProps = {}) {
         />
       }
     >
-      <VStack hidden={mainWorkspace.kind === 'cv-tailoring'} height="100%" width="100%">
+      <VStack
+        className="jobagent-chat-workspace"
+        hidden={mainWorkspace.kind === 'cv-tailoring'}
+        height="100%"
+        width="100%"
+      >
         <ChatPage
           key={workspace.state.selectedConversationId ?? 'no-conversation'}
           conversationId={workspace.state.selectedConversationId}
