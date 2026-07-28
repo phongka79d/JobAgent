@@ -1075,25 +1075,61 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
 describe('App shell hosts chat layout', () => {
   it('renders AppShell with chat page through public Astryx composition', async () => {
     const loadHistory = vi.fn().mockResolvedValue(emptyHistory());
-    // App mounts ChatPage without deps; inject via module mock is heavy —
-    // render ChatPage under AppShell shape matching App.tsx instead when env missing.
     const {container} = render(
       <Theme theme={neutralTheme}>
-        <App />
+        <App
+          deps={{
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [
+                  {
+                    id: '11111111-1111-4111-8111-111111111111',
+                    display_name: 'Synthetic CV',
+                    cv_filename: 'synthetic.pdf',
+                    attachment_state: 'active',
+                    location: null,
+                    skill_tags: [],
+                    skill_count: 0,
+                    extraction_version: 'v1',
+                    source_hash: 'hash',
+                    state: 'ready',
+                    setup_status: null,
+                    is_active: true,
+                    created_at: TS,
+                    updated_at: TS,
+                    last_opened_at: TS,
+                  },
+                ],
+                active_profile_id: '11111111-1111-4111-8111-111111111111',
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [
+                  {
+                    id: CONVERSATION_ID,
+                    profile_id: '11111111-1111-4111-8111-111111111111',
+                    title: 'Chat',
+                    created_at: TS,
+                    updated_at: TS,
+                    last_opened_at: TS,
+                    is_selected: true,
+                  },
+                ],
+                next_cursor: null,
+              }),
+            },
+            chat: {loadConversationHistory: loadHistory},
+          }}
+        />
       </Theme>,
     );
 
     const shell = container.querySelector('.astryx-app-shell');
     expect(shell).not.toBeNull();
     expect(shell).toHaveAttribute('data-variant', 'surface');
-    expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument();
-    // History may fail without VITE_API_BASE_URL; page still mounts.
+    expect(await screen.findByTestId('jobagent-chat-page')).toBeInTheDocument();
     await waitFor(() => {
-      expect(
-        screen.getByText(/Start a conversation|History load issue/),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Start a conversation')).toBeInTheDocument();
     });
-    void loadHistory;
   });
 });
 

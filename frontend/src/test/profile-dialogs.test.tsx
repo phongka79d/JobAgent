@@ -120,7 +120,9 @@ describe('profile mutation dialogs', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/ada-cv.pdf/)).toBeInTheDocument();
     expect(remove).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', {name: 'Delete permanently'}));
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Delete profile and all data'}),
+    );
     expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(PROFILE_ID);
   });

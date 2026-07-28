@@ -293,7 +293,7 @@ describe('profile and conversation navigation', () => {
     await userEvent.click(screen.getByRole('button', {name: 'Actions for Ada Lovelace'}));
     await userEvent.click(await screen.findByText('Delete profile'));
     await userEvent.click(
-      screen.getByRole('button', {name: 'Delete permanently'}),
+      screen.getByRole('button', {name: 'Delete profile and all data'}),
     );
 
     await waitFor(() => expect(deleteProfile).toHaveBeenCalledWith(PROFILE_ID));

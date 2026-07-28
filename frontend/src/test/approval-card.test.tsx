@@ -1207,7 +1207,11 @@ describe('Save Profile refreshes sidebar', () => {
       });
       await waitFor(() => {
         expect(fetchProfiles).toHaveBeenCalled();
-        expect(fetchProfileConversations).toHaveBeenCalledWith(profileId, {limit: 50});
+        expect(fetchProfileConversations).toHaveBeenCalledWith(
+          profileId,
+          {limit: 50},
+          expect.any(AbortSignal),
+        );
         expect(screen.getByTestId('jobagent-profile-list-panel')).toHaveTextContent(
           'Existing profile',
         );
