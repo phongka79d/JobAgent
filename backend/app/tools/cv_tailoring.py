@@ -119,6 +119,7 @@ def build_create_tailored_cv_tool(
                     code=None,
                     summary="Tailored CV is ready",
                     data={
+                        "outcome": created.outcome,
                         "session_id": str(created.session_id),
                         "version_id": str(created.version_id),
                         "status": "ready",

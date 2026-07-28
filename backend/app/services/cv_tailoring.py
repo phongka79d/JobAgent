@@ -56,8 +56,9 @@ from app.schemas.cv_tailoring import (
     TailoringJobLabel,
     TailoringProvenance,
     TailoringSourceRevision,
-    TailoringVersionCreateResponse,
+    TailoringVersionMutationResponse,
     parse_tailored_content,
+    tailored_content_equal,
 )
 from app.schemas.jobs import JobPostExtraction, parse_job_post_extraction
 from app.schemas.profile import CandidateProfile, parse_candidate_profile
@@ -320,17 +321,23 @@ class TailoringCoordinator:
                     raise _error(TAILORING_GROUNDING_FAILED)
                 content = parse_tailored_content(result["patch"])
                 selected_ids = tuple(result.get("selected_section_ids") or ())
-                yield await self._status_event(
-                    launch.run_id, "Generating PDF", "generate_pdf"
-                )
-                await self._render_promote_commit(
-                    prepared=prepared,
-                    snapshot=snapshot,
-                    baseline=baseline,
-                    content=content,
-                    targeted_section_ids=selected_ids,
-                    created_by=TAILORING_CREATED_BY_AI,
-                )
+                if (
+                    prepared.expected_latest_version_number > 0
+                    and tailored_content_equal(content, parent)
+                ):
+                    mutation = await self._complete_no_change(prepared)
+                else:
+                    yield await self._status_event(
+                        launch.run_id, "Generating PDF", "generate_pdf"
+                    )
+                    mutation = await self._render_promote_commit(
+                        prepared=prepared,
+                        snapshot=snapshot,
+                        baseline=baseline,
+                        content=content,
+                        targeted_section_ids=selected_ids,
+                        created_by=TAILORING_CREATED_BY_AI,
+                    )
                 await self._delete_checkpoint(launch.run_id)
         except (asyncio.CancelledError, GeneratorExit):
             with CancelScope(shield=True):
@@ -383,12 +390,17 @@ class TailoringCoordinator:
         yield build_sse_event(
             "run_completed",
             launch.run_id,
-            {"state": "completed"},
+            {
+                "state": "completed",
+                "outcome": mutation.outcome,
+                "version_id": mutation.version_id,
+                "version_number": mutation.version_number,
+            },
         )
 
     async def get_completed_version(
         self, launch: TailoringLaunch
-    ) -> TailoringVersionCreateResponse:
+    ) -> TailoringVersionMutationResponse:
         """Return the exact durable version owned by a completed launch."""
         async with self._session_factory() as session:
             run = await runs_repo.get_run(session, launch.run_id)
@@ -406,7 +418,8 @@ class TailoringCoordinator:
                 or version.version_number != owner.latest_version_number
             ):
                 raise _error(TAILORING_GROUNDING_FAILED)
-            return TailoringVersionCreateResponse(
+            return TailoringVersionMutationResponse(
+                outcome="version_created",
                 session_id=owner.id,
                 version_id=version.id,
                 version_number=version.version_number,
@@ -450,7 +463,9 @@ class TailoringCoordinator:
                 known = {section.id for section in parent.sections}
                 if any(section_id not in known for section_id in requested):
                     raise _error(TAILORING_PARENT_CONFLICT)
-            await tailoring_repo.mark_session_generating(session, owner.id)
+            await tailoring_repo.mark_session_generating(
+                session, owner.id, touch_updated_at=expected == 0
+            )
             run = await runs_repo.create_tailoring_run(
                 session,
                 tailoring_session_id=owner.id,
@@ -476,7 +491,7 @@ class TailoringCoordinator:
         session_id: str,
         parent_version_id: str,
         content: TailoredCVContent,
-    ) -> TailoringVersionCreateResponse:
+    ) -> TailoringVersionMutationResponse:
         async with session_scope(self._session_factory) as session:
             owner = await tailoring_repo.get_session(session, session_id)
             if owner is None:
@@ -489,7 +504,6 @@ class TailoringCoordinator:
             if latest is None or latest.id != parent_version_id:
                 raise _error(TAILORING_PARENT_CONFLICT)
             parent = parse_tailored_content(latest.content_json)
-            await tailoring_repo.mark_session_generating(session, owner.id)
             expected = owner.latest_version_number
         baseline = project_tailoring_baseline(
             snapshot.document,
@@ -514,6 +528,33 @@ class TailoringCoordinator:
             )
             if guarded is None or issues:
                 raise _error(TAILORING_GROUNDING_FAILED)
+            if tailored_content_equal(guarded, parent):
+                async with self._session_factory() as session:
+                    await session.execute(text("BEGIN IMMEDIATE"))
+                    owner = await tailoring_repo.get_session(session, session_id)
+                    latest = await tailoring_repo.get_latest_version(
+                        session, session_id
+                    )
+                    if (
+                        owner is None
+                        or owner.latest_version_number != expected
+                        or latest is None
+                        or latest.id != parent_version_id
+                    ):
+                        raise _error(TAILORING_PARENT_CONFLICT)
+                return TailoringVersionMutationResponse(
+                    outcome="no_change",
+                    session_id=session_id,
+                    version_id=parent_version_id,
+                    version_number=expected,
+                )
+            async with session_scope(self._session_factory) as session:
+                owner = await tailoring_repo.get_session(session, session_id)
+                if owner is None or owner.latest_version_number != expected:
+                    raise _error(TAILORING_PARENT_CONFLICT)
+                await tailoring_repo.mark_session_generating(
+                    session, owner.id, touch_updated_at=False
+                )
             prepared = _PreparedGeneration(
                 launch=TailoringLaunch(
                     session_id=session_id,
@@ -735,7 +776,7 @@ class TailoringCoordinator:
         targeted_section_ids: Sequence[str],
         created_by: str,
         complete_run: bool = True,
-    ) -> TailoringVersionCreateResponse:
+    ) -> TailoringVersionMutationResponse:
         version_id = new_uuid()
         staging = self._storage.create_staging_dir(version_id=version_id)
         try:
@@ -827,11 +868,42 @@ class TailoringCoordinator:
                 version_id=version_id,
             )
             raise
-        return TailoringVersionCreateResponse(
+        return TailoringVersionMutationResponse(
+            outcome="version_created",
             session_id=prepared.launch.session_id,
             version_id=version_id,
             version_number=version_number,
         )
+
+    async def _complete_no_change(
+        self, prepared: _PreparedGeneration
+    ) -> TailoringVersionMutationResponse:
+        async with session_scope(self._session_factory) as session:
+            await session.execute(text("BEGIN IMMEDIATE"))
+            version = await tailoring_repo.get_version(
+                session, prepared.parent_version_id or ""
+            )
+            if (
+                version is None
+                or version.session_id != prepared.launch.session_id
+                or version.version_number != prepared.expected_latest_version_number
+            ):
+                raise _error(TAILORING_PARENT_CONFLICT)
+            try:
+                await tailoring_repo.complete_no_change(
+                    session,
+                    prepared.launch.session_id,
+                    prepared.expected_latest_version_number,
+                )
+            except TailoringParentConflict as exc:
+                raise _error(TAILORING_PARENT_CONFLICT) from exc
+            await runs_repo.complete_run(session, prepared.launch.run_id)
+            return TailoringVersionMutationResponse(
+                outcome="no_change",
+                session_id=prepared.launch.session_id,
+                version_id=version.id,
+                version_number=version.version_number,
+            )
 
     async def _fail_generation(
         self, prepared: _PreparedGeneration, error_code: str

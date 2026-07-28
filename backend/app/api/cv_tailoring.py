@@ -34,7 +34,7 @@ from app.schemas.cv_tailoring import (
     TailoringSessionDetailResponse,
     TailoringSessionListResponse,
     TailoringSessionSummary,
-    TailoringVersionCreateResponse,
+    TailoringVersionMutationResponse,
     TailoringVersionSummary,
     parse_tailored_content,
     parse_tailoring_provenance,
@@ -313,13 +313,13 @@ async def create_ai_version(
 
 @router.post(
     "/cv-tailoring/sessions/{session_id}/manual-versions",
-    response_model=TailoringVersionCreateResponse,
+    response_model=TailoringVersionMutationResponse,
 )
 async def create_manual_version(
     session_id: UuidStr,
     body: CreateTailoringManualVersionRequest,
     deps: Annotated[CVTailoringDeps, Depends(get_cv_tailoring_deps)],
-) -> TailoringVersionCreateResponse:
+) -> TailoringVersionMutationResponse:
     try:
         profile_id = await _active_profile_id(deps)
         async with deps.session_factory() as session:

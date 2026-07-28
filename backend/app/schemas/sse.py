@@ -9,7 +9,7 @@ failed`` / ``running|interrupted|completed|failed`` — aliases ``complete`` and
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, cast, get_args
 
 from app.core.ids import new_uuid
 from app.core.time import utc_now
@@ -24,7 +24,15 @@ from app.schemas.common import (
     UuidStr,
     reject_status_alias,
 )
-from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 SseEventName = Literal[
     "run_started",
@@ -158,6 +166,31 @@ class RunCompletedPayload(BaseModel):
     model_config = StrictModelConfig
 
     state: Literal["completed"] = "completed"
+    outcome: Literal["version_created", "no_change"] | None = None
+    version_id: UuidStr | None = None
+    version_number: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def terminal_identity(self) -> "RunCompletedPayload":
+        has_identity = self.version_id is not None or self.version_number is not None
+        if self.outcome is None and has_identity:
+            raise ValueError("tailoring identity requires an outcome")
+        if self.outcome is not None and (
+            self.version_id is None or self.version_number is None
+        ):
+            raise ValueError("tailoring outcome requires version identity")
+        return self
+
+    @model_serializer(mode="wrap")
+    def omit_absent_tailoring_identity(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        serialized = cast(dict[str, Any], handler(self))
+        if self.outcome is None:
+            serialized.pop("outcome", None)
+            serialized.pop("version_id", None)
+            serialized.pop("version_number", None)
+        return serialized
 
 
 class RunFailedPayload(BaseModel):

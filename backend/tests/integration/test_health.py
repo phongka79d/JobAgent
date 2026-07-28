@@ -32,7 +32,7 @@ _CV_TAILORING_ROUTE_DECORATORS = (
     "cv_tailoring.py:create_ai_version:router.post('/cv-tailoring/sessions/{session_id}/ai-versions')",
     "cv_tailoring.py:create_manual_version:router.post("
     "'/cv-tailoring/sessions/{session_id}/manual-versions', "
-    "response_model=TailoringVersionCreateResponse)",
+    "response_model=TailoringVersionMutationResponse)",
     "cv_tailoring.py:create_session:router.post('/cv-tailoring/sessions')",
     "cv_tailoring.py:delete_session:router.delete("
     "'/cv-tailoring/sessions/{session_id}', "

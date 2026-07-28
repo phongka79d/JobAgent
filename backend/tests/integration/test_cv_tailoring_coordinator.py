@@ -332,7 +332,7 @@ def test_stale_profile_blocks_manual_write_and_preserves_latest_version(
     run_async(_body())
 
 
-def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
+def test_later_ai_and_manual_no_changes_preserve_one_immutable_parent(
     db_path: Path, tmp_path: Path
 ) -> None:
     async def _body() -> None:
@@ -341,6 +341,16 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
 
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
+        compile_calls: list[str] = []
+
+        async def counting_compile(
+            tex_source: str, *, staging_dir: Path, settings: Any
+        ) -> TailoringCompileResult:
+            compile_calls.append(tex_source)
+            return await _fake_compile(
+                tex_source, staging_dir=staging_dir, settings=settings
+            )
+
         try:
             profile_id, document, profile_model = await _seed_ready_source(factory)
             coordinator = TailoringCoordinator(
@@ -349,7 +359,7 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
                 settings=_Settings(),
                 invoker=_Invoker(_patch_for_summary(document, profile_model)),
                 sqlite_path=db_path,
-                compiler=_fake_compile,
+                compiler=counting_compile,
             )
             initial = await coordinator.prepare_session(
                 profile_id=profile_id,
@@ -360,8 +370,8 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
             assert (
                 [event async for event in coordinator.stream_initial_version(initial)][
                     -1
-                ].event
-                == "run_completed"
+                ].payload.outcome
+                == "version_created"
             )
 
             async with factory() as session:
@@ -369,6 +379,11 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
                     session, initial.session_id
                 )
                 assert first is not None
+                owner_before = await tailoring_repo.get_session(
+                    session, initial.session_id
+                )
+                assert owner_before is not None
+                updated_at_before = owner_before.updated_at
 
             later = await coordinator.prepare_ai_version(
                 session_id=initial.session_id,
@@ -376,18 +391,25 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
                 instruction="Keep the summary concise",
                 target_section_ids=["summary"],
             )
-            assert (
-                [event async for event in coordinator.stream_initial_version(later)][
-                    -1
-                ].event
-                == "run_completed"
-            )
+            terminal = [
+                event async for event in coordinator.stream_initial_version(later)
+            ][-1]
+            assert terminal.event == "run_completed"
+            assert terminal.payload.outcome == "no_change"
+            assert terminal.payload.version_id == first.id
+            assert terminal.payload.version_number == first.version_number
+            assert len(compile_calls) == 1
 
             async with factory() as session:
                 second = await tailoring_repo.get_latest_version(
                     session, initial.session_id
                 )
                 assert second is not None
+                owner_after_ai = await tailoring_repo.get_session(
+                    session, initial.session_id
+                )
+                assert owner_after_ai is not None
+                assert owner_after_ai.updated_at == updated_at_before
                 second_content = TailoredCVContent.model_validate(second.content_json)
 
             manual = await coordinator.create_manual_version(
@@ -395,19 +417,23 @@ def test_later_ai_and_manual_versions_form_one_immutable_parent_chain(
                 parent_version_id=second.id,
                 content=second_content,
             )
-            assert manual.version_number == 3
+            assert manual.outcome == "no_change"
+            assert manual.version_id == second.id
+            assert manual.version_number == second.version_number
+            assert len(compile_calls) == 1
 
             async with factory() as session:
                 versions = await tailoring_repo.list_versions(
                     session, initial.session_id
                 )
-                assert [item.version_number for item in versions] == [1, 2, 3]
-                assert [item.created_by for item in versions] == ["ai", "ai", "user"]
-                assert [item.parent_version_id for item in versions] == [
-                    None,
-                    versions[0].id,
-                    versions[1].id,
-                ]
+                assert [item.version_number for item in versions] == [1]
+                assert [item.created_by for item in versions] == ["ai"]
+                assert [item.parent_version_id for item in versions] == [None]
+                owner_after_manual = await tailoring_repo.get_session(
+                    session, initial.session_id
+                )
+                assert owner_after_manual is not None
+                assert owner_after_manual.updated_at == updated_at_before
         finally:
             await engine.dispose()
 

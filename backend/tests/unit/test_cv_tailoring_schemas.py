@@ -16,8 +16,11 @@ from app.schemas.cv_tailoring import (
     TailoredItem,
     TailoredSection,
     TailoringSourceRevision,
+    TailoringVersionMutationResponse,
     parse_tailored_content,
+    tailored_content_equal,
 )
+from app.schemas.sse import RunCompletedPayload
 from pydantic import ValidationError
 
 
@@ -71,6 +74,34 @@ def test_tailored_content_round_trips_and_models_are_strict() -> None:
     with pytest.raises(ValidationError):
         TailoredCVContent.model_validate(
             {**content.model_dump(mode="json"), "latex": "forbidden"}
+        )
+
+
+def test_canonical_content_equality_and_mutation_terminal_identity_are_coupled() -> None:
+    content = _content()
+    assert tailored_content_equal(content, content.model_copy(deep=True))
+    response = TailoringVersionMutationResponse(
+        outcome="no_change",
+        session_id="11111111-1111-4111-8111-111111111111",
+        version_id="22222222-2222-4222-8222-222222222222",
+        version_number=2,
+    )
+    assert response.outcome == "no_change"
+    chat_terminal = RunCompletedPayload(state="completed")
+    assert chat_terminal.model_dump(mode="json") == {"state": "completed"}
+    RunCompletedPayload(
+        state="completed",
+        outcome="no_change",
+        version_id=response.version_id,
+        version_number=response.version_number,
+    )
+    with pytest.raises(ValidationError):
+        RunCompletedPayload(state="completed", outcome="no_change")
+    with pytest.raises(ValidationError):
+        RunCompletedPayload(
+            state="completed",
+            version_id=response.version_id,
+            version_number=response.version_number,
         )
 
 

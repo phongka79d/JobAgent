@@ -217,7 +217,7 @@ async def mark_session_failed(
 
 
 async def mark_session_generating(
-    session: AsyncSession, session_id: str
+    session: AsyncSession, session_id: str, *, touch_updated_at: bool = True
 ) -> CVTailoringSession:
     row = await session.get(CVTailoringSession, session_id)
     if row is None:
@@ -229,7 +229,24 @@ async def mark_session_generating(
         raise CVTailoringRepositoryError("tailoring session cannot start generation")
     row.state = TAILORING_SESSION_STATE_GENERATING
     row.error_code = None
-    row.updated_at = utc_now()
+    if touch_updated_at:
+        row.updated_at = utc_now()
+    await session.flush()
+    return row
+
+
+async def complete_no_change(
+    session: AsyncSession,
+    session_id: str,
+    expected_latest_version_number: int,
+) -> CVTailoringSession:
+    row = await session.get(CVTailoringSession, session_id)
+    if row is None:
+        raise CVTailoringRepositoryError("tailoring session not found")
+    if row.latest_version_number != expected_latest_version_number:
+        raise TailoringParentConflict("tailoring session head changed")
+    row.state = TAILORING_SESSION_STATE_READY
+    row.error_code = None
     await session.flush()
     return row
 
@@ -276,6 +293,7 @@ __all__ = [
     "TailoringParentConflict",
     "create_session",
     "create_version_cas",
+    "complete_no_change",
     "delete_session",
     "get_session",
     "get_latest_version",

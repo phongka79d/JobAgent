@@ -1108,7 +1108,7 @@ git commit -m "feat: review CV extraction outside chat"
 - Modify: `backend/tests/integration/test_cv_tailoring_api.py`
 - Modify: `backend/tests/unit/test_cv_tailoring_schemas.py`
 
-- [ ] **Step 1: Add failing equality/outcome tests before changing generation**
+- [x] **Step 1: Add failing equality/outcome tests before changing generation**
 
 Extend `test_later_ai_and_manual_versions_form_one_immutable_parent_chain` with the unchanged-content cases:
 
@@ -1158,7 +1158,7 @@ Set-Location backend
 
 Expected: FAIL because manual and AI later mutations currently always render/promote/CAS a new version and terminal completion has no outcome.
 
-- [ ] **Step 3: Define a single canonical content comparison and typed response**
+- [x] **Step 3: Define a single canonical content comparison and typed response**
 
 Add to `cv_tailoring.py`:
 
@@ -1190,7 +1190,7 @@ Use this helper after patch/guard validation and before `create_staging_dir`, co
 
 Replace the old `TailoringVersionCreateResponse` return type at the manual route, coordinator `get_completed_version`, and `build_create_tailored_cv_tool` result projection with `TailoringVersionMutationResponse`; Version 1 still returns `outcome="version_created"` and later unchanged calls return `outcome="no_change"` with the parent identity.
 
-- [ ] **Step 4: Add no-change repository transitions and wire manual/AI paths**
+- [x] **Step 4: Add no-change repository transitions and wire manual/AI paths**
 
 Add `complete_no_change(session, session_id, expected_latest_version_number)` that updates `state='ready'` and clears `error_code` without touching `updated_at`. For later AI preparation, do not touch `updated_at` when marking generating; a real version CAS still sets it. For manual mutations, compare before marking generating. Return the unchanged parent in the typed response. For initial generation (`expected_latest_version_number == 0`), always invoke `_render_promote_commit`.
 
@@ -1226,7 +1226,7 @@ Update `POST /cv-tailoring/sessions/{id}/versions` to use the new response model
 
 Expected: PASS; compiler/storage/version spies remain untouched for later no-op cases.
 
-- [ ] **Step 6: Commit the backend no-op contract**
+- [x] **Step 6: Commit the backend no-op contract**
 
 ```powershell
 Set-Location ..

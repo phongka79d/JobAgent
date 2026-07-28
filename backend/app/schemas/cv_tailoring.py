@@ -286,13 +286,33 @@ class TailoringSessionDetailResponse(BaseModel):
     pdf_available: bool
 
 
-class TailoringVersionCreateResponse(BaseModel):
+TailoringMutationOutcome = Literal["version_created", "no_change"]
+
+
+class TailoringVersionMutationResponse(BaseModel):
     model_config = StrictModelConfig
 
+    outcome: TailoringMutationOutcome
     session_id: UuidStr
     version_id: UuidStr
     version_number: int = Field(ge=1)
     currentness: Literal["current"] = "current"
+
+    @model_validator(mode="after")
+    def identity_is_present(self) -> "TailoringVersionMutationResponse":
+        if not self.version_id or self.version_number < 1:
+            raise ValueError("tailoring mutation requires version identity")
+        return self
+
+
+def canonical_tailored_content(content: TailoredCVContent) -> dict[str, Any]:
+    return content.model_dump(mode="json", exclude_none=False)
+
+
+def tailored_content_equal(
+    left: TailoredCVContent, right: TailoredCVContent
+) -> bool:
+    return canonical_tailored_content(left) == canonical_tailored_content(right)
 
 
 class TailoringDeleteResponse(BaseModel):

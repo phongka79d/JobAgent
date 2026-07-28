@@ -17,7 +17,7 @@ from app.db.session import build_async_engine
 from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import workspace_state as workspace_repo
 from app.repositories.cv_tailoring import CVTailoringVersionWrite
-from app.schemas.cv_tailoring import TailoringVersionCreateResponse
+from app.schemas.cv_tailoring import TailoringVersionMutationResponse
 from app.schemas.sse import build_sse_event
 from app.services.cv_tailoring import (
     TAILORING_ARTIFACT_UNAVAILABLE,
@@ -93,9 +93,10 @@ class _RouteCoordinator:
 
     async def create_manual_version(
         self, **kwargs: Any
-    ) -> TailoringVersionCreateResponse:
+    ) -> TailoringVersionMutationResponse:
         self.manual_calls.append(kwargs)
-        return TailoringVersionCreateResponse(
+        return TailoringVersionMutationResponse(
+            outcome="version_created",
             session_id=self.session_id,
             version_id=new_uuid(),
             version_number=2,
@@ -107,7 +108,7 @@ def test_cv_tailoring_router_exposes_exact_authorized_endpoint_shapes() -> None:
     from app.api.cv_tailoring import router
     from app.schemas.cv_tailoring import (
         TailoringDeleteResponse,
-        TailoringVersionCreateResponse,
+        TailoringVersionMutationResponse,
     )
 
     shapes = {(route.path, frozenset(route.methods or ())) for route in router.routes}
@@ -133,7 +134,7 @@ def test_cv_tailoring_router_exposes_exact_authorized_endpoint_shapes() -> None:
     }
     assert response_models[
         ("/cv-tailoring/sessions/{session_id}/manual-versions", "POST")
-    ] is TailoringVersionCreateResponse
+    ] is TailoringVersionMutationResponse
     assert response_models[
         ("/cv-tailoring/sessions/{session_id}", "DELETE")
     ] is TailoringDeleteResponse
@@ -504,6 +505,7 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
                 json={"parent_version_id": version_id, "content": _content()},
             )
             assert manual.status_code == 200
+            assert manual.json()["outcome"] == "version_created"
             assert manual.json()["session_id"] == owner_id
             assert coordinator.manual_calls[-1]["parent_version_id"] == version_id
 

@@ -179,7 +179,7 @@ def test_selected_job_is_validated_with_owner_before_turn_insert(
 def test_create_tailored_cv_tool_replays_exact_durable_result(
     migrated_sqlite: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.schemas.cv_tailoring import TailoringVersionCreateResponse
+    from app.schemas.cv_tailoring import TailoringVersionMutationResponse
     from app.schemas.sse import build_sse_event
     from app.services.cv_tailoring import TailoringLaunch
     from app.tools.cv_tailoring import build_create_tailored_cv_tool
@@ -206,9 +206,10 @@ def test_create_tailored_cv_tool_replays_exact_durable_result(
 
         async def get_completed_version(
             self, launch: TailoringLaunch
-        ) -> TailoringVersionCreateResponse:
+        ) -> TailoringVersionMutationResponse:
             self.completed_calls += 1
-            return TailoringVersionCreateResponse(
+            return TailoringVersionMutationResponse(
+                outcome="version_created",
                 session_id=launch.session_id,
                 version_id=new_uuid(),
                 version_number=1,
