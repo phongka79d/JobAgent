@@ -9,8 +9,8 @@ from fastapi import HTTPException
 from fastapi.sse import EventSourceResponse, format_sse_event
 from starlette.types import Send
 
-from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.schemas.profile_reextraction import ProfileReextractEvent
+from app.schemas.sse import SseEvent, parse_sse_event, sse_event_to_dict
 from app.services.chat_turns import ChatTurnError
 
 StreamErrorMapper = Callable[[Any], HTTPException]

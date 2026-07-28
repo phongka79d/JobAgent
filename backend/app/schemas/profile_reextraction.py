@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import BaseModel, Field, model_validator
+
 from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
 from app.schemas.profile import SafeWarning
-from pydantic import BaseModel, Field, model_validator
 
 ReextractStage = Literal[
     "validating_source",

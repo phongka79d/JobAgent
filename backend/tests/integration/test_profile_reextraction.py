@@ -6,6 +6,8 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy import func, select
+
 from app.core.ids import new_uuid
 from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
 from app.db.session import build_async_engine
@@ -26,7 +28,6 @@ from app.services.profile_reextraction import (
     ProfileReextractionCoordinator,
 )
 from app.storage.attachments import AttachmentStorage
-from sqlalchemy import func, select
 
 from tests.integration.test_profile_approval import _seed_cv_document_draft
 from tests.support.db_migration import run_async, session_factory

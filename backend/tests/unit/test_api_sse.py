@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator
 
 import anyio
 import pytest
+from fastapi import HTTPException
+
 from app.api.sse import (
     format_profile_reextract_sse,
     format_validated_sse,
@@ -16,7 +18,6 @@ from app.schemas.profile_reextraction import (
 )
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.chat_turns import ChatTurnError
-from fastapi import HTTPException
 
 RUN_ID = "11111111-1111-4111-8111-111111111111"
 PROFILE_ID = "22222222-2222-4222-8222-222222222222"
@@ -140,6 +141,40 @@ async def test_open_typed_sse_response_primes_and_serializes_generic_events() ->
     assert response.headers["X-Operation"] == OPERATION_ID
     assert await response.body_iterator.__anext__() == b"first"
     assert await response.body_iterator.__anext__() == b"second"
+
+
+@pytest.mark.asyncio
+async def test_open_typed_sse_response_maps_pre_yield_error_and_empty_stream() -> None:
+    async def failed() -> AsyncIterator[str]:
+        raise ValueError("safe")
+        yield "unreachable"
+
+    with pytest.raises(HTTPException) as mapped:
+        await open_typed_sse_response(
+            failed(),
+            serializer=lambda value: value.encode("utf-8"),
+            error_mapper=lambda _exc: HTTPException(
+                status_code=409,
+                detail={"code": "PROFILE_REVIEW_PENDING"},
+            ),
+            error_types=(ValueError,),
+        )
+    assert mapped.value.status_code == 409
+    assert mapped.value.detail == {"code": "PROFILE_REVIEW_PENDING"}
+
+    async def empty() -> AsyncIterator[str]:
+        if False:
+            yield "unreachable"
+
+    with pytest.raises(HTTPException) as missing:
+        await open_typed_sse_response(
+            empty(),
+            serializer=lambda value: value.encode("utf-8"),
+            error_mapper=lambda _exc: HTTPException(status_code=400),
+            error_types=(ValueError,),
+        )
+    assert missing.value.status_code == 500
+    assert missing.value.detail["code"] == "EMPTY_STREAM"
 
 
 @pytest.mark.asyncio
