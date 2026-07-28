@@ -84,6 +84,28 @@ async def create_activity(
     return row
 
 
+async def create_terminal_assistant_activity(
+    session: AsyncSession,
+    *,
+    activity_id: str,
+    run_id: str,
+    label: str,
+    technical_name: str,
+    error_code: str,
+) -> AgentActivity:
+    return await create_activity(
+        session,
+        activity_id=activity_id,
+        run_id=run_id,
+        kind="assistant",
+        label=label,
+        technical_name=technical_name,
+        state="failed",
+        duration_ms=0,
+        error_code=error_code,
+    )
+
+
 async def transition_activity(
     session: AsyncSession,
     row: AgentActivity,

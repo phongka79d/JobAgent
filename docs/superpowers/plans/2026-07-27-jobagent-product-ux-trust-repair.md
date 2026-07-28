@@ -1354,7 +1354,7 @@ git commit -m "feat: show tailoring no-op outcomes"
 - Modify: `backend/tests/integration/test_cv_tailoring_coordinator.py`
 - Modify: `backend/tests/integration/test_cv_tailoring_api.py`
 
-- [ ] **Step 1: Write pure mapping/privacy tests**
+- [x] **Step 1: Write pure mapping/privacy tests**
 
 Define the backend response model before writing the tests:
 
@@ -1400,7 +1400,7 @@ Set-Location backend
 
 Expected: FAIL because raw issues are currently discarded and no user projection exists.
 
-- [ ] **Step 3: Implement bounded issue mapping and existing-activity persistence**
+- [x] **Step 3: Implement bounded issue mapping and existing-activity persistence**
 
 Map only the seven allowlisted internal codes and parse paths matching `sections[n]`, optional `items[n]`, and known field suffixes. Cap output at ten issues; deduplicate by `(section_id, item_index, field, reason)`. Unknown code/path returns one generic section issue. Never include rejected text, fact IDs, provider output, prompt, or raw path in the returned model.
 
@@ -1417,7 +1417,7 @@ label = "Source support check"
 
 Add `record_grounding_issues(run_id, issues)` that creates at most ten terminal assistant activities. The API decodes only this prefix and maps it before returning `TailoringUserIssue`; it sets `technical_name`, `error_code`, and raw activity labels to `null` in the public tailoring detail projection. Existing normal activity rows retain their current behavior.
 
-- [ ] **Step 4: Preserve issues through AI/manual coordinator failures**
+- [x] **Step 4: Preserve issues through AI/manual coordinator failures**
 
 Extend `TailoringError` with `issues: tuple[GroundingIssue, ...]`. When the graph returns `result["issues"]`, parse each strict `GroundingIssue`, pass them to `_fail_generation`, and record them before checkpoint cleanup. Manual guard failures pass the same tuple to the HTTP error projection. Unknown exceptions still map to one generic issue.
 
@@ -1446,7 +1446,7 @@ Add integration assertions that after an AI grounding failure and stream disconn
 
 Expected: PASS; no migration file is created.
 
-- [ ] **Step 6: Commit safe grounding recovery**
+- [x] **Step 6: Commit safe grounding recovery**
 
 ```powershell
 Set-Location ..

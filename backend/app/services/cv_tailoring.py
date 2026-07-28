@@ -56,6 +56,7 @@ from app.schemas.cv_tailoring import (
     TailoringJobLabel,
     TailoringProvenance,
     TailoringSourceRevision,
+    TailoringUserIssue,
     TailoringVersionMutationResponse,
     parse_tailored_content,
     tailored_content_equal,
@@ -74,13 +75,14 @@ from app.services.cv_tailoring_compiler import (
     TailoringCompileResult,
     compile_latex_cv,
 )
-from app.services.cv_tailoring_guard import guard_manual_tailored_content
+from app.services.cv_tailoring_guard import GroundingIssue, guard_manual_tailored_content
 from app.services.cv_tailoring_projection import (
     TailoringBaseline,
     project_tailoring_baseline,
     select_section_context,
 )
 from app.services.cv_tailoring_renderer import render_latex_cv
+from app.services.tailoring_issue_projection import project_grounding_issues
 from app.storage.cv_tailoring import TailoringArtifactStorage
 
 PROFILE_NOT_READY = "PROFILE_NOT_READY"
@@ -108,13 +110,22 @@ _SAFE_MESSAGES = {
 
 
 class TailoringError(Exception):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        issues: tuple[GroundingIssue, ...] = (),
+        user_issues: tuple[TailoringUserIssue, ...] = (),
+    ) -> None:
         if not isinstance(code, str) or not code.strip():
             raise ValueError("TailoringError code must be non-empty")
         if not isinstance(message, str) or not message.strip():
             raise ValueError("TailoringError message must be non-empty")
         self.code = code.strip()
         self.message = message.strip()
+        self.issues = issues[:10]
+        self.user_issues = user_issues[:10]
         super().__init__(self.message)
 
 
@@ -172,8 +183,10 @@ def _same_revision(left: datetime, right: datetime) -> bool:
     return _aware_utc(left) == _aware_utc(right)
 
 
-def _error(code: str) -> TailoringError:
-    return TailoringError(code, _SAFE_MESSAGES[code])
+def _error(
+    code: str, *, issues: tuple[GroundingIssue, ...] = ()
+) -> TailoringError:
+    return TailoringError(code, _SAFE_MESSAGES[code], issues=issues)
 
 
 class TailoringCoordinator:
@@ -267,6 +280,7 @@ class TailoringCoordinator:
         prepared = self._prepared.pop(launch.run_id, None)
         if prepared is None or prepared.launch != launch:
             raise _error(TAILORING_SESSION_NOT_FOUND)
+        parent_for_issues: TailoredCVContent | None = None
         try:
             yield build_sse_event(
                 "run_started",
@@ -282,6 +296,7 @@ class TailoringCoordinator:
                 ),
             ) as saver:
                 snapshot, parent, baseline = await self._generation_context(prepared)
+                parent_for_issues = parent
                 yield await self._status_event(
                     launch.run_id, "Selecting relevant sections", "select_sections"
                 )
@@ -319,7 +334,23 @@ class TailoringCoordinator:
                     "ground_patch",
                 )
                 if result.get("error") is not None or result.get("patch") is None:
-                    raise _error(TAILORING_GROUNDING_FAILED)
+                    raw_issues = result.get("issues")
+                    parsed_issues: tuple[GroundingIssue, ...] = ()
+                    if isinstance(raw_issues, list):
+                        try:
+                            parsed_issues = tuple(
+                                GroundingIssue.model_validate(item)
+                                for item in raw_issues[:10]
+                            )
+                        except ValueError:
+                            parsed_issues = ()
+                    if not parsed_issues:
+                        parsed_issues = (
+                            GroundingIssue(code="UNKNOWN_FACT", path="sections"),
+                        )
+                    raise _error(
+                        TAILORING_GROUNDING_FAILED, issues=parsed_issues
+                    )
                 content = parse_tailored_content(result["patch"])
                 selected_ids = tuple(result.get("selected_section_ids") or ())
                 if (
@@ -349,8 +380,15 @@ class TailoringCoordinator:
                     await self._delete_checkpoint(launch.run_id)
             raise
         except TailoringError as exc:
-            if await self._fail_generation(prepared, exc.code):
+            if await self._fail_generation(prepared, exc.code, exc.issues):
                 await self._delete_checkpoint(launch.run_id)
+            safe_issues = (
+                project_grounding_issues(
+                    issue_list=exc.issues, parent=parent_for_issues
+                )
+                if exc.issues and parent_for_issues is not None
+                else []
+            )
             yield build_sse_event(
                 "run_failed",
                 launch.run_id,
@@ -358,6 +396,7 @@ class TailoringCoordinator:
                     "state": "failed",
                     "error_code": exc.code,
                     "summary": exc.message,
+                    "issues": [item.model_dump(mode="json") for item in safe_issues],
                 },
             )
             return
@@ -375,8 +414,13 @@ class TailoringCoordinator:
             )
             return
         except Exception:
+            generic_issues = (
+                (GroundingIssue(code="UNKNOWN_FACT", path="sections"),)
+                if parent_for_issues is not None
+                else ()
+            )
             if await self._fail_generation(
-                prepared, TAILORING_GROUNDING_FAILED
+                prepared, TAILORING_GROUNDING_FAILED, generic_issues
             ):
                 await self._delete_checkpoint(launch.run_id)
             yield build_sse_event(
@@ -386,6 +430,17 @@ class TailoringCoordinator:
                     "state": "failed",
                     "error_code": TAILORING_GROUNDING_FAILED,
                     "summary": _SAFE_MESSAGES[TAILORING_GROUNDING_FAILED],
+                    "issues": (
+                        [
+                            item.model_dump(mode="json")
+                            for item in project_grounding_issues(
+                                issue_list=generic_issues,
+                                parent=parent_for_issues,
+                            )
+                        ]
+                        if generic_issues and parent_for_issues is not None
+                        else []
+                    ),
                 },
             )
             return
@@ -523,6 +578,7 @@ class TailoringCoordinator:
             )
             if candidate != previous
         )
+        generation_started = False
         try:
             guarded, issues = guard_manual_tailored_content(
                 content,
@@ -533,7 +589,19 @@ class TailoringCoordinator:
                 semantic_checker=self._structured_invoker(),
             )
             if guarded is None or issues:
-                raise _error(TAILORING_GROUNDING_FAILED)
+                internal_issues = tuple(issues) or (
+                    GroundingIssue(code="UNKNOWN_FACT", path="sections"),
+                )
+                raise TailoringError(
+                    TAILORING_GROUNDING_FAILED,
+                    _SAFE_MESSAGES[TAILORING_GROUNDING_FAILED],
+                    issues=internal_issues,
+                    user_issues=tuple(
+                        project_grounding_issues(
+                            issue_list=internal_issues, parent=parent
+                        )
+                    ),
+                )
             if tailored_content_equal(guarded, parent):
                 async with self._session_factory() as session:
                     await session.execute(text("BEGIN IMMEDIATE"))
@@ -561,6 +629,7 @@ class TailoringCoordinator:
                 await tailoring_repo.mark_session_generating(
                     session, owner.id, touch_updated_at=False
                 )
+                generation_started = True
             prepared = _PreparedGeneration(
                 launch=TailoringLaunch(
                     session_id=session_id,
@@ -582,14 +651,27 @@ class TailoringCoordinator:
                 complete_run=False,
             )
         except TailoringError:
-            await self._restore_ready(session_id)
+            if generation_started:
+                await self._restore_ready(session_id)
             raise
         except TailoringCompileError as exc:
-            await self._restore_ready(session_id)
+            if generation_started:
+                await self._restore_ready(session_id)
             raise _error(TAILORING_COMPILE_FAILED) from exc
         except Exception as exc:
-            await self._restore_ready(session_id)
-            raise _error(TAILORING_GROUNDING_FAILED) from exc
+            if generation_started:
+                await self._restore_ready(session_id)
+            generic_issue = GroundingIssue(code="UNKNOWN_FACT", path="sections")
+            raise TailoringError(
+                TAILORING_GROUNDING_FAILED,
+                _SAFE_MESSAGES[TAILORING_GROUNDING_FAILED],
+                issues=(generic_issue,),
+                user_issues=tuple(
+                    project_grounding_issues(
+                        issue_list=(generic_issue,), parent=parent
+                    )
+                ),
+            ) from exc
 
     def _bounded_instruction(self, instruction: str) -> str:
         if not isinstance(instruction, str):
@@ -912,7 +994,10 @@ class TailoringCoordinator:
             )
 
     async def _fail_generation(
-        self, prepared: _PreparedGeneration, error_code: str
+        self,
+        prepared: _PreparedGeneration,
+        error_code: str,
+        issues: tuple[GroundingIssue, ...] = (),
     ) -> bool:
         try:
             async with session_scope(self._session_factory) as session:
@@ -931,6 +1016,10 @@ class TailoringCoordinator:
                     await runs_repo.fail_run(
                         session, run.id, error_code=error_code
                     )
+            if issues:
+                await self._activity_service.record_grounding_issues(
+                    run_id=prepared.launch.run_id, issues=issues
+                )
             return True
         except Exception:
             return False

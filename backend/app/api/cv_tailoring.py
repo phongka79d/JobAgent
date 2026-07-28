@@ -49,6 +49,11 @@ from app.services.cv_tailoring import (
     TailoringError,
 )
 from app.services.cv_tailoring_deletion import delete_tailoring_session
+from app.services.tailoring_issue_projection import (
+    decode_internal_issue,
+    is_internal_issue_activity,
+    project_grounding_issues,
+)
 
 router = APIRouter(tags=["cv-tailoring"])
 
@@ -76,10 +81,12 @@ def _http_error(exc: Exception) -> HTTPException:
         TAILORING_ARTIFACT_UNAVAILABLE: 404,
         "TAILORING_DELETE_FAILED": 500,
     }.get(exc.code, 400)
-    return HTTPException(
-        status_code=status,
-        detail={"code": exc.code, "summary": exc.message},
-    )
+    detail: dict[str, Any] = {"code": exc.code, "summary": exc.message}
+    if exc.user_issues:
+        detail["issues"] = [
+            item.model_dump(mode="json") for item in exc.user_issues
+        ]
+    return HTTPException(status_code=status, detail=detail)
 
 
 async def _active_profile_id(deps: CVTailoringDeps) -> str:
@@ -242,11 +249,32 @@ async def get_session(
             latest_run = None
             if run is not None:
                 activities = await activities_repo.list_for_run_ids(session, [run.id])
+                internal_issues = [
+                    issue
+                    for item in activities
+                    if (issue := decode_internal_issue(item.technical_name)) is not None
+                ]
+                issue_parent = (
+                    parse_tailored_content(versions[-1].content_json)
+                    if versions
+                    else None
+                )
                 latest_run = TailoringRunSummary(
                     id=run.id,
                     state=cast(Any, run.state),
                     error_code=run.error_code,
-                    activities=[activity_payload(item) for item in activities],
+                    activities=[
+                        activity_payload(item)
+                        for item in activities
+                        if not is_internal_issue_activity(item.technical_name)
+                    ],
+                    issues=(
+                        project_grounding_issues(
+                            issue_list=internal_issues, parent=issue_parent
+                        )
+                        if internal_issues and issue_parent is not None
+                        else []
+                    ),
                 )
             content = (
                 parse_tailored_content(selected.content_json) if selected else None

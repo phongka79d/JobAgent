@@ -17,6 +17,8 @@ from app.schemas.agent_activity import (
     humanize_activity_name,
 )
 from app.schemas.common import ToolStatus
+from app.services.cv_tailoring_guard import GroundingIssue
+from app.services.tailoring_issue_projection import encode_internal_issue
 
 
 class AgentActivityServiceError(Exception):
@@ -93,6 +95,25 @@ class AgentActivityService:
                     state="running",
                 )
             return activity_payload(row)
+        except (SQLAlchemyError, AgentActivityRepositoryError) as exc:
+            raise AgentActivityServiceError(
+                "agent activity persistence failed"
+            ) from exc
+
+    async def record_grounding_issues(
+        self, *, run_id: str, issues: tuple[GroundingIssue, ...]
+    ) -> None:
+        try:
+            async with session_scope(self._factory) as session:
+                for issue in issues[:10]:
+                    await activity_repo.create_terminal_assistant_activity(
+                        session,
+                        activity_id=new_uuid(),
+                        run_id=run_id,
+                        label="Source support check",
+                        technical_name=encode_internal_issue(issue),
+                        error_code=issue.code,
+                    )
         except (SQLAlchemyError, AgentActivityRepositoryError) as exc:
             raise AgentActivityServiceError(
                 "agent activity persistence failed"

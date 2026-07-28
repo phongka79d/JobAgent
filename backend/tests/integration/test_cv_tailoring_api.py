@@ -17,7 +17,7 @@ from app.db.session import build_async_engine
 from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import workspace_state as workspace_repo
 from app.repositories.cv_tailoring import CVTailoringVersionWrite
-from app.schemas.cv_tailoring import TailoringVersionMutationResponse
+from app.schemas.cv_tailoring import TailoringUserIssue, TailoringVersionMutationResponse
 from app.schemas.sse import build_sse_event
 from app.services.cv_tailoring import (
     TAILORING_ARTIFACT_UNAVAILABLE,
@@ -57,6 +57,7 @@ class _RouteCoordinator:
         self.profile_id = profile_id
         self.session_id = session_id
         self.prepare_error: TailoringError | None = None
+        self.manual_error: TailoringError | None = None
         self.initial_calls: list[dict[str, Any]] = []
         self.ai_calls: list[dict[str, Any]] = []
         self.stream_calls: list[str] = []
@@ -94,6 +95,8 @@ class _RouteCoordinator:
     async def create_manual_version(
         self, **kwargs: Any
     ) -> TailoringVersionMutationResponse:
+        if self.manual_error is not None:
+            raise self.manual_error
         self.manual_calls.append(kwargs)
         return TailoringVersionMutationResponse(
             outcome="version_created",
@@ -508,6 +511,20 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
             assert manual.json()["outcome"] == "version_created"
             assert manual.json()["session_id"] == owner_id
             assert coordinator.manual_calls[-1]["parent_version_id"] == version_id
+
+            coordinator.manual_error = TailoringError(
+                "TAILORING_GROUNDING_FAILED",
+                "Tailored content is not source-supported",
+                user_issues=(TailoringUserIssue(section_id="summary", section_heading="Summary", item_index=None, field="section", reason="required_source_missing"),),
+            )
+            rejected_manual = client.post(
+                f"/api/cv-tailoring/sessions/{owner_id}/manual-versions",
+                json={"parent_version_id": version_id, "content": _content()},
+            )
+            assert rejected_manual.status_code == 422
+            assert rejected_manual.json()["detail"]["issues"] == [{"section_id": "summary", "section_heading": "Summary", "item_index": None, "field": "section", "reason": "required_source_missing"}]
+            assert "provider" not in rejected_manual.text
+            coordinator.manual_error = None
 
             streams_before_reads = list(coordinator.stream_calls)
             source = client.get(

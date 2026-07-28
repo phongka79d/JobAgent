@@ -24,6 +24,7 @@ from app.schemas.common import (
     UuidStr,
     reject_status_alias,
 )
+from app.schemas.cv_tailoring import TailoringUserIssue
 from pydantic import (
     BaseModel,
     Field,
@@ -201,6 +202,7 @@ class RunFailedPayload(BaseModel):
     state: Literal["failed"] = "failed"
     error_code: str = Field(min_length=1)
     summary: str = Field(min_length=1)
+    issues: list[TailoringUserIssue] | None = Field(default=None, max_length=10)
 
     @field_validator("error_code")
     @classmethod
@@ -208,6 +210,15 @@ class RunFailedPayload(BaseModel):
         if value.strip() == "":
             raise ValueError("error_code must be a stable non-empty string")
         return value
+
+    @model_serializer(mode="wrap")
+    def omit_absent_tailoring_issues(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        serialized = cast(dict[str, Any], handler(self))
+        if self.issues is None:
+            serialized.pop("issues", None)
+        return serialized
 
 
 class RunStartedEvent(_SseEnvelopeBase):

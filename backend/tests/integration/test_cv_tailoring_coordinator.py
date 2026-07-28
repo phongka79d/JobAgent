@@ -658,3 +658,54 @@ def test_failed_terminal_persistence_retains_checkpoint_for_recovery(
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_grounding_failure_persists_only_bounded_internal_issue_identity(
+    db_path: Path, tmp_path: Path
+) -> None:
+    async def _body() -> None:
+        from app.repositories import agent_activities as activities_repo
+        from app.services.cv_tailoring import TailoringCoordinator
+        from app.services.tailoring_issue_projection import decode_internal_issue
+
+        class RejectingInvoker(_Invoker):
+            def supports(self, *, output_text: str, cited_evidence: Sequence[str]) -> bool:
+                del output_text, cited_evidence
+                return False
+
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            profile_id, document, profile_model = await _seed_ready_source(factory)
+            patch = _patch_for_summary(document, profile_model)
+            section = patch.sections[0]
+            item = section.items[0]
+            changed_body = item.body.model_copy(update={"text": "Unsupported synthetic claim"})
+            patch = patch.model_copy(update={"sections": [section.model_copy(update={"items": [item.model_copy(update={"body": changed_body})]})]})
+            coordinator = TailoringCoordinator(
+                session_factory=factory,
+                storage=TailoringArtifactStorage(tmp_path / "files"),
+                settings=_Settings(),
+                invoker=RejectingInvoker(patch),
+                sqlite_path=db_path,
+                compiler=_fake_compile,
+            )
+            launch = await coordinator.prepare_session(
+                profile_id=profile_id,
+                job_id=None,
+                instruction="Add unsupported detail",
+                parent_run_id=None,
+            )
+            events = [event async for event in coordinator.stream_initial_version(launch)]
+            assert events[-1].event == "run_failed"
+            assert events[-1].payload.issues
+            assert "Unsupported synthetic claim" not in events[-1].model_dump_json()
+            async with factory() as session:
+                rows = await activities_repo.list_for_run_ids(session, [launch.run_id])
+                issue_rows = [row for row in rows if decode_internal_issue(row.technical_name) is not None]
+                assert 1 <= len(issue_rows) <= 10
+                assert all(row.label == "Source support check" for row in issue_rows)
+        finally:
+            await engine.dispose()
+
+    run_async(_body())

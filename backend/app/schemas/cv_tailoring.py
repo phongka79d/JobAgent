@@ -264,6 +264,17 @@ class TailoringSessionListResponse(BaseModel):
     items: list[TailoringSessionSummary]
 
 
+class TailoringUserIssue(BaseModel):
+    model_config = StrictModelConfig
+
+    section_id: str = Field(min_length=1, max_length=120)
+    section_heading: str = Field(min_length=1, max_length=200)
+    item_index: int | None = Field(default=None, ge=0, le=30)
+    field: Literal[
+        "title", "subtitle", "date", "location", "body", "bullet", "attribute", "section"
+    ]
+
+
 class TailoringRunSummary(BaseModel):
     model_config = StrictModelConfig
 
@@ -271,6 +282,14 @@ class TailoringRunSummary(BaseModel):
     state: Literal["running", "interrupted", "completed", "failed"]
     error_code: str | None
     activities: list[AgentActivityPayload]
+    issues: list[TailoringUserIssue] = Field(default_factory=list, max_length=10)
+    reason: Literal[
+        "not_in_source",
+        "belongs_to_another_section",
+        "structure_changed",
+        "required_source_missing",
+        "unsupported_value",
+    ]
 
 
 class TailoringSessionDetailResponse(BaseModel):
