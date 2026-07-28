@@ -204,6 +204,7 @@ class TailoringCoordinator:
             self._session_factory
         )
         self._prepared: dict[str, _PreparedGeneration] = {}
+        self._completed_mutations: dict[str, TailoringVersionMutationResponse] = {}
 
     async def prepare_session(
         self,
@@ -338,6 +339,7 @@ class TailoringCoordinator:
                         targeted_section_ids=selected_ids,
                         created_by=TAILORING_CREATED_BY_AI,
                     )
+                self._completed_mutations[launch.run_id] = mutation
                 await self._delete_checkpoint(launch.run_id)
         except (asyncio.CancelledError, GeneratorExit):
             with CancelScope(shield=True):
@@ -418,8 +420,12 @@ class TailoringCoordinator:
                 or version.version_number != owner.latest_version_number
             ):
                 raise _error(TAILORING_GROUNDING_FAILED)
+            completed = self._completed_mutations.get(launch.run_id)
+            outcome: Literal["version_created", "no_change"] = (
+                completed.outcome if completed is not None else "version_created"
+            )
             return TailoringVersionMutationResponse(
-                outcome="version_created",
+                outcome=outcome,
                 session_id=owner.id,
                 version_id=version.id,
                 version_number=version.version_number,

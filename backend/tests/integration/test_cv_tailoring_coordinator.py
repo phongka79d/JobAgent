@@ -399,6 +399,9 @@ def test_later_ai_and_manual_no_changes_preserve_one_immutable_parent(
             assert terminal.payload.version_id == first.id
             assert terminal.payload.version_number == first.version_number
             assert len(compile_calls) == 1
+            recovered = await coordinator.get_completed_version(later)
+            assert recovered.outcome == "no_change"
+            assert recovered.version_id == first.id
 
             async with factory() as session:
                 second = await tailoring_repo.get_latest_version(
