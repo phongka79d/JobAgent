@@ -232,7 +232,14 @@ describe('product navigation', () => {
     expect(closedSavedJobs.loadDetail).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
-    await waitFor(() => expect(closedSavedJobs.loadList).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(closedSavedJobs.loadList).toHaveBeenCalledTimes(1);
+      expect(closedSavedJobs.loadList).toHaveBeenCalledWith({}, {force: true});
+      expect(closedSavedJobs.loadDetail).toHaveBeenCalledTimes(1);
+      expect(closedSavedJobs.loadDetail).toHaveBeenCalledWith(JOB_ID, {
+        force: true,
+      });
+    });
     expect(closedTailoring.loadSessions).not.toHaveBeenCalled();
   });
 });

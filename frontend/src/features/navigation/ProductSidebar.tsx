@@ -30,23 +30,30 @@ export function ProductSidebar({
   const {isCollapsed, setIsCollapsed} = useSideNavCollapse();
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
 
-  useEffect(() => {
+  const refreshPendingSavedJobsInvalidation = useCallback(() => {
     if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
-      return;
+      return false;
     }
     handledSavedJobsInvalidateKey.current = savedJobsInvalidateKey;
-    if (selected !== 'saved-jobs') {
-      return;
-    }
     void savedJobs.loadList({}, {force: true});
     if (savedJobs.state.selectedJobId !== null) {
       void savedJobs.loadDetail(savedJobs.state.selectedJobId, {force: true});
     }
+    return true;
   }, [
     savedJobs.loadDetail,
     savedJobs.loadList,
     savedJobs.state.selectedJobId,
     savedJobsInvalidateKey,
+  ]);
+
+  useEffect(() => {
+    if (selected !== 'saved-jobs') {
+      return;
+    }
+    refreshPendingSavedJobsInvalidation();
+  }, [
+    refreshPendingSavedJobsInvalidation,
     selected,
   ]);
 
@@ -58,8 +65,11 @@ export function ProductSidebar({
     [savedJobs.loadDetail, savedJobs.selectJob],
   );
   const loadSavedJobs = useCallback(() => {
+    if (refreshPendingSavedJobsInvalidation()) {
+      return;
+    }
     void savedJobs.loadList();
-  }, [savedJobs.loadList]);
+  }, [refreshPendingSavedJobsInvalidation, savedJobs.loadList]);
   const refreshSavedJobs = useCallback(() => {
     void savedJobs.loadList({}, {force: true});
   }, [savedJobs.loadList]);
