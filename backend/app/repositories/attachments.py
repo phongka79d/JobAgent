@@ -81,6 +81,17 @@ async def get_by_file_hash(
     return result.scalar_one_or_none()
 
 
+async def list_all(session: AsyncSession) -> list[Attachment]:
+    """Return every attachment newest-first using a stable id tie-breaker."""
+    result = await session.execute(
+        select(Attachment).order_by(
+            Attachment.created_at.desc(),
+            Attachment.id.desc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def get_active(session: AsyncSession) -> Attachment | None:
     """Return the single ``active`` attachment, or ``None`` if none exists.
 

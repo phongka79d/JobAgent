@@ -42,6 +42,7 @@ from app.schemas.cv_manager import (
     ERROR_CV_DELETE_FILE_FAILED,
     ERROR_CV_DELETE_FINALIZE_FAILED,
     ERROR_CV_DELETE_GRAPH_FAILED,
+    ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN,
 )
 from app.schemas.tools import ToolResult
 from app.services.cv_manager import CvDeleteError, delete_cv
@@ -605,7 +606,7 @@ def test_profile_owned_staged_attachment_is_rejected(
                     driver=FakeNeo4jDriver(),
                     sqlite_path=db_path,
                 )
-            assert exc_info.value.code == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
+            assert exc_info.value.code == ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN
             async with factory() as session:
                 assert await att_repo.get_by_id(session, aid) is not None
                 assert await prof_repo.get_current_draft(session) is not None
@@ -620,7 +621,7 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
     db_path, files = del_env
     storage = AttachmentStorage(files)
 
-    async def _seed() -> tuple[str, str, str, str]:
+    async def _seed() -> tuple[str, str, str, str, str]:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
@@ -683,29 +684,56 @@ def test_delete_api_active_and_success(del_env: tuple[Path, Path]) -> None:
                 )
                 deleting_profile.state = "deleting"
                 await session.flush()
+                failed = await _seed_attachment(
+                    session,
+                    storage,
+                    state=ATTACHMENT_STATE_FAILED,
+                    file_hash='api-failed',
+                )
+                failed_profile = await prof_repo.create_profile(
+                    session,
+                    attachment_id=failed.id,
+                    display_name='Failed owner',
+                    profile_json={'full_name': 'Failed'},
+                    location=None,
+                    extraction_version='v1',
+                    source_hash='failed-source',
+                )
+                await conversations_repo.create_for_profile(
+                    session, profile_id=failed_profile.id
+                )
                 await session.commit()
-                return active.id, archived.id, deleting.id, unowned.id
+                return active.id, archived.id, deleting.id, failed.id, unowned.id
         finally:
             await engine.dispose()
 
-    active_id, archived_id, deleting_id, unowned_id = run_async(_seed())
+    active_id, archived_id, deleting_id, failed_id, unowned_id = run_async(_seed())
 
     model = FakeChatModel(responses=[ai_text("noop")])
     with client_with_fake_chat(db_path, model) as client:
         resp = client.delete(f"/api/cvs/{active_id}")
         assert resp.status_code == 409
-        assert resp.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
+        assert resp.json()["detail"]["code"] == ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN
 
         resp2 = client.delete(f"/api/cvs/{archived_id}")
         assert resp2.status_code == 409
-        assert resp2.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
+        assert resp2.json()["detail"]["code"] == ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN
 
         resp3 = client.delete(f"/api/cvs/{deleting_id}")
         assert resp3.status_code == 409
-        assert resp3.json()["detail"]["code"] == ERROR_CV_ACTIVE_DELETE_FORBIDDEN
+        assert resp3.json()["detail"]["code"] == ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN
 
         resp3 = client.delete(f"/api/cvs/{unowned_id}")
         assert resp3.status_code == 204
+        failed_resp = client.delete(f'/api/cvs/{failed_id}')
+        assert failed_resp.status_code == 409
+        assert failed_resp.json()['detail'] == {
+            'code': ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN,
+            'summary': (
+                'This CV belongs to a profile. Delete the profile from the Profile '
+                'menu instead.'
+            ),
+        }
         assert resp3.content == b""
 
 

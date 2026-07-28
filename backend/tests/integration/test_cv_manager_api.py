@@ -16,7 +16,11 @@ import pytest
 from app.core.ids import new_uuid
 from app.db.models.attachments import (
     ATTACHMENT_STATE_ACTIVE,
+    ATTACHMENT_STATE_ARCHIVED,
+    ATTACHMENT_STATE_DELETING,
+    ATTACHMENT_STATE_FAILED,
 )
+from app.db.models.profiles import Profile
 from app.db.session import build_async_engine, get_session_factory
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
@@ -25,6 +29,8 @@ from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as prof_repo
 from app.repositories import tool_executions as tool_repo
+from app.repositories import workspace_state as workspace_repo
+from app.services.cv_manager_projection import allowed_actions
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 from app.tools.profile import (
@@ -260,6 +266,109 @@ async def _seed_ready_profile_owner(session: Any, attachment_id: str) -> str:
     return profile.id
 
 
+async def _seed_cv_manager_matrix(
+    db_path: Path, storage: AttachmentStorage
+) -> dict[str, str]:
+    engine = build_async_engine(db_path)
+    factory = session_factory(engine)
+    try:
+        async with factory() as session:
+            async def seed(
+                marker: str, name: str, *, state: str = ATTACHMENT_STATE_FAILED
+            ) -> Any:
+                aid = new_uuid()
+                row = await att_repo.create_staged(
+                    session,
+                    file_hash=f'manager-{marker}',
+                    original_name=name,
+                    size_bytes=32,
+                    storage_path=_write_real_pdf(storage, aid),
+                    page_count=1,
+                    attachment_id=aid,
+                )
+                if state == ATTACHMENT_STATE_ACTIVE:
+                    await att_repo.mark_active(session, aid, page_count=1)
+                elif state == ATTACHMENT_STATE_ARCHIVED:
+                    await att_repo.mark_active(session, aid, page_count=1)
+                    await att_repo.mark_archived(session, aid)
+                elif state == ATTACHMENT_STATE_DELETING:
+                    await att_repo.mark_deleting(session, aid)
+                else:
+                    await att_repo.mark_failed(
+                        session, aid, failure_code='NO_EXTRACTABLE_TEXT'
+                    )
+                return row
+
+            archived = await seed(
+                'archived', 'archived.pdf', state=ATTACHMENT_STATE_ARCHIVED
+            )
+            await prof_repo.create_profile(
+                session,
+                attachment_id=archived.id,
+                display_name='Archived profile',
+                profile_json=_approval_profile_json(),
+                location=None,
+                extraction_version='v1',
+                source_hash='manager-archived-source',
+            )
+            active = await seed(
+                'active', 'active.pdf', state=ATTACHMENT_STATE_ACTIVE
+            )
+            active_profile = await prof_repo.create_profile(
+                session,
+                attachment_id=active.id,
+                display_name='Active profile',
+                profile_json=_approval_profile_json(),
+                location=None,
+                extraction_version='v1',
+                source_hash='manager-active-source',
+            )
+            pending = await seed('pending', 'pending.pdf')
+            await prof_repo.create_pending_profile(
+                session,
+                attachment_id=pending.id,
+                display_name='Pending profile',
+            )
+            deleting = await seed(
+                'deleting', 'deleting.pdf', state=ATTACHMENT_STATE_DELETING
+            )
+            deleting_profile = await prof_repo.create_profile(
+                session,
+                attachment_id=deleting.id,
+                display_name='Deleting profile',
+                profile_json=_approval_profile_json(),
+                location=None,
+                extraction_version='v1',
+                source_hash='manager-deleting-source',
+            )
+            deleting_profile.state = 'deleting'
+            failed_ready = await seed('failed-ready', 'failed-ready.pdf')
+            await prof_repo.create_profile(
+                session,
+                attachment_id=failed_ready.id,
+                display_name='Failed ready profile',
+                profile_json=_approval_profile_json(),
+                location=None,
+                extraction_version='v1',
+                source_hash='manager-failed-ready-source',
+            )
+            orphan = await seed('orphan', 'orphan.pdf')
+            await workspace_repo.set_active_profile_id(
+                session, active_profile.id
+            )
+            await session.commit()
+            return {
+                'active': active.id,
+                'archived': archived.id,
+                'pending': pending.id,
+                'deleting': deleting.id,
+                'failed_ready': failed_ready.id,
+                'orphan': orphan.id,
+            }
+    finally:
+        await engine.dispose()
+
+
 def test_reprocess_unknown_attachment_404(reprocess_env: tuple[Path, Path]) -> None:
     db_path, files_dir = reprocess_env
     storage = AttachmentStorage(files_dir)
@@ -272,6 +381,65 @@ def test_reprocess_unknown_attachment_404(reprocess_env: tuple[Path, Path]) -> N
         resp = client.post(f"/api/cvs/{missing}/reprocess")
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Not Found"
+
+
+def test_cv_manager_list_projects_actions_without_storage_or_hash(
+    reprocess_env: tuple[Path, Path],
+) -> None:
+    db_path, files_dir = reprocess_env
+    ids = run_async(_seed_cv_manager_matrix(db_path, AttachmentStorage(files_dir)))
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+    ) as client:
+        response = client.get('/api/cvs')
+
+    assert response.status_code == 200
+    by_id = {item['id']: item for item in response.json()['items']}
+    assert by_id[ids['active']]['allowed_actions'] == [
+        'preview', 'download', 'reextract'
+    ]
+    assert by_id[ids['archived']]['allowed_actions'] == [
+        'preview', 'download', 'activate_profile', 'reextract'
+    ]
+    assert by_id[ids['pending']]['allowed_actions'] == ['retry_upload']
+    assert by_id[ids['deleting']]['allowed_actions'] == []
+    assert by_id[ids['failed_ready']]['allowed_actions'] == []
+    assert by_id[ids['orphan']]['allowed_actions'] == ['delete_cv']
+    assert all(
+        'storage_path' not in item and 'file_hash' not in item
+        for item in by_id.values()
+    )
+
+
+def test_cv_manager_file_route_validates_disposition_and_ownership(
+    reprocess_env: tuple[Path, Path],
+) -> None:
+    db_path, files_dir = reprocess_env
+    ids = run_async(_seed_cv_manager_matrix(db_path, AttachmentStorage(files_dir)))
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+    ) as client:
+        inline = client.get('/api/cvs/' + ids['active'] + '/file')
+        attachment = client.get(
+            '/api/cvs/' + ids['active'] + '/file?disposition=attachment'
+        )
+        invalid = client.get(
+            '/api/cvs/' + ids['active'] + '/file?disposition=download'
+        )
+        pending = client.get('/api/cvs/' + ids['pending'] + '/file')
+
+    assert inline.status_code == 200
+    assert inline.headers['content-disposition'] == (
+        'inline; filename="active.pdf"; filename*=UTF-8\'\'active.pdf'
+    )
+    assert inline.headers['x-content-type-options'] == 'nosniff'
+    assert inline.content.startswith(b'%PDF-')
+    assert attachment.status_code == 200
+    assert attachment.headers['content-disposition'] == (
+        'attachment; filename="active.pdf"; filename*=UTF-8\'\'active.pdf'
+    )
+    assert invalid.status_code == 422
+    assert pending.status_code == 404
 
 
 def test_reprocess_rejects_staged_and_failed(
@@ -764,3 +932,64 @@ def test_reprocess_same_active_save_refreshes_document(
             assert doc.source_hash
 
     run_async(_assert())
+
+
+def test_cv_manager_file_route_encodes_unicode_original_name(
+    reprocess_env: tuple[Path, Path],
+) -> None:
+    db_path, files_dir = reprocess_env
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+
+    async def _seed() -> str:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_id = new_uuid()
+                await att_repo.create_staged(
+                    session,
+                    file_hash='unicode-name',
+                    original_name='CV \u0110\u1eb7ng.pdf',
+                    size_bytes=32,
+                    storage_path=_write_real_pdf(storage, attachment_id),
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id, page_count=1)
+                await _seed_ready_profile_owner(session, attachment_id)
+                await session.commit()
+                return attachment_id
+        finally:
+            await engine.dispose()
+
+    attachment_id = run_async(_seed())
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+    ) as client:
+        inline = client.get(f'/api/cvs/{attachment_id}/file')
+        attachment = client.get(
+            f'/api/cvs/{attachment_id}/file?disposition=attachment'
+        )
+
+    expected_filename_star = "filename*=UTF-8''CV%20%C4%90%E1%BA%B7ng.pdf"
+    for response, disposition in (
+        (inline, 'inline'),
+        (attachment, 'attachment'),
+    ):
+        assert response.status_code == 200
+        header = response.headers['content-disposition']
+        assert header.startswith(f'{disposition}; filename="CV __ng.pdf"; ')
+        assert expected_filename_star in header
+        assert all(ord(char) < 128 for char in header)
+
+
+def test_cv_manager_active_ready_policy_never_allows_activation() -> None:
+    ready_owner = Profile(state='ready')
+
+    assert allowed_actions(
+        state=ATTACHMENT_STATE_ACTIVE,
+        owner=ready_owner,
+        is_active=False,
+        file_available=True,
+    ) == ['preview', 'download', 'reextract']

@@ -44,6 +44,7 @@ from app.schemas.cv_manager import (
     ERROR_CV_DELETE_FILE_FAILED,
     ERROR_CV_DELETE_FINALIZE_FAILED,
     ERROR_CV_DELETE_GRAPH_FAILED,
+    ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN,
 )
 from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
 from app.services.cv_deletion_ownership import (
@@ -195,8 +196,11 @@ async def _phase_mark_and_redact(
         )
     if await profile_repo.get_profile_by_attachment_id(session, attachment_id):
         raise CvDeleteError(
-            ERROR_CV_ACTIVE_DELETE_FORBIDDEN,
-            "profile-owned CVs must be deleted through profile deletion",
+            ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN,
+            (
+                "This CV belongs to a profile. Delete the profile from the Profile "
+                "menu instead."
+            ),
         )
     if row.state == ATTACHMENT_STATE_ACTIVE:
         raise CvDeleteError(
@@ -351,8 +355,11 @@ async def delete_cv(
             )
         if await profile_repo.get_profile_by_attachment_id(probe, aid):
             raise CvDeleteError(
-                ERROR_CV_ACTIVE_DELETE_FORBIDDEN,
-                "profile-owned CVs must be deleted through profile deletion",
+                ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN,
+                (
+                    "This CV belongs to a profile. Delete the profile from the "
+                    "Profile menu instead."
+                ),
             )
         if existing.state == ATTACHMENT_STATE_ACTIVE:
             raise CvDeleteError(
