@@ -15,6 +15,7 @@ import type {
 import type {PendingProfileBootstrap} from './types';
 
 export type ProfileWorkspaceState = {
+  phase: WorkspacePhase;
   profiles: ProfileListItem[];
   activeProfileId: string | null;
   selectedConversationId: string | null;
@@ -22,17 +23,31 @@ export type ProfileWorkspaceState = {
   pending: ReadonlySet<string>;
   error: string | null;
 };
+export type WorkspacePhase = 'rehydrating' | 'ready' | 'error';
+type LegacyProfileWorkspaceState = Omit<ProfileWorkspaceState, 'phase'> & {
+  phase?: never;
+};
 export type ProfileWorkspaceApi = Pick<typeof defaultProfileApi,
   'fetchProfiles' | 'fetchProfileConversations' | 'activateProfile' |
   'updateProfile' | 'deleteProfile' | 'createProfileConversation' |
   'selectConversation' | 'deleteConversation'>;
 export type ProfileWorkspaceAction =
-  | {type: 'profiles/loaded'; response: ProfileListResponse}
-  | {type: 'conversations/loaded'; response: ConversationListResponse}
+  | {type: 'rehydrate/started'}
+  | {type: 'rehydrate/succeeded'; snapshot: WorkspaceSnapshot}
+  | {type: 'rehydrate/failed'; error: string}
+  | {
+      type: 'conversations/loaded';
+      profileId: string;
+      response: ConversationListResponse;
+    }
   | {type: 'profile/activated'; response: SelectionResponse}
   | {type: 'profile/renamed'; response: ProfileDetail}
   | {type: 'profile/deleted'; response: ProfileDeleteResponse}
-  | {type: 'conversation/created'; response: ConversationMutationResponse}
+  | {
+      type: 'conversation/created';
+      profileId: string;
+      response: ConversationMutationResponse;
+    }
   | {type: 'conversation/selected'; response: ConversationMutationResponse}
   | {type: 'conversation/deleted'; response: ConversationDeleteResponse}
   | {type: 'workspace/bootstrapAdopted'; bootstrap: PendingProfileBootstrap}
@@ -41,31 +56,128 @@ export type ProfileWorkspaceAction =
   | {type: 'mutation/finished'; key: string}
   | {type: 'mutation/failed'; key: string; error: string};
 
+type WorkspaceSnapshot = {
+  profiles: ProfileListResponse;
+  conversations: ConversationListResponse;
+};
+
+function validateSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const active = snapshot.profiles.active_profile_id;
+  if (
+    active !== null &&
+    !snapshot.profiles.items.some((item) => item.id === active)
+  ) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  const activeItems = snapshot.profiles.items.filter((item) => item.is_active);
+  if (
+    (active === null && activeItems.length !== 0) ||
+    (active !== null &&
+      (activeItems.length !== 1 || activeItems[0]?.id !== active))
+  ) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  if (
+    snapshot.conversations.items.some((item) => item.profile_id !== active)
+  ) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  const selected = snapshot.conversations.items.filter(
+    (item) => item.is_selected,
+  );
+  if (selected.length > 1) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  return snapshot;
+}
+
+function conversationsBelongToProfile(
+  response: ConversationListResponse,
+  profileId: string | null,
+): boolean {
+  return (
+    response.items.every((item) => item.profile_id === profileId) &&
+    response.items.filter((item) => item.is_selected).length <= 1
+  );
+}
+
+function workspaceProjectionError(
+  state: ProfileWorkspaceState,
+): ProfileWorkspaceState {
+  return {
+    ...state,
+    phase: 'error',
+    conversations: [],
+    selectedConversationId: null,
+    error: 'Workspace data did not match the active profile.',
+  };
+}
+
 export const initialProfileWorkspaceState: ProfileWorkspaceState = {
+  phase: 'rehydrating',
   profiles: [], activeProfileId: null, selectedConversationId: null,
   conversations: [], pending: new Set(), error: null,
 };
 
 export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: ProfileWorkspaceAction): ProfileWorkspaceState {
   switch (action.type) {
-    case 'profiles/loaded': {
-      const activeChanged = state.activeProfileId !== action.response.active_profile_id;
+    case 'rehydrate/started':
       return {
         ...state,
-        profiles: action.response.items,
-        activeProfileId: action.response.active_profile_id,
-        conversations: activeChanged ? [] : state.conversations,
-        selectedConversationId: activeChanged ? null : state.selectedConversationId,
+        phase: 'rehydrating',
+        conversations: [],
+        selectedConversationId: null,
+        error: null,
+      };
+    case 'rehydrate/succeeded': {
+      const snapshot = validateSnapshot(action.snapshot);
+      const selected = snapshot.conversations.items.find(
+        (item) => item.is_selected,
+      );
+      return {
+        ...state,
+        phase: 'ready',
+        profiles: snapshot.profiles.items,
+        activeProfileId: snapshot.profiles.active_profile_id,
+        conversations: snapshot.conversations.items,
+        selectedConversationId: selected?.id ?? null,
         error: null,
       };
     }
-    case 'conversations/loaded': {
-      const selected = action.response.items.find((item) => item.is_selected) ?? null;
-      return {...state, conversations: action.response.items, selectedConversationId: selected?.id ?? null, error: null};
-    }
-    case 'profile/activated':
+    case 'rehydrate/failed':
       return {
         ...state,
+        phase: 'error',
+        conversations: [],
+        selectedConversationId: null,
+        error: action.error,
+      };
+    case 'conversations/loaded': {
+      if (
+        action.profileId !== state.activeProfileId ||
+        !conversationsBelongToProfile(action.response, state.activeProfileId)
+      ) {
+        return state;
+      }
+      const selected = action.response.items.find((item) => item.is_selected);
+      return {
+        ...state,
+        phase: 'ready',
+        conversations: action.response.items,
+        selectedConversationId: selected?.id ?? null,
+        error: null,
+      };
+    }
+    case 'profile/activated':
+      if (
+        action.response.conversation &&
+        action.response.conversation.profile_id !== action.response.profile.id
+      ) {
+        return workspaceProjectionError(state);
+      }
+      return {
+        ...state,
+        phase: 'ready',
         activeProfileId: action.response.profile.id,
         profiles: state.profiles.map((item) =>
           item.id === action.response.profile.id
@@ -94,6 +206,12 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
     case 'profile/deleted': {
       const activeProfile = action.response.active_profile;
       const selected = action.response.selected_conversation;
+      if (
+        (activeProfile && !activeProfile.is_active) ||
+        (selected && selected.profile_id !== activeProfile?.id)
+      ) {
+        return workspaceProjectionError(state);
+      }
       const remaining = state.profiles.filter(
         (item) => item.id !== action.response.deleted_profile_id,
       );
@@ -122,10 +240,17 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
     }
     case 'conversation/created': {
       const selected = action.response.conversation;
+      if (
+        selected.profile_id !== action.profileId ||
+        action.profileId !== state.activeProfileId
+      ) {
+        return state;
+      }
       return {...state, selectedConversationId: selected.id, conversations: [selected, ...state.conversations.filter((item) => item.id !== selected.id).map((item) => ({...item, is_selected: false}))]};
     }
     case 'conversation/selected': {
       const selected = action.response.conversation;
+      if (selected.profile_id !== state.activeProfileId) return state;
       const listed = state.conversations.some((item) => item.id === selected.id);
       return {
         ...state,
@@ -137,13 +262,18 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
     }
     case 'conversation/deleted': {
       const selected = action.response.selected_conversation;
+      if (selected.profile_id !== state.activeProfileId) return state;
       const remaining = state.conversations.filter((item) => item.id !== action.response.deleted_conversation_id).map((item) => item.id === selected.id ? selected : {...item, is_selected: false});
       return {...state, selectedConversationId: selected.id, conversations: remaining.some((item) => item.id === selected.id) ? remaining : [selected, ...remaining]};
     }
     case 'workspace/bootstrapAdopted': {
       const {profile, conversation} = action.bootstrap;
+      if (!profile.is_active || conversation.profile_id !== profile.id) {
+        return workspaceProjectionError(state);
+      }
       return {
         ...state,
+        phase: 'ready',
         profiles: [
           profile,
           ...state.profiles
@@ -164,7 +294,7 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
 }
 
 export type ProfileWorkspaceController = {
-  state: ProfileWorkspaceState;
+  state: ProfileWorkspaceState | LegacyProfileWorkspaceState;
   activate: (profileId: string) => Promise<void>;
   createConversation: (profileId: string) => Promise<void>;
   selectConversation: (conversationId: string) => Promise<void>;
@@ -192,38 +322,57 @@ export function useProfileWorkspaceState(
   const [state, dispatch] = useReducer(profileWorkspaceReducer, initialProfileWorkspaceState);
   const pendingRef = useRef(new Set<string>());
   const requestRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const invalidateAuthoritativeWork = useCallback(() => {
+    requestRef.current += 1;
+    abortRef.current?.abort();
+    return requestRef.current;
+  }, []);
   const mutate = useCallback(async <T,>(key: string, request: () => Promise<T>, action: (value: T) => ProfileWorkspaceAction) => {
     if (interactionLocked || pendingRef.current.has(key)) return false;
+    const requestId = invalidateAuthoritativeWork();
     pendingRef.current.add(key); dispatch({type: 'mutation/started', key});
     try {
-      dispatch(action(await request()));
+      const response = await request();
+      if (requestId !== requestRef.current) return false;
+      dispatch(action(response));
       return true;
     }
     catch (error) {
-      dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'});
+      if (requestId === requestRef.current) {
+        dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'});
+      }
       return false;
     }
     finally { pendingRef.current.delete(key); dispatch({type: 'mutation/finished', key}); }
-  }, [interactionLocked]);
+  }, [interactionLocked, invalidateAuthoritativeWork]);
   const activate = useCallback(async (profileId: string) => {
     const key = `activate:${profileId}`;
     if (interactionLocked || pendingRef.current.has(key)) return;
+    const requestId = invalidateAuthoritativeWork();
     pendingRef.current.add(key);
     dispatch({type: 'mutation/started', key});
     try {
       const response = await api.activateProfile(profileId);
+      if (requestId !== requestRef.current) return;
       dispatch({type: 'profile/activated', response});
-      dispatch({type: 'conversations/loaded', response: await api.fetchProfileConversations(profileId, {limit: 50})});
+      const conversations = await api.fetchProfileConversations(profileId, {limit: 50});
+      if (requestId === requestRef.current) {
+        dispatch({type: 'conversations/loaded', profileId, response: conversations});
+      }
     } catch (error) {
-      dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'});
+      if (requestId === requestRef.current) {
+        dispatch({type: 'mutation/failed', key, error: error instanceof Error ? error.message : 'Request failed'});
+      }
     } finally {
       pendingRef.current.delete(key);
       dispatch({type: 'mutation/finished', key});
     }
-  }, [api, interactionLocked]);
+  }, [api, interactionLocked, invalidateAuthoritativeWork]);
   const createConversation = useCallback(async (profileId: string) => {
-    await mutate(`create:${profileId}`, () => api.createProfileConversation(profileId), (response) => ({type: 'conversation/created', response}));
-  }, [api, mutate]);
+    if (state.phase !== 'ready' || state.activeProfileId !== profileId) return;
+    await mutate(`create:${profileId}`, () => api.createProfileConversation(profileId), (response) => ({type: 'conversation/created', profileId, response}));
+  }, [api, mutate, state.activeProfileId, state.phase]);
   const selectConversation = useCallback(async (conversationId: string) => {
     await mutate(`select:${conversationId}`, () => api.selectConversation(conversationId), (response) => ({type: 'conversation/selected', response}));
   }, [api, mutate]);
@@ -247,25 +396,45 @@ export function useProfileWorkspaceState(
     [api, mutate],
   );
   const adoptBootstrap = useCallback((bootstrap: PendingProfileBootstrap) => {
-    requestRef.current += 1;
+    invalidateAuthoritativeWork();
     dispatch({type: 'workspace/bootstrapAdopted', bootstrap});
-  }, []);
+  }, [invalidateAuthoritativeWork]);
   const reload = useCallback(async () => {
-    const requestId = ++requestRef.current;
+    const requestId = invalidateAuthoritativeWork();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    dispatch({type: 'rehydrate/started'});
     try {
-      const profiles = await api.fetchProfiles();
-      if (requestId !== requestRef.current) return;
-      dispatch({type: 'profiles/loaded', response: profiles});
-      if (profiles.active_profile_id) {
-        const response = await api.fetchProfileConversations(profiles.active_profile_id, {limit: 50});
-        if (requestId === requestRef.current) dispatch({type: 'conversations/loaded', response});
-      }
+      const profiles = await api.fetchProfiles(controller.signal);
+      if (requestId !== requestRef.current || controller.signal.aborted) return;
+      const conversations = profiles.active_profile_id
+        ? await api.fetchProfileConversations(
+            profiles.active_profile_id,
+            {limit: 50},
+            controller.signal,
+          )
+        : {items: [], next_cursor: null};
+      if (requestId !== requestRef.current || controller.signal.aborted) return;
+      const snapshot = validateSnapshot({profiles, conversations});
+      dispatch({type: 'rehydrate/succeeded', snapshot});
     } catch (error) {
-      if (requestId === requestRef.current) {
-        dispatch({type: 'mutation/failed', key: 'reload', error: error instanceof Error ? error.message : 'Request failed'});
+      if (
+        requestId === requestRef.current &&
+        !controller.signal.aborted
+      ) {
+        dispatch({
+          type: 'rehydrate/failed',
+          error: error instanceof Error ? error.message : 'Request failed',
+        });
       }
     }
-  }, [api]);
-  useEffect(() => { void reload(); return () => { requestRef.current += 1; }; }, [reload]);
+  }, [api, invalidateAuthoritativeWork]);
+  useEffect(() => {
+    void reload();
+    return () => {
+      requestRef.current += 1;
+      abortRef.current?.abort();
+    };
+  }, [reload]);
   return {state, activate, createConversation, selectConversation, deleteConversation, renameProfile, deleteProfile, reload, adoptBootstrap};
 }
