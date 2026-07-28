@@ -22,6 +22,9 @@ import {
 } from '@astryxdesign/core/SideNav';
 
 import type {ObservabilityApi} from '../observability/api';
+import type {CvManagerApi} from '../cv-manager/api';
+import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
+import {useCvManagerState} from '../cv-manager/state';
 import {
   createEmptySavedJobsController,
   type SavedJobsController,
@@ -45,6 +48,7 @@ export type CvSidebarDeps = {
   uploadCv?: typeof uploadCv;
   getActiveCvUrl?: typeof getActiveCvUrl;
   observability?: Partial<ObservabilityApi>;
+  cvManager?: Partial<CvManagerApi>;
 };
 
 /** Terminal notice from ChatPage reprocess stream (clear pending / record error). */
@@ -186,6 +190,12 @@ function CvSidebarController({
     profileId: selectedWorkspaceProfile?.id,
     profileReady: workspace ? selectedWorkspaceProfile?.state === 'ready' : true,
   });
+  const cvManager = useCvManagerState({
+    api: deps?.cvManager,
+    profileId: selectedWorkspaceProfile?.id,
+    profileReady: selectedWorkspaceProfile?.state === 'ready',
+  });
+  const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
   const {endReprocess, failReprocess, invalidateAfterActivation} = observability;
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
@@ -362,6 +372,11 @@ function CvSidebarController({
     window.open(cvUrl(), '_blank', 'noopener,noreferrer');
   }, [cvUrl, scopedProfile]);
 
+  const handleCvManagerDeleted = useCallback(() => {
+    void reload();
+    onCvDeleted?.();
+  }, [onCvDeleted, reload]);
+
   const state = profileStateLabel(scopedProfile);
   const activeName = scopedProfile?.active_attachment?.original_name ?? null;
   const pendingName = scopedProfile?.pending_attachment?.original_name ?? null;
@@ -410,6 +425,24 @@ function CvSidebarController({
         onFileChange={handleFileChange}
         onUpload={handleUpload}
         onViewDownload={handleViewDownload}
+        onManageCvs={() => {
+          setIsCvManagerOpen(true);
+          void cvManager.open();
+        }}
+      />
+      <CvManagerDrawer
+        isOpen={isCvManagerOpen}
+        onOpenChange={setIsCvManagerOpen}
+        controller={cvManager}
+        onCvReprocess={(attachmentId) => {
+          const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
+          if (item?.profile_id) onCvReprocess?.(item.profile_id);
+        }}
+        onActivateProfile={(attachmentId) => {
+          const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
+          if (item?.profile_id) void workspace?.activate(item.profile_id);
+        }}
+        onDeleted={handleCvManagerDeleted}
       />
     </VStack>
   );

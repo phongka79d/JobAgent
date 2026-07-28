@@ -1,0 +1,16 @@
+export const CV_MANAGER_COPY = {
+  title: 'CV Manager',
+  emptyTitle: 'No CVs available',
+  loading: 'Loading CVs…',
+  refresh: 'Refresh',
+  listLabel: 'Your CVs',
+  cancel: 'Cancel',
+  preview: 'Preview',
+  download: 'Download',
+  reextract: 'Re-extract',
+  activateProfile: 'Activate profile',
+  retryUpload: 'Retry upload',
+  delete: 'Delete CV',
+  deleteTitle: 'Delete CV?',
+  deleteDescription: (name: string) => `Permanently delete ${name}? This cannot be undone.`,
+} as const;

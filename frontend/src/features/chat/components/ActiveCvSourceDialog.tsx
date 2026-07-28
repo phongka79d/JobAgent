@@ -26,7 +26,7 @@ import {
   type ActiveCvPage,
   type ActiveCvRecord,
 } from '../activeCvEvidence';
-import {getRetainedCvUrl} from '../../observability/api';
+import {cvFileUrl} from '../../cv-manager/api';
 
 export type ActiveCvSourceDialogProps = {
   isOpen: boolean;
@@ -66,7 +66,7 @@ function isChunkRecord(record: ActiveCvRecord): record is ActiveCvChunkRecord {
 
 function openOriginalCv(attachmentId: string): void {
   window.open(
-    getRetainedCvUrl(attachmentId),
+    cvFileUrl(attachmentId, 'inline'),
     '_blank',
     'noopener,noreferrer',
   );

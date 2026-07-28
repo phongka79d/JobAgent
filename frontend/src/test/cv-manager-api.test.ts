@@ -1,343 +1,365 @@
-/**
- * CV Manager typed transport tests (Plan 9 / 07A).
- * Profile re-extract SSE path, delete status mapping, forbidden-field rejection.
- */
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
-  asCvDeleteErrorCode,
-  asCvReprocessErrorCode,
-  CV_DELETE_ERROR_CODES,
-  CV_DELETE_RETRY_SUMMARY,
-  CV_REPROCESS_ERROR_CODES,
+  cvFileUrl,
   deleteCv,
-  isRetryableDeleteError,
-  toCvManagerActionError,
-} from '../features/observability/api';
-import {reextractProfile} from '../features/profile/api';
+  fetchCvManager,
+} from '../features/cv-manager/api';
 import {
-  selectSafeRemainingAttachmentId,
-} from '../features/observability/cvManagerTypes';
-import {parseGraphSnapshot} from '../features/observability/types';
-import {parseSseEventData} from '../features/chat/types';
-import {chatReducer, createInitialChatState} from '../features/chat/reducer';
+  parseCvManagerItem,
+  parseCvManagerListResponse,
+} from '../features/cv-manager/types';
+import type {
+  CvManagerItem,
+  CvManagerListResponse,
+} from '../features/cv-manager/types';
 
-const ATTACHMENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-const PROFILE_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
-const RUN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
-const EVENT_A = '11111111-1111-4111-8111-111111111111';
-const EVENT_B = '22222222-2222-4222-8222-222222222222';
+const ACTIVE_CV_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const ACTIVE_PROFILE_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
+const FAILED_UNOWNED_CV_ID = '11111111-2222-4333-8444-555555555555';
 const TS = '2026-07-13T12:00:00.000Z';
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
-describe('CV Manager error code classification', () => {
-  it('maps every documented reprocess and delete status code', () => {
-    for (const code of Object.values(CV_REPROCESS_ERROR_CODES)) {
-      expect(asCvReprocessErrorCode(code)).toBe(code);
-    }
-    for (const code of Object.values(CV_DELETE_ERROR_CODES)) {
-      expect(asCvDeleteErrorCode(code)).toBe(code);
-    }
-    expect(asCvReprocessErrorCode('UNKNOWN')).toBeNull();
-    expect(asCvDeleteErrorCode('UNKNOWN')).toBeNull();
-    expect(
-      isRetryableDeleteError(CV_DELETE_ERROR_CODES.CV_DELETE_FILE_FAILED),
-    ).toBe(true);
-    expect(
-      isRetryableDeleteError(CV_DELETE_ERROR_CODES.CV_ACTIVE_DELETE_FORBIDDEN),
-    ).toBe(false);
-    const partial = toCvManagerActionError({
-      code: CV_DELETE_ERROR_CODES.CV_DELETE_GRAPH_FAILED,
-      summary: 'internal path leak should be replaced',
+function activeProfileOwnedItem(): CvManagerItem {
+  return {
+    id: ACTIVE_CV_ID,
+    original_name: 'resume.pdf',
+    state: 'active',
+    failure_code: null,
+    page_count: 4,
+    file_available: true,
+    profile_id: ACTIVE_PROFILE_ID,
+    profile_display_name: 'Profile A',
+    profile_state: 'ready',
+    is_active_profile: true,
+    allowed_actions: ['preview', 'download', 'reextract'],
+    created_at: TS,
+    updated_at: TS,
+  };
+}
+
+function unownedFailedItem(): CvManagerItem {
+  return {
+    id: FAILED_UNOWNED_CV_ID,
+    original_name: 'failed-upload.pdf',
+    state: 'failed',
+    failure_code: 'EXTRACTION_FAILED',
+    page_count: null,
+    file_available: false,
+    profile_id: null,
+    profile_display_name: null,
+    profile_state: null,
+    is_active_profile: false,
+    allowed_actions: ['delete_cv'],
+    created_at: TS,
+    updated_at: TS,
+  };
+}
+
+function exactResponse(
+  overrides: Partial<CvManagerListResponse> = {},
+): CvManagerListResponse {
+  return {
+    items: [activeProfileOwnedItem()],
+    ...overrides,
+  };
+}
+
+describe('CV Manager exact DTO parsing', () => {
+  it('accepts every server-projected action without inferring or dropping it', () => {
+    const parsed = parseCvManagerItem({
+      ...activeProfileOwnedItem(),
+      allowed_actions: ['preview'],
     });
-    expect(partial.retryable).toBe(true);
-    expect(partial.summary).toBe(CV_DELETE_RETRY_SUMMARY);
+    expect(parsed.allowed_actions).toEqual(['preview']);
   });
 
-  it('selects a safe remaining attachment after delete', () => {
-    const items = [
-      {id: 'active-1', state: 'active'},
-      {id: 'arch-1', state: 'archived'},
-      {id: 'arch-2', state: 'archived'},
-    ];
-    expect(selectSafeRemainingAttachmentId(items, 'arch-1', 'arch-1')).toBe(
-      'active-1',
-    );
-    expect(selectSafeRemainingAttachmentId(items, 'arch-1', 'arch-2')).toBe(
-      'arch-2',
-    );
-    expect(selectSafeRemainingAttachmentId(items, 'active-1', 'active-1')).toBe(
-      'arch-1',
-    );
-    expect(selectSafeRemainingAttachmentId([{id: 'only', state: 'archived'}], 'only', 'only')).toBeNull();
+  it('parses a profile-owned active fixture and preserves server actions', () => {
+    const parsed = parseCvManagerListResponse(exactResponse());
+
+    expect(parsed.items[0]).toEqual(activeProfileOwnedItem());
+    expect(parsed.items[0]?.allowed_actions).toEqual([
+      'preview',
+      'download',
+      'reextract',
+    ]);
+    expect(parsed.items[0]?.allowed_actions).not.toContain('delete_cv');
   });
-});
 
-describe('deleteCv transport', () => {
-  it('succeeds on 204 and maps documented failures safely', async () => {
-    const prev = import.meta.env.VITE_API_BASE_URL;
-    // @ts-expect-error test mutation
-    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
+  it('parses the truly unowned failed delete fixture', () => {
+    const parsed = parseCvManagerItem(unownedFailedItem());
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, {status: 204}))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            detail: {
-              code: CV_DELETE_ERROR_CODES.CV_ACTIVE_DELETE_FORBIDDEN,
-              summary: 'Active CV cannot be deleted',
-            },
-          }),
-          {status: 409, headers: {'Content-Type': 'application/json'}},
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            detail: {
-              code: CV_DELETE_ERROR_CODES.CV_DELETE_FILE_FAILED,
-              summary: 'file step failed',
-            },
-          }),
-          {status: 409, headers: {'Content-Type': 'application/json'}},
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            detail: {
-              code: 'X',
-              summary: 'y',
-              storage_path: '/secret',
-            },
-          }),
-          {status: 500, headers: {'Content-Type': 'application/json'}},
-        ),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-
-    try {
-      await expect(deleteCv(ATTACHMENT_ID)).resolves.toBeUndefined();
-      await expect(deleteCv(ATTACHMENT_ID)).rejects.toMatchObject({
-        code: CV_DELETE_ERROR_CODES.CV_ACTIVE_DELETE_FORBIDDEN,
-      });
-      await expect(deleteCv(ATTACHMENT_ID)).rejects.toMatchObject({
-        code: CV_DELETE_ERROR_CODES.CV_DELETE_FILE_FAILED,
-        summary: CV_DELETE_RETRY_SUMMARY,
-      });
-      await expect(deleteCv(ATTACHMENT_ID)).rejects.toMatchObject({
-        code: 'FORBIDDEN_FIELD',
-      });
-      expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-        `http://api.test/api/cvs/${ATTACHMENT_ID}`,
-      );
-      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({method: 'DELETE'});
-    } finally {
-      // @ts-expect-error restore
-      import.meta.env.VITE_API_BASE_URL = prev;
-    }
+    expect(parsed.profile_id).toBeNull();
+    expect(parsed.profile_display_name).toBeNull();
+    expect(parsed.profile_state).toBeNull();
+    expect(parsed.allowed_actions).toEqual(['delete_cv']);
   });
-});
 
-describe('profile re-extract SSE path', () => {
-  it('POSTs the selected profile re-extract and feeds events into the sole chat reducer', async () => {
-    const prev = import.meta.env.VITE_API_BASE_URL;
-    // @ts-expect-error test mutation
-    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
-
-    const started = {
-      event_id: EVENT_A,
-      run_id: RUN_ID,
-      timestamp: TS,
-      event: 'run_started',
-      payload: {state: 'running', resumed: false},
-    };
-    const approval = {
-      event_id: EVENT_B,
-      run_id: RUN_ID,
-      timestamp: TS,
-      event: 'approval_required',
-      payload: {
-        state: 'interrupted',
-        kind: 'profile_commit',
-        allowed_actions: ['save_profile', 'request_changes'],
-        card: {
-          tool_name: 'propose_profile_from_cv',
-          current_title: 'Engineer',
-          draft_id: 'current',
-        },
+  it.each([
+    ['top-level extra key', {...exactResponse(), extra: true}],
+    [
+      'item extra key',
+      {
+        items: [
+          {...activeProfileOwnedItem(), extra: true},
+        ],
       },
-    };
-    const body =
-      `id: ${EVENT_A}\nevent: run_started\ndata: ${JSON.stringify(started)}\n\n` +
-      `id: ${EVENT_B}\nevent: approval_required\ndata: ${JSON.stringify(approval)}\n\n`;
+    ],
+    [
+      'storage_path',
+      {
+        items: [
+          {...activeProfileOwnedItem(), storage_path: '/private/path'},
+        ],
+      },
+    ],
+    [
+      'file_hash',
+      {
+        items: [
+          {...activeProfileOwnedItem(), file_hash: 'private-hash'},
+        ],
+      },
+    ],
+    [
+      'invalid UUID',
+      {
+        items: [
+          {...activeProfileOwnedItem(), id: 'not-a-uuid'},
+        ],
+      },
+    ],
+    [
+      'timezone-naive timestamp',
+      {
+        items: [
+          {...activeProfileOwnedItem(), created_at: '2026-07-13T12:00:00'},
+        ],
+      },
+    ],
+    [
+      'invalid timestamp',
+      {
+        items: [
+          {...activeProfileOwnedItem(), updated_at: 'not-a-timestamp'},
+        ],
+      },
+    ],
+    [
+      'invalid state',
+      {
+        items: [
+          {...activeProfileOwnedItem(), state: 'ready'},
+        ],
+      },
+    ],
+    [
+      'invalid action',
+      {
+        items: [
+          {...activeProfileOwnedItem(), allowed_actions: ['infer']},
+        ],
+      },
+    ],
+    [
+      'duplicate action',
+      {
+        items: [
+          {
+            ...activeProfileOwnedItem(),
+            allowed_actions: ['preview', 'preview'],
+          },
+        ],
+      },
+    ],
+    [
+      'non-positive page_count',
+      {
+        items: [
+          {...activeProfileOwnedItem(), page_count: 0},
+        ],
+      },
+    ],
+    [
+      'non-integer page_count',
+      {
+        items: [
+          {...activeProfileOwnedItem(), page_count: 1.5},
+        ],
+      },
+    ],
+    [
+      'empty original_name',
+      {
+        items: [
+          {...activeProfileOwnedItem(), original_name: '  '},
+        ],
+      },
+    ],
+    [
+      'empty profile_display_name',
+      {
+        items: [
+          {...activeProfileOwnedItem(), profile_display_name: ''},
+        ],
+      },
+    ],
+    [
+      'invalid failure_code nullable type',
+      {
+        items: [
+          {...activeProfileOwnedItem(), failure_code: 42},
+        ],
+      },
+    ],
+    [
+      'invalid page_count nullable type',
+      {
+        items: [
+          {...activeProfileOwnedItem(), page_count: '4'},
+        ],
+      },
+    ],
+    [
+      'invalid profile_id nullable type',
+      {
+        items: [
+          {...activeProfileOwnedItem(), profile_id: 42},
+        ],
+      },
+    ],
+    [
+      'invalid profile_display_name nullable type',
+      {
+        items: [
+          {
+            ...activeProfileOwnedItem(),
+            profile_display_name: 42,
+          },
+        ],
+      },
+    ],
+    [
+      'invalid profile_state nullable type',
+      {
+        items: [
+          {
+            ...activeProfileOwnedItem(),
+            profile_state: 'unknown',
+          },
+        ],
+      },
+    ],
+  ])('rejects %s', (_label, rawPayload) => {
+    expect(() => parseCvManagerListResponse(rawPayload)).toThrow();
+  });
+});
 
+describe('CV Manager API transport', () => {
+  it('sends the exact GET request and parses the strict response', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+    const signal = new AbortController().signal;
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(body, {
+      new Response(JSON.stringify(exactResponse()), {
         status: 200,
-        headers: {'Content-Type': 'text/event-stream'},
+        headers: {'Content-Type': 'application/json'},
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    let state = createInitialChatState();
-    const events: string[] = [];
-
-    try {
-      await reextractProfile(PROFILE_ID, {
-        onEvent: (event) => {
-          events.push(event.event);
-          state = chatReducer(state, {type: 'sse/event', event});
-        },
-      });
-
-      expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-        `http://api.test/api/profiles/${PROFILE_ID}/reextract`,
-      );
-      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-        method: 'POST',
-        body: '{}',
-      });
-      expect(events).toEqual(['run_started', 'approval_required']);
-      expect(state.pendingApproval?.kind).toBe('profile_commit');
-      expect(state.messages.some((m) => m.run?.state === 'interrupted')).toBe(
-        true,
-      );
-      // Same parseSseEventData owner as chat turns.
-      expect(
-        parseSseEventData(started).event,
-      ).toBe('run_started');
-    } finally {
-      // @ts-expect-error restore
-      import.meta.env.VITE_API_BASE_URL = prev;
-    }
+    await expect(fetchCvManager(signal)).resolves.toEqual(exactResponse());
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://api.test/api/cvs',
+      expect.objectContaining({
+        method: 'GET',
+        headers: {Accept: 'application/json'},
+        signal,
+      }),
+    );
   });
 
-  it('maps reprocess HTTP precondition failures', async () => {
-    const prev = import.meta.env.VITE_API_BASE_URL;
-    // @ts-expect-error test mutation
-    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
+  it('maps invalid JSON and invalid success payloads to the safe payload error', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{bad json', {status: 200}))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({...exactResponse(), extra: true}), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchCvManager()).rejects.toMatchObject({
+      status: 200,
+      code: 'INVALID_CV_MANAGER_PAYLOAD',
+    });
+    await expect(fetchCvManager()).rejects.toMatchObject({
+      status: 200,
+      code: 'INVALID_CV_MANAGER_PAYLOAD',
+    });
+  });
+
+  it('uses parseErrorBody for non-OK responses', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            detail: {
-              code: CV_REPROCESS_ERROR_CODES.CV_NOT_REPROCESSABLE,
-              summary: 'Not reprocessable',
-            },
+            detail: {code: 'CV_LIST_FAILED', summary: 'List unavailable'},
           }),
-          {status: 409, headers: {'Content-Type': 'application/json'}},
+          {status: 503},
         ),
       ),
     );
-    try {
-      await expect(reextractProfile(PROFILE_ID, {onEvent: () => undefined})).rejects.toMatchObject({
-        code: CV_REPROCESS_ERROR_CODES.CV_NOT_REPROCESSABLE,
-      });
-    } finally {
-      // @ts-expect-error restore
-      import.meta.env.VITE_API_BASE_URL = prev;
-    }
-  });
-});
 
-describe('graph CV branch typing', () => {
-  it('parses fixed CV/section/entry nodes and structural edges', () => {
-    const snapshot = parseGraphSnapshot({
-      status: 'ready',
-      code: null,
-      summary: 'ready',
-      rebuild_instruction: null,
-      cv: {
-        id: ATTACHMENT_ID,
-        original_name: 'resume.pdf',
-        extraction_version: 'v1',
-        revision: 'rev-1',
-      },
-      sections: [
-        {
-          id: 'sec-1',
-          heading: 'Experience',
-          kind: 'experience',
-          ordinal: 0,
-          entry_count: 1,
-        },
-      ],
-      entries: [
-        {
-          id: 'ent-1',
-          section_id: 'sec-1',
-          ordinal: 0,
-          title: 'Engineer',
-          subtitle: 'Acme',
-          date_text: '2020',
-          preview: 'Did things',
-        },
-      ],
-      candidate: {id: 'cand-1', revision: 'r1'},
-      jobs: [],
-      skills: [],
-      edges: [
-        {
-          source_id: 'cand-1',
-          target_id: ATTACHMENT_ID,
-          type: 'PROJECTS_TO',
-        },
-        {
-          source_id: ATTACHMENT_ID,
-          target_id: 'sec-1',
-          type: 'HAS_SECTION',
-        },
-        {
-          source_id: 'sec-1',
-          target_id: 'ent-1',
-          type: 'HAS_ENTRY',
-        },
-      ],
-      nodes_truncated: false,
-      edges_truncated: false,
-      omitted_node_count: 0,
-      omitted_edge_count: 0,
-      checked_at: '2024-07-01T12:00:00Z',
+    await expect(fetchCvManager()).rejects.toMatchObject({
+      status: 503,
+      code: 'CV_LIST_FAILED',
+      summary: 'List unavailable',
     });
-    expect(snapshot.cv?.original_name).toBe('resume.pdf');
-    expect(snapshot.sections).toHaveLength(1);
-    expect(snapshot.entries?.[0]?.preview).toBe('Did things');
-    expect(snapshot.edges.map((e) => e.type)).toEqual([
-      'PROJECTS_TO',
-      'HAS_SECTION',
-      'HAS_ENTRY',
-    ]);
-    expect(() =>
-      parseGraphSnapshot({
-        status: 'ready',
-        code: null,
-        summary: 'ready',
-        rebuild_instruction: null,
-        cv: {
-          id: ATTACHMENT_ID,
-          original_name: 'x',
-          extraction_version: 'v1',
-          revision: 'r',
-          storage_path: '/nope',
-        },
-        candidate: null,
-        jobs: [],
-        skills: [],
-        edges: [],
-        nodes_truncated: false,
-        edges_truncated: false,
-        omitted_node_count: 0,
-        omitted_edge_count: 0,
-        checked_at: '2024-07-01T12:00:00Z',
+  });
+
+  it('sends DELETE with the exact request and only accepts 204', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+    const signal = new AbortController().signal;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, {status: 200}))
+      .mockResolvedValueOnce(new Response(null, {status: 204}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(deleteCv(FAILED_UNOWNED_CV_ID, signal)).rejects.toMatchObject({
+      status: 200,
+      code: 'HTTP_ERROR',
+      summary: 'HTTP 200',
+    });
+    await expect(deleteCv(FAILED_UNOWNED_CV_ID, signal)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `http://api.test/api/cvs/${FAILED_UNOWNED_CV_ID}`,
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: {Accept: 'application/json'},
+        signal,
       }),
-    ).toThrow(/storage_path/);
+    );
+  });
+
+  it('encodes IDs and uses the exact inline or attachment disposition', () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test/');
+
+    expect(cvFileUrl('id/with space', 'inline')).toBe(
+      'http://api.test/api/cvs/id%2Fwith%20space/file?disposition=inline',
+    );
+    expect(cvFileUrl(ACTIVE_CV_ID, 'attachment')).toBe(
+      `http://api.test/api/cvs/${ACTIVE_CV_ID}/file?disposition=attachment`,
+    );
   });
 });

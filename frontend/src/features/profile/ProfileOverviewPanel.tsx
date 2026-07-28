@@ -29,6 +29,7 @@ export type ProfileOverviewPanelProps = {
   onFileChange: (files: File | File[] | null) => void;
   onUpload: (files: File | File[] | null) => Promise<void>;
   onViewDownload: () => void;
+  onManageCvs?: () => void;
 };
 
 export function ProfileOverviewPanel({
@@ -46,6 +47,7 @@ export function ProfileOverviewPanel({
   onFileChange,
   onUpload,
   onViewDownload,
+  onManageCvs,
 }: ProfileOverviewPanelProps) {
   return (
     <VStack
@@ -117,6 +119,14 @@ export function ProfileOverviewPanel({
         onClick={onViewDownload}
         data-testid="jobagent-cv-download"
       />
+      {onManageCvs ? (
+        <Button
+          label="Manage CVs"
+          variant="secondary"
+          size="sm"
+          onClick={onManageCvs}
+        />
+      ) : null}
     </VStack>
   );
 }

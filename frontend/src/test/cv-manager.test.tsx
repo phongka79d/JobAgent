@@ -1,43 +1,30 @@
-/**
- * CV Manager panel/dialog interaction tests (Plan 9 / 07B).
- */
-
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {
+  act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
-import type {ComponentProps} from 'react';
+import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
-import type {ObservabilityApi} from '../features/observability/api';
-import {CV_DELETE_SCOPE_WARNING} from '../features/observability/CvDeleteDialog';
-import {
-  canDeleteCv,
-  canReprocessCv,
-  CvManagerPanel,
-} from '../features/observability/CvManagerPanel';
-import {toGraphModel} from '../features/observability/graphPresentation';
-import type {CvHistoryItem} from '../features/observability/types';
-import {CvSidebar} from '../features/profile/CvSidebar';
-import type {ProfileReadResponse} from '../features/profile/types';
-import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
-import {
-  ACTIVE_ATTACHMENT_ID,
-  ATTACHMENT_ID,
-  cvManagerHistoryPage,
-  graphWithCvBranch,
-  installMatchMedia,
-  mockObservabilityApi,
-  renderObservabilitySidebar,
-} from './support/observability';
+import {CvManagerDrawer} from '../features/cv-manager/CvManagerDrawer';
+import type {CvManagerApi} from '../features/cv-manager/api';
+import {useCvManagerState} from '../features/cv-manager/state';
+import type {CvManagerItem} from '../features/cv-manager/types';
+import {ProfileDeleteDialog} from '../features/profile/ProfileDeleteDialog';
+import type {ProfileListItem} from '../features/profile/conversationTypes';
+import savedJobsStateSource from '../features/jobs/savedJobsState.ts?raw';
 
-const PROFILE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const PROFILE_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
+const ACTIVE_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const FAILED_UNOWNED_ID = '11111111-2222-4333-8444-555555555555';
+const OTHER_PROFILE_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const TS = '2026-07-13T12:00:00.000Z';
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -53,511 +40,597 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-beforeEach(() => {
-  installMatchMedia(false);
-});
-
-function activeItem(): CvHistoryItem {
-  return cvManagerHistoryPage().items[0]!;
+function activeItem(): CvManagerItem {
+  return {
+    id: ACTIVE_ID,
+    original_name: 'resume.pdf',
+    state: 'active',
+    failure_code: null,
+    page_count: 4,
+    file_available: true,
+    profile_id: PROFILE_ID,
+    profile_display_name: 'Profile A',
+    profile_state: 'ready',
+    is_active_profile: true,
+    allowed_actions: ['preview', 'download', 'reextract'],
+    created_at: TS,
+    updated_at: TS,
+  };
 }
 
-function archivedItem(): CvHistoryItem {
-  return cvManagerHistoryPage().items[1]!;
+function unownedFailedItem(): CvManagerItem {
+  return {
+    id: FAILED_UNOWNED_ID,
+    original_name: 'failed-upload.pdf',
+    state: 'failed',
+    failure_code: 'EXTRACTION_FAILED',
+    page_count: null,
+    file_available: false,
+    profile_id: null,
+    profile_display_name: null,
+    profile_state: null,
+    is_active_profile: false,
+    allowed_actions: ['delete_cv'],
+    created_at: TS,
+    updated_at: TS,
+  };
 }
 
-function renderPanel(
-  overrides: Partial<ComponentProps<typeof CvManagerPanel>> = {},
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return {promise, resolve, reject};
+}
+
+function StateHarness({
+  api,
+  profileId = PROFILE_ID,
+  profileReady = true,
+}: {
+  api: CvManagerApi;
+  profileId?: string;
+  profileReady?: boolean;
+}) {
+  const controller = useCvManagerState({
+    api,
+    profileId,
+    profileReady,
+  });
+
+  return (
+    <>
+      <button type="button" onClick={() => void controller.open()}>
+        Open manager
+      </button>
+      <button type="button" onClick={() => void controller.refresh()}>
+        Force refresh
+      </button>
+      <button
+        type="button"
+        onClick={() => void controller.confirmDelete(FAILED_UNOWNED_ID)}
+      >
+        Confirm delete
+      </button>
+      <output data-testid="controller-state">
+        {JSON.stringify(controller.state)}
+      </output>
+    </>
+  );
+}
+
+function drawerController(
+  overrides: Record<string, unknown> = {},
 ) {
-  const page = cvManagerHistoryPage();
-  const props: ComponentProps<typeof CvManagerPanel> = {
-    profileDisplayName: 'Profile A',
-    resource: {
-      phase: 'ready',
-      data: page,
-      error: null,
-      loaded: true,
+  const item = unownedFailedItem();
+  return {
+    state: {
+      phase: 'ready' as const,
+      items: [item],
+      selectedId: item.id,
+      pendingByAttachment: {},
+      errorsByAttachment: {},
+      deleteTargetId: null,
     },
-    selectedAttachmentId: ATTACHMENT_ID,
-    pendingByAttachment: {},
-    errorsByAttachment: {},
-    onSelect: vi.fn(),
-    onOpenFile: vi.fn(),
-    onRefresh: vi.fn(),
-    onReprocess: vi.fn(),
-    onConfirmDelete: vi.fn().mockResolvedValue('success'),
-    onClearError: vi.fn(),
+    refresh: vi.fn(),
+    select: vi.fn(),
+    openDeleteDialog: vi.fn(),
+    closeDeleteDialog: vi.fn(),
+    confirmDelete: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
-  return {
-    props,
-    ...render(
-      <Theme theme={neutralTheme}>
-        <CvManagerPanel {...props} />
-      </Theme>,
-    ),
-  };
 }
 
-function CvSidebarWithReprocess({
-  api,
-  loadProfile,
-  onCvReprocess,
-}: {
-  api: ObservabilityApi;
-  loadProfile: () => Promise<ProfileReadResponse>;
-  onCvReprocess: (id: string) => boolean;
-}) {
-  return (
-    <CvSidebar
-      isUploadDisabled={false}
-      onSidebarUploadSuccess={vi.fn()}
-      onCvReprocess={onCvReprocess}
-      deps={{
-        loadProfile,
-        uploadCv: vi.fn(),
-        observability: api,
-      }}
-    />
-  );
-}
+describe('useCvManagerState refresh and scope guards', () => {
+  it('forwards an actual AbortSignal and aborts the in-flight scope request', async () => {
+    const list = deferred<{items: CvManagerItem[]}>();
+    let receivedSignal: AbortSignal | undefined;
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn((_signal?: AbortSignal) => {
+        receivedSignal = _signal;
+        return list.promise;
+      }),
+      deleteCv: vi.fn(),
+    };
+    const view = render(<StateHarness api={api} profileId={PROFILE_ID} />);
 
-describe('canDeleteCv guard', () => {
-  it('allows ready profile attachments and rejects incomplete states', () => {
-    expect(canDeleteCv(activeItem())).toBe(true);
-    expect(canDeleteCv(archivedItem())).toBe(true);
-    expect(canDeleteCv({...archivedItem(), state: 'failed'})).toBe(false);
-    expect(canDeleteCv({...archivedItem(), state: 'staged'})).toBe(false);
-  });
-});
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+    expect(receivedSignal?.aborted).toBe(false);
 
-describe('canReprocessCv guard', () => {
-  it('allows active/archived and rejects staged/failed states', () => {
-    expect(canReprocessCv(activeItem())).toBe(true);
-    expect(canReprocessCv(archivedItem())).toBe(true);
-    expect(canReprocessCv({...archivedItem(), state: 'staged'})).toBe(false);
-    expect(canReprocessCv({...archivedItem(), state: 'failed'})).toBe(false);
-  });
-});
+    view.rerender(<StateHarness api={api} profileId={OTHER_PROFILE_ID} />);
+    expect(receivedSignal?.aborted).toBe(true);
 
-describe('CV Manager activation loading presentation', () => {
-  it('retains prior rows while phase is loading (not header-only idle)', () => {
-    const page = cvManagerHistoryPage();
-    renderPanel({
-      resource: {
-        phase: 'loading',
-        data: page,
-        error: null,
-        loaded: false,
-      },
-      selectedAttachmentId: ATTACHMENT_ID,
-    });
-
-    expect(screen.getByTestId('jobagent-obs-cv-history')).toBeInTheDocument();
-    expect(screen.getByText('active.pdf')).toBeInTheDocument();
-    expect(screen.getByText('archived.pdf')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('jobagent-obs-cv-history-empty'),
-    ).not.toBeInTheDocument();
-    // Loading without data would show skeleton; with retained data, rows stay.
-    expect(
-      screen.queryByTestId('jobagent-obs-cv-history-loading'),
-    ).not.toBeInTheDocument();
+    list.resolve({items: []});
   });
 
-  it('shows established skeleton when loading with no retained rows', () => {
-    renderPanel({
-      resource: {
-        phase: 'loading',
-        data: null,
-        error: null,
-        loaded: false,
-      },
-      selectedAttachmentId: null,
-    });
+  it('preserves prior rows while exposing error after refresh failure', async () => {
+    const api: CvManagerApi = {
+      fetchCvManager: vi
+        .fn()
+        .mockResolvedValueOnce({items: [activeItem()]})
+        .mockRejectedValueOnce(new Error('private transport detail')),
+      deleteCv: vi.fn(),
+    };
 
-    expect(
-      screen.getByTestId('jobagent-obs-cv-history-loading'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('jobagent-obs-cv-history-empty'),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe('CV Manager panel actions', () => {
-  it('shows one Active badge with profile-owned actions for the active row', () => {
-    renderPanel({selectedAttachmentId: ACTIVE_ATTACHMENT_ID});
-
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-active-badge-${ACTIVE_ATTACHMENT_ID}`),
-    ).toHaveTextContent('Active');
-    expect(
-      screen.queryAllByTestId(`jobagent-obs-cv-active-badge-${ATTACHMENT_ID}`),
-    ).toHaveLength(0);
-
-    const actions = screen.getByTestId(
-      `jobagent-obs-cv-actions-${ACTIVE_ATTACHMENT_ID}`,
-    );
-    expect(
-      within(actions).getByTestId(
-        `jobagent-obs-cv-open-${ACTIVE_ATTACHMENT_ID}`,
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() =>
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        'resume.pdf',
       ),
-    ).toBeEnabled();
-    expect(
-      within(actions).getByTestId(
-        `jobagent-obs-cv-reextract-${ACTIVE_ATTACHMENT_ID}`,
-      ),
-    ).toBeEnabled();
-    expect(
-      within(actions).getByTestId(
-        `jobagent-obs-cv-delete-${ACTIVE_ATTACHMENT_ID}`,
-      ),
-    ).toBeEnabled();
-    expect(
-      within(actions).queryByTestId(
-        `jobagent-obs-cv-make-active-${ACTIVE_ATTACHMENT_ID}`,
-      ),
-    ).toBeNull();
-  });
-
-  it('exposes Open, Make active, and Delete for archived selection', () => {
-    renderPanel({selectedAttachmentId: ATTACHMENT_ID});
-
-    const actions = screen.getByTestId(
-      `jobagent-obs-cv-actions-${ATTACHMENT_ID}`,
-    );
-    expect(
-      within(actions).getByTestId(`jobagent-obs-cv-open-${ATTACHMENT_ID}`),
-    ).toBeEnabled();
-    expect(
-      within(actions).getByTestId(
-        `jobagent-obs-cv-make-active-${ATTACHMENT_ID}`,
-      ),
-    ).toBeEnabled();
-    expect(
-      within(actions).getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
-    ).toBeEnabled();
-    expect(
-      within(actions).queryByTestId(
-        `jobagent-obs-cv-reextract-${ATTACHMENT_ID}`,
-      ),
-    ).toBeNull();
-  });
-
-  it.each(['staged', 'failed'] as const)(
-    'does not expose reprocess for %s selection',
-    (state) => {
-      const item: CvHistoryItem = {
-        ...archivedItem(),
-        id: `${state}-attachment`,
-        state,
-      };
-      renderPanel({
-        resource: {
-          phase: 'ready',
-          data: {items: [item], next_cursor: null},
-          error: null,
-          loaded: true,
-        },
-        selectedAttachmentId: item.id,
-      });
-
-      const actions = screen.getByTestId(
-        `jobagent-obs-cv-actions-${item.id}`,
-      );
-      expect(
-        within(actions).queryByTestId(
-          `jobagent-obs-cv-make-active-${item.id}`,
-        ),
-      ).toBeNull();
-      expect(
-        within(actions).queryByTestId(
-          `jobagent-obs-cv-reextract-${item.id}`,
-        ),
-      ).toBeNull();
-      expect(
-        within(actions).queryByTestId(`jobagent-obs-cv-delete-${item.id}`),
-      ).toBeNull();
-    },
-  );
-
-  it('disables row actions while a pending action is in flight', () => {
-    renderPanel({
-      selectedAttachmentId: ATTACHMENT_ID,
-      pendingByAttachment: {[ATTACHMENT_ID]: 'reprocess'},
-    });
-
-    const actions = screen.getByTestId(
-      `jobagent-obs-cv-actions-${ATTACHMENT_ID}`,
-    );
-    expect(
-      within(actions).getByTestId(`jobagent-obs-cv-open-${ATTACHMENT_ID}`),
-    ).toBeDisabled();
-    expect(
-      within(actions).getByTestId(
-        `jobagent-obs-cv-make-active-${ATTACHMENT_ID}`,
-      ),
-    ).toBeDisabled();
-    expect(
-      within(actions).getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
-    ).toBeDisabled();
-  });
-
-  it('names the file and scope in the accessible delete confirmation', async () => {
-    const user = userEvent.setup();
-    const onConfirmDelete = vi.fn().mockResolvedValue('success' as const);
-    renderPanel({
-      onConfirmDelete,
-      profileDisplayName: undefined as unknown as string,
-    });
-
-    await user.click(
-      screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
     );
 
-    const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('Delete this profile?');
-    expect(dialog).toHaveTextContent('archived.pdf');
-    expect(dialog).toHaveTextContent(CV_DELETE_SCOPE_WARNING);
-    expect(
-      within(dialog).getByRole('button', {name: 'Delete profile permanently'}),
-    ).toBeInTheDocument();
-
-    await user.click(
-      within(dialog).getByRole('button', {name: 'Delete profile permanently'}),
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Force refresh'}),
     );
     await waitFor(() => {
-      expect(onConfirmDelete).toHaveBeenCalledTimes(1);
+      const state = screen.getByTestId('controller-state');
+      expect(state).toHaveTextContent('"phase":"error"');
+      expect(state).toHaveTextContent('resume.pdf');
+      expect(state).not.toHaveTextContent('private transport detail');
     });
-    expect(onConfirmDelete.mock.calls[0]?.[0].id).toBe(ATTACHMENT_ID);
   });
 
-  it('keeps the row and recovery message after partial delete failure', async () => {
-    const user = userEvent.setup();
-    const onConfirmDelete = vi.fn().mockResolvedValue('error' as const);
-    const {rerender, props} = renderPanel({onConfirmDelete});
-
-    await user.click(
-      screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
+  it('clears data, selection, pending work, and errors on scope change', async () => {
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({items: [activeItem()]}),
+      deleteCv: vi.fn(),
+    };
+    const view = render(
+      <StateHarness api={api} profileId={PROFILE_ID} />,
     );
-    await user.click(
-      await screen.findByRole('button', {name: 'Delete profile permanently'}),
+
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() =>
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        'resume.pdf',
+      ),
+    );
+
+    view.rerender(
+      <StateHarness api={api} profileId={OTHER_PROFILE_ID} />,
     );
     await waitFor(() => {
-      expect(onConfirmDelete).toHaveBeenCalled();
+      const state = screen.getByTestId('controller-state');
+      expect(state).not.toHaveTextContent('resume.pdf');
+      expect(state).toHaveTextContent('"selectedId":null');
+      expect(state).toHaveTextContent('"pendingByAttachment":{}');
+      expect(state).toHaveTextContent('"errorsByAttachment":{}');
     });
-
-    rerender(
-      <Theme theme={neutralTheme}>
-        <CvManagerPanel
-          {...props}
-          onConfirmDelete={onConfirmDelete}
-          errorsByAttachment={{
-            [ATTACHMENT_ID]: {
-              code: 'CV_DELETE_GRAPH_FAILED',
-              summary:
-                'CV deletion is incomplete; the attachment remains in deleting state. Retry DELETE for the same attachment id.',
-            },
-          }}
-        />
-      </Theme>,
-    );
-
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
-    ).toBeInTheDocument();
-    const banner = screen.getByTestId(
-      `jobagent-obs-cv-action-error-${ATTACHMENT_ID}`,
-    );
-    expect(banner).toHaveTextContent('CV_DELETE_GRAPH_FAILED');
-    expect(banner).toHaveTextContent('Retry DELETE');
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-delete-${ATTACHMENT_ID}`),
-    ).toBeEnabled();
   });
 
-  it('invokes reprocess for Re-extract without changing Active badge', async () => {
-    const user = userEvent.setup();
-    const onReprocess = vi.fn();
-    renderPanel({
-      selectedAttachmentId: ACTIVE_ATTACHMENT_ID,
-      onReprocess,
+  it('ignores a stale list completion after scope change', async () => {
+    const list = deferred<{items: CvManagerItem[]}>();
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockReturnValue(list.promise),
+      deleteCv: vi.fn(),
+    };
+    const view = render(
+      <StateHarness api={api} profileId={PROFILE_ID} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    view.rerender(
+      <StateHarness api={api} profileId={OTHER_PROFILE_ID} />,
+    );
+
+    await act(async () => {
+      list.resolve({items: [activeItem()]});
+      await Promise.resolve();
     });
 
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-active-badge-${ACTIVE_ATTACHMENT_ID}`),
-    ).toBeInTheDocument();
-
-    await user.click(
-      screen.getByTestId(`jobagent-obs-cv-reextract-${ACTIVE_ATTACHMENT_ID}`),
-    );
-    expect(onReprocess).toHaveBeenCalledWith(
-      expect.objectContaining({id: ACTIVE_ATTACHMENT_ID, state: 'active'}),
-    );
-    expect(
-      screen.getByTestId(`jobagent-obs-cv-active-badge-${ACTIVE_ATTACHMENT_ID}`),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      const state = screen.getByTestId('controller-state');
+      expect(state).not.toHaveTextContent('resume.pdf');
+      expect(state).toHaveTextContent('"items":[]');
+    });
   });
 });
 
-describe('CV Manager sidebar integration', () => {
-  it('deletes through workspace profile ownership without attachment DELETE', async () => {
-    const user = userEvent.setup();
-    const deleteCv = vi.fn().mockResolvedValue(undefined);
-    const deleteProfile = vi.fn().mockResolvedValue(true);
-    const api = mockObservabilityApi({
-      fetchCvHistory: vi.fn().mockResolvedValue(cvManagerHistoryPage()),
+describe('useCvManagerState delete guards', () => {
+  it('rejects delete when delete_cv is not projected', async () => {
+    const deleteCv = vi.fn();
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({items: [activeItem()]}),
       deleteCv,
-    });
-    const profile: ProfileReadResponse = {
-      present: true,
-      profile: {summary: 'Profile A', current_title: 'Engineer'},
-      preferences: null,
-      active_attachment: {
-        id: ACTIVE_ATTACHMENT_ID,
-        original_name: 'active.pdf',
-        mime_type: 'application/pdf',
-        size_bytes: 1000,
-        page_count: 2,
-        state: 'active',
-        failure_code: null,
-      },
-      draft_present: false,
-      pending_attachment: null,
     };
-    const workspace: ProfileWorkspaceController = {
-      state: {
-        profiles: [{
-          id: PROFILE_ID,
-          display_name: 'Profile A',
-          cv_filename: 'active.pdf',
-          attachment_state: 'active',
-          location: null,
-          skill_tags: [],
-          skill_count: 0,
-          extraction_version: 'v1',
-          source_hash: 'source-a',
-          state: 'ready',
-          setup_status: null,
-          is_active: true,
-          created_at: '2024-07-01T12:00:00Z',
-          updated_at: '2024-07-01T12:00:00Z',
-          last_opened_at: '2024-07-01T12:00:00Z',
-        }],
-        activeProfileId: PROFILE_ID,
-        selectedConversationId: null,
-        conversations: [],
-        pending: new Set(),
-        error: null,
-      },
-      activate: vi.fn(),
-      createConversation: vi.fn(),
-      selectConversation: vi.fn(),
-      deleteConversation: vi.fn(),
-      renameProfile: vi.fn(),
-      deleteProfile,
-      reload: vi.fn(),
-      adoptBootstrap: vi.fn(),
-    };
-    renderObservabilitySidebar(api, {workspace, profile});
 
-    await user.click(screen.getByRole('tab', {name: 'CV Manager'}));
-    const panel = await screen.findByTestId('jobagent-obs-cv-history');
-    expect(panel).toBeInTheDocument();
-    expect(
-      within(panel).getByRole('list', {name: 'CV Manager'}),
-    ).toBeInTheDocument();
-
-    await user.click(
-      await screen.findByTestId(
-        `jobagent-obs-cv-select-${ACTIVE_ATTACHMENT_ID}`,
-      ),
-    );
-    await user.click(
-      screen.getByTestId(`jobagent-obs-cv-delete-${ACTIVE_ATTACHMENT_ID}`),
-    );
-    await user.click(
-      await screen.findByRole('button', {name: 'Delete profile permanently'}),
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Confirm delete'}),
     );
 
-    await waitFor(() => {
-      expect(deleteProfile).toHaveBeenCalledWith(PROFILE_ID);
-    });
     expect(deleteCv).not.toHaveBeenCalled();
   });
 
-  it('calls onCvReprocess when Make active is chosen on an archived CV', async () => {
-    const user = userEvent.setup();
-    const onCvReprocess = vi.fn().mockReturnValue(true);
-    const api = mockObservabilityApi({
-      fetchCvHistory: vi.fn().mockResolvedValue(cvManagerHistoryPage()),
+  it('suppresses a duplicate while the first delete remains pending', async () => {
+    const deletion = deferred<void>();
+    const deleteCv = vi.fn().mockReturnValue(deletion.promise);
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({
+        items: [unownedFailedItem()],
+      }),
+      deleteCv,
+    };
+
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() =>
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        'failed-upload.pdf',
+      ),
+    );
+
+    const confirm = screen.getByRole('button', {name: 'Confirm delete'});
+    await userEvent.click(confirm);
+    await userEvent.click(confirm);
+
+    expect(deleteCv).toHaveBeenCalledTimes(1);
+    deletion.resolve();
+  });
+
+  it('aborts stale delete and does not refresh or publish after scope change', async () => {
+    const deletion = deferred<void>();
+    const deleteCv = vi.fn().mockReturnValue(deletion.promise);
+    const fetchCvManager = vi.fn().mockResolvedValue({
+      items: [unownedFailedItem()],
     });
-    const loadProfile = vi.fn().mockResolvedValue({
-      present: true,
-      profile: {summary: 'ok', current_title: 'Engineer'},
-      preferences: null,
-      active_attachment: {
-        id: ACTIVE_ATTACHMENT_ID,
-        original_name: 'active.pdf',
-        mime_type: 'application/pdf',
-        size_bytes: 1000,
-        page_count: 2,
-        state: 'active',
-        failure_code: null,
+    const api: CvManagerApi = {fetchCvManager, deleteCv};
+    const view = render(
+      <StateHarness api={api} profileId={PROFILE_ID} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() =>
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        'failed-upload.pdf',
+      ),
+    );
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Confirm delete'}),
+    );
+    expect(deleteCv).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <StateHarness api={api} profileId={OTHER_PROFILE_ID} />,
+    );
+
+    await act(async () => {
+      deletion.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      const state = screen.getByTestId('controller-state');
+      expect(state).toHaveTextContent('"items":[]');
+      expect(state).toHaveTextContent('"pendingByAttachment":{}');
+      expect(state).toHaveTextContent('"errorsByAttachment":{}');
+      expect(state).not.toHaveTextContent('failed-upload.pdf');
+      expect(fetchCvManager).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('forces a fresh list after a successful delete', async () => {
+    const api: CvManagerApi = {
+      fetchCvManager: vi
+        .fn()
+        .mockResolvedValueOnce({items: [unownedFailedItem()]})
+        .mockResolvedValueOnce({items: []}),
+      deleteCv: vi.fn().mockResolvedValue(undefined),
+    };
+
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() =>
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        'failed-upload.pdf',
+      ),
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Confirm delete'}),
+    );
+
+    await waitFor(() => {
+      expect(api.deleteCv).toHaveBeenCalledTimes(1);
+      expect(api.fetchCvManager).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('controller-state')).toHaveTextContent(
+        '"items":[]',
+      );
+    });
+  });
+});
+
+describe('CvManagerDrawer server-action and delete behavior', () => {
+  it('renders only actions projected by allowed_actions', () => {
+    const item = activeItem();
+    const controller = {
+      ...drawerController(),
+      state: {
+        phase: 'ready' as const,
+        items: [item],
+        selectedId: item.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: null,
       },
-      draft_present: false,
-      pending_attachment: null,
-    } satisfies ProfileReadResponse);
+    };
 
     render(
       <Theme theme={neutralTheme}>
-        <CvSidebarWithReprocess
-          api={api}
-          loadProfile={loadProfile}
-          onCvReprocess={onCvReprocess}
+        <CvManagerDrawer
+          isOpen
+          onOpenChange={vi.fn()}
+          controller={controller}
+          onCvReprocess={vi.fn()}
+          onActivateProfile={vi.fn()}
+          onRetryUpload={vi.fn()}
         />
       </Theme>,
     );
 
-    await user.click(await screen.findByRole('tab', {name: 'CV Manager'}));
-    await user.click(
-      await screen.findByTestId(`jobagent-obs-cv-select-${ATTACHMENT_ID}`),
-    );
-    await user.click(
-      screen.getByTestId(`jobagent-obs-cv-make-active-${ATTACHMENT_ID}`),
+    expect(
+      screen.getByRole('button', {name: /Preview|Open/i}),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {name: /Download/i}),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {name: /Re-extract/i}),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {name: /Delete/i}),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {name: /Make active|Activate/i}),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {name: /Retry/i}),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not render Delete for staged or failed rows without delete_cv', () => {
+    const staged = {
+      ...unownedFailedItem(),
+      id: '22222222-3333-4444-8555-666666666666',
+      original_name: 'staged.pdf',
+      state: 'staged' as const,
+      allowed_actions: ['retry_upload' as const],
+    };
+    const failed = {
+      ...unownedFailedItem(),
+      original_name: 'failed-without-delete.pdf',
+      allowed_actions: ['retry_upload' as const],
+    };
+    const controller = {
+      ...drawerController(),
+      state: {
+        phase: 'ready' as const,
+        items: [staged, failed],
+        selectedId: staged.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: null,
+      },
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller} />
+      </Theme>,
     );
 
-    expect(onCvReprocess).toHaveBeenCalledWith(ATTACHMENT_ID);
+    expect(screen.queryByRole('button', {name: /Delete CV/i})).not.toBeInTheDocument();
+  });
+
+  it('renders and calls activate_profile and retry_upload handlers only when projected', async () => {
+    const item = {
+      ...unownedFailedItem(),
+      allowed_actions: ['activate_profile', 'retry_upload'] as const,
+    };
+    const onActivateProfile = vi.fn();
+    const onRetryUpload = vi.fn();
+    const controller = {
+      ...drawerController(),
+      state: {
+        phase: 'ready' as const,
+        items: [item],
+        selectedId: item.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: null,
+      },
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer
+          isOpen
+          onOpenChange={vi.fn()}
+          controller={controller}
+          onActivateProfile={onActivateProfile}
+          onRetryUpload={onRetryUpload}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: /Activate profile/i}));
+    await userEvent.click(screen.getByRole('button', {name: /Retry upload/i}));
+    expect(onActivateProfile).toHaveBeenCalledWith(item.id);
+    expect(onRetryUpload).toHaveBeenCalledWith(item.id);
+  });
+
+  it('uses a standard desktop side panel and a narrow fullscreen dialog with focus behavior', async () => {
+    const controller = drawerController();
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller} />
+      </Theme>,
+    );
+    const desktopDialog = screen.getByRole('dialog', {name: 'CV Manager'});
+    expect(desktopDialog).toHaveAttribute('data-variant', 'standard');
+    expect(desktopDialog).toHaveAttribute('data-position', 'right');
+    expect(desktopDialog).toHaveAccessibleName('CV Manager');
+
+    cleanup();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === '(max-width: 48rem)',
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+    const onOpenChange = vi.fn();
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer isOpen onOpenChange={onOpenChange} controller={controller} />
+      </Theme>,
+    );
+    const narrowDialog = screen.getByRole('dialog', {name: 'CV Manager'});
+    expect(narrowDialog).toHaveAttribute('data-variant', 'fullscreen');
+    expect(narrowDialog).toHaveAccessibleName('CV Manager');
+    fireEvent.keyDown(narrowDialog, {key: 'Escape'});
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('opens filename-scoped confirmation through the controller', async () => {
+    const item = unownedFailedItem();
+    const openDeleteDialog = vi.fn();
+    const controller = {
+      ...drawerController({openDeleteDialog}),
+      state: {
+        phase: 'ready' as const,
+        items: [item],
+        selectedId: item.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: null,
+      },
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer
+          isOpen
+          onOpenChange={vi.fn()}
+          controller={controller}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', {name: /Delete CV|Delete/i}),
+    );
+    expect(openDeleteDialog).toHaveBeenCalledWith(item.id);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('names the failed file and confirms through confirmDelete', async () => {
+    const item = unownedFailedItem();
+    const confirmDelete = vi.fn().mockResolvedValue(true);
+    const controller = {
+      ...drawerController({confirmDelete}),
+      state: {
+        phase: 'ready' as const,
+        items: [item],
+        selectedId: item.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: item.id,
+      },
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer
+          isOpen
+          onOpenChange={vi.fn()}
+          controller={controller}
+        />
+      </Theme>,
+    );
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent('failed-upload.pdf');
+    await userEvent.click(
+      within(dialog).getByRole('button', {name: /Delete CV|Delete/i}),
+    );
+    expect(confirmDelete).toHaveBeenCalledWith(item.id);
   });
 });
 
-describe('graph CV branch mapping', () => {
-  it('maps fixed CV/section/entry nodes and structural edges', () => {
-    const model = toGraphModel(graphWithCvBranch());
-    expect(model.nodes.map((node) => node.key)).toEqual(
-      expect.arrayContaining([
-        'candidate:cand-1',
-        `cv:${ATTACHMENT_ID}`,
-        'cv_section:sec-1',
-        'cv_entry:ent-1',
-        'job:job-1',
-        'skill:python',
-      ]),
+describe('ProfileDeleteDialog ownership', () => {
+  it('uses the exact destructive profile action label', () => {
+    const profile: ProfileListItem = {
+      id: PROFILE_ID,
+      display_name: 'Profile A',
+      cv_filename: 'resume.pdf',
+      attachment_state: 'active',
+      location: null,
+      skill_tags: [],
+      skill_count: 0,
+      extraction_version: 'v1',
+      source_hash: 'source-a',
+      state: 'ready',
+      setup_status: null,
+      is_active: true,
+      created_at: TS,
+      updated_at: TS,
+      last_opened_at: TS,
+    };
+    render(
+      <Theme theme={neutralTheme}>
+        <ProfileDeleteDialog
+          profile={profile}
+          isOpen
+          isActionLoading={false}
+          onOpenChange={vi.fn()}
+          onConfirm={vi.fn().mockResolvedValue(undefined)}
+        />
+      </Theme>,
     );
-    expect(model.nodes.find((n) => n.kind === 'cv')?.label).toBe('active.pdf');
-    expect(model.links.map((link) => link.type)).toEqual(
-      expect.arrayContaining([
-        'HAS_SKILL',
-        'PROJECTS_TO',
-        'HAS_SECTION',
-        'HAS_ENTRY',
-      ]),
-    );
+
     expect(
-      model.links.find((link) => link.type === 'PROJECTS_TO'),
-    ).toMatchObject({
-      source: 'candidate:cand-1',
-      target: `cv:${ATTACHMENT_ID}`,
-    });
+      screen.getByRole('button', {
+        name: 'Delete profile and all data',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps Saved Jobs on the relocated generic request hook', () => {
+    expect(savedJobsStateSource).toContain("../lib/hooks/useLatestRequest");
+    expect(savedJobsStateSource).not.toContain("../observability/useLatestRequest");
   });
 });

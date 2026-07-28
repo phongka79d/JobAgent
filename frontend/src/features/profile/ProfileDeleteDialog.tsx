@@ -18,7 +18,7 @@ export function ProfileDeleteDialog({
   onConfirm,
 }: ProfileDeleteDialogProps) {
   const isPending = profile?.state === 'pending';
-  const label = isPending ? 'Discard setup' : 'Delete permanently';
+  const label = isPending ? 'Discard setup' : 'Delete profile and all data';
   const name = profile?.display_name ?? 'this profile';
   const cvName = profile?.cv_filename ?? 'its CV';
 

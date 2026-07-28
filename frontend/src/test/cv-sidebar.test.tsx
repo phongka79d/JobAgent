@@ -799,3 +799,100 @@ describe('shared sidebar upload → chat turn', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+describe('product CV Manager overview entry point', () => {
+  it('opens Manage CVs and deletes only the unowned attachment', async () => {
+    const base = uploadResponse('managed-resume.pdf').bootstrap!;
+    const readyProfile = {
+      ...base.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'managed-source',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const deleteProfile = vi.fn().mockResolvedValue(true);
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [readyProfile],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: CONVERSATION_ID,
+        conversations: [base.conversation],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile,
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    const fetchCvManager = vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: ATTACHMENT_ID,
+          original_name: 'managed-resume.pdf',
+          state: 'failed',
+          failure_code: 'EXTRACTION_FAILED',
+          page_count: null,
+          file_available: false,
+          profile_id: null,
+          profile_display_name: null,
+          profile_state: null,
+          is_active_profile: false,
+          allowed_actions: ['delete_cv'],
+          created_at: NOW,
+          updated_at: NOW,
+        },
+      ],
+    });
+    const deleteCv = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          workspace={workspace}
+          deps={{
+            loadProfile: vi.fn().mockResolvedValue(
+              activeProfile('managed-resume.pdf'),
+            ),
+            uploadCv: vi.fn(),
+            cvManager: {
+              fetchCvManager,
+              deleteCv,
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {name: 'Manage CVs'}),
+    );
+    const drawer = await screen.findByRole('dialog', {
+      name: /CV Manager|Manage CVs/i,
+    });
+    expect(
+      within(drawer).getByText('managed-resume.pdf'),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      within(drawer).getByRole('button', {name: /Delete CV|Delete/i}),
+    );
+    const confirmation = await screen.findByRole('alertdialog');
+    expect(confirmation).toHaveTextContent('managed-resume.pdf');
+    await userEvent.click(
+      within(confirmation).getByRole('button', {name: /Delete CV|Delete/i}),
+    );
+
+    await waitFor(() => {
+      expect(deleteCv).toHaveBeenCalledTimes(1);
+      expect(deleteProfile).not.toHaveBeenCalled();
+    });
+  });
+});

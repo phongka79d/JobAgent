@@ -38,7 +38,7 @@ import {
   type ToolExecutionView,
   type ToolResult,
 } from '../features/chat/types';
-import {getRetainedCvUrl} from '../features/observability/api';
+import {cvFileUrl} from '../features/cv-manager/api';
 
 const ATTACHMENT =
   'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -1036,7 +1036,7 @@ describe('ActiveCvSourceDialog exact evidence and original CV', () => {
       await user.click(screen.getByTestId('jobagent-active-cv-open-original'));
       expect(openSpy).toHaveBeenCalledTimes(1);
       expect(openSpy).toHaveBeenCalledWith(
-        getRetainedCvUrl(ATTACHMENT),
+        cvFileUrl(ATTACHMENT, 'inline'),
         '_blank',
         'noopener,noreferrer',
       );

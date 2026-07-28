@@ -8,7 +8,7 @@
 import {useCallback, useEffect, useReducer, useRef} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
-import {useLatestRequest} from '../observability/useLatestRequest';
+import {useLatestRequest} from '../../lib/hooks/useLatestRequest';
 import {
   defaultSavedJobsApi,
   toSavedJobActionError,
