@@ -6,16 +6,18 @@
 import {useEffect, useState} from 'react';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
+import {Button} from '@astryxdesign/core/Button';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
+import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {List, ListItem} from '@astryxdesign/core/List';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
+import {Skeleton} from '@astryxdesign/core/Skeleton';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
-import {ObservabilityListSkeleton} from '../observability/ObservabilityListSkeleton';
-import {ObservabilityPanelHeader} from '../observability/ObservabilityPanelHeader';
 import {formatDisplayScore} from './matchResult';
+import './jobs.css';
 import {JobDeleteDialog} from './JobDeleteDialog';
 import {JobReextractDialog} from './JobReextractDialog';
 import {
@@ -58,6 +60,49 @@ export type SavedJobsPanelProps = {
   isTailoringPending?: boolean;
   onCreateTailoredCv?: (jobId: string) => void;
 };
+
+function SavedJobsPanelHeader({
+  title,
+  onRefresh,
+  isRefreshing,
+  refreshTestId,
+}: {
+  eyebrow: string;
+  title: string;
+  onRefresh: () => void;
+  isRefreshing: boolean;
+  refreshTestId: string;
+}) {
+  return (
+    <HStack hAlign="between" vAlign="center">
+      <Heading level={2}>{title}</Heading>
+      <Button
+        label="Refresh"
+        size="sm"
+        variant="ghost"
+        isLoading={isRefreshing}
+        onClick={onRefresh}
+        data-testid={refreshTestId}
+      />
+    </HStack>
+  );
+}
+
+function SavedJobsListSkeleton({
+  rows,
+  testId,
+}: {
+  rows: number;
+  testId: string;
+}) {
+  return (
+    <VStack gap={2} data-testid={testId}>
+      {Array.from({length: rows}, (_, index) => (
+        <Skeleton key={index} height="var(--spacing-8)" index={index} />
+      ))}
+    </VStack>
+  );
+}
 
 function processingVariant(
   status: JobProcessingStatus,
@@ -212,18 +257,15 @@ export function SavedJobsPanel({
   return (
     <VStack
       gap={2}
-      className="jobagent-obs-panel jobagent-saved-jobs-workspace"
-      data-testid="jobagent-obs-saved-jobs"
-      role="tabpanel"
-      id="jobagent-obs-panel-saved-jobs"
-      aria-labelledby="jobagent-obs-tab-saved-jobs"
+      className="jobagent-saved-jobs-workspace"
+      data-testid="jobagent-saved-jobs"
     >
       <VStack
         gap={2}
         className="jobagent-saved-jobs-master-pane"
         data-testid="jobagent-saved-jobs-master-pane"
       >
-        <ObservabilityPanelHeader
+        <SavedJobsPanelHeader
           eyebrow="Danh sách"
           title="JD đã lưu"
           onRefresh={onRefresh}
@@ -232,7 +274,7 @@ export function SavedJobsPanel({
         />
 
         {list.phase === 'loading' && !list.data ? (
-          <ObservabilityListSkeleton
+          <SavedJobsListSkeleton
             rows={3}
             testId="jobagent-obs-saved-jobs-loading"
           />

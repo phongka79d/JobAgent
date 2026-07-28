@@ -398,7 +398,7 @@ export function SavedJobDetailView({
   return (
     <VStack
       gap={2}
-      className="jobagent-obs-detail"
+      className="jobagent-saved-job-detail"
       data-testid="jobagent-saved-job-detail"
       data-job-id={job.id}
       data-evaluation-state={job.evaluation_state}
@@ -442,7 +442,7 @@ export function SavedJobDetailView({
         gap={1}
         wrap="wrap"
         vAlign="center"
-        className="jobagent-obs-row-actions"
+        className="jobagent-saved-job-row-actions"
         role="group"
         aria-label="Thao tác JD"
         data-testid={`jobagent-saved-job-actions-${job.id}`}
@@ -582,7 +582,7 @@ export function SavedJobDetailView({
           <Text type="label" as="p">
             Nội dung gốc
           </Text>
-          <pre className="jobagent-obs-fulltext">{data.raw_content}</pre>
+          <pre className="jobagent-saved-job-fulltext">{data.raw_content}</pre>
         </VStack>
       ) : null}
 

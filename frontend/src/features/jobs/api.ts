@@ -14,13 +14,11 @@ import {
   parseEvaluateJobResponse,
   parseReextractJobResponse,
   parseSaveAndEvaluateResponse,
-  parseSelectedJobSkillMap,
   parseSavedJobDetail,
   parseSavedJobListPage,
   type EvaluateJobResponse,
   type ReextractJobResponse,
   type SaveAndEvaluateResponse,
-  type SelectedJobSkillMap,
   type SavedJobDetail,
   type SavedJobListPage,
   type SavedJobsPageQuery,
@@ -258,28 +256,6 @@ export async function fetchSavedJobDetail(
 }
 
 /** GET /api/observability/skill-map — read-only selected CV/JD skill map. */
-export async function fetchSelectedJobSkillMap(
-  jobId: string,
-  signal?: AbortSignal,
-  profileId?: string,
-): Promise<SelectedJobSkillMap> {
-  const params = new URLSearchParams({job_id: jobId});
-  if (profileId) {
-    params.set('profile_id', profileId);
-  }
-  const path = `/api/observability/skill-map?${params.toString()}`;
-  const json = await getJson(path, signal);
-  try {
-    const parsed = parseSelectedJobSkillMap(json);
-    if (parsed.job?.id !== jobId.toLowerCase()) {
-      throw new Error('skill map Job does not match the requested cache key');
-    }
-    return parsed;
-  } catch (err) {
-    throw wrapParseError('INVALID_SKILL_MAP_PAYLOAD', err);
-  }
-}
-
 /** POST /api/jobs/{job_id}/evaluate — create or reuse current evaluation. */
 export async function evaluateSavedJob(
   jobId: string,
@@ -382,7 +358,6 @@ export async function deleteSavedJob(
 export type SavedJobsApi = {
   fetchSavedJobs: typeof fetchSavedJobs;
   fetchSavedJobDetail: typeof fetchSavedJobDetail;
-  fetchSelectedJobSkillMap: typeof fetchSelectedJobSkillMap;
   evaluateSavedJob: typeof evaluateSavedJob;
   reextractSavedJob: typeof reextractSavedJob;
   deleteSavedJob: typeof deleteSavedJob;
@@ -391,7 +366,6 @@ export type SavedJobsApi = {
 export const defaultSavedJobsApi: SavedJobsApi = {
   fetchSavedJobs,
   fetchSavedJobDetail,
-  fetchSelectedJobSkillMap,
   evaluateSavedJob,
   reextractSavedJob,
   deleteSavedJob,

@@ -21,7 +21,6 @@ import {
   useSideNavRenderMode,
 } from '@astryxdesign/core/SideNav';
 
-import type {ObservabilityApi} from '../observability/api';
 import type {CvManagerApi} from '../cv-manager/api';
 import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
 import {useCvManagerState} from '../cv-manager/state';
@@ -30,8 +29,7 @@ import {
   type SavedJobsController,
 } from '../jobs/savedJobsState';
 import type {CvTailoringController} from '../cv-tailoring/state';
-import {ObservabilitySidebar} from '../observability/ObservabilitySidebar';
-import {useObservabilityState} from '../observability/state';
+import {ProductSidebar} from '../navigation/ProductSidebar';
 import {
   ChatApiError,
   fetchActiveProfileCompat,
@@ -47,7 +45,6 @@ export type CvSidebarDeps = {
   loadProfile?: typeof fetchActiveProfileCompat;
   uploadCv?: typeof uploadCv;
   getActiveCvUrl?: typeof getActiveCvUrl;
-  observability?: Partial<ObservabilityApi>;
   cvManager?: Partial<CvManagerApi>;
 };
 
@@ -185,18 +182,12 @@ function CvSidebarController({
   const selectedWorkspaceProfile = workspace?.state.profiles.find(
     (candidate) => candidate.id === workspace.state.activeProfileId,
   );
-  const observability = useObservabilityState({
-    api: deps?.observability,
-    profileId: selectedWorkspaceProfile?.id,
-    profileReady: workspace ? selectedWorkspaceProfile?.state === 'ready' : true,
-  });
   const cvManager = useCvManagerState({
     api: deps?.cvManager,
     profileId: selectedWorkspaceProfile?.id,
     profileReady: selectedWorkspaceProfile?.state === 'ready',
   });
   const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
-  const {endReprocess, failReprocess, invalidateAfterActivation} = observability;
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
@@ -216,32 +207,10 @@ function CvSidebarController({
   const loadedActivationKey = useRef(activationKey);
   const handledTerminalKey = useRef<number | null>(null);
 
-  // After Save Profile activation: invalidate CV/chunk/run/graph caches only.
   useEffect(() => {
-    if (loadedActivationKey.current === activationKey) {
-      return;
-    }
     loadedActivationKey.current = activationKey;
-    invalidateAfterActivation();
-  }, [activationKey, invalidateAfterActivation]);
-
-  // Clear reprocess pending / record transport error from ChatPage terminal.
-  useEffect(() => {
-    if (!reprocessTerminal) {
-      return;
-    }
-    if (handledTerminalKey.current === reprocessTerminal.requestKey) {
-      return;
-    }
-    handledTerminalKey.current = reprocessTerminal.requestKey;
-    const actionId =
-      scopedProfile?.active_attachment?.id ?? reprocessTerminal.profileId;
-    if (reprocessTerminal.kind === 'http_error' && reprocessTerminal.error) {
-      failReprocess(actionId, reprocessTerminal.error);
-    } else {
-      endReprocess(actionId);
-    }
-  }, [endReprocess, failReprocess, reprocessTerminal, scopedProfile]);
+    handledTerminalKey.current = reprocessTerminal?.requestKey ?? null;
+  }, [activationKey, reprocessTerminal]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -449,36 +418,12 @@ function CvSidebarController({
 
   return (
     <CvSidebarShell>
-      <ObservabilitySidebar
+      <ProductSidebar
         overview={overview}
-        collapsedStatus={{
-          label: state.text,
-          variant: state.variant,
-          cvName: displayCvName,
-        }}
-        observability={observability}
         savedJobs={savedJobs ?? createEmptySavedJobsController()}
-        profileSetupInProgress={Boolean(
-          workspace && selectedWorkspaceProfile?.state !== 'ready',
-        )}
-        profileId={selectedWorkspaceProfile?.id ?? null}
-        profileDisplayName={selectedWorkspaceProfile?.display_name ?? ''}
-        onProfileDelete={
-          workspace
-            ? async (profileId) => workspace.deleteProfile(profileId)
-            : undefined
-        }
-        isInteractionLocked={isUploadDisabled}
-        savedJobsInvalidateKey={savedJobsInvalidateKey}
-        onCvReprocess={(attachmentId) =>
-          selectedWorkspaceProfile
-            ? onCvReprocess?.(selectedWorkspaceProfile.id) ?? false
-            : onCvReprocess?.(attachmentId) ?? false
-        }
-        onCvDeleted={onCvDeleted}
         onCreateTailoredCv={onCreateTailoredCv}
         isTailoringPending={isTailoringPending}
-        tailoring={tailoring}
+        tailoring={tailoring!}
         onOpenTailoringSession={onOpenTailoringSession}
       />
     </CvSidebarShell>

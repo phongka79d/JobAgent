@@ -32,12 +32,6 @@ import type {
   SavedJobListPage,
 } from '../features/jobs/types';
 import {formatDisplayScore} from '../features/jobs/matchResult';
-import {OBSERVABILITY_TABS} from '../features/observability/observabilityTabs';
-import {ObservabilityTabList} from '../features/observability/ObservabilityTabList';
-import type {ObservabilityTabId} from '../features/observability/types';
-import {
-  mockObservabilityApi,
-} from './support/observability';
 
 const JOB_NONE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const JOB_STALE = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
