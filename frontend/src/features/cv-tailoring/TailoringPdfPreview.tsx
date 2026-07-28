@@ -9,6 +9,7 @@ export type TailoringPdfPreviewProps = {
   readonly versionId: string | null;
   readonly sourceAvailable: boolean;
   readonly pdfAvailable: boolean;
+  readonly artifactLabel?: string;
   readonly sourceUrl?: (versionId: string) => string;
   readonly pdfUrl?: (versionId: string) => string;
 };
@@ -17,14 +18,15 @@ export function TailoringPdfPreview({
   versionId,
   sourceAvailable,
   pdfAvailable,
+  artifactLabel,
   sourceUrl,
   pdfUrl = tailoringPdfUrl,
 }: TailoringPdfPreviewProps) {
   if (versionId === null) {
     return (
       <EmptyState
-        title="Chưa có bản xem trước"
-        description="Hoàn tất một version để xem PDF."
+        title="No preview available"
+        description="Complete a version to preview the PDF."
         isCompact
       />
     );
@@ -36,13 +38,13 @@ export function TailoringPdfPreview({
           <iframe
             className="jobagent-tailoring-pdf-frame"
             src={pdfUrl(versionId)}
-            title="Xem trước PDF CV"
+            title="Tailored CV PDF preview"
           />
         </AspectRatio>
       ) : (
         <EmptyState
-          title="PDF chưa sẵn sàng"
-          description="Bản nội dung vẫn được giữ nguyên để bạn thử lại."
+          title="PDF not ready"
+          description="The content is preserved so you can try again."
           isCompact
         />
       )}
@@ -50,6 +52,7 @@ export function TailoringPdfPreview({
         versionId={versionId}
         sourceAvailable={sourceAvailable}
         pdfAvailable={pdfAvailable}
+        artifactLabel={artifactLabel}
         sourceUrl={sourceUrl}
         pdfUrl={pdfUrl}
       />

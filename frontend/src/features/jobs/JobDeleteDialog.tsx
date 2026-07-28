@@ -27,7 +27,7 @@ export function JobDeleteDialog({
   onConfirm,
 }: JobDeleteDialogProps) {
   const title = `Xoá JD ${jobLabel}?`;
-  const description = `Xoá “${jobLabel}”? ${JOB_DELETE_SCOPE_WARNING}`;
+  const description = `Delete “${jobLabel}”? ${JOB_DELETE_SCOPE_WARNING}`;
 
   return (
     <AlertDialog
@@ -41,7 +41,7 @@ export function JobDeleteDialog({
       title={title}
       description={description}
       actionLabel="Xoá JD"
-      cancelLabel="Huỷ"
+      cancelLabel="Cancel"
       actionVariant="destructive"
       isActionLoading={isDeleting}
       onAction={onConfirm}

@@ -12,6 +12,7 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CvTailoringController} from './state';
 import {TailoringSessionDeleteDialog} from './TailoringSessionDeleteDialog';
+import {sessionDisplayLabel} from './presentation';
 import type {TailoringSessionSummary} from './types';
 
 export type TailoringSessionsPanelProps = {
@@ -19,7 +20,7 @@ export type TailoringSessionsPanelProps = {
   readonly onOpenSession: (sessionId: string) => void;
 };
 
-export function tailoringSessionLabel(session: TailoringSessionSummary): string {
+export function legacyTailoringSessionLabel(session: TailoringSessionSummary): string {
   const title = session.job_label?.title?.trim() ?? '';
   const company = session.job_label?.company?.trim() ?? '';
   if (title && company) return `${title} · ${company}`;
@@ -29,7 +30,11 @@ export function tailoringSessionLabel(session: TailoringSessionSummary): string 
   if (instruction) {
     return instruction.length > 72 ? `${instruction.slice(0, 69)}…` : instruction;
   }
-  return 'CV đã chỉnh';
+  return 'Untitled tailored CV';
+}
+
+export function tailoringSessionLabel(session: TailoringSessionSummary): string {
+  return sessionDisplayLabel(session);
 }
 
 function statusView(session: TailoringSessionSummary): {
@@ -38,17 +43,17 @@ function statusView(session: TailoringSessionSummary): {
   color: 'green' | 'yellow' | 'red' | 'blue' | 'gray';
 } {
   if (session.currentness === 'stale') {
-    return {label: 'Dữ liệu cũ', variant: 'warning', color: 'yellow'};
+    return {label: 'Needs review', variant: 'warning', color: 'yellow'};
   }
   switch (session.state) {
     case 'generating':
-      return {label: 'Đang tạo', variant: 'accent', color: 'blue'};
+      return {label: 'Creating', variant: 'accent', color: 'blue'};
     case 'ready':
-      return {label: 'Sẵn sàng', variant: 'success', color: 'green'};
+      return {label: 'Ready', variant: 'success', color: 'green'};
     case 'failed':
-      return {label: 'Thất bại', variant: 'error', color: 'red'};
+      return {label: 'Failed', variant: 'error', color: 'red'};
     case 'deleting':
-      return {label: 'Đang xóa', variant: 'neutral', color: 'gray'};
+      return {label: 'Deleting', variant: 'neutral', color: 'gray'};
   }
 }
 
@@ -67,7 +72,7 @@ function SessionStatus({session}: {readonly session: TailoringSessionSummary}) {
 }
 
 function sessionDescription(session: TailoringSessionSummary) {
-  const timestamp = new Intl.DateTimeFormat('vi-VN', {
+  const timestamp = new Intl.DateTimeFormat('en-CA', {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(session.updated_at));
@@ -98,7 +103,7 @@ export function TailoringSessionsPanel({
   if (state.sessions.phase === 'loading' && state.sessions.data === null) {
     return (
       <Text type="supporting" role="status" aria-live="polite">
-        Đang tải CV đã chỉnh…
+        Loading tailored CVs…
       </Text>
     );
   }
@@ -106,12 +111,12 @@ export function TailoringSessionsPanel({
   if (state.sessions.phase === 'error' && items.length === 0) {
     return (
       <EmptyState
-        title="Không thể tải CV đã chỉnh"
-        description="Không thể tải danh sách CV đã chỉnh."
+        title="Unable to load tailored CVs"
+        description="The tailored CV list could not be loaded."
         isCompact
         actions={
           <Button
-            label="Thử lại"
+            label="Retry"
             size="sm"
             onClick={() => void controller.loadSessions()}
           />
@@ -123,8 +128,8 @@ export function TailoringSessionsPanel({
   if (items.length === 0) {
     return (
       <EmptyState
-        title="Chưa có CV đã chỉnh"
-        description="Chọn một JD phù hợp hoặc yêu cầu Main Agent tạo CV theo mục tiêu của bạn."
+        title="No tailored CVs yet"
+        description="Choose a saved job or ask the assistant to create a tailored CV."
         isCompact
       />
     );
@@ -133,22 +138,22 @@ export function TailoringSessionsPanel({
   return (
     <VStack gap={3} width="100%">
       <HStack gap={2} hAlign="between" vAlign="center">
-        <Heading level={2}>CV đã chỉnh</Heading>
+        <Heading level={2}>Tailored CVs</Heading>
         <Button
-          label="Làm mới"
+          label="Refresh"
           size="sm"
           variant="ghost"
           onClick={() => void controller.loadSessions()}
         />
       </HStack>
-      <List density="compact" hasDividers header="Các phiên CV đã chỉnh">
+      <List density="compact" hasDividers header="Tailored CV sessions">
         {items.map((session) => {
           const canRetry =
             session.state === 'failed' && session.latest_version_number === 0;
           const actions = canRetry ? (
-            <ButtonGroup label={`Thao tác ${tailoringSessionLabel(session)}`} size="sm">
+            <ButtonGroup label={`Actions for ${tailoringSessionLabel(session)}`} size="sm">
               <Button
-                label="Thử tạo lại"
+                label="Retry"
                 variant="secondary"
                 isLoading={retryingId === session.id}
                 onClick={() => {
@@ -164,7 +169,7 @@ export function TailoringSessionsPanel({
                 }}
               />
               <Button
-                label="Xóa phiên CV"
+                label="Delete session"
                 variant="secondary"
                 onClick={() => setDeleteTarget(session)}
               />

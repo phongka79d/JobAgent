@@ -113,6 +113,7 @@ function matchResultHigh(overrides?: JsonObject): JsonObject {
     job_id: JOB_HIGH,
     title: 'Senior Backend Engineer',
     company: 'Acme Corp',
+    display_label: 'Senior Backend Engineer · Acme Corp',
     location: 'Berlin',
     work_mode: 'remote',
     source_url: 'https://example.com/jobs/1',
@@ -147,6 +148,7 @@ function matchResultLow(overrides?: JsonObject): JsonObject {
     job_id: JOB_LOW,
     title: 'Frontend Dev',
     company: 'Beta Inc',
+    display_label: 'Frontend Dev · Beta Inc',
     location: null,
     work_mode: 'hybrid',
     source_url: null,
@@ -519,23 +521,9 @@ describe('MatchCard rendering', () => {
     // Expand collapsible score breakdown.
     const trigger = screen.getByText('Chi tiết cách tính điểm');
     await user.click(trigger);
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('jobagent-match-component-location_score'),
-      ).toHaveAttribute('data-available', 'false');
-    });
-    expect(
-      screen.getByTestId('jobagent-match-component-skill_score'),
-    ).toHaveAttribute('data-available', 'false');
-    expect(screen.getAllByText('Không có dữ liệu').length).toBeGreaterThanOrEqual(1);
     const breakdown = screen.getByTestId('jobagent-match-score-breakdown');
-    expect(within(breakdown).getByText(/Hệ số chất lượng/i)).toBeInTheDocument();
-    expect(within(breakdown).getByText('0.85')).toBeInTheDocument();
-    // Effective weights present for available components.
-    expect(screen.getAllByText(/Trọng số thực tế:/i).length).toBeGreaterThanOrEqual(
-      1,
-    );
+    expect(within(breakdown).getByText('Not enough CV/JD information to score experience.')).toBeInTheDocument();
+    expect(within(breakdown).queryByText(/effective_weights|semantic_similarity|quality_multiplier/i)).not.toBeInTheDocument();
   });
 
   it('shows high-result unavailable location and effective weights when expanded', async () => {
@@ -544,20 +532,8 @@ describe('MatchCard rendering', () => {
     )!;
     const user = userEvent.setup();
     renderWithTheme(<MatchCard data={parsed.results[0]} />);
-    await user.click(screen.getByText('Chi tiết cách tính điểm'));
-    await waitFor(() => {
-      expect(
-        screen.getByTestId('jobagent-match-component-location_score'),
-      ).toHaveTextContent('Không có dữ liệu');
-    });
-    expect(
-      screen.getByTestId('jobagent-match-component-semantic_similarity'),
-    ).toHaveAttribute('data-available', 'true');
-    expect(
-      within(screen.getByTestId('jobagent-match-score-breakdown')).getByText(
-        '1.00',
-      ),
-    ).toBeInTheDocument();
+    await user.click(screen.getByText('Why this score'));
+    expect(screen.getByTestId('jobagent-match-score-breakdown')).toHaveTextContent('Overall match: 81.2%');
   });
 });
 
@@ -671,9 +647,8 @@ describe('ChatPage durable match cards', () => {
     expect(cards[0]).toHaveAttribute('data-job-id', JOB_HIGH);
     expect(cards[1]).toHaveAttribute('data-job-id', JOB_LOW);
     expect(screen.getByText('Rank matching jobs')).toBeInTheDocument();
-    expect(
-      screen.getByText('match_jobs · completed · 200ms'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Checking job matches')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/match_jobs|200ms/);
     expect(screen.getByText('81.2%')).toBeInTheDocument();
     expect(screen.getByText('40.1%')).toBeInTheDocument();
     expect(screen.queryByText(/raw_content|embedding_json/i)).not.toBeInTheDocument();

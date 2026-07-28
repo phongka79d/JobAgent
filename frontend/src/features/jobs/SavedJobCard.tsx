@@ -107,9 +107,7 @@ export function buildSavedJobSummaryLines(
     // Explicit partial success: never claim related-data refresh succeeded.
     lines.push('Related data remains unavailable until recovery succeeds.');
   } else if (data.processingStatus === 'failed') {
-    if (code && !lines.some((l) => l.includes(code))) {
-      lines.push(`Ingestion failed (${code})`);
-    }
+    lines.push('The saved job could not be processed.');
     if (data.pasteInstruction) {
       lines.push(data.pasteInstruction);
     }
@@ -169,7 +167,6 @@ export function SavedJobCard({data, summary, errorCode}: SavedJobCardProps) {
           label={{position: 'start'}}
           data-testid="jobagent-saved-job-metadata"
         >
-          <MetadataListItem label="Job ID">{data.jobId}</MetadataListItem>
           {data.company ? (
             <MetadataListItem label="Company">{data.company}</MetadataListItem>
           ) : null}

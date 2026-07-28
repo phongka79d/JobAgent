@@ -133,6 +133,7 @@ export type TailoredFactEvidence = {
 export type TailoringJobLabel = {
   readonly title: string | null;
   readonly company: string | null;
+  readonly display_label: string | null;
 };
 
 export type TailoringVersionSummary = {
@@ -485,10 +486,20 @@ export function parseTailoredContent(raw: unknown): TailoredCVContent {
 function parseJobLabel(raw: unknown, path: string): TailoringJobLabel | null {
   if (raw === null) return null;
   const value = object(raw, path);
-  exact(value, ['title', 'company'], path);
+  if (
+    Object.keys(value).some((key) => !['title', 'company', 'display_label'].includes(key)) ||
+    !Object.prototype.hasOwnProperty.call(value, 'title') ||
+    !Object.prototype.hasOwnProperty.call(value, 'company')
+  ) {
+    throw new Error(`${path} has unexpected or missing fields`);
+  }
   return {
     title: nullableText(value.title, `${path}.title`, 300),
     company: nullableText(value.company, `${path}.company`, 300),
+    display_label:
+      value.display_label === undefined
+        ? null
+        : nullableText(value.display_label, `${path}.display_label`, 140),
   };
 }
 

@@ -89,6 +89,7 @@ function listItem(
     id,
     title: `Title ${id.slice(0, 4)}`,
     company: 'Acme Corp',
+    display_label: `Title ${id.slice(0, 4)} · Acme Corp`,
     processing_status: 'processed',
     jd_quality: 'full',
     source_type: 'text',

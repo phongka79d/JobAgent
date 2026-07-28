@@ -113,7 +113,7 @@ function detail(
     session: {
       id: SESSION_ID,
       profile_id: PROFILE_ID,
-      job_label: {title: 'Data Analyst', company: 'Synthetic Co'},
+      job_label: {title: 'Data Analyst', company: 'Synthetic Co', display_label: 'Data Analyst · Synthetic Co'},
       instruction: 'Ưu tiên kỹ năng phân tích',
       template_version: 'latex-cv-v1',
       state: 'ready',

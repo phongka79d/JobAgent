@@ -88,7 +88,7 @@ export function TailoredSectionEditor({
         <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
           <Heading level={2}>{section.heading}</Heading>
           <Button
-            label="Nhờ AI chỉnh section này"
+            label="Ask AI to revise this section"
             size="sm"
             variant="secondary"
             isDisabled={isDisabled}
@@ -97,7 +97,7 @@ export function TailoredSectionEditor({
         </HStack>
 
         {section.items.length === 0 ? (
-          <Text type="supporting">Section này không có mục nội dung.</Text>
+          <Text type="supporting">This section has no content items.</Text>
         ) : null}
 
         {section.items.map((item, itemIndex) => (
@@ -110,7 +110,7 @@ export function TailoredSectionEditor({
             <VStack gap={3}>
               <HStack gap={2} hAlign="end" wrap="wrap">
                 <Button
-                  label={`Đưa mục ${itemIndex + 1} lên`}
+                  label={`Move item ${itemIndex + 1} up`}
                   size="sm"
                   variant="ghost"
                   isDisabled={isDisabled || itemIndex === 0}
@@ -122,7 +122,7 @@ export function TailoredSectionEditor({
                   }
                 />
                 <Button
-                  label={`Đưa mục ${itemIndex + 1} xuống`}
+                  label={`Move item ${itemIndex + 1} down`}
                   size="sm"
                   variant="ghost"
                   isDisabled={
@@ -136,7 +136,7 @@ export function TailoredSectionEditor({
                   }
                 />
                 <Button
-                  label={`Xóa mục ${itemIndex + 1}`}
+                  label={`Delete item ${itemIndex + 1}`}
                   size="sm"
                   variant="ghost"
                   isDisabled={isDisabled}
@@ -155,7 +155,7 @@ export function TailoredSectionEditor({
                 <TextInput
                   id={tailoringFieldId(section.id, itemIndex, 'title')}
                   aria-describedby={describedBy(itemIndex, 'title')}
-                  label={`Tiêu đề ${itemLabel(section, itemIndex)}`}
+                  label={`Title ${itemLabel(section, itemIndex)}`}
                   value={item.title.text}
                   isDisabled={isDisabled}
                   onChange={(text) =>
@@ -170,7 +170,7 @@ export function TailoredSectionEditor({
                 <TextInput
                   id={tailoringFieldId(section.id, itemIndex, 'subtitle')}
                   aria-describedby={describedBy(itemIndex, 'subtitle')}
-                  label={`Phụ đề ${itemLabel(section, itemIndex)}`}
+                  label={`Subtitle ${itemLabel(section, itemIndex)}`}
                   value={item.subtitle.text}
                   isDisabled={isDisabled}
                   onChange={(text) =>
@@ -185,7 +185,7 @@ export function TailoredSectionEditor({
                 <TextInput
                   id={tailoringFieldId(section.id, itemIndex, 'date')}
                   aria-describedby={describedBy(itemIndex, 'date')}
-                  label={`Thời gian ${itemLabel(section, itemIndex)}`}
+                  label={`Dates ${itemLabel(section, itemIndex)}`}
                   value={item.date_text.text}
                   isDisabled={isDisabled}
                   onChange={(text) =>
@@ -200,7 +200,7 @@ export function TailoredSectionEditor({
                 <TextInput
                   id={tailoringFieldId(section.id, itemIndex, 'location')}
                   aria-describedby={describedBy(itemIndex, 'location')}
-                  label={`Địa điểm ${itemLabel(section, itemIndex)}`}
+                  label={`Location ${itemLabel(section, itemIndex)}`}
                   value={item.location.text}
                   isDisabled={isDisabled}
                   onChange={(text) =>
@@ -215,7 +215,7 @@ export function TailoredSectionEditor({
                 id={tailoringFieldId(section.id, itemIndex, 'body')}
                 aria-label={`${section.heading} body`}
                 aria-describedby={describedBy(itemIndex, 'body')}
-                label={`Nội dung ${itemLabel(section, itemIndex)}`}
+                label={`Body ${itemLabel(section, itemIndex)}`}
                 value={item.body.text}
                 rows={3}
                 maxLength={4_000}
@@ -238,7 +238,7 @@ export function TailoredSectionEditor({
                   <TextArea
                     id={`${tailoringFieldId(section.id, itemIndex, 'bullet')}-${bulletIndex}`}
                     aria-describedby={describedBy(itemIndex, 'bullet')}
-                    label={`Gạch đầu dòng ${bulletIndex + 1} · ${itemLabel(section, itemIndex)}`}
+                    label={`Bullet ${bulletIndex + 1} · ${itemLabel(section, itemIndex)}`}
                     value={bullet.text}
                     rows={2}
                     maxLength={4_000}
@@ -255,7 +255,7 @@ export function TailoredSectionEditor({
                     }
                   />
                   <Button
-                    label={`Đưa gạch đầu dòng ${bulletIndex + 1} lên`}
+                    label={`Move bullet ${bulletIndex + 1} up`}
                     size="sm"
                     variant="ghost"
                     isDisabled={isDisabled || bulletIndex === 0}
@@ -267,7 +267,7 @@ export function TailoredSectionEditor({
                     }
                   />
                   <Button
-                    label={`Đưa gạch đầu dòng ${bulletIndex + 1} xuống`}
+                    label={`Move bullet ${bulletIndex + 1} down`}
                     size="sm"
                     variant="ghost"
                     isDisabled={
@@ -281,7 +281,7 @@ export function TailoredSectionEditor({
                     }
                   />
                   <Button
-                    label={`Xóa gạch đầu dòng ${bulletIndex + 1}`}
+                    label={`Delete bullet ${bulletIndex + 1}`}
                     size="sm"
                     variant="ghost"
                     isDisabled={isDisabled}
@@ -340,7 +340,7 @@ export function TailoredSectionEditor({
         ))}
 
         {evidence.length > 0 ? (
-          <Collapsible trigger={<Text type="label">Nguồn đối chiếu</Text>} isOpen={evidenceOpen} onOpenChange={setEvidenceOpen}>
+          <Collapsible trigger={<Text type="label">Source evidence</Text>} isOpen={evidenceOpen} onOpenChange={setEvidenceOpen}>
             <VStack ref={evidenceRef} tabIndex={-1} role="region" aria-label={`${section.heading} source evidence`} gap={2}>
               {evidence.map((fact) => (
                 <Text key={fact.fact_id} type="supporting" as="p">

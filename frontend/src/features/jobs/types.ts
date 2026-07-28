@@ -412,6 +412,7 @@ const SAVED_JOB_LIST_ITEM_KEYS = [
   'id',
   'title',
   'company',
+  'display_label',
   'processing_status',
   'jd_quality',
   'source_type',
@@ -542,6 +543,7 @@ export type SavedJobListItem = {
   id: string;
   title: string | null;
   company: string | null;
+  display_label: string;
   processing_status: JobProcessingStatus;
   jd_quality: JobJdQuality | null;
   source_type: JobSourceType;
@@ -882,6 +884,10 @@ export function parseSavedJobListItem(raw: unknown): SavedJobListItem {
     company: asNullableDisplayString(
       raw.company,
       'saved job list item.company',
+    ),
+    display_label: asNonEmptyString(
+      raw.display_label,
+      'saved job list item.display_label',
     ),
     processing_status: processing as JobProcessingStatus,
     jd_quality: jdQuality,

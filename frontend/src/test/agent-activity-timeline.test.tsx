@@ -163,10 +163,10 @@ describe('AgentActivityTimeline', () => {
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
 
     expect(screen.getByText('Read active CV')).toBeInTheDocument();
-    expect(
-      screen.getByText('response_generation · completed · 25ms'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('match_jobs · running')).toBeInTheDocument();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.getByText('Checking job matches')).toBeInTheDocument();
+    expect(screen.getByText('In progress')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/response_generation|match_jobs|25ms/i);
     expect(document.body).not.toHaveTextContent(
       /arguments|result|provider_payload|raw cv|cv_text/i,
     );
@@ -239,15 +239,12 @@ describe('AgentActivityTimeline', () => {
       ),
     ).toEqual(['success', 'clock', 'error', 'spinner']);
 
-    expect(
-      screen.getByText('response_generation · completed · 25ms'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'check_provider_response · failed · 40ms · PROVIDER_UNAVAILABLE',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText('match_jobs · running')).toBeInTheDocument();
+    expect(screen.getAllByText('Complete').length).toBeGreaterThan(0);
+    expect(screen.getByText('Could not complete')).toBeInTheDocument();
+    expect(screen.getByText('Checking job matches')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(
+      /response_generation|check_provider_response|match_jobs|40ms|PROVIDER_UNAVAILABLE/i,
+    );
   });
 
   it('uses warning markers for interrupted and disconnected summaries', () => {

@@ -28,6 +28,7 @@ function job(): SavedJobListItem {
     id: JOB_ID,
     title: 'Backend Engineer',
     company: 'Acme',
+    display_label: 'Backend Engineer · Acme',
     processing_status: 'processed',
     jd_quality: 'full',
     source_type: 'text',
@@ -152,6 +153,14 @@ describe('product navigation', () => {
     expect(source).not.toContain('Neo4j graph');
     expect(source).not.toContain('Agent runs');
     expect(source).not.toContain('features/observability');
+  });
+
+  it('keeps retained product copy English and visible fallbacks UUID-free', () => {
+    const source = frontendSourceFiles(sourceRoot)
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+    expect(source).not.toMatch(/Job \$\{.*slice\(0,\s*8\)|JD \$\{.*slice\(0,\s*8\)/);
+    expect(source).not.toMatch(/Chat mới|Không thể tải|Xóa phiên|Đánh giá với CV/);
   });
 
   it('keeps saved-job and CV-tailoring controller ownership in App', () => {

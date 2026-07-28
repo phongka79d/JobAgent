@@ -1885,7 +1885,7 @@ git commit -m "feat: give jobs and tailoring sessions stable labels"
 - Modify: `frontend/src/test/cv-tailoring-editor.test.tsx`
 - Modify: `frontend/src/test/profile-conversation-sidebar.test.tsx`
 
-- [ ] **Step 1: Write no-leak presentation tests**
+- [x] **Step 1: Write no-leak presentation tests**
 
 ```tsx
 it('uses the server display label in list, detail, dialog, and match card', async () => {
@@ -1918,7 +1918,7 @@ npm test -- --run src/test/saved-jobs-panel.test.tsx src/test/saved-job-card.tes
 
 Expected: FAIL because four Saved Job/session components derive independent UUID fallbacks and activity currently renders technical details.
 
-- [ ] **Step 3: Replace every label branch with one projection helper**
+- [x] **Step 3: Replace every label branch with one projection helper**
 
 Implement:
 
@@ -1935,7 +1935,7 @@ export function sessionDisplayLabel(session: TailoringSessionSummary): string {
 
 Use it in sessions list, editor header, delete dialog, and `safeArtifactName`. Use `item.display_label` in Saved Jobs list/detail/cards/dialogs. For old match payloads with no `display_label`, use title/company or the literal `Saved job`; never use `job_id` or a UUID prefix.
 
-- [ ] **Step 4: Make score/activity presentation human-readable**
+- [x] **Step 4: Make score/activity presentation human-readable**
 
 `ScoreBreakdown` groups matched, related, and missing skills under **Why this score**. Round percentages through the existing `formatDisplayScore`; explain quality multiplier as reduced confidence from incomplete extraction; replace unavailable dimensions with fixed English sentences. `activityPresentation.ts` maps known activity labels/states to **View activity**/**Hide activity**, strips `technicalName`, `errorCode`, raw duration, and internal state names, and preserves the durable activity list/order.
 

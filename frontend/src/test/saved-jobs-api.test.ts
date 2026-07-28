@@ -40,6 +40,7 @@ function matchResultPayload(jobId: string, score = 0.81) {
     job_id: jobId,
     title: 'Backend Engineer',
     company: 'Acme',
+    display_label: 'Backend Engineer · Acme',
     location: 'Berlin',
     work_mode: 'hybrid',
     source_url: null,

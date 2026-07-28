@@ -17,6 +17,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {formatDisplayScore} from './matchResult';
+import {savedJobDisplayLabel} from './copy';
 import './jobs.css';
 import {JobDeleteDialog} from './JobDeleteDialog';
 import {JobReextractDialog} from './JobReextractDialog';
@@ -123,11 +124,11 @@ function processingVariant(
 function qualityLabel(quality: JobJdQuality | null): string | null {
   switch (quality) {
     case 'full':
-      return 'Đầy đủ';
+      return 'Complete';
     case 'partial':
-      return 'Một phần';
+      return 'Partial';
     case 'unscorable':
-      return 'Chưa thể chấm';
+      return 'Not scorable';
     default:
       return null;
   }
@@ -136,23 +137,19 @@ function qualityLabel(quality: JobJdQuality | null): string | null {
 function processingLabel(status: JobProcessingStatus): string {
   switch (status) {
     case 'processed':
-      return 'Đã xử lý';
+      return 'Processed';
     case 'processing':
-      return 'Đang xử lý';
+      return 'Processing';
     case 'failed':
-      return 'Xử lý lỗi';
+      return 'Processing failed';
     case 'received':
     default:
-      return 'Đã tiếp nhận';
+      return 'Received';
   }
 }
 
 function listRowLabel(item: SavedJobListItem): string {
-  return (
-    item.title?.trim() ||
-    item.company?.trim() ||
-    `JD ${item.id.slice(0, 8)}`
-  );
+  return savedJobDisplayLabel(item);
 }
 
 function evaluationEndContent(item: SavedJobListItem) {
@@ -160,7 +157,7 @@ function evaluationEndContent(item: SavedJobListItem) {
     return (
       <Badge
         variant="warning"
-        label="Cần đánh giá lại"
+        label="Needs re-evaluation"
         data-testid={`jobagent-saved-job-stale-badge-${item.id}`}
       />
     );
@@ -184,7 +181,7 @@ function evaluationEndContent(item: SavedJobListItem) {
         as="span"
         data-testid={`jobagent-saved-job-eval-none-${item.id}`}
       >
-        Chưa đánh giá
+        Not evaluated
       </Text>
     );
   }
@@ -267,7 +264,7 @@ export function SavedJobsPanel({
       >
         <SavedJobsPanelHeader
           eyebrow="Danh sách"
-          title="JD đã lưu"
+          title="Saved jobs"
           onRefresh={onRefresh}
           isRefreshing={list.phase === 'loading'}
           refreshTestId="jobagent-obs-saved-jobs-refresh"
@@ -283,7 +280,7 @@ export function SavedJobsPanel({
         {list.phase === 'error' && list.error ? (
           <Banner
             status="error"
-            title="Không thể tải JD đã lưu"
+            title="Unable to load saved jobs"
             description={`${list.error.summary} (${list.error.code})`}
             container="section"
             data-testid="jobagent-obs-saved-jobs-error"
@@ -293,8 +290,8 @@ export function SavedJobsPanel({
         {list.phase === 'empty' ||
         (list.loaded && items.length === 0 && list.phase !== 'error') ? (
           <EmptyState
-            title="Chưa có JD đã lưu"
-            description="Hãy lưu một mô tả công việc từ khung chat để đánh giá tại đây."
+            title="No saved jobs yet"
+            description="Save a job description from chat to evaluate it here."
             isCompact
             data-testid="jobagent-obs-saved-jobs-empty"
           />
@@ -326,10 +323,10 @@ export function SavedJobsPanel({
                       {pending ? (
                         <Text type="supporting" color="secondary" as="span">
                           {pending === 'evaluate'
-                            ? 'Đang đánh giá…'
+                            ? 'Evaluating…'
                             : pending === 'reextract'
-                              ? 'Đang trích xuất…'
-                              : 'Đang xoá…'}
+                              ? 'Extracting…'
+                              : 'Deleting…'}
                         </Text>
                       ) : null}
                       {evaluationEndContent(item)}
@@ -373,8 +370,8 @@ export function SavedJobsPanel({
           />
         ) : (
           <EmptyState
-            title="Chọn một JD"
-            description="Chọn JD trong danh sách để xem nội dung và kết quả đối chiếu CV."
+            title="Choose a saved job"
+            description="Select a saved job to view its details and CV match result."
             isCompact
           />
         )}

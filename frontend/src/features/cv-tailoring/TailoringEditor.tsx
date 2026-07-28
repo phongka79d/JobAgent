@@ -24,6 +24,7 @@ import type {CvTailoringController, TailoringSafeError} from './state';
 import {TailoredSectionEditor} from './TailoredSectionEditor';
 import {TailoringPdfPreview} from './TailoringPdfPreview';
 import {TailoringSessionDeleteDialog} from './TailoringSessionDeleteDialog';
+import {sessionDisplayLabel} from './presentation';
 import {tailoringFieldId, tailoringIssueId, type TailoredCVContent, type TailoredSection} from './types';
 import './cv-tailoring.css';
 
@@ -47,17 +48,17 @@ function safeErrorText(error: TailoringSafeError | null): string | null {
   if (error === null) return null;
   switch (error.code) {
     case 'TAILORING_PARENT_CONFLICT':
-      return 'Có version mới hơn. Bản nháp của bạn vẫn được giữ.';
+      return 'A newer version exists. Your draft is preserved.';
     case 'TAILORING_GROUNDING_FAILED':
-      return 'Nội dung chưa vượt qua kiểm tra nguồn. Bản nháp vẫn được giữ.';
+      return 'The content did not pass source checks. Your draft is preserved.';
     case 'TAILORING_COMPILE_FAILED':
-      return 'Không thể tạo PDF. Bản nháp và PDF trước đó vẫn được giữ.';
+      return 'The PDF could not be created. Your draft and previous PDF are preserved.';
     case 'TAILORING_SOURCE_STALE':
-      return 'Dữ liệu nguồn đã thay đổi. Hãy tạo một phiên mới.';
+      return 'The source changed. Create a new session.';
     case 'STREAM_DISCONNECTED':
-      return 'Mất kết nối khi tạo CV. Trạng thái bền vững chưa xác nhận hoàn tất.';
+      return 'The connection was lost. Completion has not been confirmed.';
     default:
-      return 'Không thể hoàn tất yêu cầu CV.';
+      return 'The CV request could not be completed.';
   }
 }
 
@@ -81,9 +82,9 @@ function HeaderFacts({
   readonly onEditProfile: () => void;
 }) {
   const facts = [
-    ['Họ và tên', content.header.full_name],
-    ['Địa điểm', content.header.location],
-    ['Điện thoại', content.header.phone],
+    ['Full name', content.header.full_name],
+    ['Location', content.header.location],
+    ['Phone', content.header.phone],
     ['Email', content.header.email],
     ['GitHub', content.header.github_url],
   ] as const;
@@ -91,9 +92,9 @@ function HeaderFacts({
     <Section variant="muted">
       <VStack gap={3}>
         <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
-          <Heading level={2}>Thông tin đã duyệt</Heading>
+          <Heading level={2}>Approved profile information</Heading>
           <Button
-            label="Sửa thông tin Profile"
+            label="Edit profile information"
             size="sm"
             variant="secondary"
             onClick={onEditProfile}
@@ -106,7 +107,7 @@ function HeaderFacts({
               label={label}
               value={value}
               isDisabled
-              disabledMessage="Thông tin này được quản lý trong Profile đã duyệt."
+              disabledMessage="This information is managed by the approved profile."
             />
           ) : null,
         )}
@@ -166,7 +167,7 @@ export function TailoringEditor({
       (detail?.versions ?? []).map((version) => ({
         value: version.id,
         label: `Version ${version.version_number} · ${
-          version.created_by === 'ai' ? 'AI' : 'Bạn'
+          version.created_by === 'ai' ? 'AI' : 'You'
         }`,
       })),
     [detail?.versions],
@@ -175,9 +176,9 @@ export function TailoringEditor({
   if (detail === null || draft === null) {
     return (
       <EmptyState
-        title="Chưa mở phiên CV"
-        description="Chọn một phiên CV đã chỉnh để mở editor."
-        actions={<Button label="Quay lại chat" onClick={onBackToChat} />}
+        title="No tailored CV session open"
+        description="Choose a tailored CV session to open the editor."
+        actions={<Button label="Back to chat" onClick={onBackToChat} />}
       />
     );
   }
@@ -215,6 +216,7 @@ export function TailoringEditor({
       versionId={selectedVersion?.id ?? null}
       sourceAvailable={detail.source_available}
       pdfAvailable={detail.pdf_available}
+      artifactLabel={sessionDisplayLabel(detail.session)}
       sourceUrl={artifactUrls?.source}
       pdfUrl={artifactUrls?.pdf}
     />
@@ -224,38 +226,37 @@ export function TailoringEditor({
     <Layout
       height="fill"
       header={
-        <LayoutHeader hasDivider label="Thanh công cụ CV đã chỉnh">
+        <LayoutHeader hasDivider label="Tailored CV toolbar">
           <Toolbar
-            label="Thao tác CV đã chỉnh"
+            label="Tailored CV actions"
             size="sm"
             startContent={
               <HStack gap={2} vAlign="center" wrap="wrap">
                 <Button
-                  label="Quay lại chat"
+                  label="Back to chat"
                   variant="ghost"
                   onClick={onBackToChat}
                 />
-                <Heading level={1}>CV đã chỉnh</Heading>
+                <Heading level={1}>Tailored CV</Heading>
                 <Token
-                  label={isStale ? 'Dữ liệu cũ' : 'Hiện tại'}
+                  label={isStale ? 'Needs review' : 'Current'}
                   color={isStale ? 'yellow' : 'green'}
                   size="sm"
                 />
                 <Text type="supporting">
-                  {detail.session.job_label?.title ?? detail.session.instruction}
-                  {detail.session.job_label?.company ? ` · ${detail.session.job_label.company}` : ''}
+                  {sessionDisplayLabel(detail.session)}
                 </Text>
               </HStack>
             }
             endContent={
               <HStack gap={2} wrap="wrap">
                 <Button
-                  label="Xóa phiên"
+                  label="Delete session"
                   variant="ghost"
                   onClick={() => setDeleteOpen(true)}
                 />
                 <Button
-                  label="Lưu version & tạo PDF"
+                  label="Save version and create PDF"
                   variant="primary"
                   isDisabled={editingDisabled || !state.draftDirty}
                   isLoading={isSaving}
@@ -275,7 +276,7 @@ export function TailoringEditor({
         </LayoutHeader>
       }
     >
-      <LayoutContent label="Editor CV đã chỉnh">
+      <LayoutContent label="Tailored CV editor">
         <VStack gap={3} width="100%" height="100%">
           <Section variant="transparent" padding={3} dividers={['bottom']}>
             <HStack gap={3} hAlign="between" vAlign="end" wrap="wrap">
@@ -294,7 +295,7 @@ export function TailoringEditor({
               />
               <VStack gap={1}>
                 <Text type="supporting">
-                  {selectedVersion?.created_by === 'ai' ? 'Tạo bởi AI' : 'Tạo bởi bạn'}
+                  {selectedVersion?.created_by === 'ai' ? 'Created by AI' : 'Created by you'}
                 </Text>
                 <Text type="supporting">
                   {selectedVersion
@@ -302,7 +303,7 @@ export function TailoringEditor({
                         dateStyle: 'short',
                         timeStyle: 'short',
                       }).format(new Date(selectedVersion.created_at))
-                    : 'Chưa có version'}
+                    : 'No version selected'}
                 </Text>
                 {selectedVersion ? (
                   <Text type="supporting">
@@ -316,12 +317,12 @@ export function TailoringEditor({
           {isStale ? (
             <Banner
               status="warning"
-              title="Dữ liệu nguồn đã thay đổi"
-              description="Phiên cũ vẫn xem và tải được nhưng không thể ghi thêm version."
+              title="Source data changed"
+              description="This session remains readable and downloadable, but cannot create another version."
               container="section"
               endContent={
                 <Button
-                  label="Tạo phiên mới từ dữ liệu hiện tại"
+                  label="Create a new session from current data"
                   size="sm"
                   isDisabled={!canCreateFresh || onCreateFresh === undefined}
                   onClick={onCreateFresh}
@@ -375,7 +376,7 @@ export function TailoringEditor({
                 endContent={
                   state.conflict ? (
                     <Button
-                      label="Tải version mới nhất"
+                      label="Load latest version"
                       size="sm"
                       onClick={onReloadLatest}
                     />
@@ -387,7 +388,7 @@ export function TailoringEditor({
 
           {isStreamPending ? (
             <Text type="supporting" role="status" aria-live="polite">
-              AI đang tạo version CV…
+                      AI is creating a tailored CV version…
             </Text>
           ) : null}
 
@@ -399,7 +400,7 @@ export function TailoringEditor({
                 onChange={(value) => setMobileView(value as MobileView)}
                 layout="fill"
                 hasDivider
-                aria-label="Chế độ xem CV"
+                aria-label="CV view mode"
               >
                 <Tab
                   role="tab"
@@ -454,13 +455,13 @@ export function TailoringEditor({
       >
         <VStack gap={4} padding={4}>
           <DialogHeader
-            title={`Nhờ AI chỉnh ${aiTarget?.heading ?? 'section'}`}
+            title={`Ask AI to revise ${aiTarget?.heading ?? 'this section'}`}
             onOpenChange={(isOpen) => {
               if (!isOpen && !isAiPending) setAiTarget(null);
             }}
           />
           <TextArea
-            label="Yêu cầu chỉnh sửa"
+              label="Revision request"
             value={aiInstruction}
             rows={5}
             maxLength={4_000}
@@ -469,13 +470,13 @@ export function TailoringEditor({
           />
           <HStack gap={2} hAlign="end">
             <Button
-              label="Hủy"
+              label="Cancel"
               variant="secondary"
               isDisabled={isAiPending}
               onClick={() => setAiTarget(null)}
             />
             <Button
-              label="Gửi cho AI"
+              label="Send to AI"
               variant="primary"
               isLoading={isAiPending}
               isDisabled={
@@ -516,10 +517,10 @@ export function TailoringEditor({
         onOpenChange={(isOpen) => {
           if (!isOpen) setPendingVersionId(null);
         }}
-        title="Bỏ thay đổi chưa lưu?"
-        description="Chuyển version sẽ thay bản nháp hiện tại bằng nội dung đã lưu."
-        actionLabel="Bỏ thay đổi"
-        cancelLabel="Ở lại"
+        title="Discard unsaved changes?"
+        description="Changing versions will replace the current draft with saved content."
+        actionLabel="Discard changes"
+        cancelLabel="Stay"
         onAction={() => {
           if (pendingVersionId === null) return;
           const versionId = pendingVersionId;
@@ -531,7 +532,7 @@ export function TailoringEditor({
       <TailoringSessionDeleteDialog
         isOpen={deleteOpen}
         sessionLabel={
-          detail.session.job_label?.title ?? detail.session.instruction ?? 'CV đã chỉnh'
+          sessionDisplayLabel(detail.session)
         }
         isDeleting={isDeleting}
         onOpenChange={(isOpen) => {

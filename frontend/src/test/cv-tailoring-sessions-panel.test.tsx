@@ -99,7 +99,7 @@ describe('TailoringSessionsPanel', () => {
   it('renders scoped sessions as rows with safe labels, states, and selection', async () => {
     const value = controller([
       summary(READY_ID, {
-        job_label: {title: 'Data Analyst', company: 'Synthetic Co'},
+        job_label: {title: 'Data Analyst', company: 'Synthetic Co', display_label: 'Data Analyst · Synthetic Co'},
       }),
       summary(RUNNING_ID, {
         state: 'generating',

@@ -367,7 +367,7 @@ describe('SavedJobCard rendering', () => {
       screen.queryByTestId('jobagent-job-outcome-badge'),
     ).not.toBeInTheDocument();
     expect(screen.getByText('Created')).toBeInTheDocument();
-    expect(screen.getByText(JOB_ID)).toBeInTheDocument();
+    expect(screen.queryByText(JOB_ID)).not.toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     expect(screen.getAllByText('Staff Engineer').length).toBeGreaterThanOrEqual(
       1,
@@ -590,7 +590,7 @@ describe('ChatPage durable saved-job card', () => {
     expect(
       screen.getByText('save_job · completed · 120ms'),
     ).toBeInTheDocument();
-    expect(screen.getByText(JOB_ID)).toBeInTheDocument();
+    expect(screen.queryByText(JOB_ID)).not.toBeInTheDocument();
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
       'processed',
     );
@@ -670,7 +670,7 @@ describe('ChatPage durable saved-job card', () => {
       />,
     );
     expect(screen.getAllByTestId('jobagent-saved-job-card')).toHaveLength(1);
-    expect(screen.getAllByText(JOB_ID)).toHaveLength(1);
+    expect(screen.queryByText(JOB_ID)).not.toBeInTheDocument();
     expect(screen.queryByText(/ranking|match score/i)).not.toBeInTheDocument();
   });
 

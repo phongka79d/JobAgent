@@ -13,6 +13,8 @@ import type {
   ClientRun,
   StreamPhase,
 } from '../reducer';
+import {activityLabel, activityStateLabel} from '../activityPresentation';
+import {CHAT_COPY} from '../copy';
 import './agent-activity.css';
 
 type MarkerKind = 'clock' | 'error' | 'spinner' | 'success' | 'warning';
@@ -33,7 +35,7 @@ function latestActivity(
 function runSummary(run: ClientRun, streamPhase: StreamPhase): string {
   const count = countLabel(run.activities.length);
   if (streamPhase === 'disconnected' && run.state === 'running') {
-    return 'Connection lost — Agent may still be running';
+    return 'Connection lost. Your request may still be running.';
   }
   if (run.state === 'interrupted') {
     return `Waiting for your confirmation · ${count}`;
@@ -44,29 +46,13 @@ function runSummary(run: ClientRun, streamPhase: StreamPhase): string {
   if (run.state === 'failed') {
     return `Unable to complete · ${count}`;
   }
-  return latestActivity(run.activities)?.label ?? 'Connecting…';
-}
-
-function formatDuration(durationMs: number | null): string | null {
-  if (durationMs === null) {
-    return null;
-  }
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  }
-  const seconds = durationMs / 1000;
-  return `${durationMs % 1000 === 0 ? String(seconds) : seconds.toFixed(1)}s`;
+    return latestActivity(run.activities)
+      ? activityLabel(latestActivity(run.activities)!.technicalName, latestActivity(run.activities)!.label)
+      : CHAT_COPY.connecting;
 }
 
 function activityDetail(activity: ClientAgentActivity): string {
-  return [
-    activity.technicalName,
-    activity.state,
-    formatDuration(activity.durationMs),
-    activity.errorCode,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join(' · ');
+  return activityStateLabel(activity.state);
 }
 
 function activityMarkerKind(
@@ -172,9 +158,11 @@ export function AgentActivityTimeline({
         </Text>
         {hasActivities ? (
           <Text type="supporting" color="secondary" as="span">
-            {run.state === 'running'
-              ? `View activity · ${countLabel(run.activities.length)}`
-              : 'View activity'}
+            {isOpen
+              ? 'Hide activity'
+              : run.state === 'running'
+                ? `View activity · ${countLabel(run.activities.length)}`
+                : 'View activity'}
           </Text>
         ) : null}
       </VStack>
@@ -219,7 +207,9 @@ export function AgentActivityTimeline({
                       testId={`jobagent-agent-activity-marker-${activity.activityId}`}
                     />
                     <VStack gap={0} width="100%">
-                      <Text type="body">{activity.label}</Text>
+                      <Text type="body">
+                        {activityLabel(activity.technicalName, activity.label)}
+                      </Text>
                       <Text type="supporting" color="secondary">
                         {activityDetail(activity)}
                       </Text>

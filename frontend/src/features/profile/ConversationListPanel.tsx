@@ -8,6 +8,7 @@ import type {
   ConversationSummary,
   ProfileListItem,
 } from './conversationTypes';
+import {CHAT_COPY} from '../chat/copy';
 
 export type ConversationListPanelProps = {
   profileId: string | null;
@@ -47,7 +48,7 @@ export function ConversationListPanel({
     <VStack gap={2} width="100%" data-testid="jobagent-conversation-list-panel">
       {isReady ? (
         <Button
-          label="Chat mới"
+          label={CHAT_COPY.newChat}
           variant="secondary"
           size="sm"
           isDisabled={isInteractionLocked}

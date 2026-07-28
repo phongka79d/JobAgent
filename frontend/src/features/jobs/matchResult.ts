@@ -31,6 +31,7 @@ const MATCH_RESULT_KEYS = [
   'job_id',
   'title',
   'company',
+  'display_label',
   'location',
   'work_mode',
   'source_url',
@@ -120,6 +121,7 @@ export interface CompactMatchResult {
   jobId: string;
   title: string | null;
   company: string | null;
+  displayLabel: string | null;
   location: string | null;
   workMode: JobWorkMode;
   sourceUrl: string | null;
@@ -472,6 +474,7 @@ export function parseMatchResult(
     return null;
   }
   for (const key of MATCH_RESULT_KEYS) {
+    if (key === 'display_label') continue;
     if (!Object.prototype.hasOwnProperty.call(data, key)) {
       return null;
     }
@@ -484,6 +487,9 @@ export function parseMatchResult(
 
   const title = parseNullableDisplayString(data, 'title');
   const company = parseNullableDisplayString(data, 'company');
+  const displayLabel = Object.prototype.hasOwnProperty.call(data, 'display_label')
+    ? parseNullableDisplayString(data, 'display_label')
+    : null;
   const location = parseNullableDisplayString(data, 'location');
   if (
     title === undefined ||
@@ -542,6 +548,7 @@ export function parseMatchResult(
     jobId,
     title,
     company,
+    displayLabel: displayLabel ?? null,
     location,
     workMode: workModeRaw as JobWorkMode,
     sourceUrl: safeHttpUrl(sourceUrlRaw),

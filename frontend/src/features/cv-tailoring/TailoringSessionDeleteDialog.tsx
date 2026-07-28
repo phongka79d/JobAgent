@@ -19,10 +19,10 @@ export function TailoringSessionDeleteDialog({
     <AlertDialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      title="Xóa phiên CV đã chỉnh?"
-      description={`Phiên “${sessionLabel}” cùng mọi version và file tải xuống phái sinh sẽ bị xóa.`}
-      actionLabel="Xóa phiên"
-      cancelLabel="Hủy"
+      title="Delete tailored CV session?"
+      description={`Session “${sessionLabel}” and its versions and downloaded files will be deleted.`}
+      actionLabel="Delete session"
+      cancelLabel="Cancel"
       actionVariant="destructive"
       isActionLoading={isDeleting}
       onAction={onConfirm}

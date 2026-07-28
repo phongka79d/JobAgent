@@ -43,7 +43,7 @@ export function JobReextractDialog({
       title={title}
       description={description}
       actionLabel="Re-extract JD"
-      cancelLabel="Huỷ"
+      cancelLabel="Cancel"
       actionVariant="primary"
       isActionLoading={isReextracting}
       onAction={onConfirm}

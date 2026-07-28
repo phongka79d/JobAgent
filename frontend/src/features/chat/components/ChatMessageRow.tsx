@@ -30,6 +30,7 @@ import {
   type ProfileApprovalAction,
 } from '../../profile/ApprovalCard';
 import {activeCvEvidenceForTools} from '../activeCvEvidence';
+import {CHAT_COPY} from '../copy';
 import {
   CREATE_TAILORED_CV_TOOL_NAME,
   parseCreateTailoredCvResultData,
@@ -441,7 +442,7 @@ export function ChatMessageRow({
                 />
               ) : message.isStreaming ? (
                 <Text type="label" as="span" aria-live="polite">
-                  Connecting…
+                  {CHAT_COPY.connecting}
                 </Text>
               ) : null}
               {message.content !== '' ? (
@@ -473,7 +474,7 @@ export function ChatMessageRow({
           : null}
         {tailoredCv && onOpenTailoringEditor ? (
           <Button
-            label="Mở CV đã chỉnh"
+            label={CHAT_COPY.openTailoredCv}
             size="sm"
             variant="secondary"
             onClick={() => onOpenTailoringEditor(tailoredCv.session_id)}
@@ -512,7 +513,7 @@ export function ChatMessageRow({
         ) : null}
         {showGenericInterrupted ? (
           <Text type="supporting" color="secondary" as="p">
-            Run interrupted
+            {CHAT_COPY.runInterrupted}
           </Text>
         ) : null}
       </VStack>
