@@ -156,8 +156,8 @@ export function App({deps}: AppProps = {}) {
   /** Bumps after activation/delete so sidebar invalidates profile + CV caches. */
   const [activationKey, setActivationKey] = useState(0);
   /**
-   * Bumps after activation / chat zero-result save/evaluate so sidebar-local
-   * saved-JD list/detail currentness invalidates without remounting the sidebar.
+   * Bumps after activation / chat zero-result save/evaluate so an open Saved
+   * Jobs destination refreshes without remounting the App-owned controller.
    */
   const [savedJobsInvalidateKey, setSavedJobsInvalidateKey] = useState(0);
   const requestKeyRef = useRef(0);
@@ -304,15 +304,16 @@ export function App({deps}: AppProps = {}) {
 
   /**
    * Save Profile success → one coherent activation fan-out: profile refresh,
-   * observability CV/chunk/run/graph invalidation, and saved-JD currentness
-   * invalidation (no remount; no automatic evaluate).
+   * product-data invalidation and Saved Job currentness invalidation
+   * (no remount; no automatic evaluate).
    */
   const handleProfileSaved = useCallback(() => {
     setProfileRefreshKey((k) => k + 1);
     setActivationKey((k) => k + 1);
+    savedJobs.invalidateCurrentness();
     setSavedJobsInvalidateKey((k) => k + 1);
     void workspace.reload();
-  }, [workspace.reload]);
+  }, [savedJobs.invalidateCurrentness, workspace.reload]);
 
   /** Delete success → profile summary may change if only non-active rows removed. */
   const handleCvDeleted = useCallback(() => {
@@ -320,8 +321,9 @@ export function App({deps}: AppProps = {}) {
   }, []);
 
   const handleSavedJobsInvalidated = useCallback(() => {
+    savedJobs.invalidateCurrentness();
     setSavedJobsInvalidateKey((k) => k + 1);
-  }, []);
+  }, [savedJobs.invalidateCurrentness]);
 
   return (
     <AppShell

@@ -984,9 +984,6 @@ describe('Save Profile refreshes sidebar', () => {
   });
 
   it('Save Profile fans out profile, activation, and saved-JD invalidation once', async () => {
-    const {cvHistoryPage, mockObservabilityApi} = await import(
-      './support/observability'
-    );
     const profileId = 'abababab-abab-4bab-8bab-abababababab';
     const conversationId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
     const baselineProfile = {
@@ -1066,19 +1063,6 @@ describe('Save Profile refreshes sidebar', () => {
         pending_attachment: null,
       };
     });
-
-    const firstCv = cvHistoryPage();
-    const secondCv = cvHistoryPage();
-    secondCv.items[0] = {
-      ...secondCv.items[0]!,
-      original_name: 'post-save.pdf',
-      state: 'active',
-    };
-    const fetchCvHistory = vi
-      .fn()
-      .mockResolvedValueOnce(firstCv)
-      .mockResolvedValueOnce(secondCv);
-    const observability = mockObservabilityApi({fetchCvHistory});
 
     const jobId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     const currentList = {
@@ -1194,7 +1178,6 @@ describe('Save Profile refreshes sidebar', () => {
                 loadProfile,
                 uploadCv: vi.fn(),
                 getActiveCvUrl: () => 'http://localhost/api/profile/cv',
-                observability,
               },
               workspace: {fetchProfiles, fetchProfileConversations},
             }}
@@ -1217,12 +1200,10 @@ describe('Save Profile refreshes sidebar', () => {
         );
       });
 
-      // Seed CV Manager cache, then open saved-JD (activation while JD tab open).
-      await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
-      expect(await screen.findByText('archived.pdf')).toBeInTheDocument();
-      expect(fetchCvHistory).toHaveBeenCalledTimes(1);
-
-      await userEvent.click(screen.getByRole('tab', {name: 'JD đã lưu'}));
+      // Keep Saved Jobs open while activation invalidates currentness.
+      await userEvent.click(
+        screen.getByRole('button', {name: 'Saved Jobs'}),
+      );
       await waitFor(() => {
         expect(jobsListCalls).toBeGreaterThanOrEqual(1);
       });
@@ -1235,7 +1216,6 @@ describe('Save Profile refreshes sidebar', () => {
 
       const profileBefore = loadProfile.mock.calls.length;
       const jobsBefore = jobsListCalls;
-      const cvBefore = fetchCvHistory.mock.calls.length;
 
       await userEvent.click(
         screen.getByRole('button', {name: SAVE_PROFILE_LABEL}),
@@ -1258,19 +1238,8 @@ describe('Save Profile refreshes sidebar', () => {
           screen.getByTestId(`jobagent-saved-job-stale-badge-${jobId}`),
         ).toBeInTheDocument();
       });
-      // Activation marked CV non-current without a fetch while the tab was closed.
-      expect(fetchCvHistory.mock.calls.length).toBe(cvBefore);
-
-      // Returning to CV Manager performs the deferred activation reload once.
-      await userEvent.click(screen.getByTestId('jobagent-obs-tab-cv-history'));
-      await waitFor(() => {
-        expect(fetchCvHistory.mock.calls.length).toBe(cvBefore + 1);
-      });
-      expect(await screen.findByText('post-save.pdf')).toBeInTheDocument();
-
-      // Single fan-out: each of the three signals advanced once.
+      // Single fan-out: profile and Saved Jobs signals each advanced once.
       expect(loadProfile.mock.calls.length - profileBefore).toBe(1);
-      expect(fetchCvHistory.mock.calls.length - cvBefore).toBe(1);
       expect(jobsListCalls - jobsBefore).toBeGreaterThanOrEqual(1);
     } finally {
       fetchMock.mockRestore();

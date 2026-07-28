@@ -21,8 +21,16 @@ import {
   getActiveCvUrl,
   SIDEBAR_CV_TURN_MESSAGE,
 } from '../features/profile/api';
-import {CvSidebar} from '../features/profile/CvSidebar';
-import type {ProfileWorkspaceController} from '../features/profile/workspaceState';
+import type {CvTailoringController} from '../features/cv-tailoring/state';
+import {createEmptySavedJobsController} from '../features/jobs/savedJobsState';
+import {
+  CvSidebar,
+  type CvSidebarProps,
+} from '../features/profile/CvSidebar';
+import {
+  initialProfileWorkspaceState,
+  type ProfileWorkspaceController,
+} from '../features/profile/workspaceState';
 import {
   parseAttachmentPublic,
   parseCvUploadResponse,
@@ -37,6 +45,57 @@ const PROFILE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const PROFILE_B_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const CONVERSATION_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const NOW = '2026-07-23T10:00:00Z';
+
+function emptyTailoringController(): CvTailoringController {
+  return {
+    state: {
+      profileScopeKey: 'none',
+      sessions: {phase: 'idle', data: null, error: null},
+      selectedSessionId: null,
+      selectedVersionId: null,
+      detail: {phase: 'idle', data: null, error: null},
+      draft: null,
+      draftDirty: false,
+      conflict: false,
+      stream: {phase: 'idle', data: null, error: null},
+    },
+    loadSessions: vi.fn().mockResolvedValue(undefined),
+    openSession: vi.fn().mockResolvedValue(true),
+    createSession: vi.fn().mockResolvedValue(null),
+    createAiVersion: vi.fn().mockResolvedValue(false),
+    setDraft: vi.fn(),
+    saveManualVersion: vi.fn().mockResolvedValue(false),
+    selectVersion: vi.fn().mockResolvedValue(false),
+    deleteSession: vi.fn().mockResolvedValue(true),
+  };
+}
+
+function productControllers(): Pick<
+  CvSidebarProps,
+  'workspace' | 'savedJobs' | 'tailoring' | 'savedJobsInvalidateKey'
+> {
+  const workspace: ProfileWorkspaceController = {
+    state: {
+      ...initialProfileWorkspaceState,
+      phase: 'ready',
+      pending: new Set(),
+    },
+    activate: vi.fn().mockResolvedValue(undefined),
+    createConversation: vi.fn().mockResolvedValue(undefined),
+    selectConversation: vi.fn().mockResolvedValue(undefined),
+    deleteConversation: vi.fn().mockResolvedValue(false),
+    renameProfile: vi.fn().mockResolvedValue(false),
+    deleteProfile: vi.fn().mockResolvedValue(false),
+    reload: vi.fn().mockResolvedValue(undefined),
+    adoptBootstrap: vi.fn(),
+  };
+  return {
+    workspace,
+    savedJobs: createEmptySavedJobsController(),
+    tailoring: emptyTailoringController(),
+    savedJobsInvalidateKey: 0,
+  };
+}
 
 function emptyProfile(): ProfileReadResponse {
   return {
@@ -282,6 +341,7 @@ describe('CvSidebar empty / active states', () => {
             Switch profile
           </button>
           <CvSidebar
+            {...productControllers()}
             isUploadDisabled={false}
             onSidebarUploadSuccess={vi.fn()}
             workspace={workspace}
@@ -316,6 +376,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={onSuccess}
           deps={{loadProfile, uploadCv: vi.fn()}}
@@ -345,6 +406,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
           deps={{
@@ -381,6 +443,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled
           onSidebarUploadSuccess={vi.fn()}
           deps={{loadProfile, uploadCv: vi.fn()}}
@@ -413,6 +476,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={onSuccess}
           deps={{loadProfile, uploadCv: upload}}
@@ -480,6 +544,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={onSuccess}
           workspace={workspace}
@@ -536,6 +601,7 @@ describe('CvSidebar empty / active states', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
           onCvReprocess={reextract}
@@ -831,6 +897,7 @@ describe('product CV Manager overview entry point', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
           workspace={workspace}
@@ -919,6 +986,7 @@ describe('product CV Manager overview entry point', () => {
     render(
       <Theme theme={neutralTheme}>
         <CvSidebar
+          {...productControllers()}
           isUploadDisabled={false}
           onSidebarUploadSuccess={vi.fn()}
           workspace={workspace}

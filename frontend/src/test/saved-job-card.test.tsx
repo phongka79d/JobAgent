@@ -431,7 +431,9 @@ describe('SavedJobCard rendering', () => {
       'processed',
     );
     expect(screen.getByText(/SQLite remains authoritative/i)).toBeInTheDocument();
-    expect(screen.getByText(/Graph projection unavailable/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Related data remains unavailable/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/^Synced$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/rank|matching success/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/rebuild/i).length).toBeGreaterThanOrEqual(1);

@@ -563,7 +563,9 @@ describe('App foundation shell', () => {
     await waitFor(() =>
       expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument(),
     );
-    await userEvent.click(screen.getByTestId('jobagent-obs-tab-tailored-cvs'));
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Tailored CVs'}),
+    );
     const sessionRow = await screen.findByTestId(
       'jobagent-tailoring-session-' + sessionId,
     );

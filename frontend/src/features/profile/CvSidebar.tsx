@@ -1,6 +1,6 @@
 /**
- * Approved-profile sidebar with the observability inspector.
- * Profile and upload state stay here; presentation and inspector state are delegated.
+ * Approved-profile sidebar with three product destinations.
+ * App owns workspace, Saved Jobs, and tailoring state; this component composes them.
  */
 
 import {
@@ -24,10 +24,7 @@ import {
 import type {CvManagerApi} from '../cv-manager/api';
 import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
 import {useCvManagerState} from '../cv-manager/state';
-import {
-  createEmptySavedJobsController,
-  type SavedJobsController,
-} from '../jobs/savedJobsState';
+import type {SavedJobsController} from '../jobs/savedJobsState';
 import type {CvTailoringController} from '../cv-tailoring/state';
 import {ProductSidebar} from '../navigation/ProductSidebar';
 import {
@@ -81,12 +78,12 @@ export type CvSidebarProps = {
    * Increment after activation / chat zero-result save/evaluate so sidebar-local
    * saved-JD state marks list/detail non-current (no remount, no second store).
    */
-  savedJobsInvalidateKey?: number;
-  workspace?: ProfileWorkspaceController;
-  savedJobs?: SavedJobsController;
+  savedJobsInvalidateKey: number;
+  workspace: ProfileWorkspaceController;
+  savedJobs: SavedJobsController;
   onCreateTailoredCv?: (jobId: string) => void;
   isTailoringPending?: boolean;
-  tailoring?: CvTailoringController;
+  tailoring: CvTailoringController;
   onOpenTailoringSession?: (sessionId: string) => void;
   deps?: CvSidebarDeps;
 };
@@ -170,7 +167,7 @@ function CvSidebarController({
   reprocessTerminal = null,
   refreshKey = 0,
   activationKey = 0,
-  savedJobsInvalidateKey = 0,
+  savedJobsInvalidateKey,
   workspace,
   savedJobs,
   onCreateTailoredCv,
@@ -179,7 +176,7 @@ function CvSidebarController({
   onOpenTailoringSession,
   deps,
 }: CvSidebarProps) {
-  const selectedWorkspaceProfile = workspace?.state.profiles.find(
+  const selectedWorkspaceProfile = workspace.state.profiles.find(
     (candidate) => candidate.id === workspace.state.activeProfileId,
   );
   const cvManager = useCvManagerState({
@@ -193,7 +190,7 @@ function CvSidebarController({
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
 
   const [profile, setProfile] = useState<ProfileReadResponse | null>(null);
-  const profileScope = workspace?.state.activeProfileId ?? 'legacy';
+  const profileScope = workspace.state.activeProfileId ?? 'legacy';
   const [loadedProfileScope, setLoadedProfileScope] = useState<string | null>(
     null,
   );
@@ -297,7 +294,7 @@ function CvSidebarController({
       setUploadError(null);
       try {
         const result = await doUpload(file);
-        const expectedConversationId = workspace?.state.conversations.find(
+        const expectedConversationId = workspace.state.conversations.find(
           (conversation) => conversation.profile_id === target.id,
         )?.id;
         if (
@@ -363,22 +360,20 @@ function CvSidebarController({
 
   const overview = (
     <VStack gap={4} width="100%">
-      {workspace ? (
-        <ProfileConversationSidebar
-          workspace={workspace}
-          isInteractionLocked={isUploadDisabled}
-          onReextract={(target) => {
-            if (
-              target.id === workspace.state.activeProfileId &&
-              scopedProfile?.active_attachment
-            ) {
-              onCvReprocess?.(target.id);
-            }
-          }}
-          onRetryUpload={handleRetryUpload}
-          onProfileDeleted={onCvDeleted}
-        />
-      ) : null}
+      <ProfileConversationSidebar
+        workspace={workspace}
+        isInteractionLocked={isUploadDisabled}
+        onReextract={(target) => {
+          if (
+            target.id === workspace.state.activeProfileId &&
+            scopedProfile?.active_attachment
+          ) {
+            onCvReprocess?.(target.id);
+          }
+        }}
+        onRetryUpload={handleRetryUpload}
+        onProfileDeleted={onCvDeleted}
+      />
       <ProfileOverviewPanel
         stateLabel={state.text}
         stateVariant={state.variant}
@@ -409,7 +404,7 @@ function CvSidebarController({
         }}
         onActivateProfile={(attachmentId) => {
           const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
-          if (item?.profile_id) void workspace?.activate(item.profile_id);
+          if (item?.profile_id) void workspace.activate(item.profile_id);
         }}
         onDeleted={handleCvManagerDeleted}
       />
@@ -420,10 +415,11 @@ function CvSidebarController({
     <CvSidebarShell>
       <ProductSidebar
         overview={overview}
-        savedJobs={savedJobs ?? createEmptySavedJobsController()}
+        savedJobs={savedJobs}
+        savedJobsInvalidateKey={savedJobsInvalidateKey}
         onCreateTailoredCv={onCreateTailoredCv}
         isTailoringPending={isTailoringPending}
-        tailoring={tailoring!}
+        tailoring={tailoring}
         onOpenTailoringSession={onOpenTailoringSession}
       />
     </CvSidebarShell>

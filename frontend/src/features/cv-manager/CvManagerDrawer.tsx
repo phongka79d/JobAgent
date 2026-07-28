@@ -37,7 +37,7 @@ function statusVariant(state: CvManagerItem['state']): 'success' | 'neutral' | '
 
 function CvActions({item, controller, onCvReprocess, onActivateProfile, onRetryUpload}: Pick<CvManagerDrawerProps, 'controller' | 'onCvReprocess' | 'onActivateProfile' | 'onRetryUpload'> & {item: CvManagerItem}) {
   const actions = item.allowed_actions;
-  return <HStack gap={1} wrap="wrap">
+  return <HStack gap={1} wrap="wrap" className="jobagent-cv-manager-actions">
     {actions.includes('preview') ? <Button label={CV_MANAGER_COPY.preview} size="sm" variant="secondary" onClick={() => window.open(cvFileUrl(item.id, 'inline'), '_blank', 'noopener,noreferrer')} /> : null}
     {actions.includes('download') ? <Button label={CV_MANAGER_COPY.download} size="sm" variant="secondary" onClick={() => window.open(cvFileUrl(item.id, 'attachment'), '_blank', 'noopener,noreferrer')} /> : null}
     {actions.includes('reextract') ? <Button label={CV_MANAGER_COPY.reextract} size="sm" variant="secondary" onClick={() => onCvReprocess?.(item.id)} /> : null}
