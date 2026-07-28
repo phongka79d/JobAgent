@@ -801,6 +801,71 @@ describe('shared sidebar upload → chat turn', () => {
 });
 
 describe('product CV Manager overview entry point', () => {
+  it('does not render Retry upload in the production sidebar without a retry handler', async () => {
+    const base = uploadResponse('failed-resume.pdf').bootstrap!;
+    const failedProfile = {
+      ...base.profile,
+      attachment_state: 'failed' as const,
+      state: 'pending' as const,
+      setup_status: 'extraction_failed' as const,
+    };
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [failedProfile],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: CONVERSATION_ID,
+        conversations: [base.conversation],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile: vi.fn(),
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          workspace={workspace}
+          deps={{
+            loadProfile: vi.fn().mockResolvedValue(emptyProfile()),
+            cvManager: {
+              fetchCvManager: vi.fn().mockResolvedValue({
+                items: [{
+                  id: ATTACHMENT_ID,
+                  original_name: 'failed-resume.pdf',
+                  state: 'failed',
+                  failure_code: 'EXTRACTION_FAILED',
+                  page_count: null,
+                  file_available: false,
+                  profile_id: null,
+                  profile_display_name: null,
+                  profile_state: null,
+                  is_active_profile: false,
+                  allowed_actions: ['retry_upload'],
+                  created_at: NOW,
+                  updated_at: NOW,
+                }],
+              }),
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', {name: 'Manage CVs'}));
+    const drawer = await screen.findByRole('dialog', {name: /CV Manager|Manage CVs/i});
+
+    expect(within(drawer).queryByRole('button', {name: 'Retry upload'})).not.toBeInTheDocument();
+  });
+
   it('opens Manage CVs and deletes only the unowned attachment', async () => {
     const base = uploadResponse('managed-resume.pdf').bootstrap!;
     const readyProfile = {
@@ -882,12 +947,12 @@ describe('product CV Manager overview entry point', () => {
     ).toBeInTheDocument();
 
     await userEvent.click(
-      within(drawer).getByRole('button', {name: /Delete CV|Delete/i}),
+      within(drawer).getByRole('button', {name: 'Delete CV'}),
     );
     const confirmation = await screen.findByRole('alertdialog');
     expect(confirmation).toHaveTextContent('managed-resume.pdf');
     await userEvent.click(
-      within(confirmation).getByRole('button', {name: /Delete CV|Delete/i}),
+      within(confirmation).getByRole('button', {name: 'Delete CV'}),
     );
 
     await waitFor(() => {

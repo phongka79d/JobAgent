@@ -396,16 +396,16 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
     );
 
     expect(
-      screen.getByRole('button', {name: /Preview|Open/i}),
+      screen.getByRole('button', {name: 'Preview'}),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', {name: /Download/i}),
+      screen.getByRole('button', {name: 'Download'}),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', {name: /Re-extract/i}),
+      screen.getByRole('button', {name: 'Re-extract'}),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', {name: /Delete/i}),
+      screen.queryByRole('button', {name: 'Delete CV'}),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', {name: /Make active|Activate/i}),
@@ -480,10 +480,40 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
       </Theme>,
     );
 
-    await userEvent.click(screen.getByRole('button', {name: /Activate profile/i}));
-    await userEvent.click(screen.getByRole('button', {name: /Retry upload/i}));
+    await userEvent.click(screen.getByRole('button', {name: 'Activate profile'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Retry upload'}));
     expect(onActivateProfile).toHaveBeenCalledWith(item.id);
     expect(onRetryUpload).toHaveBeenCalledWith(item.id);
+  });
+
+  it('selects the CV row activated by the user', async () => {
+    const first = activeItem();
+    const second = {
+      ...unownedFailedItem(),
+      original_name: 'other-resume.pdf',
+    };
+    const select = vi.fn();
+    const controller = {
+      ...drawerController({select}),
+      state: {
+        phase: 'ready' as const,
+        items: [first, second],
+        selectedId: first.id,
+        pendingByAttachment: {},
+        errorsByAttachment: {},
+        deleteTargetId: null,
+      },
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller} />
+      </Theme>,
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: /^other-resume\.pdf/}));
+
+    expect(select).toHaveBeenCalledWith(second.id);
   });
 
   it('uses a standard desktop side panel and a narrow fullscreen dialog with focus behavior', async () => {
@@ -551,7 +581,7 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
     );
 
     await userEvent.click(
-      screen.getByRole('button', {name: /Delete CV|Delete/i}),
+      screen.getByRole('button', {name: 'Delete CV'}),
     );
     expect(openDeleteDialog).toHaveBeenCalledWith(item.id);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -585,7 +615,7 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
     const dialog = screen.getByRole('alertdialog');
     expect(dialog).toHaveTextContent('failed-upload.pdf');
     await userEvent.click(
-      within(dialog).getByRole('button', {name: /Delete CV|Delete/i}),
+      within(dialog).getByRole('button', {name: 'Delete CV'}),
     );
     expect(confirmDelete).toHaveBeenCalledWith(item.id);
   });

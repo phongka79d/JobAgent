@@ -42,7 +42,7 @@ function CvActions({item, controller, onCvReprocess, onActivateProfile, onRetryU
     {actions.includes('download') ? <Button label={CV_MANAGER_COPY.download} size="sm" variant="secondary" onClick={() => window.open(cvFileUrl(item.id, 'attachment'), '_blank', 'noopener,noreferrer')} /> : null}
     {actions.includes('reextract') ? <Button label={CV_MANAGER_COPY.reextract} size="sm" variant="secondary" onClick={() => onCvReprocess?.(item.id)} /> : null}
     {actions.includes('activate_profile') ? <Button label={CV_MANAGER_COPY.activateProfile} size="sm" variant="secondary" onClick={() => onActivateProfile?.(item.id)} /> : null}
-    {actions.includes('retry_upload') ? <Button label={CV_MANAGER_COPY.retryUpload} size="sm" variant="secondary" onClick={() => onRetryUpload?.(item.id)} /> : null}
+    {actions.includes('retry_upload') && onRetryUpload ? <Button label={CV_MANAGER_COPY.retryUpload} size="sm" variant="secondary" onClick={() => onRetryUpload(item.id)} /> : null}
     {actions.includes('delete_cv') ? <Button label={CV_MANAGER_COPY.delete} size="sm" variant="destructive" isLoading={Boolean(controller.state.pendingByAttachment[item.id])} onClick={() => controller.openDeleteDialog(item.id)} /> : null}
   </HStack>;
 }
@@ -66,7 +66,7 @@ export function CvManagerDrawer({isOpen, onOpenChange, controller, onCvReprocess
           {state.phase === 'loading' && state.items.length === 0 ? <Text type="body">{CV_MANAGER_COPY.loading}</Text> : null}
           {state.phase !== 'loading' && state.items.length === 0 ? <Text type="body">{CV_MANAGER_COPY.emptyTitle}</Text> : null}
           {state.items.length > 0 ? <List density="compact" hasDividers header={<Text type="label">{CV_MANAGER_COPY.listLabel}</Text>}>
-            {state.items.map((item) => <ListItem key={item.id} label={item.original_name} description={<VStack gap={1}><HStack gap={2} vAlign="center"><StatusDot variant={statusVariant(item.state)} label={item.state} /><Text type="supporting">{item.state}{item.profile_display_name ? ` · ${item.profile_display_name}` : ''}</Text></HStack><CvActions item={item} controller={controller} onCvReprocess={onCvReprocess} onActivateProfile={onActivateProfile} onRetryUpload={onRetryUpload} /></VStack>} isSelected={state.selectedId === item.id} />)}
+            {state.items.map((item) => <ListItem key={item.id} label={item.original_name} description={<VStack gap={1}><HStack gap={2} vAlign="center"><StatusDot variant={statusVariant(item.state)} label={item.state} /><Text type="supporting">{item.state}{item.profile_display_name ? ` · ${item.profile_display_name}` : ''}</Text></HStack><CvActions item={item} controller={controller} onCvReprocess={onCvReprocess} onActivateProfile={onActivateProfile} onRetryUpload={onRetryUpload} /></VStack>} isSelected={state.selectedId === item.id} onClick={() => controller.select(item.id)} />)}
           </List> : null}
         </VStack>
       </LayoutContent>} footer={<LayoutFooter hasDivider><HStack hAlign="end"><Button label={CV_MANAGER_COPY.refresh} variant="secondary" onClick={() => void controller.refresh()} /></HStack></LayoutFooter>} />
