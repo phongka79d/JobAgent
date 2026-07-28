@@ -23,6 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.settings import Settings, get_settings
 from app.db.session import get_session_factory
 from app.services.cv_tailoring import TailoringCoordinator
+from app.services.cv_document_extraction import (
+    ShopAIKeyStructuredCVDocumentInvoker,
+)
+from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 from app.storage.cv_tailoring import TailoringArtifactStorage
 from app.tools.registry import ToolRegistry, production_registry
@@ -52,6 +56,17 @@ class CVTailoringDeps:
     storage: TailoringArtifactStorage
     settings: Settings
     session_factory: async_sessionmaker[AsyncSession]
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileReextractDeps:
+    session_factory: async_sessionmaker[AsyncSession]
+    storage: AttachmentStorage
+    document_invoker: Any
+    normalizer: SkillNormalizer
+    settings: Settings
+    sqlite_path: str | Path
+    graph_driver: Any | None = None
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -116,11 +131,32 @@ def get_cv_tailoring_deps(request: Request) -> CVTailoringDeps:
     )
 
 
+def get_profile_reextract_deps(request: Request) -> ProfileReextractDeps:
+    settings = get_settings_dep(request)
+    state = getattr(request.app, "state", None)
+    storage = getattr(state, "storage", None) if state is not None else None
+    if not isinstance(storage, AttachmentStorage):
+        storage = AttachmentStorage(settings.FILES_DIR)
+    return ProfileReextractDeps(
+        session_factory=get_session_factory(),
+        storage=storage,
+        document_invoker=ShopAIKeyStructuredCVDocumentInvoker(),
+        normalizer=SkillNormalizer.production(),
+        settings=settings,
+        sqlite_path=settings.SQLITE_PATH,
+        graph_driver=(
+            getattr(state, "neo4j_driver", None) if state is not None else None
+        ),
+    )
+
+
 __all__ = [
     "ChatAgentDeps",
     "ChatModelLike",
     "CVTailoringDeps",
+    "ProfileReextractDeps",
     "get_cv_tailoring_deps",
     "get_chat_agent_deps",
+    "get_profile_reextract_deps",
     "get_settings_dep",
 ]

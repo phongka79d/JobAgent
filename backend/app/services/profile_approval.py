@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -144,6 +144,7 @@ def _prefs_equal(a: JobPreferences, b: JobPreferences) -> bool:
 @dataclass(frozen=True, slots=True)
 class _Preflight:
     draft: ProfileDraftPayload
+    draft_updated_at: datetime
     draft_row_source_attachment_id: str | None
     new_attachment: Attachment | None
     new_storage_path: str | None
@@ -176,6 +177,7 @@ async def _load_preflight(
     *,
     check_files: bool,
     expected_profile_id: str,
+    expected_draft_updated_at: datetime | None = None,
 ) -> _Preflight:
     """Validate draft and attachment prerequisites.
 
@@ -194,6 +196,22 @@ async def _load_preflight(
             "Current profile draft belongs to another profile",
             code="PROFILE_INCONSISTENT",
         )
+    if expected_draft_updated_at is not None:
+        actual_revision = (
+            draft_row.updated_at.replace(tzinfo=UTC)
+            if draft_row.updated_at.tzinfo is None
+            else draft_row.updated_at.astimezone(UTC)
+        )
+        expected_revision = (
+            expected_draft_updated_at.replace(tzinfo=UTC)
+            if expected_draft_updated_at.tzinfo is None
+            else expected_draft_updated_at.astimezone(UTC)
+        )
+        if actual_revision != expected_revision:
+            raise ProfileApprovalError(
+                "The review changed; reload it before approving",
+                code="PROFILE_REEXTRACT_CONFLICT",
+            )
 
     try:
         draft = parse_profile_draft_payload(draft_row.draft_json)
@@ -312,6 +330,7 @@ async def _load_preflight(
 
     return _Preflight(
         draft=draft,
+        draft_updated_at=draft_row.updated_at,
         draft_row_source_attachment_id=source_id,
         new_attachment=new_attachment,
         new_storage_path=new_storage_path,
@@ -558,6 +577,7 @@ async def commit_approved_draft(
     storage: AttachmentStorage,
     normalizer: SkillNormalizer,
     expected_profile_id: str,
+    expected_draft_updated_at: datetime | None = None,
     driver: AsyncGraphDriver | None = None,
     failpoint: str | None = None,
     sync_fn: Callable[..., Awaitable[None]] | None = None,
@@ -584,6 +604,7 @@ async def commit_approved_draft(
                 storage,
                 check_files=True,
                 expected_profile_id=expected_profile_id,
+                expected_draft_updated_at=expected_draft_updated_at,
             )
         except ProfileApprovalError as exc:
             return ApprovalCommitResult(
@@ -616,9 +637,11 @@ async def commit_approved_draft(
                 storage=None,
                 check_files=False,
                 expected_profile_id=expected_profile_id,
+                expected_draft_updated_at=expected_draft_updated_at,
             )
             if (
-                live.draft_row_source_attachment_id
+                live.draft_updated_at != preflight.draft_updated_at
+                or live.draft_row_source_attachment_id
                 != preflight.draft_row_source_attachment_id
                 or live.active_attachment_id_for_profile != target_att_id
             ):

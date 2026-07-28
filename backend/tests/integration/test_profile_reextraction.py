@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 from app.core.ids import new_uuid
+from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
 from app.db.session import build_async_engine
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
@@ -20,8 +21,12 @@ from app.services.evaluation_context import (
     evaluation_context_hash,
 )
 from app.services.profile_approval import commit_approved_draft
-from app.services.profile_drafts import propose_profile_from_cv
+from app.services.profile_reextraction import (
+    ProfileReextractError,
+    ProfileReextractionCoordinator,
+)
 from app.storage.attachments import AttachmentStorage
+from sqlalchemy import func, select
 
 from tests.integration.test_profile_approval import _seed_cv_document_draft
 from tests.support.db_migration import run_async, session_factory
@@ -170,19 +175,70 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 conversation_ids = {first.id, second.id}
                 job_id = job.id
 
-            proposed = await propose_profile_from_cv(
-                attachment_id=attachment_id,
-                target_profile_id=profile_id,
+            async with factory() as session:
+                before_counts: list[int | None] = []
+                for model in (ChatMessage, AgentRun, ToolExecution, Conversation):
+                    before_counts.append(
+                        await session.scalar(
+                            select(func.count()).select_from(model)
+                        )
+                    )
+
+            coordinator = ProfileReextractionCoordinator(
                 session_factory=factory,
                 storage=storage,
                 normalizer=_normalizer(),
                 invoker=invoker,
-                reprocess=True,
+                graph_driver=None,
             )
-            assert proposed.tool_result.ok is True
+            events = [event async for event in coordinator.stream(profile_id)]
+            assert [event.event for event in events] == [
+                "reextract_progress",
+                "reextract_progress",
+                "reextract_progress",
+                "reextract_progress",
+                "reextract_review_ready",
+            ]
+            assert [
+                event.payload.stage
+                for event in events[:-1]
+                if hasattr(event.payload, "stage")
+            ] == [
+                "validating_source",
+                "extracting_document",
+                "projecting_profile",
+                "publishing_review",
+            ]
+            with pytest.raises(ProfileReextractError) as second_reextract:
+                _ = [event async for event in coordinator.stream(profile_id)]
+            assert second_reextract.value.code == "PROFILE_REVIEW_PENDING"
+            review = await coordinator.get_review(profile_id)
+            with pytest.raises(ProfileReextractError) as stale_discard:
+                await coordinator.discard(
+                    profile_id,
+                    revision=datetime(2000, 1, 1, tzinfo=UTC),
+                )
+            assert stale_discard.value.code == "PROFILE_REEXTRACT_CONFLICT"
+            await coordinator.discard(profile_id, revision=review.revision)
             async with factory() as session:
+                assert await profile_repo.get_current_draft(session) is None
+                assert await cv_doc_repo.get_draft(session, attachment_id) is None
+            republished = [
+                event async for event in coordinator.stream(profile_id)
+            ]
+            assert republished[-1].event == "reextract_review_ready"
+            async with factory() as session:
+                after_counts: list[int | None] = []
+                for model in (ChatMessage, AgentRun, ToolExecution, Conversation):
+                    after_counts.append(
+                        await session.scalar(
+                            select(func.count()).select_from(model)
+                        )
+                    )
+                assert after_counts == before_counts
                 draft = await profile_repo.get_current_draft(session)
                 assert draft is not None
+                original_draft_revision = draft.updated_at
                 assert draft.target_profile_id == profile_id
                 assert draft.draft_json["job_preferences"] == _preferences()
                 approved_before_approval = await profile_repo.get_profile(
@@ -208,7 +264,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                     "acceptable_work_modes": ["onsite"],
                     "target_seniority": ["junior"],
                 }
-                await profile_repo.upsert_current_draft(
+                changed_draft = await profile_repo.upsert_current_draft(
                     session,
                     draft_json=changed,
                     source_attachment_id=attachment_id,
@@ -219,12 +275,24 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
             async def no_sync() -> None:
                 return None
 
+            conflicted = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                sync_fn=no_sync,
+                expected_profile_id=profile_id,
+                expected_draft_updated_at=original_draft_revision,
+            )
+            assert conflicted.ok is False
+            assert conflicted.code == "PROFILE_REEXTRACT_CONFLICT"
+
             approved = await commit_approved_draft(
                 session_factory=factory,
                 storage=storage,
                 normalizer=_normalizer(),
                 sync_fn=no_sync,
                 expected_profile_id=profile_id,
+                expected_draft_updated_at=changed_draft.updated_at,
             )
             assert approved.ok is True
             assert approved.profile_id == profile_id

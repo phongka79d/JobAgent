@@ -52,6 +52,7 @@ from app.schemas.profile_setup import (
 from app.services.activity_gate import (
     ActivityBlockedError,
     assert_profile_idle,
+    assert_profile_review_clear,
     assert_workspace_idle,
 )
 from app.services.chat_turns import (
@@ -158,6 +159,13 @@ async def _assert_upload_activity_gate(
                 await assert_workspace_idle(
                     session, code=ERROR_PROFILE_SETUP_IN_PROGRESS
                 )
+                active_id = await workspace_repo.get_active_profile_id(session)
+                if active_id is not None:
+                    await assert_profile_review_clear(
+                        session,
+                        profile_id=active_id,
+                        code="PROFILE_REVIEW_PENDING",
+                    )
             except ActivityBlockedError as exc:
                 raise CvUploadError(exc.code, exc.summary) from exc
 
@@ -298,6 +306,7 @@ async def _pending_can_start(
     if draft is not None and draft.target_profile_id == profile_id:
         return False
     try:
+        await assert_profile_review_clear(session, profile_id=profile_id)
         await assert_profile_idle(
             session,
             profile_id=profile_id,
@@ -533,6 +542,13 @@ async def upload_cv(
                     await assert_workspace_idle(
                         session, code=ERROR_PROFILE_SETUP_IN_PROGRESS
                     )
+                    active_id = await workspace_repo.get_active_profile_id(session)
+                    if active_id is not None:
+                        await assert_profile_review_clear(
+                            session,
+                            profile_id=active_id,
+                            code="PROFILE_REVIEW_PENDING",
+                        )
                 except ActivityBlockedError as exc:
                     raise CvUploadError(exc.code, exc.summary) from exc
                 row = await att_repo.create_staged(

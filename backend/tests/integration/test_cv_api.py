@@ -875,6 +875,49 @@ def test_ready_profile_activation_is_blocked_while_setup_is_pending(
     assert activated.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
 
 
+def test_upload_is_blocked_while_active_profile_review_is_pending(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+
+    async def _seed_review() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="ready-review-upload",
+                original_name="ready.pdf",
+                size_bytes=100,
+                storage_path=new_uuid(),
+                page_count=1,
+            )
+            await att_repo.mark_active(session, attachment.id, page_count=1)
+            profile = await profile_repo.create_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Ready profile",
+                profile_json={},
+                location=None,
+                extraction_version="fixture-v1",
+                source_hash="fixture-source",
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            await profile_repo.upsert_current_draft(
+                session,
+                draft_json={"candidate_profile": {}, "job_preferences": {}},
+                source_attachment_id=attachment.id,
+                target_profile_id=profile.id,
+            )
+            await session.commit()
+
+    run_async(_seed_review())
+    with health_client() as client:
+        response = _upload(client, DIGITAL_CV.read_bytes())
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "PROFILE_REVIEW_PENDING"
+
+
 def test_upload_response_rejects_inconsistent_outcome_bootstrap_coupling(
     cv_api_env: tuple[Path, Path, FakeDriver],
 ) -> None:

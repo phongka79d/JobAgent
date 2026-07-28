@@ -249,7 +249,11 @@ async def activate_profile_by_id(
     from app.repositories import profiles as profiles_repo
     from app.repositories import workspace_state as workspace_repo
     from app.schemas.profile import SafeWarning, SelectionResponse
-    from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
+    from app.services.activity_gate import (
+        ActivityBlockedError,
+        assert_profile_review_clear,
+        assert_workspace_idle,
+    )
     from app.services.conversations import project_conversation
     from app.services.profile_projection import (
         ProfileProjectionError,
@@ -260,6 +264,11 @@ async def activate_profile_by_id(
         try:
             try:
                 await assert_workspace_idle(session)
+                current_id = await workspace_repo.get_active_profile_id(session)
+                if current_id is not None:
+                    await assert_profile_review_clear(
+                        session, profile_id=current_id
+                    )
             except ActivityBlockedError as exc:
                 raise ProfileActivationError(exc.code, exc.summary) from exc
             profile = await profiles_repo.get_profile(session, profile_id)
@@ -277,7 +286,6 @@ async def activate_profile_by_id(
                     "PROFILE_SETUP_IN_PROGRESS",
                     "finish or discard the pending profile setup first",
                 )
-            current_id = await workspace_repo.get_active_profile_id(session)
             current = (
                 await profiles_repo.get_profile(session, current_id)
                 if current_id

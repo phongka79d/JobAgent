@@ -13,6 +13,8 @@ from app.db.models.chat import (
     Conversation,
 )
 from app.db.models.cv_tailoring import CVTailoringSession
+from app.db.models.profiles import PROFILE_STATE_READY
+from app.repositories import profiles as profile_repo
 from app.schemas.cv_tailoring import TAILORING_SESSION_STATE_GENERATING
 
 
@@ -116,6 +118,27 @@ async def assert_profile_idle(
         session, Conversation.profile_id == profile_id
     ) or await _has_tailoring_activity(session, profile_id=profile_id):
         raise ActivityBlockedError(code, "profile has an active run")
+
+
+async def assert_profile_review_clear(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+    code: str = "PROFILE_REVIEW_PENDING",
+) -> None:
+    """Block lifecycle mutations while this profile owns a durable review."""
+    draft = await profile_repo.get_current_draft(session)
+    profile = await profile_repo.get_profile(session, profile_id)
+    if (
+        profile is not None
+        and profile.state == PROFILE_STATE_READY
+        and draft is not None
+        and draft.target_profile_id == profile_id
+    ):
+        raise ActivityBlockedError(
+            code,
+            "Approve or discard the pending profile review first",
+        )
 
 
 async def assert_tailoring_start_allowed(

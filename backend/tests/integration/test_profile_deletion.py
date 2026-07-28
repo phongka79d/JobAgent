@@ -277,6 +277,19 @@ def test_profile_delete_preserves_other_profile_global_job_and_normalizes_fallba
             driver.candidates.update({target_id, fallback_id})
             driver.jobs.add(job_id)
             driver.skills.add("python")
+            with pytest.raises(ProfileDeletionError) as pending_review:
+                await delete_profile(
+                    profile_id=target_id,
+                    session_factory=factory,
+                    storage=storage,
+                    graph_driver=driver,
+                    sqlite_path=db_path,
+                )
+            assert pending_review.value.code == "PROFILE_REVIEW_PENDING"
+            async with factory() as session:
+                await profiles_repo.delete_current_draft(session)
+                await documents_repo.delete_draft(session, target_attachment)
+                await session.commit()
             result = await delete_profile(
                 profile_id=target_id,
                 session_factory=factory,

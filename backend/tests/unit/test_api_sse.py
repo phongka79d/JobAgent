@@ -4,12 +4,23 @@ from collections.abc import AsyncIterator
 
 import anyio
 import pytest
-from app.api.sse import format_validated_sse, open_sse_response
+from app.api.sse import (
+    format_profile_reextract_sse,
+    format_validated_sse,
+    open_sse_response,
+    open_typed_sse_response,
+)
+from app.schemas.profile_reextraction import (
+    ProfileReextractEvent,
+    ProfileReextractProgress,
+)
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.chat_turns import ChatTurnError
 from fastapi import HTTPException
 
 RUN_ID = "11111111-1111-4111-8111-111111111111"
+PROFILE_ID = "22222222-2222-4222-8222-222222222222"
+OPERATION_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def _event() -> SseEvent:
@@ -26,6 +37,24 @@ def test_format_validated_sse_preserves_event_id_and_compact_json() -> None:
     assert "event: assistant_status" in framed
     assert f"id: {event.event_id}" in framed
     assert '"message":"Working"' in framed
+
+
+def test_format_profile_reextract_sse_uses_separate_event_contract() -> None:
+    event = ProfileReextractEvent(
+        event_id="44444444-4444-4444-8444-444444444444",
+        operation_id=OPERATION_ID,
+        profile_id=PROFILE_ID,
+        timestamp="2026-07-28T10:00:00Z",
+        event="reextract_progress",
+        payload=ProfileReextractProgress(
+            stage="extracting_document",
+            message="Extracting retained CV",
+        ),
+    )
+    framed = format_profile_reextract_sse(event).decode("utf-8")
+    assert "event: reextract_progress" in framed
+    assert f"id: {event.event_id}" in framed
+    assert '"operation_id":"33333333-3333-4333-8333-333333333333"' in framed
 
 
 @pytest.mark.asyncio
@@ -93,6 +122,24 @@ async def test_open_sse_response_accepts_custom_error_type_and_headers() -> None
         headers={"X-CV-Tailoring-Session-Id": RUN_ID},
     )
     assert response.headers["X-CV-Tailoring-Session-Id"] == RUN_ID
+
+
+@pytest.mark.asyncio
+async def test_open_typed_sse_response_primes_and_serializes_generic_events() -> None:
+    async def events() -> AsyncIterator[str]:
+        yield "first"
+        yield "second"
+
+    response = await open_typed_sse_response(
+        events(),
+        serializer=lambda value: value.encode("utf-8"),
+        error_mapper=lambda exc: HTTPException(status_code=400),
+        error_types=(ValueError,),
+        headers={"X-Operation": OPERATION_ID},
+    )
+    assert response.headers["X-Operation"] == OPERATION_ID
+    assert await response.body_iterator.__anext__() == b"first"
+    assert await response.body_iterator.__anext__() == b"second"
 
 
 @pytest.mark.asyncio

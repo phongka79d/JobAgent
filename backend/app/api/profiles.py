@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.sse import EventSourceResponse
 
-from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
-from app.api.sse import open_sse_response
+from app.api.dependencies import (
+    ProfileReextractDeps,
+    get_profile_reextract_deps,
+)
+from app.api.sse import format_profile_reextract_sse, open_typed_sse_response
 from app.core.settings import get_settings
 from app.db.models.profiles import PROFILE_DISPLAY_NAME_MAX
 from app.db.session import get_session_factory
-from app.repositories import conversations as conversations_repo
 from app.repositories import profiles as profiles_repo
-from app.repositories import workspace_state as workspace_repo
-from app.schemas.common import UuidStr
+from app.schemas.common import AwareUtcDatetime, UuidStr
 from app.schemas.profile import (
     ProfileDeleteResponse,
     ProfileDetail,
@@ -24,14 +25,21 @@ from app.schemas.profile import (
     ReextractRequest,
     SelectionResponse,
 )
-from app.services.activity_gate import ActivityBlockedError, assert_workspace_idle
-from app.services.chat_turns import ChatTurnError, stream_cv_reprocess
+from app.schemas.profile_reextraction import (
+    ProfileReextractApprovalResponse,
+    ProfileReextractApproveRequest,
+    ProfileReextractReview,
+)
 from app.services.profile_activation import (
     ProfileActivationError,
     activate_profile_by_id,
 )
 from app.services.profile_deletion import ProfileDeletionError
 from app.services.profile_deletion import delete_profile as delete_profile_service
+from app.services.profile_reextraction import (
+    ProfileReextractError,
+    ProfileReextractionCoordinator,
+)
 from app.services.profile_projection import (
     ProfileProjectionError,
     build_profile_detail,
@@ -40,19 +48,31 @@ from app.services.profile_projection import (
 from app.storage.attachments import AttachmentStorage
 
 
-def _http_for_reextract_error(exc: ChatTurnError) -> HTTPException:
+def _http_for_reextract_error(exc: Exception) -> HTTPException:
+    if not isinstance(exc, ProfileReextractError):
+        return HTTPException(
+            status_code=500,
+            detail={
+                "code": "PROFILE_REEXTRACT_FAILED",
+                "summary": "CV re-extraction could not be started",
+            },
+        )
     status = {
+        "PROFILE_NOT_FOUND": 404,
         "PROFILE_NOT_READY": 409,
-        "CONVERSATION_NOT_FOUND": 404,
-        "CONVERSATION_SWITCH_BLOCKED": 409,
-        "APPROVAL_ACTION_REQUIRED": 409,
         "CV_ATTACHMENT_NOT_FOUND": 404,
         "CV_FILE_UNAVAILABLE": 404,
         "CV_NOT_REPROCESSABLE": 409,
-    }.get(exc.code, 400)
+        "PROFILE_REVIEW_PENDING": 409,
+        "PROFILE_REEXTRACT_CONFLICT": 409,
+        "PROFILE_REEXTRACT_DRAFT_NOT_FOUND": 404,
+        "PROFILE_REEXTRACT_DRAFT_INVALID": 422,
+        "PROFILE_INCONSISTENT": 409,
+        "PROFILE_SWITCH_BLOCKED": 409,
+    }.get(exc.code, 500)
     return HTTPException(
         status_code=status,
-        detail={"code": exc.code, "summary": exc.message},
+        detail={"code": exc.code, "summary": exc.summary},
     )
 
 router = APIRouter(tags=["profiles"])
@@ -60,6 +80,18 @@ router = APIRouter(tags=["profiles"])
 
 def _http(code: str, summary: str, status: int) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "summary": summary})
+
+
+def _profile_reextract_coordinator(
+    deps: ProfileReextractDeps,
+) -> ProfileReextractionCoordinator:
+    return ProfileReextractionCoordinator(
+        session_factory=deps.session_factory,
+        storage=deps.storage,
+        normalizer=deps.normalizer,
+        invoker=deps.document_invoker,
+        graph_driver=deps.graph_driver,
+    )
 
 
 @router.get("/profiles", response_model=ProfileListResponse)
@@ -150,6 +182,7 @@ async def activate_profile(
             "PROFILE_NOT_READY": 409,
             "PROFILE_SETUP_IN_PROGRESS": 409,
             "PROFILE_SWITCH_BLOCKED": 409,
+            "PROFILE_REVIEW_PENDING": 409,
             "PROFILE_INCONSISTENT": 500,
         }.get(exc.code, 500)
         raise _http(exc.code, exc.summary, status) from exc
@@ -157,50 +190,68 @@ async def activate_profile(
 
 @router.post("/profiles/{profile_id}/reextract")
 async def reextract_profile(
-    request: Request,
     profile_id: Annotated[UuidStr, Path(description="Profile id")],
     _body: ReextractRequest,
-    deps: Annotated[ChatAgentDeps, Depends(get_chat_agent_deps)],
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
 ) -> EventSourceResponse:
-    """Re-extract the active profile's retained CV through the normal SSE flow."""
-    factory = get_session_factory()
-    async with factory() as session:
-        try:
-            await assert_workspace_idle(session)
-        except ActivityBlockedError as exc:
-            raise _http(exc.code, exc.summary, 409) from exc
-        profile = await profiles_repo.get_profile(session, profile_id)
-        active_id = await workspace_repo.get_active_profile_id(session)
-        if profile is None:
-            raise _http("PROFILE_NOT_FOUND", "profile not found", 404)
-        if profile.state != "ready" or active_id != profile_id:
-            raise _http(
-                "PROFILE_NOT_READY",
-                "profile is not the active ready profile",
-                409,
-            )
-        attachment_id = profile.attachment_id
-        conversation = await conversations_repo.most_recent_for_profile(
-            session, profile_id=profile_id
-        )
-        if conversation is None:
-            raise _http(
-                "CONVERSATION_NOT_FOUND",
-                "profile conversation could not be resolved",
-                404,
-            )
-    storage = request.app.state.storage
-    events = stream_cv_reprocess(
-        attachment_id=attachment_id,
-        target_profile_id=profile_id,
-        conversation_id=conversation.id,
-        storage=storage,
-        model=deps.model,
-        registry=deps.registry,
-        sqlite_path=deps.sqlite_path,
-        include_assistant_status=deps.include_assistant_status,
+    coordinator = _profile_reextract_coordinator(deps)
+    return await open_typed_sse_response(
+        coordinator.stream(profile_id),
+        serializer=format_profile_reextract_sse,
+        error_mapper=_http_for_reextract_error,
+        error_types=(ProfileReextractError,),
     )
-    return await open_sse_response(events, error_mapper=_http_for_reextract_error)
+
+
+@router.get(
+    "/profiles/{profile_id}/reextract-draft",
+    response_model=ProfileReextractReview,
+)
+async def get_profile_reextract_review(
+    profile_id: Annotated[UuidStr, Path(description="Profile id")],
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+) -> ProfileReextractReview:
+    coordinator = _profile_reextract_coordinator(deps)
+    try:
+        return await coordinator.get_review(profile_id)
+    except ProfileReextractError as exc:
+        raise _http_for_reextract_error(exc) from exc
+
+
+@router.post(
+    "/profiles/{profile_id}/reextract-draft/approve",
+    response_model=ProfileReextractApprovalResponse,
+)
+async def approve_profile_reextract_review(
+    profile_id: Annotated[UuidStr, Path(description="Profile id")],
+    body: ProfileReextractApproveRequest,
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+) -> ProfileReextractApprovalResponse:
+    coordinator = _profile_reextract_coordinator(deps)
+    try:
+        return await coordinator.approve(profile_id, revision=body.revision)
+    except ProfileReextractError as exc:
+        raise _http_for_reextract_error(exc) from exc
+
+
+@router.delete(
+    "/profiles/{profile_id}/reextract-draft",
+    status_code=204,
+    response_class=Response,
+)
+async def discard_profile_reextract_review(
+    profile_id: Annotated[UuidStr, Path(description="Profile id")],
+    revision: Annotated[
+        AwareUtcDatetime, Query(description="Expected UTC draft revision")
+    ],
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+) -> Response:
+    coordinator = _profile_reextract_coordinator(deps)
+    try:
+        await coordinator.discard(profile_id, revision=revision)
+    except ProfileReextractError as exc:
+        raise _http_for_reextract_error(exc) from exc
+    return Response(status_code=204)
 
 
 @router.delete("/profiles/{profile_id}", response_model=ProfileDeleteResponse)

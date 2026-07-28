@@ -46,6 +46,7 @@ EXPECTED_PUBLIC_API_ROUTES: tuple[tuple[str, str], ...] = (
     ("DELETE", "/api/cvs/{attachment_id}"),
     ("DELETE", "/api/jobs/{job_id}"),
     ("DELETE", "/api/profiles/{profile_id}"),
+    ("DELETE", "/api/profiles/{profile_id}/reextract-draft"),
     ("GET", "/api/chat/history"),
     ("GET", "/api/cvs"),
     ("GET", "/api/cvs/{attachment_id}/file"),
@@ -64,6 +65,7 @@ EXPECTED_PUBLIC_API_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/profile/cv"),
     ("GET", "/api/profiles"),
     ("GET", "/api/profiles/{profile_id}"),
+    ("GET", "/api/profiles/{profile_id}/reextract-draft"),
     ("GET", "/api/profiles/{profile_id}/conversations"),
     ("PATCH", "/api/profiles/{profile_id}"),
     ("POST", "/api/attachments/cv"),
@@ -77,6 +79,7 @@ EXPECTED_PUBLIC_API_ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/api/profiles/{profile_id}/activate"),
     ("POST", "/api/profiles/{profile_id}/conversations"),
     ("POST", "/api/profiles/{profile_id}/reextract"),
+    ("POST", "/api/profiles/{profile_id}/reextract-draft/approve"),
 )
 
 EXPECTED_ROUTE_DECORATORS: tuple[str, ...] = (
@@ -111,10 +114,13 @@ EXPECTED_ROUTE_DECORATORS: tuple[str, ...] = (
     "profile.py:get_profile_cv:router.get('/profile/cv')",
     "profiles.py:activate_profile:router.post('/profiles/{profile_id}/activate', response_model=SelectionResponse)",
     "profiles.py:delete_profile:router.delete('/profiles/{profile_id}', response_model=ProfileDeleteResponse)",
+    "profiles.py:discard_profile_reextract_review:router.delete('/profiles/{profile_id}/reextract-draft', status_code=204, response_class=Response)",
     "profiles.py:get_profile:router.get('/profiles/{profile_id}', response_model=ProfileDetail)",
+    "profiles.py:get_profile_reextract_review:router.get('/profiles/{profile_id}/reextract-draft', response_model=ProfileReextractReview)",
     "profiles.py:list_profiles:router.get('/profiles', response_model=ProfileListResponse)",
     "profiles.py:patch_profile:router.patch('/profiles/{profile_id}', response_model=ProfileDetail)",
     "profiles.py:reextract_profile:router.post('/profiles/{profile_id}/reextract')",
+    "profiles.py:approve_profile_reextract_review:router.post('/profiles/{profile_id}/reextract-draft/approve', response_model=ProfileReextractApprovalResponse)",
 )
 
 

@@ -527,6 +527,31 @@ def test_profile_activation_maps_not_found_not_ready_and_activity_blocked(
     assert blocked.json()["detail"]["code"] == "PROFILE_SWITCH_BLOCKED"
 
 
+def test_profile_activation_is_blocked_by_pending_profile_review(
+    health_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    del health_env
+    active_id, active_attachment, _, target_id, _, _ = _seed_two_profiles()
+
+    async def publish_review() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            await profiles_repo.upsert_current_draft(
+                session,
+                draft_json={"candidate_profile": _candidate()},
+                source_attachment_id=active_attachment,
+                target_profile_id=active_id,
+            )
+            await session.commit()
+
+    run_async(publish_review())
+    with health_client() as client:
+        response = client.post(f"/api/profiles/{target_id}/activate")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "PROFILE_REVIEW_PENDING"
+
+
 class _GraphResult:
     async def consume(self) -> None:
         return None
@@ -725,12 +750,12 @@ def test_profile_activation_graph_failure_warns_and_preserves_selection(
     assert run_async(selected()) == (target_id, ATTACHMENT_STATE_ACTIVE)
 
 
-def test_profile_reextract_uses_server_owned_attachment_and_conversation(
+def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
     health_env: tuple[Path, Path, FakeDriver],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     del health_env
-    profile_id, attachment_id, conversation_id = run_async(
+    profile_id, attachment_id, _conversation_id = run_async(
         _create_profile(
             state=ATTACHMENT_STATE_ACTIVE,
             marker="r",
@@ -740,29 +765,117 @@ def test_profile_reextract_uses_server_owned_attachment_and_conversation(
     run_async(_set_active(profile_id))
     captured: dict[str, Any] = {}
 
-    async def fake_stream(**kwargs: Any) -> Any:
-        from app.schemas.sse import build_sse_event
+    from types import SimpleNamespace
 
-        captured.update(kwargs)
-        run_id = new_uuid()
-        yield build_sse_event(
-            "run_started", run_id, {"state": "running", "resumed": False}
+    from app.api.dependencies import get_profile_reextract_deps
+    from app.schemas.profile_reextraction import (
+        ProfileCollectionDeltas,
+        ProfileReextractApprovalResponse,
+        ProfileReextractEvent,
+        ProfileReextractReview,
+        ProfileReextractReviewReady,
+        PublicProfileSnapshot,
+    )
+    review_revision = datetime.now(UTC)
+
+    class FakeCoordinator:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        async def stream(self, requested_profile_id: str) -> Any:
+            captured["profile_id"] = requested_profile_id
+            yield ProfileReextractEvent(
+                event_id=new_uuid(),
+                operation_id=new_uuid(),
+                profile_id=requested_profile_id,
+                timestamp=datetime.now(UTC),
+                event="reextract_review_ready",
+                payload=ProfileReextractReviewReady(
+                    revision=review_revision
+                ),
+            )
+
+        async def get_review(
+            self, requested_profile_id: str
+        ) -> ProfileReextractReview:
+            snapshot = PublicProfileSnapshot(summary="Profile", skill_labels=[])
+            return ProfileReextractReview(
+                profile_id=requested_profile_id,
+                revision=review_revision,
+                current=snapshot,
+                proposed=snapshot,
+                changed_fields=[],
+                skills_added=[],
+                skills_removed=[],
+                collection_deltas=ProfileCollectionDeltas(
+                    experiences=0,
+                    education=0,
+                    languages=0,
+                    certifications=0,
+                ),
+                extraction_confidence=None,
+                can_approve=True,
+                can_discard=True,
+            )
+
+        async def approve(
+            self, requested_profile_id: str, *, revision: datetime
+        ) -> ProfileReextractApprovalResponse:
+            captured["approve"] = (requested_profile_id, revision)
+            return ProfileReextractApprovalResponse(
+                profile_id=requested_profile_id,
+                approved=True,
+                sync_ok=True,
+                warning=None,
+            )
+
+        async def discard(
+            self, requested_profile_id: str, *, revision: datetime
+        ) -> None:
+            captured["discard"] = (requested_profile_id, revision)
+
+    monkeypatch.setattr(
+        "app.api.profiles.ProfileReextractionCoordinator", FakeCoordinator
+    )
+    client = health_client()
+    client.app.dependency_overrides[get_profile_reextract_deps] = lambda: (
+        SimpleNamespace(
+            session_factory=object(),
+            storage=object(),
+            normalizer=object(),
+            document_invoker=object(),
+            graph_driver=None,
         )
-        yield build_sse_event("run_completed", run_id, {"state": "completed"})
-
-    monkeypatch.setattr("app.api.profiles.stream_cv_reprocess", fake_stream)
-    with health_client() as client:
+    )
+    with client:
         response = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert response.status_code == 200
+        review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
+        approved = client.post(
+            f"/api/profiles/{profile_id}/reextract-draft/approve",
+            json={"revision": review_revision.isoformat()},
+        )
+        discarded = client.delete(
+            f"/api/profiles/{profile_id}/reextract-draft",
+            params={"revision": review_revision.isoformat()},
+        )
         assert client.post(
             f"/api/profiles/{profile_id}/reextract",
             json={"attachment_id": attachment_id},
         ).status_code == 422
         assert client.post(f"/api/cvs/{attachment_id}/reprocess").status_code == 404
 
-    assert captured["attachment_id"] == attachment_id
-    assert captured["target_profile_id"] == profile_id
-    assert captured["conversation_id"] == conversation_id
+    assert captured["profile_id"] == profile_id
+    assert review.status_code == 200
+    assert approved.status_code == 200
+    assert approved.json()["approved"] is True
+    assert discarded.status_code == 204
+    assert captured["approve"] == (profile_id, review_revision)
+    assert captured["discard"] == (profile_id, review_revision)
+    assert "reextract_review_ready" in response.text
+    assert "run_started" not in response.text
+    assert "approval_required" not in response.text
+    assert "conversation_id" not in response.text
 
 
 def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
