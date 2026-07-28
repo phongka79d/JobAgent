@@ -153,6 +153,7 @@ function drawerController(
     closeDeleteDialog: vi.fn(),
     confirmDelete: vi.fn().mockResolvedValue(true),
     startReextract: vi.fn().mockResolvedValue(true),
+    loadReview: vi.fn().mockResolvedValue(true),
     approveReview: vi.fn().mockResolvedValue(true),
     discardReview: vi.fn().mockResolvedValue(true),
     closeReview: vi.fn(),

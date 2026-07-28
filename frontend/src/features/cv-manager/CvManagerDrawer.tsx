@@ -17,7 +17,7 @@ import type {CvManagerController, CvManagerViewState} from './state';
 import type {CvManagerItem} from './types';
 import './cv-manager.css';
 
-type DrawerController = Pick<CvManagerController, 'refresh' | 'select' | 'openDeleteDialog' | 'closeDeleteDialog' | 'confirmDelete' | 'startReextract' | 'approveReview' | 'discardReview' | 'closeReview'> & {close?: CvManagerController['close']; state: CvManagerViewState};
+type DrawerController = Pick<CvManagerController, 'refresh' | 'select' | 'openDeleteDialog' | 'closeDeleteDialog' | 'confirmDelete' | 'startReextract' | 'loadReview' | 'approveReview' | 'discardReview' | 'closeReview'> & {close?: CvManagerController['close']; state: CvManagerViewState};
 
 export type CvManagerDrawerProps = {
   isOpen: boolean;

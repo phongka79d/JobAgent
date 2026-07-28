@@ -10,7 +10,7 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CvManagerController} from './state';
 
-type ReviewController = Pick<CvManagerController, 'state' | 'startReextract' | 'approveReview' | 'discardReview' | 'closeReview'>;
+type ReviewController = Pick<CvManagerController, 'state' | 'startReextract' | 'loadReview' | 'approveReview' | 'discardReview' | 'closeReview'>;
 
 export function ProfileReextractReview({controller, onApproved}: {controller: ReviewController; onApproved?: () => void}) {
   const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false);
@@ -30,12 +30,16 @@ export function ProfileReextractReview({controller, onApproved}: {controller: Re
   }
 
   if (state.phase === 'error') {
-    const canRetry = state.profileId !== null && !state.draftAvailable;
+    const retry = state.profileId === null
+      ? null
+      : state.draftAvailable
+        ? () => controller.loadReview(state.profileId ?? '')
+        : () => controller.startReextract(state.profileId ?? '');
     return <VStack gap={2} aria-live="assertive" aria-atomic="true" aria-describedby="jobagent-profile-review-error">
       <Banner id="jobagent-profile-review-error" status="error" title="Profile review could not be prepared" description={state.error?.summary} />
-      {state.draftAvailable ? <Text type="supporting">A review may still exist. Close this message and reopen CV Manager after the service is available.</Text> : null}
+      {state.draftAvailable ? <Text type="supporting">A review exists. Retry loads that review without starting another extraction.</Text> : null}
       <HStack gap={1} wrap="wrap">
-        {canRetry ? <Button label="Retry" variant="primary" onClick={() => void controller.startReextract(state.profileId ?? '')} /> : null}
+        {retry ? <Button label="Retry" variant="primary" onClick={() => void retry()} /> : null}
         <Button label="Close" variant="ghost" onClick={controller.closeReview} />
       </HStack>
     </VStack>;

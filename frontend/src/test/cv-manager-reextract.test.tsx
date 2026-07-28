@@ -17,6 +17,7 @@ function controller(state: CvManagerViewState, overrides: Record<string, unknown
     state,
     refresh: vi.fn(), select: vi.fn(), openDeleteDialog: vi.fn(), closeDeleteDialog: vi.fn(),
     confirmDelete: vi.fn().mockResolvedValue(true), startReextract: vi.fn().mockResolvedValue(true),
+    loadReview: vi.fn().mockResolvedValue(true),
     approveReview: vi.fn().mockResolvedValue(true), discardReview: vi.fn().mockResolvedValue(true),
     closeReview: vi.fn(),
     ...overrides,
@@ -51,9 +52,20 @@ describe('ProfileReextractReview', () => {
     const startReextract = vi.fn().mockResolvedValue(false);
     const discardReview = vi.fn().mockResolvedValue(true);
     render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller({...base, reextract: {phase: 'error', profileId: PROFILE_ID, stage: null, error: {code: 'SOURCE_FAILED', summary: 'The source could not be read'}, draftAvailable: false, review: null}}, {startReextract, discardReview})} /></Theme>);
-    await userEvent.click(screen.getByRole('button', {name: 'Retry'}));
+    screen.getByRole('button', {name: 'Retry'}).focus();
+    await userEvent.keyboard('{Enter}');
     expect(startReextract).toHaveBeenCalledWith(PROFILE_ID);
     expect(discardReview).not.toHaveBeenCalled();
+  });
+
+  it('retries durable GET instead of starting extraction when the server reports a draft', async () => {
+    const loadReview = vi.fn().mockResolvedValue(true);
+    const startReextract = vi.fn();
+    render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller({...base, reextract: {phase: 'error', profileId: PROFILE_ID, stage: null, error: {code: 'REVIEW_UNAVAILABLE', summary: 'Retry loading the review'}, draftAvailable: true, review: null}}, {loadReview, startReextract})} /></Theme>);
+    screen.getByRole('button', {name: 'Retry'}).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(loadReview).toHaveBeenCalledWith(PROFILE_ID);
+    expect(startReextract).not.toHaveBeenCalled();
   });
 
   it('confirms keyboard discard and restores focus after Escape closes the manager', async () => {
