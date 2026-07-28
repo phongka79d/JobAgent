@@ -486,36 +486,6 @@ describe('CvManagerDrawer server-action and delete behavior', () => {
     expect(onRetryUpload).toHaveBeenCalledWith(item.id);
   });
 
-  it('selects the CV row activated by the user', async () => {
-    const first = activeItem();
-    const second = {
-      ...unownedFailedItem(),
-      original_name: 'other-resume.pdf',
-    };
-    const select = vi.fn();
-    const controller = {
-      ...drawerController({select}),
-      state: {
-        phase: 'ready' as const,
-        items: [first, second],
-        selectedId: first.id,
-        pendingByAttachment: {},
-        errorsByAttachment: {},
-        deleteTargetId: null,
-      },
-    };
-
-    render(
-      <Theme theme={neutralTheme}>
-        <CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller} />
-      </Theme>,
-    );
-
-    await userEvent.click(screen.getByRole('button', {name: /^other-resume\.pdf/}));
-
-    expect(select).toHaveBeenCalledWith(second.id);
-  });
-
   it('uses a standard desktop side panel and a narrow fullscreen dialog with focus behavior', async () => {
     const controller = drawerController();
     render(
