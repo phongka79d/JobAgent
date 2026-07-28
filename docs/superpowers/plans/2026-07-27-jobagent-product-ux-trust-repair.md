@@ -137,7 +137,7 @@ Test snippets below extend the named existing fixture files. Any helper name int
 - Modify: `frontend/src/app/App.test.tsx`
 - Test: `frontend/src/test/profile-workspace-state.test.tsx`
 
-- [ ] **Step 1: Write reducer and hook tests for ownership, ordering, and `pageshow`**
+- [x] **Step 1: Write reducer and hook tests for ownership, ordering, and `pageshow`**
 
 Extend the existing fixtures/constants in `frontend/src/test/profile-workspace-state.test.tsx`. Add this local deferred helper and pass the existing `fetchProfiles`/`fetchProfileConversations` fakes through `useProfileWorkspaceState`:
 
@@ -194,7 +194,7 @@ it('rehydrates a persisted pageshow and removes the listener on cleanup', async 
 });
 ```
 
-- [ ] **Step 2: Run the workspace tests and verify the new contract fails**
+- [x] **Step 2: Run the workspace tests and verify the new contract fails**
 
 Run:
 
@@ -205,7 +205,7 @@ npm test -- --run src/test/profile-workspace-state.test.tsx
 
 Expected: FAIL because `phase`, ownership validation, and `useWorkspaceLifecycle` do not exist.
 
-- [ ] **Step 3: Implement one atomic workspace snapshot reducer**
+- [x] **Step 3: Implement one atomic workspace snapshot reducer**
 
 Replace the split profile/conversation publication during reload with these shapes; retain existing mutation actions for activate/rename/create/select/delete:
 
@@ -276,7 +276,7 @@ case 'rehydrate/failed':
 
 In `reload`, increment the generation, abort the prior controller, dispatch `rehydrate/started`, fetch profiles, fetch conversations only for `active_profile_id`, and dispatch one `rehydrate/succeeded`. For a null active profile, use `{items: [], next_cursor: null}`. Abort and ignore old generations; never publish the profile response alone.
 
-- [ ] **Step 4: Add the isolated `pageshow` hook and App render gate**
+- [x] **Step 4: Add the isolated `pageshow` hook and App render gate**
 
 Create:
 
@@ -316,7 +316,7 @@ const chatKey = `${workspace.state.activeProfileId ?? 'no-profile'}:${
 
 Preserve the existing hidden chat workspace CSS fix when placing this gate.
 
-- [ ] **Step 5: Prove App never renders stale cross-profile chat**
+- [x] **Step 5: Prove App never renders stale cross-profile chat**
 
 Add an App test that starts with Profile A/chat A, resolves a `pageshow` reload to Profile B/chat B, and asserts chat A is absent during `rehydrating` and the remount key changes once. Then run:
 
@@ -327,7 +327,7 @@ npm run typecheck
 
 Expected: all selected tests PASS; TypeScript exits 0.
 
-- [ ] **Step 6: Commit the coherent workspace milestone**
+- [x] **Step 6: Commit the coherent workspace milestone**
 
 ```powershell
 Set-Location ..
@@ -351,7 +351,7 @@ Verify the staged App/theme diff still contains the pre-existing `jobagent-chat-
 - Test: `backend/tests/integration/test_cv_manager_api.py`
 - Test: `backend/tests/integration/test_cv_manager_deletion.py`
 
-- [ ] **Step 1: Write failing API tests for server-owned allowed actions**
+- [x] **Step 1: Write failing API tests for server-owned allowed actions**
 
 Add cases that seed one active ready profile, one archived ready profile, one pending failed profile, and one truly unowned failed attachment:
 
@@ -377,7 +377,7 @@ def test_profile_owned_attachment_delete_is_rejected_for_every_lifecycle_state(c
         assert response.json()["detail"]["code"] == "CV_PROFILE_OWNED_DELETE_FORBIDDEN"
 ```
 
-- [ ] **Step 2: Run the focused backend tests and verify route/schema failures**
+- [x] **Step 2: Run the focused backend tests and verify route/schema failures**
 
 ```powershell
 Set-Location backend
@@ -386,7 +386,7 @@ Set-Location backend
 
 Expected: FAIL because `GET /api/cvs`, `allowed_actions`, and the precise ownership code do not exist.
 
-- [ ] **Step 3: Implement the pure action projection**
+- [x] **Step 3: Implement the pure action projection**
 
 Add `list_all` ordered by newest `created_at,id` to `repositories/attachments.py`. Define strict DTOs:
 
@@ -437,7 +437,7 @@ def allowed_actions(*, state: str, owner: Profile | None, is_active: bool, file_
 
 Do not add `delete_cv` for any profile owner.
 
-- [ ] **Step 4: Add safe list/file routes and precise deletion language**
+- [x] **Step 4: Add safe list/file routes and precise deletion language**
 
 Add `GET /api/cvs` and `GET /api/cvs/{attachment_id}/file`. The file route accepts only `disposition=inline|attachment`, resolves only an existing active/archived owned CV with an available retained file, and returns:
 
@@ -451,7 +451,7 @@ return FileResponse(path, media_type="application/pdf", headers=headers)
 
 Rename the misleading constant to `CV_PROFILE_OWNED_DELETE_FORBIDDEN` and return the safe summary `This CV belongs to a profile. Delete the profile from the Profile menu instead.` Keep old partial-cleanup retry codes unchanged.
 
-- [ ] **Step 5: Verify product reads and delete invariants**
+- [x] **Step 5: Verify product reads and delete invariants**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/integration/test_cv_manager_api.py tests/integration/test_cv_manager_deletion.py tests/integration/test_profile_deletion.py -q
@@ -460,7 +460,7 @@ Rename the misleading constant to `CV_PROFILE_OWNED_DELETE_FORBIDDEN` and return
 
 Expected: all tests PASS; Ruff exits 0.
 
-- [ ] **Step 6: Commit the product CV contract**
+- [x] **Step 6: Commit the product CV contract**
 
 ```powershell
 Set-Location ..
@@ -485,12 +485,13 @@ git commit -m "feat: expose safe CV manager actions"
 - Create: `frontend/src/lib/hooks/useLatestRequest.ts`
 - Modify: `frontend/src/features/profile/ProfileOverviewPanel.tsx`
 - Modify: `frontend/src/features/profile/CvSidebar.tsx`
+- Modify: `frontend/src/features/profile/ProfileDeleteDialog.tsx`
 - Modify: `frontend/src/features/chat/components/ActiveCvSourceDialog.tsx`
 - Rewrite: `frontend/src/test/cv-manager-api.test.ts`
 - Rewrite: `frontend/src/test/cv-manager.test.tsx`
 - Modify: `frontend/src/test/active-cv-source.test.tsx`
 
-- [ ] **Step 1: Replace inferred-action tests with strict parser tests**
+- [x] **Step 1: Replace inferred-action tests with strict parser tests**
 
 Use an exact response fixture and reject extras:
 
@@ -524,7 +525,7 @@ it('renders Delete CV only when delete_cv is in the server projection', () => {
 });
 ```
 
-- [ ] **Step 2: Run the CV Manager frontend tests and confirm old behavior fails**
+- [x] **Step 2: Run the CV Manager frontend tests and confirm old behavior fails**
 
 ```powershell
 Set-Location frontend
@@ -533,7 +534,7 @@ npm test -- --run src/test/cv-manager-api.test.ts src/test/cv-manager.test.tsx s
 
 Expected: FAIL because tests still import observability modules and the old UI routes profile-owned deletion through `workspace.deleteProfile`.
 
-- [ ] **Step 3: Implement exact DTO parsing and transport**
+- [x] **Step 3: Implement exact DTO parsing and transport**
 
 Define `CvManagerAction`, `CvManagerItem`, `CvManagerListResponse`, and exact parsers in `types.ts`. Implement:
 
@@ -567,7 +568,7 @@ export async function deleteCv(id: string, signal?: AbortSignal): Promise<void> 
 
 Move `useLatestRequest` unchanged into `frontend/src/lib/hooks/useLatestRequest.ts`; update Saved Jobs imports now so no retained product code depends on observability.
 
-- [ ] **Step 4: Implement one transient CV Manager state owner**
+- [x] **Step 4: Implement one transient CV Manager state owner**
 
 `useCvManagerState` owns `closed|loading|ready|error`, selected ID, one mutation per attachment, preserved prior list on refresh failure, and aborts on profile-scope change. It must call `deleteCv` only after checking the selected server projection contains `delete_cv`:
 
@@ -591,7 +592,7 @@ const confirmDelete = useCallback(async (id: string): Promise<boolean> => {
 }, [api, load, state.resource.data]);
 ```
 
-- [ ] **Step 5: Build the accessible drawer and Overview entry**
+- [x] **Step 5: Build the accessible drawer and Overview entry**
 
 Run Astryx discovery before implementation:
 
@@ -604,7 +605,7 @@ npx astryx component AlertDialog
 
 Use the returned public components/props. Add **Manage CVs** to `ProfileOverviewPanel`; render a side drawer on desktop and full-screen drawer on narrow viewports. Action buttons come only from `allowed_actions`. **Delete CV** opens a filename-scoped confirmation and never calls `workspace.deleteProfile`. Profile deletion remains in `ProfileDeleteDialog` with the exact label **Delete profile and all data**.
 
-- [ ] **Step 6: Move active-CV file callers off observability and verify**
+- [x] **Step 6: Move active-CV file callers off observability and verify**
 
 Update `ActiveCvSourceDialog` and its test to import `cvFileUrl` from the new API. Run:
 
@@ -615,7 +616,7 @@ npm run typecheck
 
 Expected: selected tests PASS; typecheck exits 0; no test expects profile deletion from CV Manager.
 
-- [ ] **Step 7: Commit the extracted CV Manager**
+- [x] **Step 7: Commit the extracted CV Manager**
 
 ```powershell
 Set-Location ..
