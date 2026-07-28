@@ -646,7 +646,7 @@ git commit -m "refactor: extract product CV manager"
 - Modify: `frontend/src/test/cv-tailoring-state.test.tsx`
 - Delete: technical-only observability/graph/skill-map test files listed in Step 4
 
-- [ ] **Step 1: Write the three-destination and static-removal tests**
+- [x] **Step 1: Write the three-destination and static-removal tests**
 
 ```tsx
 it('exposes exactly the approved primary navigation in order', () => {
@@ -665,7 +665,7 @@ it('contains no product imports or labels for technical panels', () => {
 });
 ```
 
-- [ ] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
+- [x] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
 
 ```powershell
 Set-Location frontend
@@ -674,7 +674,7 @@ npm test -- --run src/test/product-navigation.test.tsx src/test/saved-jobs-panel
 
 Expected: FAIL because `OBSERVABILITY_TABS`, `ObservabilitySidebar`, and seven-tab assertions remain.
 
-- [ ] **Step 3: Implement `ProductSidebar` without another data owner**
+- [x] **Step 3: Implement `ProductSidebar` without another data owner**
 
 Use one local selected destination and the existing controllers passed from `App`:
 
@@ -690,7 +690,7 @@ export const PRODUCT_DESTINATIONS = [
 
 `ProductSidebar` renders the supplied Overview content, the existing `SavedJobsPanel`, or `TailoringSessionsPanel`. It calls only the existing `savedJobs` and `tailoring` controllers; it does not invoke their hooks. Opening a destination expands a collapsed rail and loads only that destination's existing controller.
 
-- [ ] **Step 4: Move retained styles and remove technical modules/tests**
+- [x] **Step 4: Move retained styles and remove technical modules/tests**
 
 Move Saved Job rules from `observability.css` into `jobs.css` and CV Manager rules into `cv-manager.css`, renaming `jobagent-obs-*` classes to feature names. Delete all files under `frontend/src/features/observability/` after imports are removed. Delete these technical-only suites:
 
@@ -713,7 +713,7 @@ frontend/src/test/support/observability.tsx
 
 Remove skill-map transport/cache code from `features/jobs/api.ts`, `types.ts`, and `savedJobsState.ts`; it has no remaining product consumer. Replace Saved Jobs' observability skeleton/header imports with direct Astryx `Skeleton`, `Heading`, and `Button` composition. Do not modify backend observability files or `frontend/package.json`.
 
-- [ ] **Step 5: Update App composition and sole-owner static assertions**
+- [x] **Step 5: Update App composition and sole-owner static assertions**
 
 Pass `workspace`, `savedJobs`, and `tailoring` into `CvSidebar`/`ProductSidebar`. Keep the only `useSavedJobsState` and `useCvTailoringState` calls in `App`. Replace the old raw-source assertion with:
 
@@ -725,7 +725,7 @@ it('keeps singleton product state hooks in App', () => {
 });
 ```
 
-- [ ] **Step 6: Verify navigation, build, and static removal**
+- [x] **Step 6: Verify navigation, build, and static removal**
 
 ```powershell
 npm test -- --run src/test/product-navigation.test.tsx src/test/saved-jobs-panel.test.tsx src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-state.test.tsx src/test/cv-sidebar.test.tsx src/app/App.test.tsx
@@ -737,7 +737,7 @@ rg -n "features/observability|LLM chunks|Neo4j graph|Agent runs" src
 
 Expected: tests/lint/typecheck/build PASS. The final `rg` exits 1 with no matches in retained source.
 
-- [ ] **Step 7: Commit the product navigation milestone**
+- [x] **Step 7: Commit the product navigation milestone**
 
 ```powershell
 Set-Location ..
