@@ -244,9 +244,21 @@ it('binds safe issues to fields and exposes source, undo, and retry actions', as
   expect(createAiVersion).not.toHaveBeenCalled();
 });
 
+it('uses a new tab only for preview and keeps download failures in the editor', async () => {
+  const open = vi.spyOn(window, 'open').mockReturnValue(null);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {status: 503})));
+  renderEditor(controller());
+  await userEvent.click(screen.getByRole('button', {name: 'Preview PDF'}));
+  expect(open).toHaveBeenCalledWith(expect.stringContaining('/pdf'), '_blank', 'noopener,noreferrer');
+  await userEvent.click(screen.getByRole('button', {name: 'Download PDF'}));
+  expect(await screen.findByText('The PDF could not be downloaded.')).toBeInTheDocument();
+  expect(screen.getByRole('heading', {level: 1, name: 'CV đã chỉnh'})).toBeInTheDocument();
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('TailoringEditor', () => {
@@ -284,14 +296,10 @@ describe('TailoringEditor', () => {
     expect(
       screen.getByTitle('Xem trước PDF CV'),
     ).toHaveAttribute('src', expect.stringContaining(VERSION_2_ID));
-    expect(screen.getByRole('link', {name: 'Tải file .tex'})).toHaveAttribute(
-      'href',
-      expect.stringContaining(`${VERSION_2_ID}/source`),
-    );
-    expect(screen.getByRole('link', {name: 'Tải PDF'})).toHaveAttribute(
-      'href',
-      expect.stringContaining(`${VERSION_2_ID}/pdf`),
-    );
+    expect(screen.getByRole('button', {name: 'Preview PDF'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Download PDF'})).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', {name: 'Advanced'}));
+    expect(screen.getByRole('button', {name: 'Download LaTeX source'})).toBeInTheDocument();
     expect(screen.getByText('CV dài 2 trang')).toBeInTheDocument();
     expect(screen.getByText('2 trang')).toBeInTheDocument();
   });

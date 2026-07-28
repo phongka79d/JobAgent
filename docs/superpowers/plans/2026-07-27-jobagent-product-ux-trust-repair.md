@@ -1630,7 +1630,7 @@ Expected: tests PASS; compiler test may be skipped only for absent TeX.
 - Modify: `frontend/src/test/cv-tailoring-editor.test.tsx`
 - Create: `frontend/src/test/artifact-download.test.ts`
 
-- [ ] **Step 1: Write navigation/download isolation tests**
+- [x] **Step 1: Write navigation/download isolation tests**
 
 ```ts
 it('uses a new tab only for PDF preview', async () => {
@@ -1668,7 +1668,7 @@ npm test -- --run src/test/artifact-download.test.ts src/test/cv-tailoring-api.t
 
 Expected: FAIL because `.tex` is currently a normal anchor and PDF actions do not share a blob helper.
 
-- [ ] **Step 3: Implement the bounded download helper**
+- [x] **Step 3: Implement the bounded download helper**
 
 ```ts
 import {parseErrorBody} from './chat';

@@ -4,6 +4,9 @@ export const TAILORING_COPY = {
   previewPdf: 'Preview PDF',
   downloadPdf: 'Download PDF',
   downloadLatex: 'Download LaTeX source',
+  advanced: 'Advanced',
+  pdfDownloadError: 'The PDF could not be downloaded.',
+  latexDownloadError: 'The LaTeX source could not be downloaded.',
   issueReasons: {
     not_in_source: 'This value is not supported by the selected source.',
     belongs_to_another_section: 'This source belongs to another section.',
