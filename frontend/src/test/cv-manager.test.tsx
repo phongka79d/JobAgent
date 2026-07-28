@@ -15,7 +15,7 @@ import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 import {CvManagerDrawer} from '../features/cv-manager/CvManagerDrawer';
 import type {CvManagerApi} from '../features/cv-manager/api';
 import {useCvManagerState} from '../features/cv-manager/state';
-import type {CvManagerItem} from '../features/cv-manager/types';
+import type {CvManagerItem, ProfileReextractReview} from '../features/cv-manager/types';
 import {ProfileDeleteDialog} from '../features/profile/ProfileDeleteDialog';
 import type {ProfileListItem} from '../features/profile/conversationTypes';
 import savedJobsStateSource from '../features/jobs/savedJobsState.ts?raw';
@@ -115,11 +115,23 @@ function StateHarness({
       >
         Confirm delete
       </button>
+      <button type="button" onClick={() => void controller.startReextract(profileId ?? PROFILE_ID)}>
+        Start re-extract
+      </button>
       <output data-testid="controller-state">
         {JSON.stringify(controller.state)}
       </output>
     </>
   );
+}
+
+function reviewFixture(revision = TS): ProfileReextractReview {
+  return {
+    profile_id: PROFILE_ID, revision,
+    current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Approved', current_title: 'Engineer', skill_labels: []},
+    proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: 'Senior Engineer', skill_labels: []},
+    changed_fields: [], skills_added: [], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: true, can_discard: true,
+  };
 }
 
 function drawerController(
@@ -252,6 +264,55 @@ describe('useCvManagerState refresh and scope guards', () => {
       expect(state).not.toHaveTextContent('resume.pdf');
       expect(state).toHaveTextContent('"items":[]');
     });
+  });
+});
+
+describe('useCvManagerState direct re-extract recovery', () => {
+  it('loads the durable server-permitted review after draft_available failure', async () => {
+    const getProfileReextractReview = vi.fn().mockResolvedValue(reviewFixture());
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractReview,
+      streamProfileReextract: vi.fn(async (_profileId, handlers) => {
+        handlers.onEvent({event_id: '11111111-1111-4111-8111-111111111111', operation_id: '22222222-2222-4222-8222-222222222222', profile_id: PROFILE_ID, timestamp: TS, event: 'reextract_failed', payload: {code: 'PROVIDER_FAILED', summary: 'Retry later', draft_available: true}});
+      }),
+    };
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extract'}));
+    await waitFor(() => expect(getProfileReextractReview).toHaveBeenCalledWith(PROFILE_ID, expect.any(AbortSignal)));
+    expect(screen.getByTestId('controller-state')).toHaveTextContent('"phase":"review"');
+    expect(screen.getByTestId('controller-state')).toHaveTextContent('PROVIDER_FAILED');
+  });
+
+  it('tries durable review recovery after a stream ends without a terminal event', async () => {
+    const getProfileReextractReview = vi.fn().mockResolvedValue(reviewFixture());
+    const api: CvManagerApi = {fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractReview, streamProfileReextract: vi.fn().mockResolvedValue(undefined)};
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extract'}));
+    await waitFor(() => expect(getProfileReextractReview).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('controller-state')).toHaveTextContent('"phase":"review"');
+  });
+
+  it('rejects a durable review whose revision does not match review_ready', async () => {
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractReview: vi.fn().mockResolvedValue(reviewFixture('2026-07-29T10:00:00Z')),
+      streamProfileReextract: vi.fn(async (_profileId, handlers) => handlers.onEvent({event_id: '11111111-1111-4111-8111-111111111111', operation_id: '22222222-2222-4222-8222-222222222222', profile_id: PROFILE_ID, timestamp: TS, event: 'reextract_review_ready', payload: {revision: TS}})),
+    };
+    render(<StateHarness api={api} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extract'}));
+    await waitFor(() => expect(screen.getByTestId('controller-state')).toHaveTextContent('PROFILE_REEXTRACT_REVIEW_MISMATCH'));
+  });
+
+  it('ignores a late durable review after the selected profile scope changes', async () => {
+    const pendingReview = deferred<ProfileReextractReview>();
+    const api: CvManagerApi = {
+      fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractReview: vi.fn().mockReturnValue(pendingReview.promise),
+      streamProfileReextract: vi.fn(async (_profileId, handlers) => handlers.onEvent({event_id: '11111111-1111-4111-8111-111111111111', operation_id: '22222222-2222-4222-8222-222222222222', profile_id: PROFILE_ID, timestamp: TS, event: 'reextract_review_ready', payload: {revision: TS}})),
+    };
+    const view = render(<StateHarness api={api} profileId={PROFILE_ID} />);
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extract'}));
+    view.rerender(<StateHarness api={api} profileId={OTHER_PROFILE_ID} />);
+    await act(async () => { pendingReview.resolve(reviewFixture()); await Promise.resolve(); });
+    expect(screen.getByTestId('controller-state')).not.toHaveTextContent('Senior Engineer');
   });
 });
 

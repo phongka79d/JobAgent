@@ -472,7 +472,7 @@ export function ChatPage({
     }
   }, []);
 
-  /** Focus the existing approval card after reprocess reaches approval_required. */
+  /** Focus the existing chat approval card after a profile_commit interrupt. */
   const focusApprovalCard = useCallback(() => {
     const focus = () => {
       const card = document.querySelector(

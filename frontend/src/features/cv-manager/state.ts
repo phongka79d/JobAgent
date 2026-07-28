@@ -10,6 +10,8 @@ type ProfileReextractState = {
   stage: ProfileReextractStage | null;
   review: ProfileReextractReview | null;
   error: CvManagerSafeError | null;
+  /** A durable draft means review actions, not a speculative retry, are allowed. */
+  draftAvailable: boolean;
 };
 export type CvManagerViewState = {
   phase: 'closed' | 'loading' | 'ready' | 'error';
@@ -21,7 +23,7 @@ export type CvManagerViewState = {
   reextract?: ProfileReextractState;
 };
 
-const EMPTY_REEXTRACT: ProfileReextractState = {phase: 'idle', profileId: null, stage: null, review: null, error: null};
+const EMPTY_REEXTRACT: ProfileReextractState = {phase: 'idle', profileId: null, stage: null, review: null, error: null, draftAvailable: false};
 
 const CLOSED: CvManagerViewState = {
   phase: 'closed', items: [], selectedId: null, pendingByAttachment: {}, errorsByAttachment: {}, deleteTargetId: null,
@@ -158,17 +160,21 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     }
   }, [api, publish, refresh]);
 
-  const loadReview = useCallback(async (profileId: string, expectedRevision?: string, signal?: AbortSignal): Promise<boolean> => {
+  const loadReview = useCallback(async (profileId: string, expectedRevision?: string, signal?: AbortSignal, serverError: CvManagerSafeError | null = null): Promise<boolean> => {
     const scope = scopeRef.current;
     const reextractGeneration = reextractGenerationRef.current;
     try {
       const review = await api.getProfileReextractReview(profileId, signal);
-      if (signal?.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration || review.profile_id !== profileId || (expectedRevision !== undefined && review.revision !== expectedRevision)) return false;
-      publish((previous) => ({...previous, reextract: {phase: 'review', profileId, stage: null, review, error: null}}));
+      if (signal?.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
+      if (review.profile_id !== profileId || (expectedRevision !== undefined && review.revision !== expectedRevision)) {
+        publish((previous) => ({...previous, reextract: {phase: 'error', profileId, stage: null, review: null, error: {code: 'PROFILE_REEXTRACT_REVIEW_MISMATCH', summary: 'The review changed; reload it before continuing.'}, draftAvailable: false}}));
+        return false;
+      }
+      publish((previous) => ({...previous, reextract: {phase: 'review', profileId, stage: null, review, error: serverError, draftAvailable: true}}));
       return true;
     } catch (error) {
       if (signal?.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
-      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, error: safeError(error)}}));
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, review: null, error: safeError(error), draftAvailable: serverError !== null}}));
       return false;
     }
   }, [api, publish]);
@@ -181,32 +187,37 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     const scope = scopeRef.current;
     const reextractGeneration = reextractGenerationRef.current + 1;
     reextractGenerationRef.current = reextractGeneration;
-    publish((previous) => ({...previous, reextract: {phase: 'loading', profileId, stage: 'validating_source', review: null, error: null}}));
+    publish((previous) => ({...previous, reextract: {phase: 'loading', profileId, stage: 'validating_source', review: null, error: null, draftAvailable: false}}));
     let reviewRevision: string | null = null;
-    let failed = false;
+    let failure: {error: CvManagerSafeError; draftAvailable: boolean} | null = null;
     try {
       await api.streamProfileReextract(profileId, {
         onEvent: (event) => {
           if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration || event.profile_id !== profileId) return;
           if (event.event === 'reextract_progress') {
-            publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'loading', profileId, stage: event.payload.stage, error: null}}));
+            publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'loading', profileId, stage: event.payload.stage, error: null, draftAvailable: false}}));
           } else if (event.event === 'reextract_review_ready') {
             reviewRevision = event.payload.revision;
           } else {
-            failed = true;
-            publish((previous) => ({...previous, reextract: {phase: 'error', profileId, stage: null, review: previous.reextract?.profileId === profileId ? previous.reextract.review : null, error: {code: event.payload.code, summary: event.payload.summary}}}));
+            failure = {error: {code: event.payload.code, summary: event.payload.summary}, draftAvailable: event.payload.draft_available};
           }
         },
         onMalformed: () => undefined,
         onDisconnected: () => undefined,
       }, controller.signal);
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
-      if (failed) return false;
+      if (failure !== null) {
+        if (failure.draftAvailable) {
+          return await loadReview(profileId, undefined, controller.signal, failure.error);
+        }
+        publish((previous) => ({...previous, reextract: {phase: 'error', profileId, stage: null, review: null, error: failure.error, draftAvailable: false}}));
+        return false;
+      }
       return await loadReview(profileId, reviewRevision ?? undefined, controller.signal);
     } catch (error) {
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
       if (await loadReview(profileId, undefined, controller.signal)) return true;
-      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, error: safeError(error)}}));
+      publish((previous) => ({...previous, reextract: {...(previous.reextract ?? EMPTY_REEXTRACT), phase: 'error', profileId, review: null, error: safeError(error), draftAvailable: false}}));
       return false;
     } finally {
       mutationControllersRef.current.delete(key);
@@ -222,7 +233,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     try {
       await api.approveProfileReextractReview(review.profile_id, review.revision, controller.signal);
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
-      publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}}));
+      publish((previous) => ({...previous, reextract: EMPTY_REEXTRACT}));
       await refresh();
       return true;
     } catch (error) {
@@ -241,7 +252,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     try {
       await api.discardProfileReextractReview(review.profile_id, review.revision, controller.signal);
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
-      publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}}));
+      publish((previous) => ({...previous, reextract: EMPTY_REEXTRACT}));
       return true;
     } catch (error) {
       if (scopeRef.current !== scope || reextractGenerationRef.current !== generation) return false;
@@ -250,7 +261,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     }
   }, [api, publish]);
 
-  const closeReview = useCallback(() => publish((previous) => ({...previous, reextract: {phase: 'idle', profileId: null, stage: null, review: null, error: null}})), [publish]);
+  const closeReview = useCallback(() => publish((previous) => ({...previous, reextract: EMPTY_REEXTRACT})), [publish]);
 
   return {state, open, close, refresh, select, openDeleteDialog, closeDeleteDialog, confirmDelete, startReextract, loadReview, approveReview, discardReview, closeReview};
 }

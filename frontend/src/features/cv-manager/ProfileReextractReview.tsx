@@ -1,5 +1,8 @@
+import {useState} from 'react';
+import {AlertDialog} from '@astryxdesign/core/AlertDialog';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
+import {Collapsible} from '@astryxdesign/core/Collapsible';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Text} from '@astryxdesign/core/Text';
@@ -7,49 +10,63 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CvManagerController} from './state';
 
-type ReviewController = Pick<
-  CvManagerController,
-  'state' | 'startReextract' | 'approveReview' | 'discardReview' | 'closeReview'
->;
+type ReviewController = Pick<CvManagerController, 'state' | 'startReextract' | 'approveReview' | 'discardReview' | 'closeReview'>;
 
 export function ProfileReextractReview({controller, onApproved}: {controller: ReviewController; onApproved?: () => void}) {
+  const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false);
   const state = controller.state.reextract;
   if (!state || state.phase === 'idle') return null;
+
+  const requestDiscard = () => setIsDiscardConfirmOpen(true);
+  const confirmDiscard = async () => {
+    if (await controller.discardReview()) setIsDiscardConfirmOpen(false);
+  };
+
   if (state.phase === 'loading') {
-    return <VStack gap={2} aria-live="polite" data-testid="jobagent-profile-reextract-progress">
+    return <VStack gap={2} aria-live="polite" aria-atomic="true" data-testid="jobagent-profile-reextract-progress">
       <Heading level={3}>Preparing profile review</Heading>
       <Text type="body">{state.stage?.replaceAll('_', ' ') ?? 'Working'}</Text>
     </VStack>;
   }
+
   if (state.phase === 'error') {
-    return <VStack gap={2} aria-live="assertive">
-      <Banner status="error" title="Profile review could not be prepared" description={state.error?.summary} />
+    const canRetry = state.profileId !== null && !state.draftAvailable;
+    return <VStack gap={2} aria-live="assertive" aria-atomic="true" aria-describedby="jobagent-profile-review-error">
+      <Banner id="jobagent-profile-review-error" status="error" title="Profile review could not be prepared" description={state.error?.summary} />
+      {state.draftAvailable ? <Text type="supporting">A review may still exist. Close this message and reopen CV Manager after the service is available.</Text> : null}
       <HStack gap={1} wrap="wrap">
-        {state.profileId ? <Button label="Retry" variant="primary" onClick={() => void controller.startReextract(state.profileId!)} /> : null}
-        {state.review?.can_discard ? <Button label="Discard review" variant="secondary" onClick={() => void controller.discardReview()} /> : null}
+        {canRetry ? <Button label="Retry" variant="primary" onClick={() => void controller.startReextract(state.profileId ?? '')} /> : null}
         <Button label="Close" variant="ghost" onClick={controller.closeReview} />
       </HStack>
     </VStack>;
   }
+
   const review = state.review;
   if (!review) return null;
-  return <VStack gap={3} aria-describedby="jobagent-profile-review-summary" data-testid="jobagent-profile-reextract-review">
+  const saveReason = review.can_approve ? undefined : 'Save is unavailable because this server review cannot be approved.';
+  const discardReason = review.can_discard ? undefined : 'Discard is unavailable because this server review cannot be discarded.';
+  return <VStack gap={3} aria-describedby={state.error ? 'jobagent-profile-review-summary jobagent-profile-review-error' : 'jobagent-profile-review-summary'} data-testid="jobagent-profile-reextract-review">
     <Heading level={3}>Review changes</Heading>
     <Text id="jobagent-profile-review-summary" type="body">Your approved profile stays unchanged until you save this review.</Text>
-    {review.changed_fields.length > 0 ? <VStack gap={1}>
-      <Heading level={4}>Changed profile details</Heading>
-      {review.changed_fields.map((change) => <Text id={`jobagent-profile-review-change-${change.field}`} key={change.field} type="supporting">{change.field.replaceAll('_', ' ')}: {String(change.before ?? 'Not provided')} → {String(change.after ?? 'Not provided')}</Text>)}
-    </VStack> : <Text type="supporting">No profile detail changes.</Text>}
-    <VStack gap={1}>
-      <Heading level={4}>Skills added</Heading>
-      <Text type="supporting">{review.skills_added.join(', ') || 'None'}</Text>
-      <Heading level={4}>Skills removed</Heading>
-      <Text type="supporting">{review.skills_removed.join(', ') || 'None'}</Text>
-    </VStack>
+    {state.error ? <Banner id="jobagent-profile-review-error" status="warning" title="Re-extraction reported a recoverable issue" description={state.error.summary} /> : null}
+    {review.changed_fields.length > 0 ? <Collapsible trigger="Changed profile details" defaultIsOpen>
+      <VStack gap={1}>
+        {review.changed_fields.map((change) => <Text id={`jobagent-profile-review-change-${change.field}`} key={change.field} type="supporting">{change.field.replaceAll('_', ' ')}: {String(change.before ?? 'Not provided')} → {String(change.after ?? 'Not provided')}</Text>)}
+      </VStack>
+    </Collapsible> : <Text type="supporting">No profile detail changes.</Text>}
+    <Collapsible trigger="Skill changes" defaultIsOpen>
+      <VStack gap={1}>
+        <Text type="supporting">Skills added: {review.skills_added.join(', ') || 'None'}</Text>
+        <Text type="supporting">Skills removed: {review.skills_removed.join(', ') || 'None'}</Text>
+      </VStack>
+    </Collapsible>
+    {saveReason ? <Text id="jobagent-profile-review-save-reason" type="supporting">{saveReason}</Text> : null}
+    {discardReason ? <Text id="jobagent-profile-review-discard-reason" type="supporting">{discardReason}</Text> : null}
     <HStack gap={1} wrap="wrap">
-      <Button label="Save review" variant="primary" isDisabled={!review.can_approve} onClick={() => void controller.approveReview().then((ok) => { if (ok) onApproved?.(); })} />
-      <Button label="Discard review" variant="secondary" isDisabled={!review.can_discard} onClick={() => void controller.discardReview()} />
+      <Button label="Save review" variant="primary" isDisabled={!review.can_approve} aria-describedby={saveReason ? 'jobagent-profile-review-save-reason' : undefined} onClick={() => void controller.approveReview().then((ok) => { if (ok) onApproved?.(); })} />
+      <Button label="Discard review" variant="secondary" isDisabled={!review.can_discard} aria-describedby={discardReason ? 'jobagent-profile-review-discard-reason' : undefined} onClick={requestDiscard} />
       <Button label="Close" variant="ghost" onClick={controller.closeReview} />
     </HStack>
+    <AlertDialog isOpen={isDiscardConfirmOpen} onOpenChange={setIsDiscardConfirmOpen} title="Discard this profile review?" description="This keeps your approved profile unchanged and removes this proposed review." actionLabel="Discard review" actionVariant="destructive" onAction={() => void confirmDiscard()} />
   </VStack>;
 }

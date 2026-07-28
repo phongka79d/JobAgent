@@ -41,7 +41,7 @@ function CvActions({item, controller, onActivateProfile, onRetryUpload}: Pick<Cv
   return <HStack gap={1} wrap="wrap" className="jobagent-cv-manager-actions">
     {actions.includes('preview') ? <Button label={CV_MANAGER_COPY.preview} size="sm" variant="secondary" onClick={() => window.open(cvFileUrl(item.id, 'inline'), '_blank', 'noopener,noreferrer')} /> : null}
     {actions.includes('download') ? <Button label={CV_MANAGER_COPY.download} size="sm" variant="secondary" onClick={() => window.open(cvFileUrl(item.id, 'attachment'), '_blank', 'noopener,noreferrer')} /> : null}
-    {actions.includes('reextract') && item.profile_id ? <Button label={CV_MANAGER_COPY.reextract} size="sm" variant="secondary" onClick={() => void controller.startReextract(item.profile_id!)} /> : null}
+    {actions.includes('reextract') && item.profile_id ? <Button label={CV_MANAGER_COPY.reextract} size="sm" variant="secondary" onClick={() => { const profileId = item.profile_id; if (profileId) void controller.startReextract(profileId); }} /> : null}
     {actions.includes('activate_profile') ? <Button label={CV_MANAGER_COPY.activateProfile} size="sm" variant="secondary" onClick={() => onActivateProfile?.(item.id)} /> : null}
     {actions.includes('retry_upload') && onRetryUpload ? <Button label={CV_MANAGER_COPY.retryUpload} size="sm" variant="secondary" onClick={() => onRetryUpload(item.id)} /> : null}
     {actions.includes('delete_cv') ? <Button label={CV_MANAGER_COPY.delete} size="sm" variant="destructive" isLoading={Boolean(controller.state.pendingByAttachment[item.id])} onClick={() => controller.openDeleteDialog(item.id)} /> : null}
@@ -57,6 +57,12 @@ export function CvManagerDrawer({isOpen, onOpenChange, controller, onActivatePro
   const handleOpenChange = (open: boolean) => {
     if (!open) controller.close?.();
     onOpenChange(open);
+    if (!open) {
+      requestAnimationFrame(() => {
+        const manageButton = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Manage CVs');
+        manageButton?.focus();
+      });
+    }
   };
 
   return <>

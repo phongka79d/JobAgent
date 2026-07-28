@@ -4,7 +4,7 @@
  * Product destination and collapse state are owned by the sidebar composition.
  * Shared upload endpoint for sidebar and composer; sidebar success starts
  * one concise chat turn carrying only the returned attachment_id.
- * CV Manager reprocess delegates SSE to ChatPage (sole stream/reducer path).
+ * CV Manager owns direct profile re-extraction review; chat owns only chat turns.
  */
 
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
