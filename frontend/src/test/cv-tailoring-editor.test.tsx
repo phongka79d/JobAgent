@@ -140,6 +140,7 @@ function detail(
       state: 'completed',
       error_code: null,
       activities: [],
+      issues: [],
     },
     source_available: true,
     pdf_available: true,
@@ -165,6 +166,8 @@ function controller(
       stream: {phase: 'idle', data: null, error: null},
       lastOutcome: null,
       lastOutcomeSource: null,
+      pendingFocus: null,
+      retryRequest: null,
       ...stateOverrides,
     },
     loadSessions: vi.fn().mockResolvedValue(undefined),
@@ -172,6 +175,9 @@ function controller(
     createSession: vi.fn().mockResolvedValue(SESSION_ID),
     createAiVersion: vi.fn().mockResolvedValue(true),
     setDraft: vi.fn(),
+    undoIssue: vi.fn(),
+    focusIssue: vi.fn(),
+    retryIssue: vi.fn(),
     saveManualVersion: vi.fn().mockResolvedValue(true),
     selectVersion: vi.fn().mockResolvedValue(true),
     deleteSession: vi.fn().mockResolvedValue(true),
@@ -216,6 +222,26 @@ it('renders the feature-local no-change message without appending a version', ()
   renderEditor(value);
   expect(screen.getByText('There are no changes to save.')).toBeInTheDocument();
   expect(value.state.detail.data?.versions).toHaveLength(2);
+});
+
+it('binds safe issues to fields and exposes source, undo, and retry actions', async () => {
+  const issue = {section_id: 'summary', section_heading: 'Summary', item_index: 0, field: 'body' as const, reason: 'not_in_source' as const};
+  const focusIssue = vi.fn();
+  const undoIssue = vi.fn();
+  const retryIssue = vi.fn();
+  const createAiVersion = vi.fn();
+  const value = controller('current', {focusIssue, undoIssue, retryIssue, createAiVersion}, {stream: {phase: 'error', data: null, error: {code: 'TAILORING_GROUNDING_FAILED', summary: 'Not source-supported', issues: [issue]}}});
+  renderEditor(value);
+  expect(screen.getByRole('textbox', {name: 'Summary body'})).toHaveAttribute('aria-describedby', expect.stringContaining('tailoring-issue'));
+  await userEvent.click(screen.getByRole('button', {name: 'View source'}));
+  expect(await screen.findByRole('region', {name: 'Summary source evidence'})).toHaveFocus();
+  await userEvent.click(screen.getByRole('button', {name: 'Focus field'}));
+  await userEvent.click(screen.getByRole('button', {name: 'Undo change'}));
+  await userEvent.click(screen.getByRole('button', {name: 'Try again'}));
+  expect(focusIssue).toHaveBeenCalledWith(issue);
+  expect(undoIssue).toHaveBeenCalledWith(issue);
+  expect(retryIssue).toHaveBeenCalledWith(issue);
+  expect(createAiVersion).not.toHaveBeenCalled();
 });
 
 afterEach(() => {

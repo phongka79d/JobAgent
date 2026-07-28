@@ -4,4 +4,11 @@ export const TAILORING_COPY = {
   previewPdf: 'Preview PDF',
   downloadPdf: 'Download PDF',
   downloadLatex: 'Download LaTeX source',
+  issueReasons: {
+    not_in_source: 'This value is not supported by the selected source.',
+    belongs_to_another_section: 'This source belongs to another section.',
+    structure_changed: 'The source-owned structure changed.',
+    required_source_missing: 'Required source evidence is missing.',
+    unsupported_value: 'This value is outside the supported content bounds.',
+  },
 } as const;

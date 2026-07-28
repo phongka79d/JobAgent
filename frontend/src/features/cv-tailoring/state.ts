@@ -3,6 +3,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ChatApiError} from '../../lib/api/chat';
 import {
   defaultCvTailoringApi,
+  TailoringApiError,
   type CvTailoringApi,
 } from './api';
 import {asTailoringErrorCode} from './types';
@@ -15,6 +16,7 @@ import type {
   TailoringSessionListResponse,
   TailoringMutationOutcome,
   TailoringSseEvent,
+  TailoringUserIssue,
 } from './types';
 
 export type TailoringRequestPhase =
@@ -28,6 +30,7 @@ export type TailoringRequestPhase =
 export type TailoringSafeError = {
   readonly code: TailoringErrorCode | 'REQUEST_FAILED' | 'STREAM_DISCONNECTED';
   readonly summary: string;
+  readonly issues?: readonly TailoringUserIssue[];
 };
 
 export type TailoringResource<T> = {
@@ -48,6 +51,8 @@ export type CvTailoringState = {
   readonly stream: TailoringResource<null>;
   readonly lastOutcome: TailoringMutationOutcome | null;
   readonly lastOutcomeSource: 'ai' | 'manual' | null;
+  readonly pendingFocus: {readonly key: number; readonly issue: TailoringUserIssue} | null;
+  readonly retryRequest: {readonly key: number; readonly issue: TailoringUserIssue; readonly instruction: string} | null;
 };
 
 export type UseCvTailoringOptions = {
@@ -90,6 +95,8 @@ function initialState(key: string): CvTailoringState {
     stream: empty(),
     lastOutcome: null,
     lastOutcomeSource: null,
+    pendingFocus: null,
+    retryRequest: null,
   };
 }
 
@@ -100,25 +107,27 @@ function safeError(error: unknown): TailoringSafeError {
         ? 'REQUEST_FAILED'
         : asTailoringErrorCode(error.code);
     if (code === null) {
-      return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed'};
+      return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed', issues: []};
     }
     return {
       code,
       summary: error.summary,
+      issues: error instanceof TailoringApiError ? error.issues : [],
     };
   }
-  return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed'};
+  return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed', issues: []};
 }
 
 function streamError(event: TailoringSseEvent): TailoringSafeError | null {
   if (event.event !== 'run_failed') return null;
   const code = asTailoringErrorCode(event.payload.error_code);
   if (code === null) {
-    return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed'};
+    return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed', issues: []};
   }
   return {
     code,
     summary: event.payload.summary,
+    issues: event.payload.issues ?? [],
   };
 }
 
@@ -147,6 +156,8 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
   const detailRequestRef = useRef(0);
   const detailAbortRef = useRef<AbortController | null>(null);
   const mutationRef = useRef<MutationOperation | null>(null);
+  const interactionKeyRef = useRef(0);
+  const lastAiInstructionRef = useRef('');
 
   useEffect(() => {
     if (scopeRef.current === key) return;
@@ -367,8 +378,9 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
                 ? {
                     code: 'REQUEST_FAILED',
                     summary: 'CV tailoring request failed',
+                    issues: [],
                   }
-                : {code, summary: 'CV tailoring request failed'},
+                : {code, summary: 'CV tailoring request failed', issues: detail.latest_run?.issues ?? []},
           };
         }
         if (isDurableCompletedDetail(detail)) {
@@ -423,6 +435,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               terminalError = {
                 code: 'STREAM_DISCONNECTED',
                 summary: 'CV tailoring stream disconnected',
+                issues: [],
               };
             },
           },
@@ -481,6 +494,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
                 terminalError ?? {
                   code: 'REQUEST_FAILED',
                   summary: 'CV tailoring did not complete',
+                  issues: [],
                 },
             },
           }));
@@ -501,6 +515,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
                 error: {
                   code: 'REQUEST_FAILED',
                   summary: 'CV tailoring did not complete',
+                  issues: [],
                 },
               },
             }));
@@ -560,6 +575,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       let disconnected = false;
       const knownParentId = body.parent_version_id;
       const knownParentNumber = state.detail.data?.selected_version?.version_number ?? null;
+      lastAiInstructionRef.current = body.instruction;
       setState((current) => ({
         ...current,
         stream: {phase: 'loading', data: null, error: null},
@@ -585,6 +601,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               terminalError = {
                 code: 'STREAM_DISCONNECTED',
                 summary: 'CV tailoring stream disconnected',
+                issues: [],
               };
             },
           },
@@ -646,6 +663,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
                 terminalError ?? {
                   code: 'REQUEST_FAILED',
                   summary: 'CV tailoring did not complete',
+                  issues: [],
                 },
             },
           }));
@@ -661,7 +679,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               stream: {
                 phase: 'error',
                 data: null,
-                error: {code: 'REQUEST_FAILED', summary: 'CV tailoring response did not match its parent version'},
+                error: {code: 'REQUEST_FAILED', summary: 'CV tailoring response did not match its parent version', issues: []},
               },
             }));
             return false;
@@ -688,6 +706,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
                 error: {
                   code: 'REQUEST_FAILED',
                   summary: 'CV tailoring did not complete',
+                  issues: [],
                 },
               },
             }));
@@ -736,6 +755,51 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       draftDirty: true,
       lastOutcome: null,
       lastOutcomeSource: null,
+    }));
+  }, []);
+
+  const undoIssue = useCallback((issue: TailoringUserIssue): void => {
+    setState((current) => {
+      const parent = current.detail.data?.content;
+      if (parent === null || parent === undefined || current.draft === null) return current;
+      const parentSection = parent.sections.find((section) => section.id === issue.section_id);
+      const draftSectionIndex = current.draft.sections.findIndex((section) => section.id === issue.section_id);
+      if (!parentSection || draftSectionIndex < 0) return current;
+      const draftSection = current.draft.sections[draftSectionIndex]!;
+      let nextSection = parentSection;
+      if (issue.item_index !== null && issue.field !== 'section') {
+        const parentItem = parentSection.items[issue.item_index];
+        const draftItem = draftSection.items[issue.item_index];
+        if (!parentItem || !draftItem) return current;
+        const field = issue.field;
+        const nextItem = field === 'bullet'
+          ? {...draftItem, bullets: parentItem.bullets}
+          : field === 'attribute'
+            ? {...draftItem, attributes: parentItem.attributes}
+            : field === 'date'
+              ? {...draftItem, date_text: parentItem.date_text}
+              : {...draftItem, [field]: parentItem[field]};
+        nextSection = {...draftSection, items: draftSection.items.map((item, index) => index === issue.item_index ? nextItem : item)};
+      }
+      const draft = {...current.draft, sections: current.draft.sections.map((section, index) => index === draftSectionIndex ? nextSection : section)};
+      return {...current, draft, draftDirty: true};
+    });
+  }, []);
+
+  const focusIssue = useCallback((issue: TailoringUserIssue): void => {
+    interactionKeyRef.current += 1;
+    setState((current) => ({...current, pendingFocus: {key: interactionKeyRef.current, issue}}));
+  }, []);
+
+  const retryIssue = useCallback((issue: TailoringUserIssue): void => {
+    interactionKeyRef.current += 1;
+    setState((current) => ({
+      ...current,
+      retryRequest: {
+        key: interactionKeyRef.current,
+        issue,
+        instruction: lastAiInstructionRef.current || current.detail.data?.session.instruction || '',
+      },
     }));
   }, []);
 
@@ -891,6 +955,9 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
     createSession,
     createAiVersion,
     setDraft,
+    undoIssue,
+    focusIssue,
+    retryIssue,
     saveManualVersion,
     selectVersion,
     deleteSession,

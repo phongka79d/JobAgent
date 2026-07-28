@@ -3,6 +3,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {useCvTailoringState} from '../features/cv-tailoring/state';
 import type {TailoringSessionDetailResponse} from '../features/cv-tailoring/types';
+import type {TailoringUserIssue} from '../features/cv-tailoring/types';
 import {ChatApiError} from '../lib/api/chat';
 import appSource from '../app/App.tsx?raw';
 import productSidebarSource from '../features/navigation/ProductSidebar.tsx?raw';
@@ -79,6 +80,7 @@ function durableDetail(
       state: runState,
       error_code: errorCode,
       activities: [],
+      issues: [],
     },
     source_available: hasVersion,
     pdf_available: hasVersion,
@@ -431,6 +433,22 @@ describe('CV tailoring state owner', () => {
     expect(result.current.state.selectedVersionId).toBe(VERSION_ID);
     expect(result.current.state.lastOutcome).toBe('no_change');
     expect(result.current.state.stream.error).toBeNull();
+  });
+
+  it('owns issue undo, focus, and retry intent without submitting another mutation', async () => {
+    const ready = durableDetail();
+    const issue: TailoringUserIssue = {section_id: 'summary', section_heading: 'Summary', item_index: null, field: 'section', reason: 'structure_changed'};
+    const streamAiVersion = vi.fn();
+    const {result} = renderHook(() => useCvTailoringState({profileId: PROFILE_ID, profileReady: true, api: {fetchSession: vi.fn().mockResolvedValue(ready), streamAiVersion}}));
+    await act(async () => { await result.current.openSession(SESSION_ID); });
+    act(() => result.current.setDraft({...ready.content!, sections: [{...ready.content!.sections[0]!, heading: 'Edited heading'}]}));
+    act(() => result.current.undoIssue(issue));
+    expect(result.current.state.draft?.sections[0]).toEqual(ready.content?.sections[0]);
+    act(() => result.current.focusIssue(issue));
+    expect(result.current.state.pendingFocus?.issue).toEqual(issue);
+    act(() => result.current.retryIssue(issue));
+    expect(result.current.state.retryRequest?.instruction).toBe('Focus');
+    expect(streamAiVersion).not.toHaveBeenCalled();
   });
 
   it('does not select a session when initial stream fails', async () => {

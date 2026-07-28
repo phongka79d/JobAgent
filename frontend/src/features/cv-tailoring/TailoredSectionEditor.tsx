@@ -1,3 +1,4 @@
+import {useEffect, useRef, useState} from 'react';
 import {Button} from '@astryxdesign/core/Button';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
 import {Heading} from '@astryxdesign/core/Heading';
@@ -13,6 +14,9 @@ import type {
   TailoredFactEvidence,
   TailoredItem,
   TailoredSection,
+  TailoringUserIssue,
+  tailoringFieldId,
+  tailoringIssueId,
 } from './types';
 
 export type TailoredSectionEditorProps = {
@@ -21,6 +25,9 @@ export type TailoredSectionEditorProps = {
   readonly isDisabled: boolean;
   readonly onChange: (section: TailoredSection) => void;
   readonly onAskAi: (sectionId: string, heading: string) => void;
+  readonly issues?: readonly TailoringUserIssue[];
+  readonly isEvidenceOpen?: boolean;
+  readonly evidenceFocusKey?: number;
 };
 
 function replaceAt<T>(items: readonly T[], index: number, value: T): readonly T[] {
@@ -49,13 +56,30 @@ export function TailoredSectionEditor({
   isDisabled,
   onChange,
   onAskAi,
+  issues = [],
+  isEvidenceOpen = false,
+  evidenceFocusKey = 0,
 }: TailoredSectionEditorProps) {
+  const evidenceRef = useRef<HTMLDivElement>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  useEffect(() => {
+    if (isEvidenceOpen && evidenceFocusKey > 0) {
+      setEvidenceOpen(true);
+      requestAnimationFrame(() => evidenceRef.current?.focus());
+    }
+  }, [evidenceFocusKey, isEvidenceOpen]);
+  const describedBy = (itemIndex: number, field: TailoringUserIssue['field']) => {
+    const ids = issues.filter((issue) => issue.item_index === itemIndex && issue.field === field).map(tailoringIssueId);
+    return ids.length > 0 ? ids.join(' ') : undefined;
+  };
+  const sectionIssueIds = issues.filter((issue) => issue.item_index === null || issue.field === 'section').map(tailoringIssueId).join(' ') || undefined;
   const updateItem = (index: number, item: TailoredItem) => {
     onChange({...section, items: replaceAt(section.items, index, item)});
   };
 
   return (
     <Section
+      aria-describedby={sectionIssueIds}
       variant="transparent"
       dividers={['bottom']}
       data-testid={`jobagent-tailored-section-${section.id}`}
@@ -129,6 +153,8 @@ export function TailoredSectionEditor({
 
               {item.title ? (
                 <TextInput
+                  id={tailoringFieldId(section.id, itemIndex, 'title')}
+                  aria-describedby={describedBy(itemIndex, 'title')}
                   label={`Tiêu đề ${itemLabel(section, itemIndex)}`}
                   value={item.title.text}
                   isDisabled={isDisabled}
@@ -142,6 +168,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.subtitle ? (
                 <TextInput
+                  id={tailoringFieldId(section.id, itemIndex, 'subtitle')}
+                  aria-describedby={describedBy(itemIndex, 'subtitle')}
                   label={`Phụ đề ${itemLabel(section, itemIndex)}`}
                   value={item.subtitle.text}
                   isDisabled={isDisabled}
@@ -155,6 +183,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.date_text ? (
                 <TextInput
+                  id={tailoringFieldId(section.id, itemIndex, 'date')}
+                  aria-describedby={describedBy(itemIndex, 'date')}
                   label={`Thời gian ${itemLabel(section, itemIndex)}`}
                   value={item.date_text.text}
                   isDisabled={isDisabled}
@@ -168,6 +198,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.location ? (
                 <TextInput
+                  id={tailoringFieldId(section.id, itemIndex, 'location')}
+                  aria-describedby={describedBy(itemIndex, 'location')}
                   label={`Địa điểm ${itemLabel(section, itemIndex)}`}
                   value={item.location.text}
                   isDisabled={isDisabled}
@@ -180,6 +212,9 @@ export function TailoredSectionEditor({
                 />
               ) : null}
               <TextArea
+                id={tailoringFieldId(section.id, itemIndex, 'body')}
+                aria-label={`${section.heading} body`}
+                aria-describedby={describedBy(itemIndex, 'body')}
                 label={`Nội dung ${itemLabel(section, itemIndex)}`}
                 value={item.body.text}
                 rows={3}
@@ -201,6 +236,8 @@ export function TailoredSectionEditor({
                   wrap="wrap"
                 >
                   <TextArea
+                    id={`${tailoringFieldId(section.id, itemIndex, 'bullet')}-${bulletIndex}`}
+                    aria-describedby={describedBy(itemIndex, 'bullet')}
                     label={`Gạch đầu dòng ${bulletIndex + 1} · ${itemLabel(section, itemIndex)}`}
                     value={bullet.text}
                     rows={2}
@@ -270,6 +307,8 @@ export function TailoredSectionEditor({
                     <Text type="label">{attribute.name}</Text>
                     {attribute.values.map((attributeValue, valueIndex) => (
                       <TextInput
+                        id={`${tailoringFieldId(section.id, itemIndex, 'attribute')}-${attributeIndex}-${valueIndex}`}
+                        aria-describedby={describedBy(itemIndex, 'attribute')}
                         key={`${attribute.name}-${valueIndex}`}
                         label={`${attribute.name} ${valueIndex + 1}`}
                         value={attributeValue.text}
@@ -301,8 +340,8 @@ export function TailoredSectionEditor({
         ))}
 
         {evidence.length > 0 ? (
-          <Collapsible trigger={<Text type="label">Nguồn đối chiếu</Text>} defaultIsOpen={false}>
-            <VStack gap={2}>
+          <Collapsible trigger={<Text type="label">Nguồn đối chiếu</Text>} isOpen={evidenceOpen} onOpenChange={setEvidenceOpen}>
+            <VStack ref={evidenceRef} tabIndex={-1} role="region" aria-label={`${section.heading} source evidence`} gap={2}>
               {evidence.map((fact) => (
                 <Text key={fact.fact_id} type="supporting" as="p">
                   {fact.source_text}

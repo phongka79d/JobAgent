@@ -1,4 +1,4 @@
-import {useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {AlertDialog} from '@astryxdesign/core/AlertDialog';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
@@ -24,7 +24,7 @@ import type {CvTailoringController, TailoringSafeError} from './state';
 import {TailoredSectionEditor} from './TailoredSectionEditor';
 import {TailoringPdfPreview} from './TailoringPdfPreview';
 import {TailoringSessionDeleteDialog} from './TailoringSessionDeleteDialog';
-import type {TailoredCVContent, TailoredSection} from './types';
+import {tailoringFieldId, tailoringIssueId, type TailoredCVContent, type TailoredSection} from './types';
 import './cv-tailoring.css';
 
 export type TailoringEditorProps = {
@@ -143,6 +143,23 @@ export function TailoringEditor({
   const [isDeleting, setIsDeleting] = useState(false);
   const saveGuard = useRef(false);
   const errorText = safeErrorText(state.detail.error ?? state.stream.error);
+  const issues = state.stream.error?.issues ?? state.detail.error?.issues ?? [];
+  const [evidenceTarget, setEvidenceTarget] = useState<{sectionId: string; key: number} | null>(null);
+
+  useEffect(() => {
+    const target = state.pendingFocus?.issue;
+    if (!target || target.item_index === null || target.field === 'section') return;
+    const id = tailoringFieldId(target.section_id, target.item_index, target.field);
+    const field = document.getElementById(id) ?? document.querySelector<HTMLElement>(`[id^="${id}-"]`);
+    field?.focus();
+  }, [state.pendingFocus]);
+
+  useEffect(() => {
+    const request = state.retryRequest;
+    if (!request) return;
+    setAiTarget({sectionId: request.issue.section_id, heading: request.issue.section_heading});
+    setAiInstruction(request.instruction);
+  }, [state.retryRequest]);
 
   const versionOptions = useMemo(
     () =>
@@ -174,7 +191,7 @@ export function TailoringEditor({
     <VStack gap={4} width="100%">
       <HeaderFacts content={draft} onEditProfile={onEditProfile} />
       {draft.sections.map((section) => (
-        <TailoredSectionEditor
+          <TailoredSectionEditor
           key={section.id}
           section={section}
           evidence={detail.evidence.filter(
@@ -185,6 +202,9 @@ export function TailoringEditor({
           onAskAi={(sectionId, heading) =>
             setAiTarget({sectionId, heading})
           }
+          issues={issues.filter((issue) => issue.section_id === section.id)}
+          isEvidenceOpen={evidenceTarget?.sectionId === section.id}
+          evidenceFocusKey={evidenceTarget?.sectionId === section.id ? evidenceTarget.key : 0}
         />
       ))}
     </VStack>
@@ -321,6 +341,24 @@ export function TailoringEditor({
                 title={state.lastOutcomeSource === 'manual' ? TAILORING_COPY.noChangeManual : TAILORING_COPY.noChangeAi}
                 container="section"
               />
+            </VStack>
+          ) : null}
+
+          {issues.length > 0 ? (
+            <VStack gap={2} role="status" aria-live="polite">
+              {issues.map((issue) => (
+                <Section key={tailoringIssueId(issue)} variant="muted" padding={3}>
+                  <VStack gap={2}>
+                    <Text id={tailoringIssueId(issue)} type="body">{issue.section_heading}: {TAILORING_COPY.issueReasons[issue.reason]}</Text>
+                    <HStack gap={2} wrap="wrap">
+                      <Button label="Focus field" size="sm" variant="secondary" onClick={() => controller.focusIssue(issue)} />
+                      <Button label="View source" size="sm" variant="secondary" onClick={() => setEvidenceTarget({sectionId: issue.section_id, key: Date.now()})} />
+                      <Button label="Undo change" size="sm" variant="secondary" onClick={() => controller.undoIssue(issue)} />
+                      <Button label="Try again" size="sm" variant="secondary" onClick={() => controller.retryIssue(issue)} />
+                    </HStack>
+                  </VStack>
+                </Section>
+              ))}
             </VStack>
           ) : null}
 

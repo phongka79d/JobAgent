@@ -183,7 +183,32 @@ export type TailoringRunSummary = {
   readonly state: 'running' | 'interrupted' | 'completed' | 'failed';
   readonly error_code: string | null;
   readonly activities: readonly TailoringActivity[];
+  readonly issues: readonly TailoringUserIssue[];
 };
+
+export type TailoringUserIssue = {
+  readonly section_id: string;
+  readonly section_heading: string;
+  readonly item_index: number | null;
+  readonly field: 'title' | 'subtitle' | 'date' | 'location' | 'body' | 'bullet' | 'attribute' | 'section';
+  readonly reason: 'not_in_source' | 'belongs_to_another_section' | 'structure_changed' | 'required_source_missing' | 'unsupported_value';
+};
+
+function safeIssueToken(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, '-');
+}
+
+export function tailoringIssueId(issue: TailoringUserIssue): string {
+  return `tailoring-issue-${safeIssueToken(issue.section_id)}-${issue.item_index ?? 'section'}-${issue.field}-${issue.reason}`;
+}
+
+export function tailoringFieldId(
+  sectionId: string,
+  itemIndex: number,
+  field: TailoringUserIssue['field'],
+): string {
+  return `tailoring-field-${safeIssueToken(sectionId)}-${itemIndex}-${field}`;
+}
 
 export type TailoringSessionDetailResponse = {
   readonly session: TailoringSessionSummary;
@@ -206,7 +231,7 @@ export type TailoringVersionMutationResponse = {
   readonly currentness: 'current';
 };
 
-export type TailoringSseEvent = Exclude<SseEvent, {event: 'run_completed'}> | {
+export type TailoringSseEvent = Exclude<SseEvent, {event: 'run_completed' | 'run_failed'}> | {
   readonly event_id: string;
   readonly run_id: string;
   readonly timestamp: string;
@@ -216,6 +241,17 @@ export type TailoringSseEvent = Exclude<SseEvent, {event: 'run_completed'}> | {
     readonly outcome?: TailoringMutationOutcome;
     readonly version_id?: string;
     readonly version_number?: number;
+  };
+} | {
+  readonly event_id: string;
+  readonly run_id: string;
+  readonly timestamp: string;
+  readonly event: 'run_failed';
+  readonly payload: {
+    readonly state: 'failed';
+    readonly error_code: string;
+    readonly summary: string;
+    readonly issues?: readonly TailoringUserIssue[];
   };
 };
 
@@ -609,7 +645,7 @@ function parseActivity(raw: unknown, runId: string, path: string): TailoringActi
 function parseRun(raw: unknown, path: string): TailoringRunSummary | null {
   if (raw === null) return null;
   const value = object(raw, path);
-  exact(value, ['id', 'state', 'error_code', 'activities'], path);
+  exact(value, ['id', 'state', 'error_code', 'activities', 'issues'], path);
   if (!['running', 'interrupted', 'completed', 'failed'].includes(String(value.state))) {
     throw new Error(`${path}.state is invalid`);
   }
@@ -621,7 +657,28 @@ function parseRun(raw: unknown, path: string): TailoringRunSummary | null {
     activities: array(value.activities, `${path}.activities`, 20_000).map(
       (item, index) => parseActivity(item, id, `${path}.activities[${index}]`),
     ),
+    issues: parseTailoringIssues(value.issues, `${path}.issues`),
   };
+}
+
+export function parseTailoringIssues(raw: unknown, path = 'issues'): TailoringUserIssue[] {
+  return array(raw, path, 10).map((item, index) => {
+    const value = object(item, `${path}[${index}]`);
+    exact(value, ['section_id', 'section_heading', 'item_index', 'field', 'reason'], `${path}[${index}]`);
+    const fields = ['title', 'subtitle', 'date', 'location', 'body', 'bullet', 'attribute', 'section'] as const;
+    const reasons = ['not_in_source', 'belongs_to_another_section', 'structure_changed', 'required_source_missing', 'unsupported_value'] as const;
+    if (!fields.includes(value.field as (typeof fields)[number])) throw new Error(`${path}[${index}].field is invalid`);
+    if (!reasons.includes(value.reason as (typeof reasons)[number])) throw new Error(`${path}[${index}].reason is invalid`);
+    const itemIndex = value.item_index === null ? null : integer(value.item_index, `${path}[${index}].item_index`);
+    if (itemIndex !== null && itemIndex > 30) throw new Error(`${path}[${index}].item_index is invalid`);
+    return {
+      section_id: text(value.section_id, `${path}[${index}].section_id`, 120),
+      section_heading: text(value.section_heading, `${path}[${index}].section_heading`, 200),
+      item_index: itemIndex,
+      field: value.field as TailoringUserIssue['field'],
+      reason: value.reason as TailoringUserIssue['reason'],
+    };
+  });
 }
 
 export function parseTailoringSessionList(raw: unknown): TailoringSessionListResponse {
@@ -707,8 +764,29 @@ export function parseTailoringSseFrame(
   try {
     const raw = object(JSON.parse(frame.data) as unknown, 'tailoring event');
     exact(raw, ['event_id', 'run_id', 'timestamp', 'event', 'payload'], 'tailoring event');
-    if (raw.event !== 'run_completed') {
+    if (raw.event !== 'run_completed' && raw.event !== 'run_failed') {
       const event = parseSseEventData(raw) as TailoringSseEvent;
+      if (frame.event !== null && frame.event !== event.event) throw new SseParseError('wire event name mismatch');
+      if (frame.id !== null && frame.id.toLowerCase() !== event.event_id) throw new SseParseError('wire event id mismatch');
+      return {ok: true, event};
+    }
+    if (raw.event === 'run_failed') {
+      const payload = object(raw.payload, 'tailoring run_failed payload');
+      const hasIssues = payload.issues !== undefined;
+      exact(payload, hasIssues ? ['state', 'error_code', 'summary', 'issues'] : ['state', 'error_code', 'summary'], 'tailoring run_failed payload');
+      if (payload.state !== 'failed') throw new SseParseError("run_failed requires state='failed'");
+      const event: TailoringSseEvent = {
+        event_id: uuid(raw.event_id, 'tailoring event.event_id'),
+        run_id: uuid(raw.run_id, 'tailoring event.run_id'),
+        timestamp: timestamp(raw.timestamp, 'tailoring event.timestamp'),
+        event: 'run_failed',
+        payload: {
+          state: 'failed',
+          error_code: text(payload.error_code, 'tailoring event.error_code', 120),
+          summary: text(payload.summary, 'tailoring event.summary', 500),
+          ...(hasIssues ? {issues: parseTailoringIssues(payload.issues)} : {}),
+        },
+      };
       if (frame.event !== null && frame.event !== event.event) throw new SseParseError('wire event name mismatch');
       if (frame.id !== null && frame.id.toLowerCase() !== event.event_id) throw new SseParseError('wire event id mismatch');
       return {ok: true, event};

@@ -90,6 +90,7 @@ const detail = {
     state: 'completed',
     error_code: null,
     activities: [],
+    issues: [],
   },
   source_available: true,
   pdf_available: true,
@@ -137,6 +138,13 @@ describe('CV tailoring strict contracts', () => {
     const envelope = {event_id: '66666666-6666-4666-8666-666666666666', run_id: RUN_ID, timestamp: NOW, event: 'run_completed', payload: {state: 'completed', outcome: 'no_change', version_id: VERSION_ID, version_number: 1}};
     expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_completed', data: JSON.stringify(envelope)})).toMatchObject({ok: true, event: envelope});
     expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_completed', data: JSON.stringify({...envelope, payload: {state: 'completed', version_id: VERSION_ID, version_number: 1}})}).ok).toBe(false);
+  });
+
+  it('parses at most ten safe tailoring issues and rejects internal fields', () => {
+    const issue = {section_id: 'summary', section_heading: 'Summary', item_index: 0, field: 'body', reason: 'not_in_source'};
+    const envelope = {event_id: '66666666-6666-4666-8666-666666666666', run_id: RUN_ID, timestamp: NOW, event: 'run_failed', payload: {state: 'failed', error_code: 'TAILORING_GROUNDING_FAILED', summary: 'Not source-supported', issues: [issue]}};
+    expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_failed', data: JSON.stringify(envelope)})).toMatchObject({ok: true, event: envelope});
+    expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_failed', data: JSON.stringify({...envelope, payload: {...envelope.payload, issues: [{...issue, path: 'sections[0].items[0].body'}]}})}).ok).toBe(false);
   });
 
   it('validates the creation session header before consuming SSE', async () => {

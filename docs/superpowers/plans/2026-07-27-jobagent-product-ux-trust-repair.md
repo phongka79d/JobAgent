@@ -1470,7 +1470,7 @@ git commit -m "feat: project safe tailoring grounding issues"
 - Modify: `frontend/src/test/cv-tailoring-editor.test.tsx`
 - Modify: `frontend/src/test/cv-tailoring-accessibility.test.tsx`
 
-- [ ] **Step 1: Write issue parsing and recovery tests**
+- [x] **Step 1: Write issue parsing and recovery tests**
 
 ```tsx
 it('focuses the field, opens source evidence, and connects the issue with aria-describedby', async () => {
@@ -1505,7 +1505,7 @@ npm test -- --run src/test/cv-tailoring-state.test.tsx src/test/cv-tailoring-edi
 
 Expected: FAIL because state stores only `TailoringSafeError` and the editor has no issue bindings/recovery actions.
 
-- [ ] **Step 3: Add strict issue types and state ownership**
+- [x] **Step 3: Add strict issue types and state ownership**
 
 Mirror the backend allowlist exactly in `types.ts`; parse at most ten issues and reject extra keys. Store issues with the stream/detail error, but keep the local draft and selected parent unchanged on failure. Add state callbacks:
 
@@ -1517,7 +1517,7 @@ retryIssue(issue: TailoringUserIssue): void;
 
 `undoIssue` copies only the addressed parent field/item. `focusIssue` sets a pending focus target consumed by the editor after render. `retryIssue` opens the existing scoped AI dialog with the prior instruction and never calls the API until the user confirms.
 
-- [ ] **Step 4: Render safe issue cards and accessible field links**
+- [x] **Step 4: Render safe issue cards and accessible field links**
 
 Create stable field IDs from section ID/item index/field using the already parsed safe values. Pass `issueIds` into `TailoredSectionEditor`, render an English reason from `copy.ts`, and attach `aria-describedby`. Use `View source`, `Undo change`, and `Try again` buttons with visible labels/tooltips and live-region announcements. Do not show internal code/path or rejected text.
 
@@ -1531,7 +1531,7 @@ npm run typecheck
 
 Expected: PASS. The accessibility test must also assert no nested buttons, icon-only controls have labels, and reduced-motion CSS remains enabled.
 
-- [ ] **Step 6: Commit editor recovery**
+- [x] **Step 6: Commit editor recovery**
 
 ```powershell
 Set-Location ..

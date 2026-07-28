@@ -17,6 +17,7 @@ import {
   parseTailoringSessionList,
   parseTailoringMutationResponse,
   parseTailoringSseFrame,
+  parseTailoringIssues,
   type CreateTailoringAiVersionRequest,
   type CreateTailoringManualVersionRequest,
   type CreateTailoringSessionRequest,
@@ -25,14 +26,34 @@ import {
   type TailoringSessionListResponse,
   type TailoringSseEvent,
   type TailoringVersionMutationResponse,
+  type TailoringUserIssue,
 } from './types';
 
 export type TailoringStreamCallbacks = TypedStreamHandlers<TailoringSseEvent>;
 
+export class TailoringApiError extends ChatApiError {
+  readonly issues: readonly TailoringUserIssue[];
+
+  constructor(status: number, code: string, summary: string, issues: readonly TailoringUserIssue[]) {
+    super(status, code, summary);
+    this.name = 'TailoringApiError';
+    this.issues = issues;
+  }
+}
+
 function safeError(status: number, body: string): ChatApiError {
   const parsed = parseErrorBody(status, body);
   const code = asTailoringErrorCode(parsed.code);
-  if (code !== null) return new ChatApiError(status, code, parsed.summary);
+  if (code !== null) {
+    let issues: TailoringUserIssue[] = [];
+    try {
+      const raw = JSON.parse(body) as {detail?: {issues?: unknown}};
+      if (raw.detail?.issues !== undefined) issues = parseTailoringIssues(raw.detail.issues);
+    } catch {
+      issues = [];
+    }
+    return new TailoringApiError(status, code, parsed.summary, issues);
+  }
   return new ChatApiError(status, 'HTTP_ERROR', 'CV tailoring request failed');
 }
 
