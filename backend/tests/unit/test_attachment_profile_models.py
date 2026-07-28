@@ -166,7 +166,7 @@ def test_frozen_profile_contract_constants_and_state_check() -> None:
     assert profile_models.PROFILE_DISPLAY_NAME_MAX == 120
     assert profile_models.CONVERSATION_TITLE_MAX == 120
     assert profile_models.PROFILE_SKILL_TAG_LIMIT == 12
-    assert profile_models.NEW_CONVERSATION_TITLE == "Chat mới"
+    assert profile_models.NEW_CONVERSATION_TITLE == "New chat"
     assert any(name.endswith("state") for name in _check_sql(_t("profiles")))
 
 

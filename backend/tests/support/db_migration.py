@@ -107,7 +107,7 @@ def seed_legacy_test_conversation(db_path: Path) -> None:
         connection.execute(
             "INSERT INTO conversations "
             "(id, profile_id, title, created_at, updated_at, last_opened_at) "
-            "VALUES ('main', ?, 'Chat mới', ?, ?, ?)",
+            "VALUES ('main', ?, 'New chat', ?, ?, ?)",
             (profile_id, now, now, now),
         )
         connection.commit()

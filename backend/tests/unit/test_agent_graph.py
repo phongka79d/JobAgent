@@ -22,6 +22,7 @@ from app.agent.graph import (
 )
 from app.agent.graph import initial_graph_state as _production_initial_graph_state
 from app.agent.state import AGENT_STATE_FIELDS
+from app.agent.prompt import build_system_prompt
 from app.services import job_save_confirmation as conf
 from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
 from app.tools.registry import ToolRegistry, production_registry
@@ -307,6 +308,13 @@ def test_production_registry_has_exactly_eight_tools() -> None:
         "create_tailored_cv",
     ]
     assert "synthetic_interrupt" not in names
+
+
+def test_tailoring_prompt_covers_explicit_editing_intent_and_durable_success() -> None:
+    prompt = build_system_prompt(["create_tailored_cv"])
+    for verb in ("tailor", "edit", "revise", "customize", "generate", "create"):
+        assert verb in prompt
+    assert "Claim success only after a successful exact create_tailored_cv ToolResult" in prompt
 
 
 def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:

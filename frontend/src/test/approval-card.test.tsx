@@ -709,7 +709,7 @@ describe('Save Profile refreshes sidebar', () => {
     const conversation = {
       id: conversationId,
       profile_id: profileId,
-      title: 'Chat mới',
+      title: 'New chat',
       created_at: TS,
       updated_at: TS,
       last_opened_at: TS,
@@ -882,7 +882,7 @@ describe('Save Profile refreshes sidebar', () => {
     const conversation = {
       id: conversationId,
       profile_id: profileId,
-      title: 'Chat mới',
+      title: 'New chat',
       created_at: TS,
       updated_at: TS,
       last_opened_at: TS,

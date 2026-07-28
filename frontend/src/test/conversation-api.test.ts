@@ -10,7 +10,7 @@ const CONVERSATION_ID = 'bbbbbbbb-cccc-4ddd-8eee-fffffffffff1';
 const REPLACEMENT_ID = 'cccccccc-dddd-4eee-8fff-000000000001';
 const NOW = '2026-07-23T10:00:00Z';
 const conversation = {
-  id: CONVERSATION_ID, profile_id: PROFILE_ID, title: 'Chat mới',
+  id: CONVERSATION_ID, profile_id: PROFILE_ID, title: 'New chat',
   created_at: NOW, updated_at: NOW, last_opened_at: NOW, is_selected: true,
 };
 

@@ -95,7 +95,7 @@ async def _seed_run(session: AsyncSession, content: str = "tool turn") -> str:
         text(
             "INSERT INTO conversations ("
             "id, profile_id, title, created_at, updated_at, last_opened_at) VALUES ("
-            ":conversation_id, :profile_id, 'Chat mới', :now, :now, :now)"
+            ":conversation_id, :profile_id, 'New chat', :now, :now, :now)"
         ),
         {
             "conversation_id": conversation_id,

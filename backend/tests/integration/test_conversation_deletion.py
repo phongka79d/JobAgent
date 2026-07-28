@@ -187,7 +187,7 @@ def test_delete_last_conversation_creates_exactly_one_empty_replacement(
                 sqlite_path=db_path,
             )
             assert result.replacement_conversation_id == result.selected_conversation.id
-            assert result.selected_conversation.title == "Chat mới"
+            assert result.selected_conversation.title == "New chat"
 
             async with factory() as session:
                 count = await session.scalar(

@@ -782,7 +782,7 @@ def test_new_upload_bootstraps_pending_profile_and_conversation(
     assert bootstrap["profile"]["source_hash"] is None
     assert bootstrap["profile"]["setup_status"] == "awaiting_extraction"
     assert bootstrap["conversation"]["profile_id"] == bootstrap["profile"]["id"]
-    assert bootstrap["conversation"]["title"] == "Chat mới"
+    assert bootstrap["conversation"]["title"] == "New chat"
     assert bootstrap["start_extraction"] is True
     assert body["attachment"]["state"] == ATTACHMENT_STATE_STAGED
     assert (files_dir / body["attachment"]["id"]).is_file()

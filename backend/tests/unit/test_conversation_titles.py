@@ -11,3 +11,4 @@ def test_title_normalizes_whitespace_and_is_bounded() -> None:
 
 def test_blank_title_uses_frozen_default() -> None:
     assert derive_conversation_title(" \n\t ") == NEW_CONVERSATION_TITLE
+    assert NEW_CONVERSATION_TITLE == "New chat"

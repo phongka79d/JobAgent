@@ -78,7 +78,7 @@ def db_path(migrated_sqlite: Path) -> Path:
                 await session.execute(text(
                     "INSERT INTO conversations (id, profile_id, title, "
                     "created_at, updated_at, last_opened_at) VALUES "
-                    "(:cid, :pid, 'Chat mới', :now, :now, :now)"
+                    "(:cid, :pid, 'New chat', :now, :now, :now)"
                 ), {"cid": CONVERSATION_ID, "pid": profile_id, "now": now})
                 await session.commit()
         finally:

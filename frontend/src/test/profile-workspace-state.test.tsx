@@ -23,7 +23,7 @@ const CONVERSATION_B = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const conversation = {
   id: CONVERSATION_A,
   profile_id: PROFILE_A,
-  title: 'Chat mới',
+  title: 'New chat',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   last_opened_at: '2026-01-01T00:00:00Z',

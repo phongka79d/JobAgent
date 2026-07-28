@@ -149,7 +149,7 @@ describe('profile and conversation navigation', () => {
     );
 
     expect(screen.getByText('Platform role search')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', {name: 'Chat mới'}));
+    await userEvent.click(screen.getByRole('button', {name: 'New chat'}));
     expect(create).toHaveBeenCalledWith(PROFILE_ID);
   });
 
@@ -189,7 +189,7 @@ describe('profile and conversation navigation', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', {name: 'Chat mới'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'New chat'})).not.toBeInTheDocument();
     expect(screen.queryByRole('button', {name: /Delete conversation/})).not.toBeInTheDocument();
   });
 

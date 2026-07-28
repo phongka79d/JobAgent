@@ -1981,7 +1981,7 @@ git commit -m "fix: remove internal identifiers from product UI"
 - Modify: `frontend/src/test/profile-api.test.ts`
 - Modify: `frontend/src/test/profile-workspace-state.test.tsx`
 
-- [ ] **Step 1: Write title and decision-path regressions**
+- [x] **Step 1: Write title and decision-path regressions**
 
 ```py
 def test_blank_title_uses_english_default() -> None:
@@ -2011,13 +2011,13 @@ Set-Location backend
 
 Expected: the title test fails on `Chat mới`; representative intent tests fail or expose prompt-only coverage.
 
-- [ ] **Step 3: Change only the default/title prompt contract**
+- [x] **Step 3: Change only the default/title prompt contract**
 
 Set `NEW_CONVERSATION_TITLE = "New chat"`. Keep `derive_conversation_title`'s whitespace normalization, length cap, and first ordinary non-empty user-message guard. Upload/re-extraction/approval/system messages remain excluded from title derivation.
 
 Expand the existing tailoring prompt with the bounded synonyms **edit**, **revise**, **customize**, and **generate**. Add decision-path tests through the existing fake-model/tool registry; do not add a natural-language success classifier or change the final durable `create_tailored_cv` boundary.
 
-- [ ] **Step 4: Update frontend fixture contracts and verify**
+- [x] **Step 4: Update frontend fixture contracts and verify**
 
 Replace Vietnamese default-title fixtures with `New chat`; retain source-message text fixtures unchanged. Run:
 

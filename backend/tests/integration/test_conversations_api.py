@@ -209,7 +209,7 @@ def test_pending_extraction_turn_keeps_owner_without_approved_context_or_title(
                 session, conversation_id=conversation_id
             )
             assert conversation is not None
-            assert conversation.title == "Chat mới"
+            assert conversation.title == "New chat"
             await conversations_repo.update_title_from_first_user_message(
                 session,
                 conversation_id=conversation_id,

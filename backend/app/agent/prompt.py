@@ -221,7 +221,8 @@ def build_system_prompt(
                     "",
                     "Tailored CV creation:",
                     "- Call create_tailored_cv only for an explicit request to "
-                    "tailor or create a CV for a selected Job or bounded user "
+                    "tailor, edit, revise, customize, generate, or create a CV "
+                    "for a selected Job or bounded user "
                     "instruction.",
                     "- Pass only the user's bounded instruction. The server "
                     "already owns the selected Job ID and resolves approved CV "

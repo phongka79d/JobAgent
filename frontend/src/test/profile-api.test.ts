@@ -33,7 +33,7 @@ const pendingProfile = {
 const conversation = {
   id: CONVERSATION_ID,
   profile_id: PROFILE_ID,
-  title: 'Chat mới',
+  title: 'New chat',
   created_at: NOW,
   updated_at: NOW,
   last_opened_at: NOW,

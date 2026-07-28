@@ -34,7 +34,7 @@ PROFILE_SETUP_STATUS_EXTRACTION_FAILED = "extraction_failed"
 PROFILE_DISPLAY_NAME_MAX = 120
 CONVERSATION_TITLE_MAX = 120
 PROFILE_SKILL_TAG_LIMIT = 12
-NEW_CONVERSATION_TITLE = "Chat mới"
+NEW_CONVERSATION_TITLE = "New chat"
 
 # ponytail: Legacy modules are migrated in Tasks 5 and 8, so these import-only
 # aliases temporarily keep the application importable. Remove them when those
