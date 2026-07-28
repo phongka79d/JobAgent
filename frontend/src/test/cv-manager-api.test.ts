@@ -4,6 +4,7 @@ import {
   cvFileUrl,
   deleteCv,
   fetchCvManager,
+  streamProfileReextract,
 } from '../features/cv-manager/api';
 import {
   parseCvManagerItem,
@@ -378,5 +379,28 @@ describe('profile re-extract event parsing', () => {
   it('rejects chat-shaped or extra-key events instead of coupling the stream to the chat reducer', () => {
     expect(() => parseProfileReextractEvent({...event, run_id: 'chat-run'})).toThrow();
     expect(() => parseProfileReextractEvent({...event, payload: {revision: event.payload.revision, state: 'completed'}})).toThrow();
+  });
+
+  it('assembles split direct-stream frames and rejects wire/payload coupling mismatches', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+    const encoder = new TextEncoder();
+    const valid = `id: ${event.event_id}\nevent: ${event.event}\ndata: ${JSON.stringify(event)}\n\n`;
+    const mismatched = `id: ${event.event_id}\nevent: reextract_failed\ndata: ${JSON.stringify(event)}\n\n`;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(valid.slice(0, 37)));
+        controller.enqueue(encoder.encode(valid.slice(37) + mismatched));
+        controller.close();
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {status: 200, headers: {'Content-Type': 'text/event-stream'}})));
+    const onEvent = vi.fn();
+    const onMalformed = vi.fn();
+
+    await streamProfileReextract(ACTIVE_PROFILE_ID, {onEvent, onMalformed});
+
+    expect(onEvent).toHaveBeenCalledOnce();
+    expect(onEvent).toHaveBeenCalledWith(event);
+    expect(onMalformed).toHaveBeenCalledOnce();
   });
 });

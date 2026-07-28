@@ -438,6 +438,7 @@ describe('App foundation shell', () => {
       source_available: true,
       pdf_available: true,
     });
+    const streamProfileReextract = vi.fn().mockResolvedValue(undefined);
     render(
       <Theme theme={neutralTheme}>
         <App
@@ -454,6 +455,21 @@ describe('App foundation shell', () => {
             },
             chat: {loadConversationHistory},
             tailoring: {fetchSession},
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue({
+                present: true,
+                profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+                preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+                active_attachment: {id: versionId, original_name: 'synthetic.pdf', mime_type: 'application/pdf', size_bytes: 1024, page_count: 1, state: 'active', failure_code: null},
+                draft_present: false,
+                pending_attachment: null,
+              }),
+              cvManager: {
+                fetchCvManager: vi.fn().mockResolvedValue({items: []}),
+                streamProfileReextract,
+                getProfileReextractReview: vi.fn().mockRejectedValue(new Error('review not ready')),
+              },
+            },
           }}
         />
       </Theme>,
@@ -476,6 +492,10 @@ describe('App foundation shell', () => {
     );
     expect(screen.getByTestId('jobagent-chat-page')).toBe(chat);
     expect(loadConversationHistory).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', {name: /Profile/}));
+    await waitFor(() => expect(streamProfileReextract).toHaveBeenCalledWith(profileId, expect.any(Object), expect.any(AbortSignal)));
+    expect(screen.getByRole('heading', {level: 1, name: 'CV Ä‘Ã£ chá»‰nh'})).toBeInTheDocument();
+    expect(screen.getByRole('dialog', {name: 'CV Manager'})).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole('button', {name: 'Quay lại chat'}),
     );
