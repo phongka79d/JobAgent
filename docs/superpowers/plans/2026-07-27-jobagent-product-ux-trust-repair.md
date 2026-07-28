@@ -665,7 +665,7 @@ it('contains no product imports or labels for technical panels', () => {
 });
 ```
 
-- [x] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
+- [ ] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
 
 ```powershell
 Set-Location frontend
@@ -725,7 +725,7 @@ it('keeps singleton product state hooks in App', () => {
 });
 ```
 
-- [x] **Step 6: Verify navigation, build, and static removal**
+- [ ] **Step 6: Verify navigation, build, and static removal**
 
 ```powershell
 npm test -- --run src/test/product-navigation.test.tsx src/test/saved-jobs-panel.test.tsx src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-state.test.tsx src/test/cv-sidebar.test.tsx src/app/App.test.tsx
@@ -775,7 +775,7 @@ Before committing, inspect `git diff --cached --name-status` and confirm no back
 - Test: `backend/tests/integration/test_profile_deletion.py`
 - Test: `backend/tests/unit/test_api_sse.py`
 
-- [ ] **Step 1: Define strict event/review contracts and write parser tests**
+- [x] **Step 1: Define strict event/review contracts and write parser tests**
 
 Create the new schema module with bounded fields and no raw text/path/provider payloads:
 
@@ -885,7 +885,7 @@ Set-Location backend
 
 Expected: FAIL until the new models, parsers, and projection helper are present.
 
-- [ ] **Step 3: Add a generic validated SSE response seam without changing chat event names**
+- [x] **Step 3: Add a generic validated SSE response seam without changing chat event names**
 
 In `backend/app/api/sse.py`, keep `open_sse_response` unchanged for the seven chat events and add:
 
@@ -921,7 +921,7 @@ async def open_typed_sse_response(
 
 The profile event serializer validates the discriminated model, writes `event`, `id`, and compact JSON data, and is unit-tested for split/invalid frames on the existing wire parser. Do not add profile events to the chat `SseEventName` union.
 
-- [ ] **Step 4: Implement the direct coordinator using existing extraction/draft/approval owners**
+- [x] **Step 4: Implement the direct coordinator using existing extraction/draft/approval owners**
 
 `ProfileReextractionCoordinator.stream(profile_id)` must:
 
@@ -936,7 +936,7 @@ Use `asyncio.CancelledError` handling so cancellation before the atomic draft pu
 
 Add `GET` review loading that requires the requested ready profile, verifies `draft.target_profile_id` and `source_attachment_id`, parses the draft with `parse_profile_draft_payload`, loads the approved profile/preferences, and uses `draft.updated_at.isoformat()` as the optimistic revision. Add approve/discard methods that compare the supplied revision and profile owner inside the transaction.
 
-- [ ] **Step 5: Make approval and discard revision-safe and enforce the review gate**
+- [x] **Step 5: Make approval and discard revision-safe and enforce the review gate**
 
 Extend `commit_approved_draft` with `expected_draft_updated_at: datetime | None`; `_load_preflight` must reject a changed `ProfileDraft.updated_at` with `PROFILE_REEXTRACT_CONFLICT` in both its read and write sessions. Discard must delete the matching profile draft and `cv_document_drafts` row in one transaction:
 
@@ -955,7 +955,7 @@ async with session_scope(factory) as session:
 
 Add `assert_profile_review_clear` to `activity_gate.py` and call it from profile activation, profile deletion, CV upload, and profile re-extraction preconditions. It checks only a published current draft for the affected profile and returns `PROFILE_REVIEW_PENDING`; chat correction and explicit approve/discard remain allowed. Add tests proving profile switch, upload, second re-extract, and deletion are blocked until approve/discard.
 
-- [ ] **Step 6: Replace the route dependency and remove chat side effects**
+- [x] **Step 6: Replace the route dependency and remove chat side effects**
 
 Add `ProfileReextractDeps` in `backend/app/api/dependencies.py` containing the existing session factory, attachment storage, document invoker, `SkillNormalizer`, settings, SQLite path, and optional Neo4j driver. Replace `ChatAgentDeps`/`stream_cv_reprocess` in `profiles.py` with the coordinator and add the three review routes. Map errors to 404/409/422/500 with `{code, summary}` only.
 
@@ -980,7 +980,7 @@ The stream must contain `reextract_progress`/`reextract_review_ready` or one `re
 
 Expected: all selected tests PASS and Ruff exits 0.
 
-- [ ] **Step 8: Commit the direct backend lifecycle**
+- [x] **Step 8: Commit the direct backend lifecycle**
 
 ```powershell
 Set-Location ..
