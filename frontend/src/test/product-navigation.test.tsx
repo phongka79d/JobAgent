@@ -1,4 +1,5 @@
 import {readFileSync, readdirSync, statSync} from 'node:fs';
+import {join, normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -116,7 +117,7 @@ function productShell(
 
 function frontendSourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
-    const path = `${directory}/${name}`;
+    const path = join(directory, name);
     return statSync(path).isDirectory()
       ? frontendSourceFiles(path)
       : /\.(?:ts|tsx|css)$/.test(path)
@@ -149,18 +150,20 @@ describe('product navigation', () => {
       fileURLToPath(new URL('../app/App.tsx', import.meta.url)),
       'utf8',
     );
-    const controllerDefinitions = new Set([
-      fileURLToPath(
-        new URL('../features/jobs/savedJobsState.ts', import.meta.url),
-      ),
-      fileURLToPath(
-        new URL('../features/cv-tailoring/state.ts', import.meta.url),
-      ),
-    ]);
+    const controllerDefinitions = new Set(
+      [
+        fileURLToPath(
+          new URL('../features/jobs/savedJobsState.ts', import.meta.url),
+        ),
+        fileURLToPath(
+          new URL('../features/cv-tailoring/state.ts', import.meta.url),
+        ),
+      ].map(normalize),
+    );
     const featureSource = frontendSourceFiles(
       fileURLToPath(new URL('../features', import.meta.url)),
     )
-      .filter((file) => !controllerDefinitions.has(file))
+      .filter((file) => !controllerDefinitions.has(normalize(file)))
       .map((file) => readFileSync(file, 'utf8'))
       .join('\n');
 
