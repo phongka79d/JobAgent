@@ -1976,6 +1976,16 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
             client.get(f"/api/jobs/{job_id}").json()
         )
         assert detail_before.compact.evaluation_state == "current"
+        listed_before = SavedJobListPage.model_validate(
+            client.get("/api/jobs").json()
+        )
+        expected_label = listed_before.items[0].display_label
+        assert listed_before.items[0].id == job_id
+        evaluate_before = EvaluateJobResponse.model_validate(
+            client.post(f"/api/jobs/{job_id}/evaluate").json()
+        )
+        assert evaluate_before.job.display_label == expected_label
+        evaluate_calls.clear()
 
         ok = client.post(f"/api/jobs/{job_id}/reextract", json={})
         assert ok.status_code == 200
@@ -1988,7 +1998,7 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert body.job.evaluation_state == "stale"
         assert body.job.latest_score == pytest.approx(0.77)
         assert body.job.title == "Backend Engineer"
-        assert body.job.display_label == "Backend Engineer · Acme"
+        assert body.job.display_label == expected_label
         _assert_no_forbidden_list(ok.json())
         assert evaluate_calls == []
         assert invoker.call_count >= 1
@@ -2017,9 +2027,37 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert warn.code == "NEO4J_SYNC_FAILED"
         assert warn.rebuild_instruction == NEO4J_REBUILD_INSTRUCTION
         assert warn.job.evaluation_state == "stale"
-        assert warn.job.display_label == "Backend Engineer · Acme"
+        assert warn.job.display_label == expected_label
         _assert_no_forbidden_list(partial.json())
         assert evaluate_calls == []
+
+        detail_before_delete = SavedJobDetail.model_validate(
+            client.get(f"/api/jobs/{job_id}").json()
+        )
+        listed_before_delete = SavedJobListPage.model_validate(
+            client.get("/api/jobs").json()
+        )
+        assert detail_before_delete.compact.display_label == expected_label
+        assert listed_before_delete.items[0].display_label == expected_label
+
+        async def _fake_delete(
+            delete_job_id: str,
+            *,
+            driver: Any,
+            session_factory: Any = None,
+            graph_delete_fn: Any = None,
+            graph_absent_fn: Any = None,
+        ) -> Any:
+            del driver, session_factory, graph_delete_fn, graph_absent_fn
+            from app.services.job_deletion import JobDeleteResult
+
+            assert delete_job_id == job_id
+            return JobDeleteResult(job_id=delete_job_id)
+
+        monkeypatch.setattr(saved_jobs_service, "delete_job", _fake_delete)
+        deleted = client.delete(f"/api/jobs/{job_id}")
+        assert deleted.status_code == 204
+        assert deleted.content == b""
 
 
 def test_reextract_precommit_error_families(

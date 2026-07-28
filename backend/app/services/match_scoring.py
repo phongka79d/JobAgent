@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from app.schemas.jobs import JobPostExtraction
 from app.schemas.matching import MatchJobsResultData, MatchResult
 from app.schemas.profile import CandidateProfile, JobPreferences
+from app.services.job_display import derive_saved_job_display_label
 from app.services.match_components import (
     MatchScoreComponents,
     compute_experience_score,
@@ -28,7 +29,6 @@ from app.services.match_explanations import (
     project_match_jobs_result,
     project_match_result,
 )
-from app.services.job_display import derive_saved_job_display_label
 from app.services.skill_matching import SkillCoverageResult, compute_skill_coverage
 from app.services.skill_normalization import SkillNormalizer
 

@@ -89,13 +89,11 @@ from app.services.jd_ingestion import (
 )
 from app.services.job_deletion import (
     ERROR_JOB_DELETE_GRAPH_FAILED,
+    ERROR_JOB_NOT_FOUND as DELETE_JOB_NOT_FOUND,
     JobDeleteError,
     delete_job,
 )
 from app.services.job_display import derive_saved_job_display_label
-from app.services.job_deletion import (
-    ERROR_JOB_NOT_FOUND as DELETE_JOB_NOT_FOUND,
-)
 from app.services.job_evaluation import (
     ERROR_ACTIVE_PROFILE_REQUIRED,
     ERROR_JOB_NOT_SCORABLE,

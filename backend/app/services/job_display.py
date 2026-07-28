@@ -46,7 +46,10 @@ def derive_saved_job_display_label(
     sentence = _first_meaningful_sentence(summary)
     if sentence:
         return sentence[:120]
-    return f"Untitled saved job \N{MIDDLE DOT} {_aware_utc(saved_at).date().isoformat()}"
+    return (
+        f"Untitled saved job \N{MIDDLE DOT} "
+        f"{_aware_utc(saved_at).date().isoformat()}"
+    )
 
 
 __all__ = ["derive_saved_job_display_label"]
