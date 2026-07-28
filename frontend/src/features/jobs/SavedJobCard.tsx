@@ -98,14 +98,14 @@ export function buildSavedJobSummaryLines(
   if (isSyncFailed) {
     if (!lines.some((l) => /neo4j|sync failed|rebuild/i.test(l))) {
       lines.push(
-        'Job saved to SQLite but Neo4j graph sync failed; rebuild graph from SQLite.',
+        'The saved job is available, but related data could not be refreshed.',
       );
     }
     if (data.rebuildInstruction) {
       lines.push(data.rebuildInstruction);
     }
-    // Explicit non-success for graph path — never claim ranking/graph success.
-    lines.push('Graph projection unavailable until rebuild succeeds.');
+    // Explicit partial success: never claim related-data refresh succeeded.
+    lines.push('Related data remains unavailable until recovery succeeds.');
   } else if (data.processingStatus === 'failed') {
     if (code && !lines.some((l) => l.includes(code))) {
       lines.push(`Ingestion failed (${code})`);

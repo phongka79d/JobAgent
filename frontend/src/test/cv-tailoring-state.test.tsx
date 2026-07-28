@@ -5,7 +5,7 @@ import {useCvTailoringState} from '../features/cv-tailoring/state';
 import type {TailoringSessionDetailResponse} from '../features/cv-tailoring/types';
 import {ChatApiError} from '../lib/api/chat';
 import appSource from '../app/App.tsx?raw';
-import observabilitySource from '../features/observability/ObservabilitySidebar.tsx?raw';
+import productSidebarSource from '../features/navigation/ProductSidebar.tsx?raw';
 
 const PROFILE_ID = '22222222-2222-4222-8222-222222222222';
 const SESSION_ID = '11111111-1111-4111-8111-111111111111';
@@ -86,9 +86,11 @@ function durableDetail(
 }
 
 describe('CV tailoring state owner', () => {
-  it('keeps the sole production saved-JD hook call in App', () => {
+  it('keeps singleton product state hooks in App', () => {
     expect(appSource.match(/useSavedJobsState\s*\(/g)).toHaveLength(1);
-    expect(observabilitySource).not.toMatch(/useSavedJobsState\s*\(/);
+    expect(appSource.match(/useCvTailoringState\s*\(/g)).toHaveLength(1);
+    expect(productSidebarSource).not.toMatch(/useSavedJobsState\s*\(/);
+    expect(productSidebarSource).not.toMatch(/useCvTailoringState\s*\(/);
   });
   it('drops server data when profile scope changes', async () => {
     const fetchSessions = vi.fn().mockResolvedValue({items: []});

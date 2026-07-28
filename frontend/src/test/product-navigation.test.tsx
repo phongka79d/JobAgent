@@ -4,7 +4,7 @@ import {describe, expect, it} from 'vitest';
 
 import {PRODUCT_DESTINATIONS} from '../features/navigation/productNavigation';
 
-const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
+const sourceRoot = fileURLToPath(new URL('../features', import.meta.url));
 
 function frontendSourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
@@ -41,9 +41,18 @@ describe('product navigation', () => {
       fileURLToPath(new URL('../app/App.tsx', import.meta.url)),
       'utf8',
     );
+    const controllerDefinitions = new Set([
+      fileURLToPath(
+        new URL('../features/jobs/savedJobsState.ts', import.meta.url),
+      ),
+      fileURLToPath(
+        new URL('../features/cv-tailoring/state.ts', import.meta.url),
+      ),
+    ]);
     const featureSource = frontendSourceFiles(
       fileURLToPath(new URL('../features', import.meta.url)),
     )
+      .filter((file) => !controllerDefinitions.has(file))
       .map((file) => readFileSync(file, 'utf8'))
       .join('\n');
 

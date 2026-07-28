@@ -255,7 +255,6 @@ export async function fetchSavedJobDetail(
   }
 }
 
-/** GET /api/observability/skill-map — read-only selected CV/JD skill map. */
 /** POST /api/jobs/{job_id}/evaluate — create or reuse current evaluation. */
 export async function evaluateSavedJob(
   jobId: string,

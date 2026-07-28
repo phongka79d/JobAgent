@@ -1,5 +1,5 @@
 /**
- * Saved-JD sidebar panel: tab order, list/detail, currentness actions, a11y.
+ * Saved-JD product panel: list/detail, currentness actions, and accessibility.
  * Composes accepted savedJobsState contracts without reimplementing transport.
  */
 import {
@@ -22,10 +22,8 @@ import {
 import {SavedJobsPanel} from '../features/jobs/SavedJobsPanel';
 import {
   initialSavedJobsActionSlice,
-  useSavedJobsState,
   type CachedResource,
 } from '../features/jobs/savedJobsState';
-import {CvSidebar} from '../features/profile/CvSidebar';
 import type {
   SavedJobDetail,
   SavedJobListItem,
@@ -270,36 +268,6 @@ describe('evaluateActionLabel currentness matrix', () => {
   });
 });
 
-describe('observability tab order for JD đã lưu', () => {
-  it('places JD đã lưu immediately after Agent runs', () => {
-    const ids = OBSERVABILITY_TABS.map((tab) => tab.id);
-    const runsIndex = ids.indexOf('runs');
-    const savedIndex = ids.indexOf('saved-jobs');
-    expect(runsIndex).toBeGreaterThanOrEqual(0);
-    expect(savedIndex).toBe(runsIndex + 1);
-    expect(OBSERVABILITY_TABS[savedIndex]?.label).toBe('JD đã lưu');
-  });
-
-  it('renders seven vertical tabs with JD đã lưu after Agent runs', async () => {
-    const onChange = vi.fn();
-    render(
-      <Theme theme={neutralTheme}>
-        <ObservabilityTabList
-          value="overview"
-          isCollapsed={false}
-          onChange={onChange}
-        />
-      </Theme>,
-    );
-    const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(7);
-    const labels = tabs.map((tab) => tab.textContent ?? '');
-    const runsAt = labels.findIndex((label) => label.includes('Agent runs'));
-    const savedAt = labels.findIndex((label) => label.includes('JD đã lưu'));
-    expect(savedAt).toBe(runsAt + 1);
-  });
-});
-
 describe('SavedJobsPanel list, detail, and actions', () => {
   it('uses a master-detail workspace and opens the CV comparison first', () => {
     const current = listItem(JOB_CURRENT, {
@@ -368,7 +336,7 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     });
     renderPanel({items: [none, stale, current], selectedJobId: null});
 
-    expect(screen.getByTestId('jobagent-obs-saved-jobs')).toBeInTheDocument();
+    expect(screen.getByTestId('jobagent-saved-jobs')).toBeInTheDocument();
     expect(
       screen.getByTestId(`jobagent-saved-job-stale-badge-${JOB_STALE}`),
     ).toHaveTextContent('Cần đánh giá lại');
@@ -919,148 +887,3 @@ describe('SavedJobsPanel list, detail, and actions', () => {
   });
 });
 
-describe('sidebar composition loads JD đã lưu panel', () => {
-  it('opens the saved-jobs tab after Agent runs and loads list via API', async () => {
-    const prev = import.meta.env.VITE_API_BASE_URL;
-    // @ts-expect-error test mutation of Vite env
-    import.meta.env.VITE_API_BASE_URL = 'http://api.test';
-
-    try {
-      const listItemPayload = {
-        id: JOB_NONE,
-        title: 'Sidebar Job',
-        company: 'Acme',
-        processing_status: 'processed',
-        jd_quality: 'full',
-        source_type: 'text',
-        source_url: null,
-        created_at: TS,
-        updated_at: TS,
-        evaluation_state: 'none',
-        latest_score: null,
-      };
-      const listPage = {items: [listItemPayload], next_cursor: null};
-
-      const fetchMock = vi
-        .spyOn(globalThis, 'fetch')
-        .mockImplementation(async (input: RequestInfo | URL) => {
-          const url = String(input);
-          if (url.includes('/api/jobs/') && url.includes(JOB_NONE)) {
-            return new Response(
-              JSON.stringify({
-                compact: listItemPayload,
-                extraction: null,
-                raw_content: null,
-                latest_evaluation: null,
-              }),
-              {status: 200, headers: {'Content-Type': 'application/json'}},
-            );
-          }
-          if (url.includes('/api/jobs')) {
-            return new Response(JSON.stringify(listPage), {
-              status: 200,
-              headers: {'Content-Type': 'application/json'},
-            });
-          }
-          return new Response(JSON.stringify({}), {
-            status: 404,
-            headers: {'Content-Type': 'application/json'},
-          });
-        });
-
-      function SidebarHarness() {
-        const savedJobs = useSavedJobsState({
-          profileId: 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb',
-          profileReady: true,
-        });
-        return (
-          <Theme theme={neutralTheme}>
-            <CvSidebar
-              isUploadDisabled={false}
-              onSidebarUploadSuccess={vi.fn()}
-              savedJobs={savedJobs}
-              deps={{
-                loadProfile: vi.fn().mockResolvedValue({
-                  present: false,
-                  profile: null,
-                  preferences: null,
-                  active_attachment: null,
-                }),
-                uploadCv: vi.fn(),
-                observability: mockObservabilityApi(),
-              }}
-            />
-          </Theme>
-        );
-      }
-      render(<SidebarHarness />);
-
-      const tabs = await screen.findAllByRole('tab');
-      expect(tabs).toHaveLength(7);
-      const runs = screen.getByRole('tab', {name: 'Agent runs'});
-      const saved = screen.getByRole('tab', {name: 'JD đã lưu'});
-      expect(tabs.indexOf(saved)).toBe(tabs.indexOf(runs) + 1);
-
-      await userEvent.click(saved);
-      expect(
-        await screen.findByTestId('jobagent-obs-saved-jobs'),
-      ).toBeInTheDocument();
-
-      await waitFor(() => {
-        const jobUrls = fetchMock.mock.calls
-          .map((call) => String(call[0]))
-          .filter((url) => url.includes('/api/jobs'));
-        expect(jobUrls.length).toBeGreaterThan(0);
-      });
-
-      expect(
-        await screen.findByTestId(`jobagent-saved-job-select-${JOB_NONE}`),
-      ).toHaveTextContent('Sidebar Job');
-
-      await userEvent.click(
-        screen.getByTestId(`jobagent-saved-job-select-${JOB_NONE}`),
-      );
-      await waitFor(() => {
-        expect(
-          screen.getByTestId(`jobagent-saved-job-evaluate-${JOB_NONE}`),
-        ).toHaveTextContent('Đánh giá với CV');
-      });
-    } finally {
-      // @ts-expect-error restore Vite env
-      import.meta.env.VITE_API_BASE_URL = prev;
-    }
-  });
-});
-
-describe('OBSERVABILITY_TABS keyboard identity', () => {
-  it('supports selecting saved-jobs via tab change', async () => {
-    let value: ObservabilityTabId = 'runs';
-    const onChange = vi.fn((next: ObservabilityTabId) => {
-      value = next;
-    });
-    const {rerender} = render(
-      <Theme theme={neutralTheme}>
-        <ObservabilityTabList
-          value={value}
-          isCollapsed={false}
-          onChange={onChange}
-        />
-      </Theme>,
-    );
-    await userEvent.click(screen.getByRole('tab', {name: 'JD đã lưu'}));
-    expect(onChange).toHaveBeenCalledWith('saved-jobs');
-    rerender(
-      <Theme theme={neutralTheme}>
-        <ObservabilityTabList
-          value="saved-jobs"
-          isCollapsed={false}
-          onChange={onChange}
-        />
-      </Theme>,
-    );
-    expect(screen.getByRole('tab', {name: 'JD đã lưu'})).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-  });
-});

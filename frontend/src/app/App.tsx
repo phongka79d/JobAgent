@@ -1,7 +1,7 @@
 /**
- * Plan 4/8/9 shell: AppShell + SideNav CV/observability sidebar + ChatPage.
+ * Plan 4/8/9 shell: AppShell + product sidebar + ChatPage.
  * Profile fetch/upload state lives outside the SSE reducer.
- * Observability tab/cache/collapse state is owned by the sidebar composition.
+ * Product destination and collapse state are owned by the sidebar composition.
  * Shared upload endpoint for sidebar and composer; sidebar success starts
  * one concise chat turn carrying only the returned attachment_id.
  * CV Manager reprocess delegates SSE to ChatPage (sole stream/reducer path).
