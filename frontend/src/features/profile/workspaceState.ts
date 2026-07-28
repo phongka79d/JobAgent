@@ -15,6 +15,7 @@ import type {
 import type {PendingProfileBootstrap} from './types';
 
 export type ProfileWorkspaceState = {
+  phase: WorkspacePhase;
   profiles: ProfileListItem[];
   activeProfileId: string | null;
   selectedConversationId: string | null;
@@ -22,12 +23,18 @@ export type ProfileWorkspaceState = {
   pending: ReadonlySet<string>;
   error: string | null;
 };
+export type WorkspacePhase = 'rehydrating' | 'ready' | 'error';
+type LegacyProfileWorkspaceState = Omit<ProfileWorkspaceState, 'phase'> & {
+  phase?: never;
+};
 export type ProfileWorkspaceApi = Pick<typeof defaultProfileApi,
   'fetchProfiles' | 'fetchProfileConversations' | 'activateProfile' |
   'updateProfile' | 'deleteProfile' | 'createProfileConversation' |
   'selectConversation' | 'deleteConversation'>;
 export type ProfileWorkspaceAction =
-  | {type: 'profiles/loaded'; response: ProfileListResponse}
+  | {type: 'rehydrate/started'}
+  | {type: 'rehydrate/succeeded'; snapshot: WorkspaceSnapshot}
+  | {type: 'rehydrate/failed'; error: string}
   | {type: 'conversations/loaded'; response: ConversationListResponse}
   | {type: 'profile/activated'; response: SelectionResponse}
   | {type: 'profile/renamed'; response: ProfileDetail}
@@ -41,31 +48,86 @@ export type ProfileWorkspaceAction =
   | {type: 'mutation/finished'; key: string}
   | {type: 'mutation/failed'; key: string; error: string};
 
+type WorkspaceSnapshot = {
+  profiles: ProfileListResponse;
+  conversations: ConversationListResponse;
+};
+
+function validateSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const active = snapshot.profiles.active_profile_id;
+  if (
+    active !== null &&
+    !snapshot.profiles.items.some((item) => item.id === active)
+  ) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  if (
+    snapshot.conversations.items.some((item) => item.profile_id !== active)
+  ) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  const selected = snapshot.conversations.items.filter(
+    (item) => item.is_selected,
+  );
+  if (selected.length > 1) {
+    throw new Error('Workspace data did not match the active profile.');
+  }
+  return snapshot;
+}
+
 export const initialProfileWorkspaceState: ProfileWorkspaceState = {
+  phase: 'rehydrating',
   profiles: [], activeProfileId: null, selectedConversationId: null,
   conversations: [], pending: new Set(), error: null,
 };
 
 export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: ProfileWorkspaceAction): ProfileWorkspaceState {
   switch (action.type) {
-    case 'profiles/loaded': {
-      const activeChanged = state.activeProfileId !== action.response.active_profile_id;
+    case 'rehydrate/started':
       return {
         ...state,
-        profiles: action.response.items,
-        activeProfileId: action.response.active_profile_id,
-        conversations: activeChanged ? [] : state.conversations,
-        selectedConversationId: activeChanged ? null : state.selectedConversationId,
+        phase: 'rehydrating',
+        conversations: [],
+        selectedConversationId: null,
+        error: null,
+      };
+    case 'rehydrate/succeeded': {
+      const snapshot = validateSnapshot(action.snapshot);
+      const selected = snapshot.conversations.items.find(
+        (item) => item.is_selected,
+      );
+      return {
+        ...state,
+        phase: 'ready',
+        profiles: snapshot.profiles.items,
+        activeProfileId: snapshot.profiles.active_profile_id,
+        conversations: snapshot.conversations.items,
+        selectedConversationId: selected?.id ?? null,
         error: null,
       };
     }
+    case 'rehydrate/failed':
+      return {
+        ...state,
+        phase: 'error',
+        conversations: [],
+        selectedConversationId: null,
+        error: action.error,
+      };
     case 'conversations/loaded': {
-      const selected = action.response.items.find((item) => item.is_selected) ?? null;
-      return {...state, conversations: action.response.items, selectedConversationId: selected?.id ?? null, error: null};
+      const selected = action.response.items.find((item) => item.is_selected);
+      return {
+        ...state,
+        phase: 'ready',
+        conversations: action.response.items,
+        selectedConversationId: selected?.id ?? null,
+        error: null,
+      };
     }
     case 'profile/activated':
       return {
         ...state,
+        phase: 'ready',
         activeProfileId: action.response.profile.id,
         profiles: state.profiles.map((item) =>
           item.id === action.response.profile.id
@@ -144,6 +206,7 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
       const {profile, conversation} = action.bootstrap;
       return {
         ...state,
+        phase: 'ready',
         profiles: [
           profile,
           ...state.profiles
@@ -164,7 +227,7 @@ export function profileWorkspaceReducer(state: ProfileWorkspaceState, action: Pr
 }
 
 export type ProfileWorkspaceController = {
-  state: ProfileWorkspaceState;
+  state: ProfileWorkspaceState | LegacyProfileWorkspaceState;
   activate: (profileId: string) => Promise<void>;
   createConversation: (profileId: string) => Promise<void>;
   selectConversation: (conversationId: string) => Promise<void>;
@@ -192,6 +255,7 @@ export function useProfileWorkspaceState(
   const [state, dispatch] = useReducer(profileWorkspaceReducer, initialProfileWorkspaceState);
   const pendingRef = useRef(new Set<string>());
   const requestRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const mutate = useCallback(async <T,>(key: string, request: () => Promise<T>, action: (value: T) => ProfileWorkspaceAction) => {
     if (interactionLocked || pendingRef.current.has(key)) return false;
     pendingRef.current.add(key); dispatch({type: 'mutation/started', key});
@@ -248,24 +312,46 @@ export function useProfileWorkspaceState(
   );
   const adoptBootstrap = useCallback((bootstrap: PendingProfileBootstrap) => {
     requestRef.current += 1;
+    abortRef.current?.abort();
     dispatch({type: 'workspace/bootstrapAdopted', bootstrap});
   }, []);
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    dispatch({type: 'rehydrate/started'});
     try {
-      const profiles = await api.fetchProfiles();
-      if (requestId !== requestRef.current) return;
-      dispatch({type: 'profiles/loaded', response: profiles});
-      if (profiles.active_profile_id) {
-        const response = await api.fetchProfileConversations(profiles.active_profile_id, {limit: 50});
-        if (requestId === requestRef.current) dispatch({type: 'conversations/loaded', response});
-      }
+      const profiles = await api.fetchProfiles(controller.signal);
+      if (requestId !== requestRef.current || controller.signal.aborted) return;
+      const conversations = profiles.active_profile_id
+        ? await api.fetchProfileConversations(
+            profiles.active_profile_id,
+            {limit: 50},
+            controller.signal,
+          )
+        : {items: [], next_cursor: null};
+      if (requestId !== requestRef.current || controller.signal.aborted) return;
+      const snapshot = validateSnapshot({profiles, conversations});
+      dispatch({type: 'rehydrate/succeeded', snapshot});
     } catch (error) {
-      if (requestId === requestRef.current) {
-        dispatch({type: 'mutation/failed', key: 'reload', error: error instanceof Error ? error.message : 'Request failed'});
+      if (
+        requestId === requestRef.current &&
+        !controller.signal.aborted
+      ) {
+        dispatch({
+          type: 'rehydrate/failed',
+          error: error instanceof Error ? error.message : 'Request failed',
+        });
       }
     }
   }, [api]);
-  useEffect(() => { void reload(); return () => { requestRef.current += 1; }; }, [reload]);
+  useEffect(() => {
+    void reload();
+    return () => {
+      requestRef.current += 1;
+      abortRef.current?.abort();
+    };
+  }, [reload]);
   return {state, activate, createConversation, selectConversation, deleteConversation, renameProfile, deleteProfile, reload, adoptBootstrap};
 }

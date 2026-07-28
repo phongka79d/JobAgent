@@ -5,8 +5,14 @@ import {
   initialProfileWorkspaceState,
   profileWorkspaceReducer,
   useProfileWorkspaceState,
+  type ProfileWorkspaceApi,
 } from '../features/profile/workspaceState';
-import type {ConversationMutationResponse} from '../features/profile/conversationTypes';
+import {useWorkspaceLifecycle} from '../features/profile/useWorkspaceLifecycle';
+import type {
+  ConversationListResponse,
+  ConversationMutationResponse,
+  ProfileListResponse,
+} from '../features/profile/conversationTypes';
 import type {PendingProfileBootstrap} from '../features/profile/types';
 
 const PROFILE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -92,6 +98,47 @@ const bootstrap: PendingProfileBootstrap = {
   conversation,
   start_extraction: true,
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return {promise, resolve, reject};
+}
+
+function profile(id: string, isActive: boolean) {
+  return {...readyProfile, id, is_active: isActive};
+}
+
+function conversationFor(id: string, profileId: string, isSelected: boolean) {
+  return {...conversation, id, profile_id: profileId, is_selected: isSelected};
+}
+
+function createWorkspaceApi(input: {
+  profiles: ProfileListResponse;
+  conversations: ConversationListResponse;
+}): Partial<ProfileWorkspaceApi> {
+  return {
+    fetchProfiles: vi.fn().mockResolvedValue(input.profiles),
+    fetchProfileConversations: vi.fn().mockResolvedValue(input.conversations),
+  };
+}
+
+function createSequencedWorkspaceApi(
+  profiles: Array<Promise<ProfileListResponse>>,
+): Partial<ProfileWorkspaceApi> {
+  let index = 0;
+  return {
+    fetchProfiles: vi.fn(() => profiles[index++]),
+    fetchProfileConversations: vi.fn().mockResolvedValue({
+      items: [],
+      next_cursor: null,
+    }),
+  };
+}
 
 describe('profile workspace state', () => {
   it('applies the server-selected conversation after create', async () => {
@@ -286,5 +333,45 @@ describe('profile workspace state', () => {
     expect(succeeded).toBe(false);
     expect(result.current.state.error).toBe('Delete blocked');
     expect(result.current.state.profiles).toEqual([readyProfile]);
+  });
+
+  it('publishes ready state only when every conversation belongs to the active profile', async () => {
+    const api = createWorkspaceApi({
+      profiles: {items: [profile('profile-a', true)], active_profile_id: 'profile-a'},
+      conversations: {
+        items: [conversationFor('conversation-b', 'profile-b', true)],
+        next_cursor: null,
+      },
+    });
+    const {result} = renderHook(() => useProfileWorkspaceState(api));
+
+    await waitFor(() => expect(result.current.state.phase).toBe('error'));
+    expect(result.current.state.conversations).toEqual([]);
+    expect(result.current.state.selectedConversationId).toBeNull();
+    expect(result.current.state.error).toBe('Workspace data did not match the active profile.');
+  });
+
+  it('ignores an older reload after a newer authoritative snapshot wins', async () => {
+    const first = deferred<ProfileListResponse>();
+    const second = deferred<ProfileListResponse>();
+    const api = createSequencedWorkspaceApi([first.promise, second.promise]);
+    const {result} = renderHook(() => useProfileWorkspaceState(api));
+
+    act(() => { void result.current.reload(); });
+    second.resolve({items: [profile('profile-b', true)], active_profile_id: 'profile-b'});
+    await waitFor(() => expect(result.current.state.activeProfileId).toBe('profile-b'));
+    first.resolve({items: [profile('profile-a', true)], active_profile_id: 'profile-a'});
+
+    await waitFor(() => expect(result.current.state.activeProfileId).toBe('profile-b'));
+  });
+
+  it('rehydrates a persisted pageshow and removes the listener on cleanup', async () => {
+    const reload = vi.fn(async () => undefined);
+    const {unmount} = renderHook(() => useWorkspaceLifecycle(reload));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    unmount();
+    window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

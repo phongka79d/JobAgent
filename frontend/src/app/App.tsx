@@ -9,6 +9,8 @@
 
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {AppShell} from '@astryxdesign/core/AppShell';
+import {Banner} from '@astryxdesign/core/Banner';
+import {Button} from '@astryxdesign/core/Button';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {
@@ -41,6 +43,7 @@ import {
   useProfileWorkspaceState,
   type ProfileWorkspaceApi,
 } from '../features/profile/workspaceState';
+import {useWorkspaceLifecycle} from '../features/profile/useWorkspaceLifecycle';
 
 export {SIDEBAR_CV_TURN_MESSAGE} from '../features/profile/api';
 
@@ -104,10 +107,39 @@ export async function reloadLatestTailoring(
   return true;
 }
 
+function WorkspaceStatus({
+  title,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <VStack align="center" justify="center" height="100%" width="100%">
+      <Banner
+        status={actionLabel ? 'error' : 'info'}
+        title={title}
+        endContent={
+          actionLabel && onAction ? (
+            <Button
+              label={actionLabel}
+              variant="secondary"
+              onClick={onAction}
+            />
+          ) : undefined
+        }
+      />
+    </VStack>
+  );
+}
+
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
   const workspaceApi = useMemo(() => deps?.workspace ?? {}, [deps?.workspace]);
   const workspace = useProfileWorkspaceState(workspaceApi, uploadLocked);
+  useWorkspaceLifecycle(workspace.reload);
   const workspaceLocked = workspace.state.pending.size > 0;
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [sidebarTurn, setSidebarTurn] =
@@ -307,27 +339,37 @@ export function App({deps}: AppProps = {}) {
         height="100%"
         width="100%"
       >
-        <ChatPage
-          key={workspace.state.selectedConversationId ?? 'no-conversation'}
-          conversationId={workspace.state.selectedConversationId}
-          selectedProfileState={selectedProfile?.state ?? null}
-          selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
-          selectedJobId={savedJobs.state.selectedJobId}
-          deps={deps?.chat}
-          onInteractionLockChange={setUploadLocked}
-          sidebarAttachmentTurn={sidebarTurn}
-          onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
-          cvReprocessRequest={reprocessRequest}
-          onCvReprocessHandled={handleCvReprocessHandled}
-          onCvReprocessTerminal={handleCvReprocessTerminal}
-          onProfileSaved={handleProfileSaved}
-          onProfileSetupChanged={workspace.reload}
-          onCvUploadSuccess={handleSidebarUploadSuccess}
-          onSavedJobsInvalidated={handleSavedJobsInvalidated}
-          onOpenTailoringEditor={(sessionId) => {
-            void handleOpenTailoringEditor(sessionId);
-          }}
-        />
+        {workspace.state.phase === 'ready' ? (
+          <ChatPage
+            key={`${workspace.state.activeProfileId ?? 'no-profile'}:${workspace.state.selectedConversationId ?? 'no-conversation'}`}
+            conversationId={workspace.state.selectedConversationId}
+            selectedProfileState={selectedProfile?.state ?? null}
+            selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
+            selectedJobId={savedJobs.state.selectedJobId}
+            deps={deps?.chat}
+            onInteractionLockChange={setUploadLocked}
+            sidebarAttachmentTurn={sidebarTurn}
+            onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
+            cvReprocessRequest={reprocessRequest}
+            onCvReprocessHandled={handleCvReprocessHandled}
+            onCvReprocessTerminal={handleCvReprocessTerminal}
+            onProfileSaved={handleProfileSaved}
+            onProfileSetupChanged={workspace.reload}
+            onCvUploadSuccess={handleSidebarUploadSuccess}
+            onSavedJobsInvalidated={handleSavedJobsInvalidated}
+            onOpenTailoringEditor={(sessionId) => {
+              void handleOpenTailoringEditor(sessionId);
+            }}
+          />
+        ) : workspace.state.phase === 'rehydrating' ? (
+          <WorkspaceStatus title="Loading your workspace..." />
+        ) : (
+          <WorkspaceStatus
+            title="Your workspace could not be loaded"
+            actionLabel="Retry"
+            onAction={() => void workspace.reload()}
+          />
+        )}
       </VStack>
       {mainWorkspace.kind === 'cv-tailoring' ? (
         <TailoringEditor

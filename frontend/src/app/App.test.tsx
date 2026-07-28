@@ -1,4 +1,4 @@
-import {cleanup, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
@@ -10,12 +10,59 @@ import {
   reloadLatestTailoring,
   selectedScorableJobId,
 } from './App';
+import type {
+  ConversationSummary,
+  ProfileListItem,
+  ProfileListResponse,
+} from '../features/profile/conversationTypes';
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return {promise, resolve, reject};
+}
+
+function appProfile(id: string, isActive: boolean): ProfileListItem {
+  return {
+    id,
+    display_name: id,
+    cv_filename: `${id}.pdf`,
+    attachment_state: 'active',
+    location: null,
+    skill_tags: [],
+    skill_count: 0,
+    extraction_version: 'v1',
+    source_hash: id,
+    state: 'ready',
+    setup_status: null,
+    is_active: isActive,
+    created_at: '2026-07-28T00:00:00Z',
+    updated_at: '2026-07-28T00:00:00Z',
+    last_opened_at: '2026-07-28T00:00:00Z',
+  };
+}
+
+function appConversation(id: string, profileId: string): ConversationSummary {
+  return {
+    id,
+    profile_id: profileId,
+    title: id,
+    created_at: '2026-07-28T00:00:00Z',
+    updated_at: '2026-07-28T00:00:00Z',
+    last_opened_at: '2026-07-28T00:00:00Z',
+    is_selected: true,
+  };
+}
 
 describe('App foundation shell', () => {
   it('retains only a selected scorable Job for fresh tailoring recovery', () => {
@@ -134,8 +181,15 @@ describe('App foundation shell', () => {
   });
 
   it('renders AppShell with CV sidebar and chat page', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
+      if (url.includes('/api/profiles')) {
+        return new Response(
+          JSON.stringify({items: [], active_profile_id: null}),
+          {status: 200, headers: {'Content-Type': 'application/json'}},
+        );
+      }
       if (url.includes('/api/profile') && !url.includes('/cv')) {
         return new Response(
           JSON.stringify({
@@ -162,13 +216,91 @@ describe('App foundation shell', () => {
     const shell = container.querySelector('.astryx-app-shell');
     expect(shell).not.toBeNull();
     expect(shell).toHaveAttribute('data-variant', 'surface');
-    expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('jobagent-chat-page')).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-cv-sidebar')).toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByText(/Start a conversation|History load issue/),
       ).toBeInTheDocument();
     });
+  });
+
+  it('removes stale chat while a persisted workspace reloads and remounts for the new identities', async () => {
+    const first = deferred<ProfileListResponse>();
+    const second = deferred<ProfileListResponse>();
+    const profileA = appProfile('profile-a', true);
+    const profileB = appProfile('profile-b', true);
+    const conversationA = appConversation('conversation-a', profileA.id);
+    const conversationB = appConversation('conversation-b', profileB.id);
+    let profileRequest = 0;
+    const fetchProfiles = vi.fn(() =>
+      [first.promise, second.promise][profileRequest++],
+    );
+    const fetchProfileConversations = vi.fn((profileId: string) =>
+      Promise.resolve({
+        items: [profileId === profileA.id ? conversationA : conversationB],
+        next_cursor: null,
+      }),
+    );
+    const loadConversationHistory = vi.fn().mockResolvedValue({
+      items: [],
+      next_cursor: null,
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/profiles')) {
+        return new Response(
+          JSON.stringify({items: [], active_profile_id: null}),
+          {status: 200, headers: {'Content-Type': 'application/json'}},
+        );
+      }
+      if (url.includes('/api/profile') && !url.includes('/cv')) {
+        return new Response(
+          JSON.stringify({
+            present: false,
+            profile: null,
+            preferences: null,
+            active_attachment: null,
+          }),
+          {status: 200, headers: {'Content-Type': 'application/json'}},
+        );
+      }
+      return new Response(JSON.stringify({items: [], next_cursor: null}), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    });
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            workspace: {fetchProfiles, fetchProfileConversations},
+            chat: {loadConversationHistory},
+          }}
+        />
+      </Theme>,
+    );
+
+    expect(screen.queryByTestId('jobagent-chat-page')).not.toBeInTheDocument();
+    first.resolve({items: [profileA], active_profile_id: profileA.id});
+    await waitFor(() => expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument());
+    await waitFor(() => expect(loadConversationHistory).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    });
+    await waitFor(() => expect(fetchProfiles).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('jobagent-chat-page')).not.toBeInTheDocument();
+
+    second.resolve({items: [profileB], active_profile_id: profileB.id});
+    await waitFor(() => expect(screen.getByTestId('jobagent-chat-page')).toBeInTheDocument());
+    await waitFor(() => expect(loadConversationHistory).toHaveBeenCalledTimes(2));
+    expect(loadConversationHistory.mock.calls.map(([id]) => id)).toEqual([
+      conversationA.id,
+      conversationB.id,
+    ]);
   });
 
   it('switches to a validated tailoring workspace without remounting ChatPage', async () => {
