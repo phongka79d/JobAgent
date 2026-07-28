@@ -67,6 +67,12 @@ def _http_for_reextract_error(exc: Exception) -> HTTPException:
         "PROFILE_REEXTRACT_CONFLICT": 409,
         "PROFILE_REEXTRACT_DRAFT_NOT_FOUND": 404,
         "PROFILE_REEXTRACT_DRAFT_INVALID": 422,
+        "DRAFT_NOT_FOUND": 404,
+        "DRAFT_INVALID": 422,
+        "DOCUMENT_DRAFT_NOT_FOUND": 404,
+        "DOCUMENT_DRAFT_INVALID": 422,
+        "ATTACHMENT_NOT_FOUND": 404,
+        "ATTACHMENT_FILE_MISSING": 404,
         "PROFILE_INCONSISTENT": 409,
         "PROFILE_SWITCH_BLOCKED": 409,
     }.get(exc.code, 500)
