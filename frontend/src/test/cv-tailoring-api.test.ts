@@ -3,6 +3,8 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   parseTailoringSessionDetail,
   parseTailoringSessionList,
+  parseTailoringMutationResponse,
+  parseTailoringSseFrame,
 } from '../features/cv-tailoring/types';
 import {streamCreateTailoringSession} from '../features/cv-tailoring/api';
 import {
@@ -128,6 +130,13 @@ describe('CV tailoring strict contracts', () => {
         },
       }),
     ).toThrow();
+  });
+
+  it('parses no-change mutation identity and strictly couples stream outcomes', () => {
+    expect(parseTailoringMutationResponse({outcome: 'no_change', session_id: SESSION_ID, version_id: VERSION_ID, version_number: 1, currentness: 'current'})).toMatchObject({outcome: 'no_change', version_id: VERSION_ID});
+    const envelope = {event_id: '66666666-6666-4666-8666-666666666666', run_id: RUN_ID, timestamp: NOW, event: 'run_completed', payload: {state: 'completed', outcome: 'no_change', version_id: VERSION_ID, version_number: 1}};
+    expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_completed', data: JSON.stringify(envelope)})).toMatchObject({ok: true, event: envelope});
+    expect(parseTailoringSseFrame({id: envelope.event_id, event: 'run_completed', data: JSON.stringify({...envelope, payload: {state: 'completed', version_id: VERSION_ID, version_number: 1}})}).ok).toBe(false);
   });
 
   it('validates the creation session header before consuming SSE', async () => {

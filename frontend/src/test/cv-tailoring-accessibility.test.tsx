@@ -92,6 +92,8 @@ function controller(): CvTailoringController {
       draftDirty: false,
       conflict: false,
       stream: {phase: 'idle', data: null, error: null},
+      lastOutcome: null,
+      lastOutcomeSource: null,
     },
     loadSessions: vi.fn().mockResolvedValue(undefined),
     openSession: vi.fn().mockResolvedValue(true),

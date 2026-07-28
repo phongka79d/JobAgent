@@ -481,6 +481,7 @@ describe('ChatMessageRow role split and composition', () => {
       {
         session_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
         version_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+        outcome: 'version_created',
         status: 'ready',
         currentness: 'current',
       },
@@ -489,6 +490,7 @@ describe('ChatMessageRow role split and composition', () => {
     expect(tailoredCvResultForTools([valid])).toEqual({
       session_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
       version_id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+      outcome: 'version_created',
       status: 'ready',
       currentness: 'current',
     });

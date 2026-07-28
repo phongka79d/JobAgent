@@ -163,6 +163,8 @@ function controller(
       draftDirty: false,
       conflict: false,
       stream: {phase: 'idle', data: null, error: null},
+      lastOutcome: null,
+      lastOutcomeSource: null,
       ...stateOverrides,
     },
     loadSessions: vi.fn().mockResolvedValue(undefined),
@@ -207,6 +209,13 @@ beforeAll(() => {
   HTMLDialogElement.prototype.close = function close() {
     this.removeAttribute('open');
   };
+});
+
+it('renders the feature-local no-change message without appending a version', () => {
+  const value = controller('current', {}, {lastOutcome: 'no_change', lastOutcomeSource: 'manual'});
+  renderEditor(value);
+  expect(screen.getByText('There are no changes to save.')).toBeInTheDocument();
+  expect(value.state.detail.data?.versions).toHaveLength(2);
 });
 
 afterEach(() => {

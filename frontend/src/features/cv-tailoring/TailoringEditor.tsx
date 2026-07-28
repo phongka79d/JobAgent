@@ -19,6 +19,7 @@ import {Toolbar} from '@astryxdesign/core/Toolbar';
 import {VStack} from '@astryxdesign/core/VStack';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 
+import {TAILORING_COPY} from './copy';
 import type {CvTailoringController, TailoringSafeError} from './state';
 import {TailoredSectionEditor} from './TailoredSectionEditor';
 import {TailoringPdfPreview} from './TailoringPdfPreview';
@@ -311,6 +312,16 @@ export function TailoringEditor({
               title={selectedVersion.page_warning}
               container="section"
             />
+          ) : null}
+
+          {state.lastOutcome === 'no_change' ? (
+            <VStack role="status" aria-live="polite">
+              <Banner
+                status="info"
+                title={state.lastOutcomeSource === 'manual' ? TAILORING_COPY.noChangeManual : TAILORING_COPY.noChangeAi}
+                container="section"
+              />
+            </VStack>
           ) : null}
 
           {errorText ? (

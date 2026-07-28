@@ -1,8 +1,17 @@
-import {isUuidV4, type JsonObject} from '../chat/types';
+import {
+  isUuidV4,
+  parseSseEventData,
+  SseParseError,
+  type JsonObject,
+  type SseEvent,
+} from '../chat/types';
+import type {SseWireFrame} from '../../lib/sse/parser';
+import type {TypedSseParseResult} from '../../lib/sse/stream';
 
 export const CREATE_TAILORED_CV_TOOL_NAME = 'create_tailored_cv' as const;
 
 export type CreateTailoredCvResultData = {
+  readonly outcome: 'version_created';
   readonly session_id: string;
   readonly version_id: string;
   readonly status: 'ready';
@@ -187,11 +196,27 @@ export type TailoringSessionDetailResponse = {
   readonly pdf_available: boolean;
 };
 
-export type TailoringVersionCreateResponse = {
+export type TailoringMutationOutcome = 'version_created' | 'no_change';
+
+export type TailoringVersionMutationResponse = {
+  readonly outcome: TailoringMutationOutcome;
   readonly session_id: string;
   readonly version_id: string;
   readonly version_number: number;
   readonly currentness: 'current';
+};
+
+export type TailoringSseEvent = Exclude<SseEvent, {event: 'run_completed'}> | {
+  readonly event_id: string;
+  readonly run_id: string;
+  readonly timestamp: string;
+  readonly event: 'run_completed';
+  readonly payload: {
+    readonly state: 'completed';
+    readonly outcome?: TailoringMutationOutcome;
+    readonly version_id?: string;
+    readonly version_number?: number;
+  };
 };
 
 export type TailoringDeleteResponse = {
@@ -654,22 +679,65 @@ export function parseTailoringSessionDetail(
   };
 }
 
-export function parseTailoringVersionCreate(
+export function parseTailoringMutationResponse(
   raw: unknown,
-): TailoringVersionCreateResponse {
+): TailoringVersionMutationResponse {
   const value = object(raw, 'version');
   exact(
     value,
-    ['session_id', 'version_id', 'version_number', 'currentness'],
+    ['outcome', 'session_id', 'version_id', 'version_number', 'currentness'],
     'version',
   );
   if (value.currentness !== 'current') throw new Error('version currentness invalid');
+  if (value.outcome !== 'version_created' && value.outcome !== 'no_change') {
+    throw new Error('version outcome invalid');
+  }
   return {
+    outcome: value.outcome,
     session_id: uuid(value.session_id, 'version.session_id'),
     version_id: uuid(value.version_id, 'version.version_id'),
     version_number: integer(value.version_number, 'version.version_number', 1),
     currentness: 'current',
   };
+}
+
+export function parseTailoringSseFrame(
+  frame: SseWireFrame,
+): TypedSseParseResult<TailoringSseEvent> {
+  try {
+    const raw = object(JSON.parse(frame.data) as unknown, 'tailoring event');
+    exact(raw, ['event_id', 'run_id', 'timestamp', 'event', 'payload'], 'tailoring event');
+    if (raw.event !== 'run_completed') {
+      const event = parseSseEventData(raw) as TailoringSseEvent;
+      if (frame.event !== null && frame.event !== event.event) throw new SseParseError('wire event name mismatch');
+      if (frame.id !== null && frame.id.toLowerCase() !== event.event_id) throw new SseParseError('wire event id mismatch');
+      return {ok: true, event};
+    }
+    const payload = object(raw.payload, 'tailoring run_completed payload');
+    const outcome = payload.outcome;
+    const hasOutcome = outcome !== undefined;
+    exact(payload, hasOutcome ? ['state', 'outcome', 'version_id', 'version_number'] : ['state'], 'tailoring run_completed payload');
+    if (payload.state !== 'completed') throw new SseParseError("run_completed requires state='completed'");
+    if (hasOutcome && outcome !== 'version_created' && outcome !== 'no_change') throw new SseParseError('tailoring outcome invalid');
+    if (!hasOutcome && (payload.version_id !== undefined || payload.version_number !== undefined)) throw new SseParseError('tailoring identity requires outcome');
+    const event: TailoringSseEvent = {
+      event_id: uuid(raw.event_id, 'tailoring event.event_id'),
+      run_id: uuid(raw.run_id, 'tailoring event.run_id'),
+      timestamp: timestamp(raw.timestamp, 'tailoring event.timestamp'),
+      event: 'run_completed',
+      payload: hasOutcome ? {
+        state: 'completed',
+        outcome: outcome as TailoringMutationOutcome,
+        version_id: uuid(payload.version_id, 'tailoring event.version_id'),
+        version_number: integer(payload.version_number, 'tailoring event.version_number', 1),
+      } : {state: 'completed'},
+    };
+    if (frame.event !== null && frame.event !== event.event) throw new SseParseError('wire event name mismatch');
+    if (frame.id !== null && frame.id.toLowerCase() !== event.event_id) throw new SseParseError('wire event id mismatch');
+    return {ok: true, event};
+  } catch (error) {
+    return {ok: false, error: error instanceof SseParseError ? error : new SseParseError(error instanceof Error ? error.message : 'parse failed'), frame};
+  }
 }
 
 export function parseTailoringDelete(raw: unknown): TailoringDeleteResponse {
@@ -692,11 +760,12 @@ export function parseCreateTailoredCvResultData(
   try {
     exact(
       raw,
-      ['session_id', 'version_id', 'status', 'currentness'],
+      ['outcome', 'session_id', 'version_id', 'status', 'currentness'],
       'create_tailored_cv',
     );
-    if (raw.status !== 'ready' || raw.currentness !== 'current') return null;
+    if (raw.outcome !== 'version_created' || raw.status !== 'ready' || raw.currentness !== 'current') return null;
     return {
+      outcome: 'version_created',
       session_id: uuid(raw.session_id, 'create_tailored_cv.session_id'),
       version_id: uuid(raw.version_id, 'create_tailored_cv.version_id'),
       status: 'ready',

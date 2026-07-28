@@ -147,6 +147,19 @@ describe('SSE event vocabulary and status aliases', () => {
     ).toThrow(SseParseError);
   });
 
+  it('keeps chat completion isolated from tailoring outcome fields', () => {
+    expect(() =>
+      parseSseEventData(
+        envelope(EVENT_A, 'run_completed', {
+          state: 'completed',
+          outcome: 'no_change',
+          version_id: EVENT_B,
+          version_number: 1,
+        }),
+      ),
+    ).toThrow(SseParseError);
+  });
+
   it('accepts exact run/tool statuses', () => {
     const started = parseSseEventData(
       envelope(EVENT_A, 'run_started', {state: 'running', resumed: false}),

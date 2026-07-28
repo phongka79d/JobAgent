@@ -362,7 +362,7 @@ describe('App foundation shell', () => {
                   ok: true,
                   code: null,
                   summary: 'ready',
-                  data: {session_id: sessionId, version_id: versionId, status: 'ready', currentness: 'current'},
+                  data: {outcome: 'version_created', session_id: sessionId, version_id: versionId, status: 'ready', currentness: 'current'},
                 },
               },
             ],

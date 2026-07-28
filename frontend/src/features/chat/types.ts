@@ -575,6 +575,7 @@ export function parseSseEventData(data: unknown): SseEvent {
       return {...base, event: 'text_delta', payload: {delta}};
     }
     case 'run_completed': {
+      requireExactKeys(payload, ['state'], 'run_completed.payload');
       if (payload.state !== 'completed') {
         rejectStatusAlias(String(payload.state ?? ''));
         throw new SseParseError("run_completed requires state='completed'");

@@ -1254,7 +1254,7 @@ git commit -m "fix: make unchanged tailoring mutations no-ops"
 - Modify: `frontend/src/test/cv-tailoring-editor.test.tsx`
 - Modify: `frontend/src/test/sse-reducer.test.ts`
 
-- [ ] **Step 1: Write strict parser/state tests for both outcomes**
+- [x] **Step 1: Write strict parser/state tests for both outcomes**
 
 ```tsx
 it('parses a manual no_change response and exposes the unchanged parent', async () => {
@@ -1293,13 +1293,13 @@ npm test -- --run src/test/cv-tailoring-api.test.ts src/test/cv-tailoring-state.
 
 Expected: FAIL because the exact parsers reject `outcome` and state has no no-op projection.
 
-- [ ] **Step 3: Extend strict types and the generic SSE parser**
+- [x] **Step 3: Extend strict types and the generic SSE parser**
 
 Add `TailoringMutationOutcome`, `TailoringVersionMutationResponse`, and `lastOutcome` to the tailoring state. Extend `CreateTailoredCvResultData` with the same required `outcome` field so chat-created Version 1 is projected as `version_created`. Make `frameToEvent` remain the chat adapter while `consumeSseResponse` accepts an optional `parseFrame` callback; add `consumeTypedSseResponse<T>` for tailoring/direct profile events. Its terminal detector is supplied by the caller, so profile re-extract does not become a chat run.
 
 The tailoring parser accepts `run_completed` with optional outcome/identity and rejects an identity without an outcome. It accepts `run_failed.issues` only after Task 9 adds that exact safe projection.
 
-- [ ] **Step 4: Implement no-op state transitions and copy**
+- [x] **Step 4: Implement no-op state transitions and copy**
 
 Use feature-local constants:
 
@@ -1324,7 +1324,7 @@ npm run typecheck
 
 Expected: PASS and typecheck exits 0. Add a static assertion that no `no_change` path calls `compile`, `promote`, or `create_version` mocks.
 
-- [ ] **Step 6: Commit frontend no-op handling**
+- [x] **Step 6: Commit frontend no-op handling**
 
 ```powershell
 Set-Location ..

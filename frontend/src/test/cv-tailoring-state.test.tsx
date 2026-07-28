@@ -403,6 +403,36 @@ describe('CV tailoring state owner', () => {
     );
   });
 
+  it('keeps the parent detail and exposes a manual no-change outcome', async () => {
+    const ready = durableDetail();
+    const fetchSession = vi.fn().mockResolvedValue(ready);
+    const createManualVersion = vi.fn().mockResolvedValue({outcome: 'no_change', session_id: SESSION_ID, version_id: VERSION_ID, version_number: 1, currentness: 'current'});
+    const fetchSessions = vi.fn();
+    const {result} = renderHook(() => useCvTailoringState({profileId: PROFILE_ID, profileReady: true, api: {fetchSession, fetchSessions, createManualVersion}}));
+    await act(async () => { await result.current.openSession(SESSION_ID); });
+    act(() => result.current.setDraft(ready.content!));
+    await act(async () => { expect(await result.current.saveManualVersion()).toBe(true); });
+    expect(result.current.state.selectedVersionId).toBe(VERSION_ID);
+    expect(result.current.state.detail.data?.versions).toHaveLength(1);
+    expect(result.current.state.draft).toEqual(ready.content);
+    expect(result.current.state.draftDirty).toBe(false);
+    expect(result.current.state.lastOutcome).toBe('no_change');
+    expect(result.current.state.stream.error).toBeNull();
+    expect(fetchSessions).not.toHaveBeenCalled();
+  });
+
+  it('classifies a disconnected AI mutation as no-change only when the durable parent remains latest', async () => {
+    const ready = durableDetail();
+    const fetchSession = vi.fn().mockResolvedValue(ready);
+    const streamAiVersion = vi.fn(async (_sessionId, _body, callbacks) => callbacks.onDisconnected?.());
+    const {result} = renderHook(() => useCvTailoringState({profileId: PROFILE_ID, profileReady: true, api: {fetchSession, fetchSessions: vi.fn().mockResolvedValue({items: [ready.session]}), streamAiVersion}}));
+    await act(async () => { await result.current.openSession(SESSION_ID); });
+    await act(async () => { expect(await result.current.createAiVersion(SESSION_ID, {parent_version_id: VERSION_ID, instruction: 'Focus', target_section_ids: ['summary']})).toBe(true); });
+    expect(result.current.state.selectedVersionId).toBe(VERSION_ID);
+    expect(result.current.state.lastOutcome).toBe('no_change');
+    expect(result.current.state.stream.error).toBeNull();
+  });
+
   it('does not select a session when initial stream fails', async () => {
     const streamCreate = vi.fn(async (_body, callbacks) => {
       callbacks.onSessionId(SESSION_ID);

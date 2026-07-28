@@ -2,9 +2,12 @@ import {
   ChatApiError,
   apiUrl,
   parseErrorBody,
-  type StreamCallbacks,
 } from '../../lib/api/chat';
-import {consumeSseResponse, StreamHttpError} from '../../lib/sse/stream';
+import {
+  consumeTypedSseResponse,
+  StreamHttpError,
+  type TypedStreamHandlers,
+} from '../../lib/sse/stream';
 import {isUuidV4} from '../chat/types';
 import {
   CV_TAILORING_SESSION_HEADER,
@@ -12,15 +15,19 @@ import {
   parseTailoringDelete,
   parseTailoringSessionDetail,
   parseTailoringSessionList,
-  parseTailoringVersionCreate,
+  parseTailoringMutationResponse,
+  parseTailoringSseFrame,
   type CreateTailoringAiVersionRequest,
   type CreateTailoringManualVersionRequest,
   type CreateTailoringSessionRequest,
   type TailoringDeleteResponse,
   type TailoringSessionDetailResponse,
   type TailoringSessionListResponse,
-  type TailoringVersionCreateResponse,
+  type TailoringSseEvent,
+  type TailoringVersionMutationResponse,
 } from './types';
+
+export type TailoringStreamCallbacks = TypedStreamHandlers<TailoringSseEvent>;
 
 function safeError(status: number, body: string): ChatApiError {
   const parsed = parseErrorBody(status, body);
@@ -31,11 +38,11 @@ function safeError(status: number, body: string): ChatApiError {
 
 async function consume(
   response: Response,
-  callbacks: StreamCallbacks,
+  callbacks: TailoringStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    await consumeSseResponse(
+    await consumeTypedSseResponse(
       response,
       {
         onEvent: callbacks.onEvent,
@@ -45,6 +52,8 @@ async function consume(
           throw safeError(status, body);
         },
       },
+      parseTailoringSseFrame,
+      (event) => event.event === 'run_completed' || event.event === 'run_failed',
       signal,
     );
   } catch (error) {
@@ -113,9 +122,9 @@ export async function createTailoringManualVersion(
   sessionId: string,
   body: CreateTailoringManualVersionRequest,
   signal?: AbortSignal,
-): Promise<TailoringVersionCreateResponse> {
+): Promise<TailoringVersionMutationResponse> {
   const session = requireUuid(sessionId, 'session_id');
-  return parseTailoringVersionCreate(
+  return parseTailoringMutationResponse(
     await jsonRequest(
       `/api/cv-tailoring/sessions/${encodeURIComponent(session)}/manual-versions`,
       {method: 'POST', body: JSON.stringify(body), signal},
@@ -138,7 +147,7 @@ export async function deleteTailoringSession(
 
 export async function streamCreateTailoringSession(
   body: CreateTailoringSessionRequest,
-  callbacks: StreamCallbacks & {onSessionId: (sessionId: string) => void},
+  callbacks: TailoringStreamCallbacks & {onSessionId: (sessionId: string) => void},
   signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch(apiUrl('/api/cv-tailoring/sessions'), {
@@ -165,7 +174,7 @@ export async function streamCreateTailoringSession(
 export async function streamCreateTailoringAiVersion(
   sessionId: string,
   body: CreateTailoringAiVersionRequest,
-  callbacks: StreamCallbacks,
+  callbacks: TailoringStreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
   const session = requireUuid(sessionId, 'session_id');

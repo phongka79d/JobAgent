@@ -51,6 +51,8 @@ function controller(
       draftDirty: false,
       conflict: false,
       stream: {phase: 'idle', data: null, error: null},
+      lastOutcome: null,
+      lastOutcomeSource: null,
       ...stateOverrides,
     },
     loadSessions: vi.fn().mockResolvedValue(undefined),

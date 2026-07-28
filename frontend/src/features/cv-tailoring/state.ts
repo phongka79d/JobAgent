@@ -1,7 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
 import {ChatApiError} from '../../lib/api/chat';
-import type {SseEvent} from '../chat/types';
 import {
   defaultCvTailoringApi,
   type CvTailoringApi,
@@ -14,6 +13,8 @@ import type {
   TailoringErrorCode,
   TailoringSessionDetailResponse,
   TailoringSessionListResponse,
+  TailoringMutationOutcome,
+  TailoringSseEvent,
 } from './types';
 
 export type TailoringRequestPhase =
@@ -45,6 +46,8 @@ export type CvTailoringState = {
   readonly draftDirty: boolean;
   readonly conflict: boolean;
   readonly stream: TailoringResource<null>;
+  readonly lastOutcome: TailoringMutationOutcome | null;
+  readonly lastOutcomeSource: 'ai' | 'manual' | null;
 };
 
 export type UseCvTailoringOptions = {
@@ -85,6 +88,8 @@ function initialState(key: string): CvTailoringState {
     draftDirty: false,
     conflict: false,
     stream: empty(),
+    lastOutcome: null,
+    lastOutcomeSource: null,
   };
 }
 
@@ -105,7 +110,7 @@ function safeError(error: unknown): TailoringSafeError {
   return {code: 'REQUEST_FAILED', summary: 'CV tailoring request failed'};
 }
 
-function streamError(event: SseEvent): TailoringSafeError | null {
+function streamError(event: TailoringSseEvent): TailoringSafeError | null {
   if (event.event !== 'run_failed') return null;
   const code = asTailoringErrorCode(event.payload.error_code);
   if (code === null) {
@@ -390,11 +395,14 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       mutationRef.current = operation;
       let pendingSessionId: string | null = null;
       let completed = false;
+      let terminalOutcome: TailoringMutationOutcome | null = null;
       let terminalError: TailoringSafeError | null = null;
       let disconnected = false;
       setState((current) => ({
         ...current,
         stream: {phase: 'loading', data: null, error: null},
+        lastOutcome: null,
+        lastOutcomeSource: null,
       }));
       try {
         await api.streamCreate(
@@ -404,7 +412,10 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
               pendingSessionId = id;
             },
             onEvent: (event) => {
-              if (event.event === 'run_completed') completed = true;
+              if (event.event === 'run_completed') {
+                completed = true;
+                terminalOutcome = event.payload.outcome ?? null;
+              }
               terminalError = streamError(event) ?? terminalError;
             },
             onDisconnected: () => {
@@ -443,6 +454,8 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
             setState((current) => ({
               ...current,
               stream: {phase: 'ready', data: null, error: null},
+              lastOutcome: terminalOutcome ?? 'version_created',
+              lastOutcomeSource: 'ai',
             }));
             await loadSessions();
             return pendingSessionId;
@@ -497,6 +510,8 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         setState((current) => ({
           ...current,
           stream: {phase: 'ready', data: null, error: null},
+          lastOutcome: terminalOutcome ?? 'version_created',
+          lastOutcomeSource: 'ai',
         }));
         await loadSessions();
         return selectedId;
@@ -538,11 +553,18 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       };
       mutationRef.current = operation;
       let completed = false;
+      let terminalOutcome: TailoringMutationOutcome | null = null;
+      let terminalVersionId: string | null = null;
+      let terminalVersionNumber: number | null = null;
       let terminalError: TailoringSafeError | null = null;
       let disconnected = false;
+      const knownParentId = body.parent_version_id;
+      const knownParentNumber = state.detail.data?.selected_version?.version_number ?? null;
       setState((current) => ({
         ...current,
         stream: {phase: 'loading', data: null, error: null},
+        lastOutcome: null,
+        lastOutcomeSource: null,
       }));
       try {
         await api.streamAiVersion(
@@ -550,7 +572,12 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           body,
           {
             onEvent: (event) => {
-              if (event.event === 'run_completed') completed = true;
+              if (event.event === 'run_completed') {
+                completed = true;
+                terminalOutcome = event.payload.outcome ?? null;
+                terminalVersionId = event.payload.version_id ?? null;
+                terminalVersionNumber = event.payload.version_number ?? null;
+              }
               terminalError = streamError(event) ?? terminalError;
             },
             onDisconnected: () => {
@@ -574,6 +601,12 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           const recovery = await recoverDisconnectedStream(sessionId, operation);
           if (recovery.kind === 'stale') return false;
           if (recovery.kind === 'completed') {
+            const recoveredNoChange =
+              knownParentId !== null &&
+              knownParentNumber !== null &&
+              recovery.detail.selected_version?.id === knownParentId &&
+              recovery.detail.selected_version.version_number === knownParentNumber &&
+              recovery.detail.session.latest_version_number === knownParentNumber;
             if (
               !applyDetail(
                 recovery.detail,
@@ -586,6 +619,8 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
             setState((current) => ({
               ...current,
               stream: {phase: 'ready', data: null, error: null},
+              lastOutcome: recoveredNoChange ? 'no_change' : 'version_created',
+              lastOutcomeSource: 'ai',
             }));
             await loadSessions();
             return true;
@@ -616,6 +651,29 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           }));
           return false;
         }
+        if (terminalOutcome === 'no_change') {
+          if (
+            terminalVersionId !== knownParentId ||
+            terminalVersionNumber !== knownParentNumber
+          ) {
+            setState((current) => ({
+              ...current,
+              stream: {
+                phase: 'error',
+                data: null,
+                error: {code: 'REQUEST_FAILED', summary: 'CV tailoring response did not match its parent version'},
+              },
+            }));
+            return false;
+          }
+          setState((current) => ({
+            ...current,
+            stream: {phase: 'ready', data: null, error: null},
+            lastOutcome: 'no_change',
+            lastOutcomeSource: 'ai',
+          }));
+          return true;
+        }
         if (!(await fetchCompletedAndSelect(sessionId, operation))) {
           if (
             !operation.controller.signal.aborted &&
@@ -639,6 +697,8 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         setState((current) => ({
           ...current,
           stream: {phase: 'ready', data: null, error: null},
+          lastOutcome: terminalOutcome ?? 'version_created',
+          lastOutcomeSource: 'ai',
         }));
         await loadSessions();
         return true;
@@ -665,11 +725,18 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       fetchCompletedAndSelect,
       loadSessions,
       recoverDisconnectedStream,
+      state.detail.data?.selected_version?.version_number,
     ],
   );
 
   const setDraft = useCallback((draft: TailoredCVContent) => {
-    setState((current) => ({...current, draft, draftDirty: true}));
+    setState((current) => ({
+      ...current,
+      draft,
+      draftDirty: true,
+      lastOutcome: null,
+      lastOutcomeSource: null,
+    }));
   }, []);
 
   const saveManualVersion = useCallback(async (): Promise<boolean> => {
@@ -687,6 +754,12 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       controller: new AbortController(),
     };
     mutationRef.current = operation;
+    setState((current) => ({
+      ...current,
+      stream: {phase: 'loading', data: null, error: null},
+      lastOutcome: null,
+      lastOutcomeSource: null,
+    }));
     try {
       const created = await api.createManualVersion(state.selectedSessionId, {
         parent_version_id: state.selectedVersionId,
@@ -699,6 +772,18 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
       ) {
         return false;
       }
+      if (created.outcome === 'no_change') {
+        setState((current) => ({
+          ...current,
+          draftDirty: false,
+          conflict: false,
+          detail: {...current.detail, error: null},
+          stream: {phase: 'ready', data: null, error: null},
+          lastOutcome: 'no_change',
+          lastOutcomeSource: 'manual',
+        }));
+        return true;
+      }
       if (
         (await fetchAndSelect(
           state.selectedSessionId,
@@ -710,6 +795,12 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
         return false;
       }
       await loadSessions();
+      setState((current) => ({
+        ...current,
+        stream: {phase: 'ready', data: null, error: null},
+        lastOutcome: 'version_created',
+        lastOutcomeSource: 'manual',
+      }));
       return true;
     } catch (error) {
       if (
@@ -728,6 +819,7 @@ export function useCvTailoringState(options: UseCvTailoringOptions) {
           data: current.detail.data,
           error: mapped,
         },
+        stream: {phase: 'error', data: null, error: mapped},
       }));
       return false;
     } finally {

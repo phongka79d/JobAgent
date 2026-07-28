@@ -3,12 +3,24 @@
  * Does not infer run completion on disconnect or parse failure.
  */
 
-import type {SseEvent} from '../../features/chat/types';
+import type {SseEvent, SseParseError} from '../../features/chat/types';
 import {
   frameToEvent,
   IncrementalSseParser,
+  type SseWireFrame,
   type SseParseResult,
 } from './parser';
+
+export type TypedSseParseResult<T> =
+  | {ok: true; event: T}
+  | {ok: false; error: SseParseError; frame: SseWireFrame};
+
+export type TypedStreamHandlers<T> = {
+  onEvent: (event: T) => void;
+  onMalformed?: (result: Extract<TypedSseParseResult<T>, {ok: false}>) => void;
+  onDisconnected?: () => void;
+  onHttpError?: (status: number, body: string) => void;
+};
 
 export type StreamHandlers = {
   onEvent: (event: SseEvent) => void;
@@ -39,6 +51,26 @@ export async function consumeSseResponse(
   response: Response,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  options: {
+    parseFrame?: (frame: SseWireFrame) => SseParseResult;
+    isTerminal?: (event: SseEvent) => boolean;
+  } = {},
+): Promise<void> {
+  return consumeTypedSseResponse(
+    response,
+    handlers,
+    options.parseFrame ?? frameToEvent,
+    options.isTerminal ?? ((event) => event.event === 'run_completed' || event.event === 'run_failed'),
+    signal,
+  );
+}
+
+export async function consumeTypedSseResponse<T>(
+  response: Response,
+  handlers: TypedStreamHandlers<T>,
+  parseFrame: (frame: SseWireFrame) => TypedSseParseResult<T>,
+  isTerminal: (event: T) => boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -55,18 +87,13 @@ export async function consumeSseResponse(
   const parser = new IncrementalSseParser();
   let sawTerminal = false;
 
-  const handleResults = (results: SseParseResult[]): void => {
+  const handleResults = (results: TypedSseParseResult<T>[]): void => {
     for (const result of results) {
       if (!result.ok) {
         handlers.onMalformed?.(result);
         continue;
       }
-      if (
-        result.event.event === 'run_completed' ||
-        result.event.event === 'run_failed'
-      ) {
-        sawTerminal = true;
-      }
+      if (isTerminal(result.event)) sawTerminal = true;
       handlers.onEvent(result.event);
     }
   };
@@ -82,7 +109,7 @@ export async function consumeSseResponse(
       }
       const {done, value} = await reader.read();
       if (done) {
-        const flushed = parser.flush().map(frameToEvent);
+        const flushed = parser.flush().map(parseFrame);
         handleResults(flushed);
         if (!sawTerminal) {
           handlers.onDisconnected?.();
@@ -90,7 +117,7 @@ export async function consumeSseResponse(
         return;
       }
       const text = decoder.decode(value, {stream: true});
-      handleResults(parser.feed(text).map(frameToEvent));
+      handleResults(parser.feed(text).map(parseFrame));
     }
   } catch (err) {
     if (signal?.aborted) {
