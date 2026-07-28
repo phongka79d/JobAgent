@@ -241,6 +241,10 @@ export function TailoringEditor({
                   color={isStale ? 'yellow' : 'green'}
                   size="sm"
                 />
+                <Text type="supporting">
+                  {detail.session.job_label?.title ?? detail.session.instruction}
+                  {detail.session.job_label?.company ? ` · ${detail.session.job_label.company}` : ''}
+                </Text>
               </HStack>
             }
             endContent={
@@ -400,17 +404,25 @@ export function TailoringEditor({
                 <Tab
                   role="tab"
                   value="content"
-                  label="Nội dung"
+                  label="Content"
                   aria-selected={mobileView === 'content'}
                 />
                 <Tab
                   role="tab"
                   value="preview"
-                  label="Xem trước"
+                  label="Preview"
                   aria-selected={mobileView === 'preview'}
                 />
               </TabList>
-              {mobileView === 'content' ? editorContent : previewContent}
+              <StackItem
+                as="section"
+                isScrollable
+                data-scroll-owner="viewport"
+                role="tabpanel"
+                aria-label={mobileView === 'content' ? 'Content' : 'Preview'}
+              >
+                {mobileView === 'content' ? editorContent : previewContent}
+              </StackItem>
             </VStack>
           ) : (
             <HStack
@@ -419,10 +431,10 @@ export function TailoringEditor({
               height="100%"
               className="jobagent-tailoring-desktop-split"
             >
-              <StackItem size="fill" isScrollable as="section">
+              <StackItem size="fill" isScrollable as="section" data-scroll-owner="viewport" aria-label="Content">
                 {editorContent}
               </StackItem>
-              <StackItem size="fill" isScrollable as="section">
+              <StackItem size="fill" isScrollable as="section" data-scroll-owner="viewport" aria-label="Preview">
                 {previewContent}
               </StackItem>
             </HStack>

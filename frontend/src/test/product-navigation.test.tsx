@@ -104,6 +104,7 @@ function productShell(
   savedJobs: SavedJobsController,
   tailoring: CvTailoringController,
   savedJobsInvalidateKey = 0,
+  editorMode = false,
 ) {
   return (
     <Theme theme={neutralTheme}>
@@ -116,6 +117,7 @@ function productShell(
           savedJobs={savedJobs}
           tailoring={tailoring}
           savedJobsInvalidateKey={savedJobsInvalidateKey}
+          editorMode={editorMode}
         />
       </SideNav>
     </Theme>
@@ -206,6 +208,21 @@ describe('product navigation', () => {
     await userEvent.click(screen.getByRole('button', {name: 'Tailored CVs'}));
     await waitFor(() => expect(tailoring.loadSessions).toHaveBeenCalledTimes(1));
     expect(savedJobs.loadList).toHaveBeenCalledTimes(1);
+  });
+
+  it('reduces to the rail in editor mode and restores destination and collapse state', async () => {
+    const savedJobs = savedJobsController();
+    const tailoring = tailoringController();
+    const view = render(productShell(savedJobs, tailoring));
+    await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
+    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
+    view.rerender(productShell(savedJobs, tailoring, 0, true));
+    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-editor-mode', 'true');
+    expect(screen.queryByTestId(`jobagent-saved-job-select-${JOB_ID}`)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Collapsed'})).toBeInTheDocument();
+    view.rerender(productShell(savedJobs, tailoring));
+    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
+    expect(screen.getByRole('button', {name: 'Expanded'})).toBeInTheDocument();
   });
 
   it('refreshes open Saved Jobs after invalidation and keeps closed destinations lazy', async () => {

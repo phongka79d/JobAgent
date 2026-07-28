@@ -3,6 +3,11 @@
   min-block-size: 0;
 }
 
+[data-scroll-owner='viewport'] {
+  min-block-size: 0;
+  overflow: auto;
+}
+
 .jobagent-tailoring-desktop-split > .astryx-stack-item:first-child {
   flex: 3 1 0;
   min-inline-size: 0;

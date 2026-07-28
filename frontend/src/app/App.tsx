@@ -315,6 +315,7 @@ export function App({deps}: AppProps = {}) {
           onOpenTailoringSession={(sessionId) => {
             void handleOpenTailoringEditor(sessionId);
           }}
+          editorMode={mainWorkspace.kind === 'cv-tailoring'}
           deps={deps?.sidebar}
         />
       }

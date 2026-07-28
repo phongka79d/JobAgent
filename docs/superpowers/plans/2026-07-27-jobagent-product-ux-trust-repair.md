@@ -1723,7 +1723,7 @@ git commit -m "fix: keep CV artifact downloads inside JobAgent"
 - Modify: `frontend/src/test/cv-tailoring-accessibility.test.tsx`
 - Modify: `frontend/src/app/App.test.tsx`
 
-- [ ] **Step 1: Write desktop/narrow/sidebar restoration tests**
+- [x] **Step 1: Write desktop/narrow/sidebar restoration tests**
 
 ```tsx
 it('reduces the secondary sidebar to the rail while the editor is active and restores the prior destination', async () => {
@@ -1754,11 +1754,11 @@ npm test -- --run src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-ac
 
 Expected: FAIL for rail restoration/context header/scroll ownership assertions.
 
-- [ ] **Step 3: Implement one editor context header and two-pane scroll contract**
+- [x] **Step 3: Implement one editor context header and two-pane scroll contract**
 
 Move session label, currentness, version, actions, and context into the editor header. Desktop renders one content pane and one PDF pane; only each pane may scroll. Narrow view renders Astryx tabs named **Content** and **Preview** and mounts one visible pane at a time. Use `Stack`, `StackItem`, `Tabs`, and tokenized CSS; do not add raw layout `<div>`, raw hex, or raw CSS pixel declarations.
 
-- [ ] **Step 4: Preserve sidebar collapse/selection state through editor mode**
+- [x] **Step 4: Preserve sidebar collapse/selection state through editor mode**
 
 `ProductSidebar` stores the previous selected destination/collapse state in a ref when `editorMode` becomes true, exposes the rail only, and restores the ref when returning to chat/list. `App` passes `editorMode={mainWorkspace.kind === 'cv-tailoring'}` and an `onOpenCvManager` callback. `TailoringEditor` **Edit Profile Information** invokes that callback instead of focusing the chat composer.
 

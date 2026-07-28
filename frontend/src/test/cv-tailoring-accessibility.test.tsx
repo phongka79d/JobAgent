@@ -138,16 +138,17 @@ describe('tailoring UI accessibility and static guards', () => {
 
     const tabs = await screen.findByRole('tablist', {name: 'Chế độ xem CV'});
     expect(tabs).toBeInTheDocument();
-    expect(screen.getByRole('tab', {name: 'Nội dung'})).toHaveAttribute(
+    expect(screen.getByRole('tab', {name: 'Content'})).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    await userEvent.click(screen.getByRole('tab', {name: 'Xem trước'}));
-    expect(screen.getByRole('tab', {name: 'Xem trước'})).toHaveAttribute(
+    await userEvent.click(screen.getByRole('tab', {name: 'Preview'}));
+    expect(screen.getByRole('tab', {name: 'Preview'})).toHaveAttribute(
       'aria-selected',
       'true',
     );
     expect(screen.getByTitle('Xem trước PDF CV')).toBeVisible();
+    expect(document.querySelectorAll('[data-scroll-owner="viewport"]')).toHaveLength(1);
     expect(
       screen.getByText('Không thể hoàn tất yêu cầu CV.').closest('[role="status"]'),
     ).toHaveAttribute('aria-live', 'polite');

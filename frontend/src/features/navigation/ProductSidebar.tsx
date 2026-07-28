@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {SideNavItem, SideNavSection, useSideNavCollapse} from '@astryxdesign/core/SideNav';
+import {VStack} from '@astryxdesign/core/VStack';
 
 import {TailoringSessionsPanel} from '../cv-tailoring/TailoringSessionsPanel';
 import type {CvTailoringController} from '../cv-tailoring/state';
@@ -15,6 +16,7 @@ export type ProductSidebarProps = {
   readonly onCreateTailoredCv?: (jobId: string) => void;
   readonly isTailoringPending?: boolean;
   readonly onOpenTailoringSession?: (sessionId: string) => void;
+  readonly editorMode?: boolean;
 };
 
 export function ProductSidebar({
@@ -25,10 +27,28 @@ export function ProductSidebar({
   onCreateTailoredCv,
   isTailoringPending = false,
   onOpenTailoringSession = () => undefined,
+  editorMode = false,
 }: ProductSidebarProps) {
   const [selected, setSelected] = useState<ProductDestination>('overview');
   const {isCollapsed, setIsCollapsed} = useSideNavCollapse();
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
+  const beforeEditorRef = useRef<{selected: ProductDestination; collapsed: boolean} | null>(null);
+
+  useEffect(() => {
+    if (editorMode) {
+      if (beforeEditorRef.current === null) {
+        beforeEditorRef.current = {selected, collapsed: isCollapsed};
+      }
+      if (!isCollapsed) setIsCollapsed(true);
+      return;
+    }
+    const previous = beforeEditorRef.current;
+    if (previous !== null) {
+      beforeEditorRef.current = null;
+      setSelected(previous.selected);
+      setIsCollapsed(previous.collapsed);
+    }
+  }, [editorMode, isCollapsed, selected, setIsCollapsed]);
 
   const refreshPendingSavedJobsInvalidation = useCallback(() => {
     if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
@@ -81,12 +101,18 @@ export function ProductSidebar({
   );
 
   const selectDestination = (destination: ProductDestination) => {
+    if (editorMode) return;
     setSelected(destination);
     if (isCollapsed) setIsCollapsed(false);
   };
 
   return (
-    <>
+    <VStack
+      gap={2}
+      data-testid="jobagent-product-sidebar"
+      data-editor-mode={String(editorMode)}
+      data-selected-destination={selected}
+    >
       <SideNavSection title="Workspace">
         {PRODUCT_DESTINATIONS.map((destination) => (
           <SideNavItem
@@ -98,8 +124,8 @@ export function ProductSidebar({
           />
         ))}
       </SideNavSection>
-      {selected === 'overview' ? overview : null}
-      {selected === 'saved-jobs' ? (
+      {!editorMode && selected === 'overview' ? overview : null}
+      {!editorMode && selected === 'saved-jobs' ? (
         <SavedJobsPanel
           list={savedJobs.state.list}
           details={savedJobs.state.details}
@@ -118,12 +144,12 @@ export function ProductSidebar({
           onCreateTailoredCv={onCreateTailoredCv}
         />
       ) : null}
-      {selected === 'tailored-cvs' ? (
+      {!editorMode && selected === 'tailored-cvs' ? (
         <TailoringSessionsPanel
           controller={tailoring}
           onOpenSession={onOpenTailoringSession}
         />
       ) : null}
-    </>
+    </VStack>
   );
 }

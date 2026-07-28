@@ -73,6 +73,7 @@ export type CvSidebarProps = {
   isTailoringPending?: boolean;
   tailoring: CvTailoringController;
   onOpenTailoringSession?: (sessionId: string) => void;
+  editorMode?: boolean;
   deps?: CvSidebarDeps;
 };
 
@@ -163,6 +164,7 @@ function CvSidebarController({
   isTailoringPending = false,
   tailoring,
   onOpenTailoringSession,
+  editorMode = false,
   deps,
 }: CvSidebarProps) {
   const selectedWorkspaceProfile = workspace.state.profiles.find(
@@ -415,6 +417,7 @@ function CvSidebarController({
         isTailoringPending={isTailoringPending}
         tailoring={tailoring}
         onOpenTailoringSession={onOpenTailoringSession}
+        editorMode={editorMode}
       />
     </CvSidebarShell>
   );

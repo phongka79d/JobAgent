@@ -302,6 +302,7 @@ describe('TailoringEditor', () => {
     expect(screen.getByRole('button', {name: 'Download LaTeX source'})).toBeInTheDocument();
     expect(screen.getByText('CV dài 2 trang')).toBeInTheDocument();
     expect(screen.getByText('2 trang')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-scroll-owner="viewport"]')).toHaveLength(2);
   });
 
   it('saves once and sends an AI request for exactly one selected section', async () => {
