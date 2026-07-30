@@ -782,6 +782,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
                 assert data.results[0].job_id == job_id
                 assert data.results[0].final_score > 0
                 assert data.results[0].title == "Backend Engineer"
+                assert data.results[0].display_label == "Backend Engineer · Acme Corp"
                 matched_keys = {
                     s.job_skill_key
                     for s in data.results[0].matched_required_skills

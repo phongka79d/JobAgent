@@ -577,6 +577,7 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                 assert first is not None
                 assert first.provenance_json["targeted_section_ids"] == ["summary"]
                 assert first.provenance_json["facts"]
+                first_content = TailoredCVContent.model_validate(first.content_json)
                 await session.commit()
 
             later = await coordinator.prepare_ai_version(
@@ -589,27 +590,47 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                 event async for event in coordinator.stream_initial_version(later)
             ]
             assert later_events[-1].event == "run_completed"
-            second = await coordinator.get_completed_version(later)
-            async with factory() as session:
-                second_row = await tailoring_repo.get_version(
-                    session,
-                    second.version_id,
-                )
-                assert second_row is not None
-                second_content = TailoredCVContent.model_validate(
-                    second_row.content_json
-                )
+            assert later_events[-1].payload.outcome == "no_change"
 
+            changed_content = first_content.model_copy(
+                update={
+                    "sections": [
+                        first_content.sections[0].model_copy(
+                            update={
+                                "items": [
+                                    first_content.sections[0]
+                                    .items[0]
+                                    .model_copy(
+                                        update={
+                                            "body": first_content.sections[0]
+                                            .items[0]
+                                            .body.model_copy(
+                                                update={
+                                                    "text": (
+                                                        "Synthetic source-supported "
+                                                        "summary edit"
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    )
+                                ]
+                            }
+                        ),
+                        *first_content.sections[1:],
+                    ]
+                }
+            )
             third = await coordinator.create_manual_version(
                 session_id=instruction_session_id,
-                parent_version_id=second.version_id,
-                content=second_content,
+                parent_version_id=first_version_id,
+                content=changed_content,
             )
             with pytest.raises(TailoringError) as conflict:
                 await coordinator.create_manual_version(
                     session_id=instruction_session_id,
                     parent_version_id=first_version_id,
-                    content=second_content,
+                    content=changed_content,
                 )
             assert conflict.value.code == TAILORING_PARENT_CONFLICT
 
@@ -633,12 +654,11 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                     session,
                     instruction_session_id,
                 )
-                assert [row.version_number for row in chain] == [1, 2, 3]
-                assert [row.created_by for row in chain] == ["ai", "ai", "user"]
+                assert [row.version_number for row in chain] == [1, 2]
+                assert [row.created_by for row in chain] == ["ai", "user"]
                 assert [row.parent_version_id for row in chain] == [
                     None,
                     chain[0].id,
-                    chain[1].id,
                 ]
                 full_row = await tailoring_repo.get_version(
                     session,
@@ -647,6 +667,14 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                 partial_row = await tailoring_repo.get_version(
                     session,
                     partial_created.version_id,
+                )
+                full_session = await tailoring_repo.get_session(
+                    session, full_session_id
+                )
+                assert full_session is not None
+                assert full_session.job_label_json is not None
+                assert full_session.job_label_json["display_label"] == (
+                    "Full Engineer · Synthetic Civic Lab"
                 )
                 assert full_row is not None and partial_row is not None
                 full_content = TailoredCVContent.model_validate(full_row.content_json)
@@ -679,7 +707,7 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                 await coordinator.create_manual_version(
                     session_id=instruction_session_id,
                     parent_version_id=third.version_id,
-                    content=second_content,
+                    content=changed_content,
                 )
             assert stale_profile.value.code == TAILORING_SOURCE_STALE
             assert await _download_bytes(

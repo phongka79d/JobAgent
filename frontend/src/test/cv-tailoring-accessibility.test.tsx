@@ -1,11 +1,15 @@
-import {cleanup, render, screen} from '@testing-library/react';
+import {cleanup, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {TailoringEditor} from '../features/cv-tailoring/TailoringEditor';
+import {TailoringSessionsPanel} from '../features/cv-tailoring/TailoringSessionsPanel';
 import type {CvTailoringController} from '../features/cv-tailoring/state';
+import type {TailoringSessionSummary} from '../features/cv-tailoring/types';
+import {CvManagerDrawer} from '../features/cv-manager/CvManagerDrawer';
+import type {CvManagerViewState} from '../features/cv-manager/state';
 import editorSource from '../features/cv-tailoring/TailoringEditor.tsx?raw';
 import sectionSource from '../features/cv-tailoring/TailoredSectionEditor.tsx?raw';
 import previewSource from '../features/cv-tailoring/TailoringPdfPreview.tsx?raw';
@@ -112,6 +116,69 @@ function controller(): CvTailoringController {
   };
 }
 
+function failedSession(): TailoringSessionSummary {
+  return {
+    id: SESSION_ID,
+    profile_id: '33333333-3333-4333-8333-333333333333',
+    job_label: null,
+    instruction: 'Synthetic instruction',
+    template_version: 'latex-cv-v1',
+    state: 'failed',
+    currentness: 'current',
+    latest_version_number: 0,
+    error_code: 'TAILORING_GROUNDING_FAILED',
+    created_at: NOW,
+    updated_at: NOW,
+  };
+}
+
+function failedSessionController(deleteSession = vi.fn().mockResolvedValue(true)): CvTailoringController {
+  return {
+    ...controller(),
+    state: {
+      ...controller().state,
+      sessions: {phase: 'ready', data: {items: [failedSession()]}, error: null},
+      selectedSessionId: SESSION_ID,
+    },
+    deleteSession,
+  };
+}
+
+function cvManagerController(): {
+  state: CvManagerViewState;
+  refresh: ReturnType<typeof vi.fn>;
+  select: ReturnType<typeof vi.fn>;
+  openDeleteDialog: ReturnType<typeof vi.fn>;
+  closeDeleteDialog: ReturnType<typeof vi.fn>;
+  confirmDelete: ReturnType<typeof vi.fn>;
+  startReextract: ReturnType<typeof vi.fn>;
+  loadReview: ReturnType<typeof vi.fn>;
+  approveReview: ReturnType<typeof vi.fn>;
+  discardReview: ReturnType<typeof vi.fn>;
+  closeReview: ReturnType<typeof vi.fn>;
+} {
+  return {
+    state: {
+      phase: 'ready',
+      items: [],
+      selectedId: null,
+      pendingByAttachment: {},
+      errorsByAttachment: {},
+      deleteTargetId: null,
+    },
+    refresh: vi.fn(),
+    select: vi.fn(),
+    openDeleteDialog: vi.fn(),
+    closeDeleteDialog: vi.fn(),
+    confirmDelete: vi.fn().mockResolvedValue(true),
+    startReextract: vi.fn().mockResolvedValue(true),
+    loadReview: vi.fn().mockResolvedValue(true),
+    approveReview: vi.fn().mockResolvedValue(true),
+    discardReview: vi.fn().mockResolvedValue(true),
+    closeReview: vi.fn(),
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -136,7 +203,7 @@ describe('tailoring UI accessibility and static guards', () => {
       </Theme>,
     );
 
-    const tabs = await screen.findByRole('tablist', {name: 'Chế độ xem CV'});
+    const tabs = await screen.findByRole('tablist', {name: 'CV view mode'});
     expect(tabs).toBeInTheDocument();
     expect(screen.getByRole('tab', {name: 'Content'})).toHaveAttribute(
       'aria-selected',
@@ -147,10 +214,10 @@ describe('tailoring UI accessibility and static guards', () => {
       'aria-selected',
       'true',
     );
-    expect(screen.getByTitle('Xem trước PDF CV')).toBeVisible();
+    expect(screen.getByTitle('Tailored CV PDF preview')).toBeVisible();
     expect(document.querySelectorAll('[data-scroll-owner="viewport"]')).toHaveLength(1);
     expect(
-      screen.getByText('Không thể hoàn tất yêu cầu CV.').closest('[role="status"]'),
+      screen.getByText('The CV request could not be completed.').closest('[role="status"]'),
     ).toHaveAttribute('aria-live', 'polite');
     expect(screen.queryByText(/private|documentclass|raw JD|candidate@/i)).not.toBeInTheDocument();
   });
@@ -173,5 +240,86 @@ describe('tailoring UI accessibility and static guards', () => {
     expect(stylesSource).toMatch(
       /(?:prefers-reduced-motion: reduce|^$)/,
     );
+    expect(deleteSource).toContain('Delete tailored CV session?');
+    expect(deleteSource).toContain('cancelLabel="Cancel"');
+    expect(editorSource).toContain('aria-label="CV view mode"');
+  });
+
+  it('opens the named tailored-CV confirmation dialog from the keyboard and restores focus after keyboard cancellation', async () => {
+    vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(
+      function showModal(this: HTMLDialogElement) {
+        this.setAttribute('open', '');
+        this.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+      },
+    );
+    const value = failedSessionController();
+    render(
+      <Theme theme={neutralTheme}>
+        <TailoringSessionsPanel controller={value} onOpenSession={vi.fn()} />
+      </Theme>,
+    );
+
+    await waitFor(() => expect(value.loadSessions).toHaveBeenCalledTimes(1));
+    const retry = screen.getByRole('button', {name: 'Retry'});
+    retry.focus();
+    const user = userEvent.setup();
+    await user.tab();
+    const deleteButton = screen.getByRole('button', {name: 'Delete session'});
+    expect(deleteButton).toHaveFocus();
+    await user.keyboard('{Enter}');
+
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Delete tailored CV session?',
+    });
+    expect(dialog).toHaveAccessibleName('Delete tailored CV session?');
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    expect(within(dialog).getByRole('button', {name: 'Cancel'})).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(deleteButton).toHaveFocus());
+  });
+
+  it('uses a keyboard-operable fullscreen CV Manager drawer on narrow screens', async () => {
+    const matchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        matches: query === '(max-width: 48rem)',
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+    try {
+      const onOpenChange = vi.fn();
+      const drawerController = cvManagerController();
+      render(
+        <Theme theme={neutralTheme}>
+          <button type="button">Manage CVs</button>
+          <CvManagerDrawer
+            isOpen
+            onOpenChange={onOpenChange}
+            controller={drawerController}
+          />
+        </Theme>,
+      );
+
+      const dialog = screen.getByRole('dialog', {name: 'CV Manager'});
+      expect(dialog).toHaveAttribute('data-variant', 'fullscreen');
+      const refresh = within(dialog).getByRole('button', {name: 'Refresh'});
+      refresh.focus();
+      const user = userEvent.setup();
+      await user.keyboard('{Enter}');
+      expect(drawerController.refresh).toHaveBeenCalledTimes(1);
+      await user.keyboard('{Escape}');
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      await waitFor(() => expect(screen.getByRole('button', {name: 'Manage CVs'})).toHaveFocus());
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {configurable: true, value: matchMedia});
+    }
   });
 });

@@ -32,8 +32,7 @@ The last committed product baseline is **Plan 15 Batch03** at commit
 - Batch03: complete saved-JD extraction detail groups, accessible
   `JobReextractDialog`, and sole-owner non-optimistic re-extraction through
   the App-owned `useSavedJobsState` controller passed to
-  `ObservabilitySidebar` (graph-generation invalidation reused; no second
-  state owner).
+  the App-owned product sidebar (invalidation reused; no second state owner).
 
 **Plan 15 Batch04** (Diagnostic and Release Evidence) is on the working tree over
 that base: bounded live synthetic JD diagnostic
@@ -50,6 +49,7 @@ Scope, acceptance, and design authority:
 - [Plan 14](docs/plans/Plan_14.md)
 - [Task 14](docs/tasks/task_14.md)
 - [Acceptance documents](docs/acceptance/)
+- [Product UX and trust repair checklist](docs/acceptance/product-ux-trust-repair-checklist.md)
 - [Multi-profile destructive rollout](docs/operations/cv-profile-multi-conversation-rollout.md)
 - [Multi-profile acceptance checklist](docs/acceptance/cv-profile-multi-conversation-checklist.md)
 - [CV tailoring operations](docs/operations/cv-tailoring-latex.md)
@@ -68,8 +68,8 @@ This is a full-stack local application workspace. A user can:
    text before saving, and retain exact-hash-deduplicated Jobs.
 5. Explicitly evaluate a saved Job against the current approved CV/profile and
    inspect deterministic score components and skill gaps.
-6. Browse CV history and chunk lists, open retained CVs and chunk
-   details, inspect Agent runs and saved Jobs, and view a bounded Neo4j graph.
+6. Manage CVs, inspect saved Jobs and match explanations, and work in the
+   tailored-CV editor; operational diagnostics remain backend-only.
 7. Create source-grounded, versioned tailored CVs from a selected scorable Job
    or a bounded natural-language instruction, edit structured source sections,
    and preview/download fixed `latex-cv-v1` TeX/PDF artifacts.
@@ -96,7 +96,7 @@ accepted baseline was reached.
   SQLAlchemy repositories and models, Alembic migrations, retained-file access,
   Neo4j synchronization/rebuild logic, ShopAIKey adapters, and backend tests.
 - [`frontend/`](frontend/) owns the React/Astryx chat, CV Manager, saved-JD,
-  observability, and tailored-CV sessions/editor panels, the single SSE
+  and tailored-CV sessions/editor panels, the single SSE
   reducer, typed API clients, and frontend tests.
 - [`infrastructure/`](infrastructure/) owns Docker Compose, backend/frontend
   Dockerfiles, Neo4j skill seed data, provider/PDF diagnostics, and graph rebuild
@@ -188,6 +188,21 @@ The boundaries are intentionally narrow:
    attempts to project the active Candidate/Skill/CV branch to Neo4j. A graph
    failure never rolls back committed SQLite truth.
 
+### 1a. Direct CV re-extraction and review
+
+1. Later re-extraction starts from **Manage CVs** and streams bounded progress
+   through the profile re-extraction API. It does not create a synthetic chat
+   message, conversation, Agent run, or tool execution.
+2. The durable review shows approved and proposed profile values, skill changes,
+   collection counts, and extraction-confidence change without exposing source
+   text or storage/provider details.
+3. **Save profile** and **Discard review** require the displayed review revision.
+   A conflicting revision must be reloaded; approved profile truth remains
+   authoritative until Save succeeds.
+4. Profile switching, upload, deletion, and a second re-extraction are blocked
+   while that profile has a pending review. CV actions remain the exact
+   server-projected `allowed_actions`; the frontend never infers deletion scope.
+
 ### 2. Chat turn, Agent loop, and durable history
 
 1. [`ChatPage`](frontend/src/features/chat/ChatPage.tsx) sends a message and
@@ -224,9 +239,9 @@ The boundaries are intentionally narrow:
    projection without copying raw JD text into SSE or pending state.
 3. The action labels owned by
    the [JD confirmation UI contract](frontend/src/features/chat/jobSaveConfirmation.ts)
-   are **Không lưu** and **Lưu JD**. **Không lưu** cancels the same interrupted
+   are **Do not save** and **Save job**. **Do not save** cancels the same interrupted
    tool execution with no Job, extraction, embedding, evaluation, or Neo4j
-   mutation. **Lưu JD** resumes that same run/tool identity and accepts the
+   mutation. **Save job** resumes that same run/tool identity and accepts the
    durable current-message content.
 4. The [JD ingestion service](backend/app/services/jd_ingestion.py) computes the
    exact SHA-256 content hash and selects one branch: an existing non-failed Job
@@ -292,19 +307,18 @@ The boundaries are intentionally narrow:
    only through the sole
    [`useSavedJobsState`](frontend/src/features/jobs/savedJobsState.ts) owner in
    [`App.tsx`](frontend/src/app/App.tsx), passed to
-   [`ObservabilitySidebar`](frontend/src/features/observability/ObservabilitySidebar.tsx):
-   non-optimistic compact-row patch, forced detail GET, currentness refresh,
-   and graph-generation bump; graph-warning success still refreshes SQLite
-   views and shows rebuild guidance; pre-commit failure preserves cached
-   list/detail and shows only a safe summary.
+   `ProductSidebar` and `SavedJobsPanel`: non-optimistic compact-row patch,
+   forced detail GET, currentness refresh, and the existing invalidation
+   callback; related-data warnings refresh authoritative views and show safe
+   recovery copy; pre-commit failure preserves cached list/detail.
 
 ### 4c. Source-grounded tailored CVs (Plan 17)
 
-1. Saved-JD detail exposes **Tạo CV theo JD** only for a `processed` Job with
+1. Saved-JD detail exposes **Create tailored CV** only for a `processed` Job with
    `full` or `partial` quality. The Main Agent accepts a bounded instruction
    plus optional server-injected selected Job state; both paths call the same
    `TailoringCoordinator` and bounded CV Tailoring Agent.
-2. The sidebar's **CV đã chỉnh** list is scoped to the selected ready profile.
+2. The sidebar's **Tailored CVs** list is scoped to the selected ready profile.
    Opening a session swaps only the main workspace; `ChatPage` stays mounted and
    the single `useSavedJobsState` owner is unchanged.
 3. The editor renders every source-owned section in order, keeps approved
@@ -319,6 +333,15 @@ The boundaries are intentionally narrow:
 5. `latex-cv-v1` owns the fixed escaped renderer and the backend compiler. The
    frontend never accepts or edits LaTeX, and tailored content is not projected
    into Neo4j or evaluation tables.
+6. Later manual or AI mutations that equal the selected parent return a typed
+   no-change outcome. They do not create a version, compile, promote an artifact,
+   or advance the session timestamp; initial Version 1 creation remains explicit.
+7. Grounding failures expose only bounded section/field/reason projections.
+   **Focus field**, **View source**, **Undo change**, and **Try again** preserve
+   the local draft while internal issue codes and paths remain server-only.
+8. **Preview PDF** is the only new-tab action. PDF and LaTeX downloads use
+   authenticated blob fetches and safe filenames derived from the visible
+   session label without changing the JobAgent location.
 
 ### 5. CV and Job deletion
 
@@ -339,18 +362,14 @@ The boundaries are intentionally narrow:
    deletion is explicit and retryable; deleting a Job preserves existing
    tailored versions and downloads.
 
-### 6. Observability and graph rebuild
+### 6. Backend diagnostics and graph rebuild
 
-1. The sidebar uses the
-   [observability API client](frontend/src/features/observability/api.ts) for
-   cursor-paginated CV history, chunk lists, and Agent runs; exact retained-file
-   and chunk-detail reads; and a bounded graph snapshot.
-2. The [observability routes](backend/app/api/observability.py) expose read-only
+1. The [observability routes](backend/app/api/observability.py) expose read-only
    endpoints and delegate to the
    [observability service](backend/app/services/observability.py).
    The graph response is an allowlisted `ready`, `stale`, or `unavailable`
-   projection; clients cannot submit Cypher.
-3. If Neo4j is missing or stale, the explicit
+   projection for operators; clients cannot submit Cypher.
+2. If Neo4j is missing or stale, the explicit
    [graph rebuild entrypoint](backend/app/graph/rebuild.py) reads authoritative
    SQLite and stored embeddings/documents, clears only JobAgent-owned graph
    labels and relationships, and recreates the projection. It does not call
@@ -360,7 +379,7 @@ The boundaries are intentionally narrow:
 
 The frontend is React 19 + TypeScript + Vite with Astryx 0.1.4 and the neutral
 theme. The [application shell](frontend/src/app/App.tsx) composes one `AppShell`,
-the resizable CV/observability/saved-JD sidebar, and `ChatPage`.
+the product sidebar (Overview, Saved Jobs, and Tailored CVs), and `ChatPage`.
 
 Key ownership rules:
 
@@ -369,14 +388,14 @@ Key ownership rules:
   and the only chat/SSE reducer.
 - `features/profile/` owns active/draft profile reads, CV upload presentation,
   active-PDF access, and approval presentation.
-- `features/observability/` owns CV Manager, chunks, run history, bounded graph
-  presentation, request/cache state, and deletion UI.
+- `features/cv-manager/` owns CV lifecycle list/actions, direct re-extraction
+  review, artifact access, and deletion UI.
 - `features/jobs/` owns typed saved-JD contracts, list/detail/currentness state,
   complete extraction detail groups, explicit evaluation/re-evaluation,
   confirmation-based same-ID re-extraction (`JobReextractDialog` +
   `confirmReextract`), deterministic match cards, and deletion UI. The sole
   `useSavedJobsState` instance lives in `App.tsx` and is passed into
-  `ObservabilitySidebar` and `SavedJobsPanel` by props only.
+  `ProductSidebar` and `SavedJobsPanel` by props only.
 - `features/cv-tailoring/` owns strict tailoring DTO/SSE parsing, the single
   `useCvTailoringState` controller, source-order structured editing, evidence,
   immutable version actions, preview, and stale/conflict/delete recovery. It
@@ -572,10 +591,10 @@ Set-Location backend
 & '..\.venv\Scripts\python.exe' -m pytest -q
 
 Set-Location ..\frontend
-# Plan 17 tailored-CV UI and owner subset
-npm test -- --run src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-accessibility.test.tsx src/test/observability-navigation.test.tsx src/app/App.test.tsx
-# Plan 15 Batch03 focused frontend subset (parser/detail/dialog/state/sidebar)
-npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/observability-sidebar.test.tsx
+# Product navigation, tailoring, and owner subset
+npm test -- --run src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-accessibility.test.tsx src/test/product-navigation.test.tsx src/test/product-copy-static.test.ts src/app/App.test.tsx
+# Saved Jobs focused frontend subset (parser/detail/dialog/state/sidebar)
+npm test -- --run src/test/saved-jobs-api.test.ts src/test/saved-jobs-panel.test.tsx src/test/saved-jobs-state.test.tsx src/test/saved-job-card.test.tsx
 npm test -- --run
 npm run lint
 npm run typecheck
