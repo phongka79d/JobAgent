@@ -39,7 +39,7 @@ describe('ProfileReextractReview', () => {
     const approveReview = vi.fn().mockResolvedValue(true);
     const onProfileApproved = vi.fn();
     const onOpenChange = vi.fn();
-    render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={onOpenChange} onProfileApproved={onProfileApproved} controller={controller({...base, reextract: {phase: 'review', profileId: PROFILE_ID, stage: null, error: null, draftAvailable: true, review: {profile_id: PROFILE_ID, revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Approved', current_title: 'Engineer', skill_labels: ['TypeScript']}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: 'Senior Engineer', skill_labels: ['TypeScript', 'React']}, changed_fields: [{field: 'current_title', before: 'Engineer', after: 'Senior Engineer'}], skills_added: ['React'], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: true, can_discard: true}}}, {approveReview})} /></Theme>);
+    render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={onOpenChange} onProfileApproved={onProfileApproved} controller={controller({...base, reextract: {phase: 'review', profileId: PROFILE_ID, stage: null, error: null, draftAvailable: true, review: {profile_id: PROFILE_ID, revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Approved', current_title: 'Engineer', skill_labels: ['TypeScript']}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: 'Senior Engineer', skill_labels: ['TypeScript', 'React']}, changed_fields: [{field: 'current_title', before: 'Engineer', after: 'Senior Engineer'}], preference_changes: [], skills_added: ['React'], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: true, can_discard: true}}}, {approveReview})} /></Theme>);
     expect(
       screen.getByText(/current title: Engineer.*Senior Engineer/),
     ).toBeInTheDocument();
@@ -48,6 +48,11 @@ describe('ProfileReextractReview', () => {
     await waitFor(() => expect(approveReview).toHaveBeenCalledTimes(1));
     expect(onProfileApproved).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('shows preference-only review changes before save', () => {
+    render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={vi.fn()} controller={controller({...base, reextract: {phase: 'review', profileId: PROFILE_ID, stage: null, error: null, draftAvailable: true, review: {profile_id: PROFILE_ID, revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, changed_fields: [], preference_changes: [{field: 'target_roles', before: ['Platform Engineer'], after: ['ML Platform Engineer']}], skills_added: [], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: true, can_discard: true}}})} /></Theme>);
+    expect(screen.getByText(/target roles: Platform Engineer.*ML Platform Engineer/)).toBeInTheDocument();
   });
 
   it('offers retry only when the server says no draft is available', async () => {
@@ -72,8 +77,9 @@ describe('ProfileReextractReview', () => {
 
   it('confirms keyboard discard and restores focus after Escape closes the manager', async () => {
     const discardReview = vi.fn().mockResolvedValue(true);
+    const onProfileDiscarded = vi.fn();
     const onOpenChange = vi.fn();
-    render(<Theme theme={neutralTheme}><button type="button">Manage CVs</button><CvManagerDrawer isOpen onOpenChange={onOpenChange} controller={controller({...base, reextract: {phase: 'review', profileId: PROFILE_ID, stage: null, error: null, draftAvailable: true, review: {profile_id: PROFILE_ID, revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, changed_fields: [], skills_added: [], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: false, can_discard: true}}}, {discardReview})} /></Theme>);
+    render(<Theme theme={neutralTheme}><button type="button">Manage CVs</button><CvManagerDrawer isOpen onOpenChange={onOpenChange} onProfileDiscarded={onProfileDiscarded} controller={controller({...base, reextract: {phase: 'review', profileId: PROFILE_ID, stage: null, error: null, draftAvailable: true, review: {profile_id: PROFILE_ID, revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: '', current_title: null, skill_labels: []}, changed_fields: [], preference_changes: [], skills_added: [], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: false, can_discard: true}}}, {discardReview})} /></Theme>);
     screen.getAllByRole('button', {name: 'Discard review'})[0]?.focus();
     await userEvent.keyboard('{Enter}');
     const confirmation = await screen.findByRole('alertdialog', {
@@ -82,6 +88,7 @@ describe('ProfileReextractReview', () => {
     within(confirmation).getByRole('button', {name: 'Discard review'}).focus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(discardReview).toHaveBeenCalledTimes(1));
+    expect(onProfileDiscarded).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(screen.getByRole('dialog', {name: 'CV Manager'}), {key: 'Escape'});
     expect(onOpenChange).toHaveBeenCalledWith(false);
     await waitFor(() => expect(screen.getByRole('button', {name: 'Manage CVs'})).toHaveFocus());

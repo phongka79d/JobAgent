@@ -84,6 +84,7 @@ function controller(): CvTailoringController {
             activities: [],
             issues: [],
           },
+          fit_warning: null,
           source_available: true,
           pdf_available: true,
         },

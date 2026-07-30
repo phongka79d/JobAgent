@@ -92,6 +92,7 @@ const detail = {
     activities: [],
     issues: [],
   },
+  fit_warning: null,
   source_available: true,
   pdf_available: true,
 };
@@ -107,6 +108,7 @@ describe('CV tailoring strict contracts', () => {
     expect(parseTailoringSessionDetail(detail).content?.sections[0]?.heading).toBe(
       'Summary',
     );
+    expect(parseTailoringSessionDetail({...detail, fit_warning: 'JD fit warning'}).fit_warning).toBe('JD fit warning');
     expect(() => parseTailoringSessionList({items: [summary], storage_path: 'x'}))
       .toThrow();
     expect(() =>

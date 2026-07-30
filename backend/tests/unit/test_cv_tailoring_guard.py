@@ -323,6 +323,52 @@ def test_changed_non_substring_fails_closed_without_a_semantic_checker() -> None
     assert any(issue.code == "UNSUPPORTED_ANCHOR" for issue in issues)
 
 
+def test_manual_paraphrase_uses_deterministic_checks_without_provider_veto() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+    manual = baseline.content.model_copy(deep=True)
+    manual.sections[0].items[0].body = _bound(
+        "Specialist in public-service systems.", fact_id
+    )
+    checker = RecordingSemanticChecker(result=False)
+
+    guarded, issues = guard_manual_tailored_content(
+        manual,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=checker,
+    )
+
+    assert issues == ()
+    assert guarded is not None
+    assert checker.calls == []
+
+
+def test_manual_unsupported_claim_is_rejected_even_without_provider_veto() -> None:
+    baseline = _baseline()
+    fact_id = _body_fact_id("summary")
+    manual = baseline.content.model_copy(deep=True)
+    manual.sections[0].items[0].body = _bound(
+        "Led a banking migration program.", fact_id
+    )
+    checker = RecordingSemanticChecker(result=False)
+
+    guarded, issues = guard_manual_tailored_content(
+        manual,
+        parent=baseline.content,
+        allowed_section_ids=["summary"],
+        fact_bank=baseline.fact_bank,
+        approved_skill_labels=baseline.approved_skill_labels,
+        semantic_checker=checker,
+    )
+
+    assert guarded is None
+    assert any(issue.code == "UNSUPPORTED_ANCHOR" for issue in issues)
+    assert checker.calls == []
+
+
 def test_duplicate_fact_ids_are_rejected_after_in_memory_mutation() -> None:
     baseline = _baseline()
     fact_id = _body_fact_id("summary")

@@ -21,6 +21,7 @@ from app.services.evaluation_context import (
     evaluation_context_hash,
 )
 from app.services.profile_approval import commit_approved_draft
+from app.services.profile_drafts import propose_profile_update
 from app.services.profile_reextraction import (
     ProfileReextractError,
     ProfileReextractionCoordinator,
@@ -45,6 +46,267 @@ def _preferences() -> dict[str, Any]:
         "acceptable_work_modes": ["remote"],
         "target_seniority": ["senior"],
     }
+
+
+def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            rel = storage.write_bytes(attachment_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="agent-review-draft",
+                    original_name="agent-review.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id)
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="Ready",
+                    profile_json=_valid_profile(
+                        phone="+1 (202) 555-0147",
+                        email="ready@example.test",
+                        github_url="https://github.com/ready-user",
+                    ).model_dump(mode="json"),
+                    location=None,
+                    extraction_version="old-v1",
+                    source_hash="old-source-hash",
+                )
+                await profile_repo.upsert_profile_preferences(
+                    session,
+                    profile_id=profile.id,
+                    preferences_json=_preferences(),
+                )
+                proposed = _valid_profile(
+                    phone="+1 (202) 555-0147",
+                    email="ready@example.test",
+                    github_url="https://github.com/ready-user",
+                )
+                proposed.summary = "Updated summary from chat"
+                draft = await profile_repo.upsert_current_draft(
+                    session,
+                    draft_json={
+                        "candidate_profile": proposed.model_dump(mode="json"),
+                        "job_preferences": _preferences(),
+                    },
+                    source_attachment_id=None,
+                    target_profile_id=profile.id,
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                await session.commit()
+                profile_id = profile.id
+                revision = draft.updated_at
+
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            review = await coordinator.get_review(profile_id)
+            assert review.profile_id == profile_id
+            assert review.revision == revision.replace(tzinfo=UTC)
+            assert review.current.summary != review.proposed.summary
+            assert review.proposed.summary == "Updated summary from chat"
+
+            await coordinator.discard(profile_id, revision=review.revision)
+            async with factory() as session:
+                assert await profile_repo.get_current_draft(session) is None
+                document = await cv_doc_repo.get_document(session, attachment_id)
+                assert document is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_source_backed_reextract_draft_accepts_agent_correction_before_approval(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            rel = storage.write_bytes(attachment_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="source-backed-agent-correction",
+                    original_name="ready.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id)
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="Ready",
+                    profile_json=_valid_profile(
+                        phone="+1 (202) 555-0147",
+                        email="ready@example.test",
+                        github_url="https://github.com/ready-user",
+                    ).model_dump(mode="json"),
+                    location=None,
+                    extraction_version="old-v1",
+                    source_hash="old-source-hash",
+                )
+                await profile_repo.upsert_profile_preferences(
+                    session,
+                    profile_id=profile.id,
+                    preferences_json=_preferences(),
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                await session.commit()
+                profile_id = profile.id
+
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            events = [event async for event in coordinator.stream(profile_id)]
+            assert events[-1].event == "reextract_review_ready"
+
+            correction = await propose_profile_update(
+                session_factory=factory,
+                normalizer=_normalizer(),
+                expected_profile_id=profile_id,
+                profile_changes={"summary": "Corrected summary from chat"},
+            )
+            assert correction.tool_result.ok is True
+            assert correction.source_attachment_id == attachment_id
+
+            review = await coordinator.get_review(profile_id)
+            assert review.proposed.summary == "Corrected summary from chat"
+
+            approved = await coordinator.approve(profile_id, revision=review.revision)
+            assert approved.approved is True
+
+            async with factory() as session:
+                refreshed = await profile_repo.get_profile(session, profile_id)
+                document = await cv_doc_repo.get_document(session, attachment_id)
+                assert refreshed is not None
+                assert document is not None
+                assert refreshed.profile_json["summary"] == (
+                    "Corrected summary from chat"
+                )
+                assert document.profile_json["summary"] == (
+                    "Corrected summary from chat"
+                )
+                assert await profile_repo.get_current_draft(session) is None
+                assert await cv_doc_repo.get_draft(session, attachment_id) is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_preference_only_profile_review_discloses_preference_changes(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            rel = storage.write_bytes(attachment_id, pdf.read_bytes())
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="preference-only-review",
+                    original_name="ready.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id)
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="Ready",
+                    profile_json=_valid_profile(
+                        phone="+1 (202) 555-0147",
+                        email="ready@example.test",
+                        github_url="https://github.com/ready-user",
+                    ).model_dump(mode="json"),
+                    location=None,
+                    extraction_version="old-v1",
+                    source_hash="old-source-hash",
+                )
+                await profile_repo.upsert_profile_preferences(
+                    session,
+                    profile_id=profile.id,
+                    preferences_json=_preferences(),
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                await session.commit()
+                profile_id = profile.id
+
+            correction = await propose_profile_update(
+                session_factory=factory,
+                normalizer=_normalizer(),
+                expected_profile_id=profile_id,
+                preference_changes={
+                    "target_roles": ["ML Platform Engineer"],
+                    "preferred_locations": ["Remote"],
+                    "acceptable_work_modes": ["remote"],
+                    "target_seniority": ["senior"],
+                },
+            )
+            assert correction.tool_result.ok is True
+
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            review = await coordinator.get_review(profile_id)
+
+            assert review.changed_fields == []
+            assert [
+                (change.field, change.before, change.after)
+                for change in review.preference_changes
+            ] == [
+                (
+                    "target_roles",
+                    ["Platform Engineer"],
+                    ["ML Platform Engineer"],
+                )
+            ]
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 def test_same_profile_reextraction_preserves_owner_preferences_and_conversations(

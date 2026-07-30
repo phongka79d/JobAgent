@@ -13,7 +13,8 @@ checkpoint, or approval side effects.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,7 +27,9 @@ from app.repositories import attachments as att_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.attachments import AttachmentPublic
 from app.schemas.profile import (
+    ProfilePendingReview,
     ProfileReadResponse,
+    ProfileReviewSource,
     empty_profile_read_response,
     parse_candidate_profile,
     parse_job_preferences,
@@ -61,20 +64,44 @@ def _attachment_public(row: Any) -> AttachmentPublic:
     )
 
 
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 async def _pending_draft_attachment(
     session: AsyncSession,
-) -> tuple[bool, AttachmentPublic | None]:
+) -> tuple[bool, AttachmentPublic | None, Any | None]:
     """Return draft presence and staged source attachment metadata when any."""
     draft_row = await profile_repo.get_current_draft(session)
     if draft_row is None:
-        return False, None
+        return False, None, None
     pending: AttachmentPublic | None = None
     source_id = draft_row.source_attachment_id
     if isinstance(source_id, str) and source_id.strip():
         row = await att_repo.get_by_id(session, source_id)
         if row is not None:
             pending = _attachment_public(row)
-    return True, pending
+    return True, pending, draft_row
+
+
+def _pending_review_for_active_profile(
+    *, profile_row: Any, draft_row: Any | None
+) -> ProfilePendingReview | None:
+    if draft_row is None or draft_row.target_profile_id != profile_row.id:
+        return None
+    source_id = draft_row.source_attachment_id
+    if source_id is None:
+        source = "agent_update"
+        can_review = True
+    else:
+        source = "reextract"
+        can_review = source_id == profile_row.active_attachment_id
+    return ProfilePendingReview(
+        profile_id=profile_row.id,
+        revision=_aware(draft_row.updated_at),
+        source=cast(ProfileReviewSource, source),
+        can_review=can_review,
+    )
 
 
 async def build_profile_read_response(
@@ -86,7 +113,9 @@ async def build_profile_read_response(
     state, optionally with draft/staged pending attachment for sidebar display.
     Never returns PDF bytes or storage paths.
     """
-    draft_present, pending_attachment = await _pending_draft_attachment(session)
+    draft_present, pending_attachment, draft_row = await _pending_draft_attachment(
+        session
+    )
 
     profile_row = await profile_repo.get_selected_ready_profile(session)
     if profile_row is None:
@@ -135,6 +164,10 @@ async def build_profile_read_response(
         active_attachment=_attachment_public(attachment),
         draft_present=draft_present,
         pending_attachment=pending_attachment,
+        pending_review=_pending_review_for_active_profile(
+            profile_row=profile_row,
+            draft_row=draft_row,
+        ),
     )
 
 

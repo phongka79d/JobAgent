@@ -222,6 +222,7 @@ export type TailoringSessionDetailResponse = {
   readonly content: TailoredCVContent | null;
   readonly evidence: readonly TailoredFactEvidence[];
   readonly latest_run: TailoringRunSummary | null;
+  readonly fit_warning: string | null;
   readonly source_available: boolean;
   readonly pdf_available: boolean;
 };
@@ -719,6 +720,7 @@ export function parseTailoringSessionDetail(
       'content',
       'evidence',
       'latest_run',
+      'fit_warning',
       'source_available',
       'pdf_available',
     ],
@@ -746,6 +748,7 @@ export function parseTailoringSessionDetail(
       parseEvidence(item, `detail.evidence[${index}]`),
     ),
     latest_run: parseRun(value.latest_run, 'detail.latest_run'),
+    fit_warning: nullableText(value.fit_warning, 'detail.fit_warning', 500),
     source_available: bool(value.source_available, 'detail.source_available'),
     pdf_available: bool(value.pdf_available, 'detail.pdf_available'),
   };

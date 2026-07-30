@@ -607,8 +607,7 @@ def test_cross_layer_tool_jobs_versions_staleness_deletion_and_privacy(
                                             .body.model_copy(
                                                 update={
                                                     "text": (
-                                                        "Synthetic source-supported "
-                                                        "summary edit"
+                                                        "Synthetic source text"
                                                     )
                                                 }
                                             )

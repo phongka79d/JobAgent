@@ -186,6 +186,20 @@ def build_system_prompt(
                     "do not re-run propose with invented attachment IDs.",
                 ]
             )
+            if "propose_profile_update" in names and "commit_profile_draft" in names:
+                sections.extend(
+                    [
+                        "- For active or base CV edits (summary, skills, work "
+                        "history, contact details, preferences, or factual "
+                        "corrections), call propose_profile_update and then "
+                        "commit_profile_draft with draft_id='current' so the "
+                        "user can review, Save Profile, Request Changes, or "
+                        "discard. Active CV stays unchanged until Save Profile.",
+                        "- Multiple correction requests should update the "
+                        "current profile draft rather than duplicate existing "
+                        "content or create a tailored CV.",
+                    ]
+                )
         if "read_active_cv" in names:
             sections.extend(
                 [
@@ -220,10 +234,12 @@ def build_system_prompt(
                 [
                     "",
                     "Tailored CV creation:",
-                    "- Call create_tailored_cv only for an explicit request to "
-                    "tailor, edit, revise, customize, generate, or create a CV "
-                    "for a selected Job or bounded user "
-                    "instruction.",
+                    "- Call create_tailored_cv only when the user explicitly "
+                    "asks for a derivative tailored CV for a selected Job, "
+                    "saved job, job description, role, or target application.",
+                    "- Do not use create_tailored_cv for generic active or "
+                    "base CV edits; use the profile draft workflow when "
+                    "registered.",
                     "- Pass only the user's bounded instruction. The server "
                     "already owns the selected Job ID and resolves approved CV "
                     "facts itself; do not call read_active_cv or Job evidence "

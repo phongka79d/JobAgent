@@ -55,6 +55,39 @@ def _content() -> dict[str, Any]:
     }
 
 
+def _content_with_summary(text: str) -> dict[str, Any]:
+    return {
+        "header": {
+            "full_name": "Synthetic Candidate",
+            "location": None,
+            "phone": None,
+            "email": None,
+            "github_url": None,
+        },
+        "sections": [
+            {
+                "id": "summary",
+                "ordinal": 0,
+                "heading": "Summary",
+                "kind": "summary",
+                "items": [
+                    {
+                        "id": "summary-item",
+                        "source_entry_id": "summary-source",
+                        "title": None,
+                        "subtitle": None,
+                        "date_text": None,
+                        "location": None,
+                        "body": {"text": text, "source_fact_ids": ["sf_summary"]},
+                        "bullets": [],
+                        "attributes": [],
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class _RouteCoordinator:
     def __init__(self, *, profile_id: str, session_id: str) -> None:
         self.profile_id = profile_id
@@ -287,6 +320,175 @@ def test_job_backed_session_persists_shared_display_label(
             item = response.json()["items"][0]
             assert item["id"] == session_id
             assert item["job_label"]["display_label"] == expected_label
+    finally:
+        run_async(engine.dispose())
+
+
+def test_session_detail_projects_jd_fit_warning_for_selected_child_version(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    from app.api.cv_tailoring import router
+    from app.api.dependencies import CVTailoringDeps
+    from app.repositories import jobs as jobs_repo
+
+    from tests.support.graph_rebuild import extraction_payload
+
+    async def _seed() -> tuple[CVTailoringDeps, str, str, Any]:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        storage = TailoringArtifactStorage(tmp_path / "fit-warning-files")
+        async with factory() as session:
+            attachment = Attachment(
+                file_hash="d" * 64,
+                original_name="fit-warning.pdf",
+                mime_type="application/pdf",
+                size_bytes=10,
+                page_count=1,
+                storage_path=f"{new_uuid()}.pdf",
+                state="active",
+            )
+            session.add(attachment)
+            await session.flush()
+            profile = Profile(
+                attachment_id=attachment.id,
+                display_name="Synthetic Candidate",
+                profile_json={"full_name": "Synthetic Candidate"},
+                location=None,
+                extraction_version="cv-document-v1",
+                source_hash="source-fit-warning",
+                state="ready",
+            )
+            session.add(profile)
+            await session.flush()
+            await workspace_repo.set_active_profile_id(session, profile.id)
+
+            job = await jobs_repo.create_text_job(
+                session,
+                raw_content="Synthetic role requiring SQL.",
+                raw_content_hash="fit-warning-job-hash",
+            )
+            await jobs_repo.mark_processing(session, job.id)
+            extraction = extraction_payload()
+            extraction["required_skills"] = [
+                {
+                    "skill": {
+                        "canonical_key": "sql",
+                        "display_name": "SQL",
+                        "aliases": [],
+                        "category": "database",
+                    },
+                    "confidence": 0.95,
+                    "evidence": ["Required: SQL"],
+                }
+            ]
+            processed = await jobs_repo.mark_processed(
+                session,
+                job.id,
+                extraction_json=extraction,
+                jd_quality="full",
+                embedding_json=[0.02 + (index * 1e-6) for index in range(1536)],
+                embedding_model="text-embedding-3-small",
+                embedding_dimensions=1536,
+            )
+            owner = await tailoring_repo.create_session(
+                session,
+                profile_id=profile.id,
+                source_attachment_id=attachment.id,
+                source_hash=profile.source_hash,
+                profile_updated_at=profile.updated_at,
+                job_id=job.id,
+                job_updated_at=processed.updated_at,
+                job_label_json=None,
+                instruction="Focus on data work",
+                template_version="latex-cv-v1",
+            )
+            await session.flush()
+
+            async def _create_version(
+                *,
+                version_id: str,
+                parent_version_id: str | None,
+                version_number: int,
+                content_json: dict[str, Any],
+            ) -> None:
+                staging = storage.create_staging_dir(version_id=version_id)
+                tex_bytes = f"synthetic tex {version_number}".encode()
+                pdf_bytes = f"%PDF-1.4 synthetic {version_number}".encode()
+                (staging / "resume.tex").write_bytes(tex_bytes)
+                (staging / "resume.pdf").write_bytes(pdf_bytes)
+                paths = storage.promote(
+                    profile_id=profile.id,
+                    session_id=owner.id,
+                    version_id=version_id,
+                    staged_tex=staging / "resume.tex",
+                    staged_pdf=staging / "resume.pdf",
+                )
+                await tailoring_repo.create_version_cas(
+                    session,
+                    session_id=owner.id,
+                    expected_latest_version_number=version_number - 1,
+                    expected_parent_version_id=parent_version_id,
+                    version=CVTailoringVersionWrite(
+                        id=version_id,
+                        parent_version_id=parent_version_id,
+                        created_by="ai" if parent_version_id is None else "user",
+                        content_json=content_json,
+                        provenance_json={
+                            "targeted_section_ids": [],
+                            "facts": [],
+                        },
+                        source_revision_json={"source_hash": profile.source_hash},
+                        tex_relative_path=paths.tex_relative_path,
+                        pdf_relative_path=paths.pdf_relative_path,
+                        tex_sha256=hashlib.sha256(tex_bytes).hexdigest(),
+                        pdf_sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+                        page_count=1,
+                        page_warning=None,
+                        created_at=datetime(2026, 7, 26, tzinfo=UTC),
+                    ),
+                )
+
+            parent_version_id = new_uuid()
+            child_version_id = new_uuid()
+            await _create_version(
+                version_id=parent_version_id,
+                parent_version_id=None,
+                version_number=1,
+                content_json=_content_with_summary(
+                    "Built SQL dashboards and Python analysis workflows."
+                ),
+            )
+            await _create_version(
+                version_id=child_version_id,
+                parent_version_id=parent_version_id,
+                version_number=2,
+                content_json=_content_with_summary(
+                    "Built Python analysis workflows."
+                ),
+            )
+            await session.commit()
+        deps = CVTailoringDeps(
+            coordinator=cast(Any, object()),
+            storage=storage,
+            settings=cast(Any, SimpleNamespace(SQLITE_PATH=migrated_sqlite)),
+            session_factory=factory,
+        )
+        return deps, owner.id, child_version_id, engine
+
+    deps, session_id, child_version_id, engine = run_async(_seed())
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    app.dependency_overrides[get_cv_tailoring_deps] = lambda: deps
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                f"/api/cv-tailoring/sessions/{session_id}",
+                params={"version_id": child_version_id},
+            )
+            assert response.status_code == 200
+            assert response.json()["fit_warning"] == (
+                "This version mentions fewer required JD skills than its parent: SQL."
+            )
     finally:
         run_async(engine.dispose())
 

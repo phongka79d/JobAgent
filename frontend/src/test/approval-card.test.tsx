@@ -905,6 +905,7 @@ describe('Save Profile refreshes sidebar', () => {
           active_attachment: null,
           draft_present: false,
           pending_attachment: null,
+          pending_review: null,
         };
       }
       return {
@@ -930,6 +931,7 @@ describe('Save Profile refreshes sidebar', () => {
         },
         draft_present: false,
         pending_attachment: null,
+        pending_review: null,
       };
     });
 
@@ -1056,6 +1058,7 @@ describe('Save Profile refreshes sidebar', () => {
           active_attachment: null,
           draft_present: true,
           pending_attachment: null,
+          pending_review: null,
         };
       }
       return {
@@ -1081,6 +1084,7 @@ describe('Save Profile refreshes sidebar', () => {
         },
         draft_present: false,
         pending_attachment: null,
+        pending_review: null,
       };
     });
 

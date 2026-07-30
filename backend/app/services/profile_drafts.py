@@ -13,17 +13,21 @@ Owns ``propose_profile_from_cv`` and ``propose_profile_update`` service behavior
   leaves prior chunks, approved document, drafts, and active profile unchanged
 * ``propose_profile_update`` applies profile/preference/skill corrections to the
   current draft or an active-context copy, validates the full
-  ``ProfileDraftPayload``, and upserts only ``profile_drafts('current')``
+  ``ProfileDraftPayload``, and upserts ``profile_drafts('current')`` plus the
+  matching CV document draft profile projection when the draft remains
+  source-backed
 
 Never writes active profile/preferences. Never registers tools.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -98,6 +102,8 @@ _PROFILE_PATCH_KEYS: frozenset[str] = frozenset(
         "extraction_confidence",
     }
 )
+_TEXT_UNIT_RE = re.compile(r"[^.!?\n;]+(?:[.!?]+|$)")
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -656,6 +662,161 @@ def _merge_profile_fields(
     return data
 
 
+def _content_key(value: str) -> str:
+    cleaned = value.strip().strip(".!?;:").casefold()
+    return " ".join(cleaned.split())
+
+
+def _dedupe_text_units(value: str) -> tuple[str, int]:
+    units = [match.group(0).strip() for match in _TEXT_UNIT_RE.finditer(value)]
+    units = [unit for unit in units if unit]
+    if len(units) <= 1:
+        return value, 0
+    seen: set[str] = set()
+    kept: list[str] = []
+    removed = 0
+    for unit in units:
+        key = _content_key(unit)
+        if key and key in seen:
+            removed += 1
+            continue
+        if key:
+            seen.add(key)
+        kept.append(unit)
+    if removed == 0:
+        return value, 0
+    return " ".join(kept), removed
+
+
+def _normalized_json(value: Any) -> Any:
+    if isinstance(value, str):
+        return _content_key(value)
+    if isinstance(value, Mapping):
+        return {
+            str(key): _normalized_json(value[key])
+            for key in sorted(value.keys(), key=str)
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return [_normalized_json(item) for item in value]
+    return value
+
+
+def _model_content_key(value: Any) -> str:
+    payload = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    return json.dumps(
+        _normalized_json(payload),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _dedupe_sequence(
+    values: Sequence[_T],
+    key_fn: Callable[[_T], str],
+) -> tuple[list[_T], int]:
+    seen: set[str] = set()
+    kept: list[_T] = []
+    removed = 0
+    for value in values:
+        key = key_fn(value)
+        if key and key in seen:
+            removed += 1
+            continue
+        if key:
+            seen.add(key)
+        kept.append(value)
+    return kept, removed
+
+
+def _dedupe_string_list(values: Sequence[str]) -> tuple[list[str], int]:
+    return _dedupe_sequence(values, _content_key)
+
+
+def _dedupe_candidate_profile(
+    profile: CandidateProfile,
+) -> tuple[CandidateProfile, int]:
+    removed = 0
+    summary, count = _dedupe_text_units(profile.summary)
+    removed += count
+
+    experiences = []
+    for experience in profile.experiences:
+        experience_summary, count = _dedupe_text_units(experience.summary)
+        removed += count
+        experiences.append(
+            experience.model_copy(update={"summary": experience_summary})
+            if experience_summary != experience.summary
+            else experience
+        )
+    experiences, count = _dedupe_sequence(experiences, _model_content_key)
+    removed += count
+
+    education, count = _dedupe_sequence(profile.education, _model_content_key)
+    removed += count
+    languages, count = _dedupe_sequence(profile.languages, _model_content_key)
+    removed += count
+
+    if removed == 0:
+        return profile, 0
+    return (
+        profile.model_copy(
+            update={
+                "summary": summary,
+                "experiences": experiences,
+                "education": education,
+                "languages": languages,
+            }
+        ),
+        removed,
+    )
+
+
+def _dedupe_job_preferences(prefs: JobPreferences) -> tuple[JobPreferences, int]:
+    removed = 0
+    target_roles, count = _dedupe_string_list(prefs.target_roles)
+    removed += count
+    preferred_locations, count = _dedupe_string_list(prefs.preferred_locations)
+    removed += count
+    acceptable_work_modes, count = _dedupe_string_list(prefs.acceptable_work_modes)
+    removed += count
+    target_seniority, count = _dedupe_string_list(prefs.target_seniority)
+    removed += count
+
+    if removed == 0:
+        return prefs, 0
+    return (
+        prefs.model_copy(
+            update={
+                "target_roles": target_roles,
+                "preferred_locations": preferred_locations,
+                "acceptable_work_modes": acceptable_work_modes,
+                "target_seniority": target_seniority,
+            }
+        ),
+        removed,
+    )
+
+
+def _dedupe_profile_draft_payload(
+    payload: ProfileDraftPayload,
+) -> tuple[ProfileDraftPayload, int]:
+    profile, profile_removed = _dedupe_candidate_profile(payload.candidate_profile)
+    prefs, prefs_removed = _dedupe_job_preferences(payload.job_preferences)
+    removed = profile_removed + prefs_removed
+    if removed == 0:
+        return payload, 0
+    return (
+        parse_profile_draft_payload(
+            {
+                "candidate_profile": profile.model_dump(mode="json"),
+                "job_preferences": prefs.model_dump(mode="json"),
+            }
+        ),
+        removed,
+    )
+
+
 def _correction_to_skill(
     item: Mapping[str, Any],
     *,
@@ -973,6 +1134,7 @@ async def propose_profile_update(
             skill_corrections=skill_corrections,
             normalizer=normalizer,
         )
+        updated, duplicate_content_removed = _dedupe_profile_draft_payload(updated)
     except (ValidationError, SkillTaxonomyError, TypeError, ValueError) as exc:
         return ProposeUpdateResult(
             base_kind=base_kind,
@@ -1013,12 +1175,37 @@ async def propose_profile_update(
                     ),
                     source_attachment_id=source_attachment_id,
                 )
+            document_draft = None
+            if source_attachment_id is not None:
+                document_draft = await cv_doc_repo.get_draft(
+                    session, source_attachment_id
+                )
+                if document_draft is None:
+                    return ProposeUpdateResult(
+                        base_kind=base_kind,
+                        tool_result=_tool_fail(
+                            "PROFILE_INCONSISTENT",
+                            "source-backed current draft is missing its document draft",
+                        ),
+                        source_attachment_id=source_attachment_id,
+                    )
             await profile_repo.upsert_current_draft(
                 session,
                 draft_json=draft_json,
                 source_attachment_id=source_attachment_id,
                 target_profile_id=target_profile_id,
             )
+            if document_draft is not None:
+                assert source_attachment_id is not None
+                await cv_doc_repo.upsert_draft(
+                    session,
+                    attachment_id=source_attachment_id,
+                    document_json=dict(document_draft.document_json),
+                    profile_json=dict(draft_json["candidate_profile"]),
+                    outline_json=dict(document_draft.outline_json),
+                    extraction_version=document_draft.extraction_version,
+                    source_hash=document_draft.source_hash,
+                )
     except Exception as exc:
         logger.exception("draft upsert failed during propose_profile_update")
         return ProposeUpdateResult(
@@ -1046,6 +1233,7 @@ async def propose_profile_update(
         "preference_only": has_prefs and not has_profile and not has_skills,
         "excluded_skill_count": excluded_count,
         "user_correction_skill_count": correction_count,
+        "duplicate_content_removed": duplicate_content_removed,
         **compact_draft_summary(updated),
     }
     return ProposeUpdateResult(

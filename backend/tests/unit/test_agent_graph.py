@@ -365,10 +365,16 @@ def test_production_registry_has_exactly_eight_tools() -> None:
     assert "synthetic_interrupt" not in names
 
 
-def test_tailoring_prompt_covers_explicit_editing_intent_and_durable_success() -> None:
-    prompt = build_system_prompt(["create_tailored_cv"])
-    for verb in ("tailor", "edit", "revise", "customize", "generate", "create"):
-        assert verb in prompt
+def test_prompt_separates_active_profile_edits_from_tailored_cv_creation() -> None:
+    prompt = build_system_prompt(
+        ["propose_profile_update", "commit_profile_draft", "create_tailored_cv"]
+    )
+    assert "For active or base CV edits" in prompt
+    assert "propose_profile_update" in prompt
+    assert "Active CV stays unchanged until Save Profile" in prompt
+    assert "Do not use create_tailored_cv for generic active or base CV edits" in prompt
+    for phrase in ("selected Job", "job description", "derivative tailored CV"):
+        assert phrase in prompt
     assert (
         "Claim success only after a successful exact create_tailored_cv ToolResult"
         in prompt

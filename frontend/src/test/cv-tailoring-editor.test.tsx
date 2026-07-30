@@ -1,4 +1,11 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
@@ -142,6 +149,7 @@ function detail(
       activities: [],
       issues: [],
     },
+    fit_warning: null,
     source_available: true,
     pdf_available: true,
   };
@@ -258,6 +266,12 @@ it('binds safe issues to fields and exposes source, undo, and retry actions', as
   const createAiVersion = vi.fn();
   const value = controller('current', {focusIssue, undoIssue, retryIssue, createAiVersion}, {stream: {phase: 'error', data: null, error: {code: 'TAILORING_GROUNDING_FAILED', summary: 'Not source-supported', issues: [issue]}}});
   renderEditor(value);
+  expect(screen.getByText('Source support warning')).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'Manual edits are still available. Use source evidence, undo the flagged field, or retry with AI.',
+    ),
+  ).toBeInTheDocument();
   expect(screen.getByText('Summary: This value is not supported by the selected source.')).toHaveAttribute('id', 'tailoring-issue-summary-0-body-not_in_source');
   const groundedField = screen.getByRole('textbox', {name: 'Summary body'});
   expect(groundedField).toHaveAttribute('aria-invalid', 'true');
@@ -276,6 +290,45 @@ it('binds safe issues to fields and exposes source, undo, and retry actions', as
   expect(undoIssue).toHaveBeenCalledWith(issue);
   expect(retryIssue).toHaveBeenCalledWith(issue);
   expect(createAiVersion).not.toHaveBeenCalled();
+});
+
+it('renders base-to-tailored version lineage', () => {
+  const value = controller('current');
+  renderEditor(value);
+
+  const lineage = screen.getByRole('tree', {name: 'Version lineage'});
+  expect(
+    within(lineage).getByRole('treeitem', {name: 'Base CV'}),
+  ).toBeInTheDocument();
+  expect(
+    within(lineage).getByRole('treeitem', {name: 'Version 1 - AI'}),
+  ).toBeInTheDocument();
+  expect(
+    within(lineage).getByRole('treeitem', {name: 'Version 2 - You'}),
+  ).toBeInTheDocument();
+});
+
+it('renders a non-blocking JD fit warning from the selected version detail', () => {
+  const selected = detail('current');
+  const value = controller('current', {}, {
+    detail: {
+      phase: 'ready',
+      data: {
+        ...selected,
+        fit_warning: 'This version mentions fewer required JD skills than its parent: SQL.',
+      },
+      error: null,
+    },
+  });
+  renderEditor(value);
+
+  expect(screen.getByText('JD fit warning')).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'This version mentions fewer required JD skills than its parent: SQL.',
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', {name: 'Save version'})).toBeInTheDocument();
 });
 
 it('focuses source evidence only after the disclosure is open', async () => {
@@ -429,8 +482,8 @@ describe('TailoringEditor', () => {
     const value = controller('current', {}, {draftDirty: true});
     renderEditor(value);
 
-    fireEvent.click(screen.getByRole('button', {name: 'Save version and create PDF'}));
-    fireEvent.click(screen.getByRole('button', {name: 'Save version and create PDF'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Save version'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Save version'}));
     await waitFor(() => expect(value.saveManualVersion).toHaveBeenCalledTimes(1));
 
     await userEvent.click(
@@ -457,7 +510,7 @@ describe('TailoringEditor', () => {
     renderEditor(value, {onCreateFresh});
 
     expect(screen.getByText('Source data changed')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Save version and create PDF'})).toBeDisabled();
+    expect(screen.getByRole('button', {name: 'Save version'})).toBeDisabled();
     await userEvent.click(
       screen.getByRole('button', {name: 'Create a new session from current data'}),
     );

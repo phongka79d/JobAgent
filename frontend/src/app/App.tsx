@@ -296,6 +296,10 @@ export function App({deps}: AppProps = {}) {
     setProfileRefreshKey((k) => k + 1);
   }, []);
 
+  const handleProfileReviewDiscarded = useCallback(() => {
+    setProfileRefreshKey((k) => k + 1);
+  }, []);
+
   const handleSavedJobsInvalidated = useCallback(() => {
     savedJobs.invalidateCurrentness();
     setSavedJobsInvalidateKey((k) => k + 1);
@@ -306,6 +310,7 @@ export function App({deps}: AppProps = {}) {
     onSidebarUploadSuccess: handleSidebarUploadSuccess,
     onCvDeleted: handleCvDeleted,
     onProfileApproved: handleProfileSaved,
+    onProfileDiscarded: handleProfileReviewDiscarded,
     cvManagerRequest,
     onCvManagerRequestHandled: handleCvManagerRequestHandled,
     refreshKey: profileRefreshKey,

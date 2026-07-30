@@ -579,6 +579,7 @@ describe('App foundation shell', () => {
       },
       evidence: [],
       latest_run: null,
+      fit_warning: null,
       source_available: false,
       pdf_available: false,
     });

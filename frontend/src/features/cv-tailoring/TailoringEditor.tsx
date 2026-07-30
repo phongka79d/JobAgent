@@ -25,7 +25,14 @@ import {TailoredSectionEditor} from './TailoredSectionEditor';
 import {TailoringPdfPreview} from './TailoringPdfPreview';
 import {TailoringSessionDeleteDialog} from './TailoringSessionDeleteDialog';
 import {sessionDisplayLabel} from './presentation';
-import {tailoringFieldId, tailoringIssueId, tailoringSectionId, type TailoredCVContent, type TailoredSection} from './types';
+import {
+  tailoringFieldId,
+  tailoringIssueId,
+  tailoringSectionId,
+  type TailoredCVContent,
+  type TailoredSection,
+  type TailoringVersionSummary,
+} from './types';
 import './cv-tailoring.css';
 
 export type TailoringEditorProps = {
@@ -50,7 +57,7 @@ function safeErrorText(error: TailoringSafeError | null): string | null {
     case 'TAILORING_PARENT_CONFLICT':
       return 'A newer version exists. Your draft is preserved.';
     case 'TAILORING_GROUNDING_FAILED':
-      return 'The content did not pass source checks. Your draft is preserved.';
+      return 'Source support warning';
     case 'TAILORING_COMPILE_FAILED':
       return 'The PDF could not be created. Your draft and previous PDF are preserved.';
     case 'TAILORING_SOURCE_STALE':
@@ -60,6 +67,19 @@ function safeErrorText(error: TailoringSafeError | null): string | null {
     default:
       return 'The CV request could not be completed.';
   }
+}
+
+function safeErrorDescription(error: TailoringSafeError | null): string | undefined {
+  if (error?.code === 'TAILORING_GROUNDING_FAILED') {
+    return 'Manual edits are still available. Use source evidence, undo the flagged field, or retry with AI.';
+  }
+  return undefined;
+}
+
+function safeErrorStatus(
+  error: TailoringSafeError | null,
+): 'error' | 'warning' {
+  return error?.code === 'TAILORING_GROUNDING_FAILED' ? 'warning' : 'error';
 }
 
 function replaceSection(
@@ -116,6 +136,48 @@ function HeaderFacts({
   );
 }
 
+function VersionLineage({
+  versions,
+  selectedVersionId,
+}: {
+  readonly versions: readonly TailoringVersionSummary[];
+  readonly selectedVersionId: string | null;
+}) {
+  const sorted = [...versions].sort(
+    (left, right) => left.version_number - right.version_number,
+  );
+  const depths = new Map<string, number>();
+  const rows = sorted.map((version) => {
+    const parentDepth = version.parent_version_id
+      ? (depths.get(version.parent_version_id) ?? 0)
+      : 0;
+    const depth = parentDepth + 1;
+    depths.set(version.id, depth);
+    return {version, depth};
+  });
+
+  return (
+    <VStack gap={1} role="tree" aria-label="Version lineage">
+      <Text role="treeitem" aria-level={1} type="supporting">
+        Base CV
+      </Text>
+      {rows.map(({version, depth}) => (
+        <Text
+          key={version.id}
+          role="treeitem"
+          aria-level={depth + 1}
+          aria-selected={version.id === selectedVersionId}
+          type="supporting"
+        >
+          {`Version ${version.version_number} - ${
+            version.created_by === 'ai' ? 'AI' : 'You'
+          }`}
+        </Text>
+      ))}
+    </VStack>
+  );
+}
+
 export function TailoringEditor({
   controller,
   onBackToChat,
@@ -143,7 +205,9 @@ export function TailoringEditor({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const saveGuard = useRef(false);
-  const errorText = safeErrorText(state.detail.error ?? state.stream.error);
+  const activeError = state.detail.error ?? state.stream.error;
+  const errorText = safeErrorText(activeError);
+  const errorDescription = safeErrorDescription(activeError);
   const issues = state.stream.error?.issues ?? state.detail.error?.issues ?? [];
   const [evidenceTarget, setEvidenceTarget] = useState<{sectionId: string; key: number} | null>(null);
 
@@ -260,7 +324,7 @@ export function TailoringEditor({
                   onClick={() => setDeleteOpen(true)}
                 />
                 <Button
-                  label="Save version and create PDF"
+                  label="Save version"
                   variant="primary"
                   isDisabled={editingDisabled || !state.draftDirty}
                   isLoading={isSaving}
@@ -316,6 +380,10 @@ export function TailoringEditor({
                 ) : null}
               </VStack>
             </HStack>
+            <VersionLineage
+              versions={detail.versions}
+              selectedVersionId={state.selectedVersionId}
+            />
           </Section>
 
           {isStale ? (
@@ -339,6 +407,15 @@ export function TailoringEditor({
             <Banner
               status="warning"
               title={selectedVersion.page_warning}
+              container="section"
+            />
+          ) : null}
+
+          {detail.fit_warning ? (
+            <Banner
+              status="warning"
+              title="JD fit warning"
+              description={detail.fit_warning}
               container="section"
             />
           ) : null}
@@ -374,8 +451,9 @@ export function TailoringEditor({
           {errorText ? (
             <VStack role="status" aria-live="polite">
               <Banner
-                status="error"
+                status={safeErrorStatus(activeError)}
                 title={errorText}
+                description={errorDescription}
                 container="section"
                 endContent={
                   state.conflict ? (

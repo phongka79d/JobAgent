@@ -1385,6 +1385,81 @@ def test_propose_update_exclusions_survive_repeated_updates(
     run_async(_body())
 
 
+def test_propose_update_accumulates_without_duplicate_profile_content(
+    db_path: Path,
+) -> None:
+    """Repeated Agent corrections preserve new content but drop exact duplicates."""
+    from app.services.profile_drafts import propose_profile_update
+    from app.services.skill_normalization import SkillNormalizer
+
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                att_id = await _staged_attachment(
+                    session, file_hash="upd-no-dupes", storage_path="upd-no-dupes.pdf"
+                )
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="upd-no-dupes.pdf"
+                )
+                await prof_repo.upsert_current_draft(
+                    session,
+                    draft_json=_valid_draft_json(),
+                    source_attachment_id=None,
+                    target_profile_id=owner.id,
+                )
+                await session.commit()
+                owner_id = owner.id
+
+            first = await propose_profile_update(
+                session_factory=factory,
+                normalizer=normalizer,
+                expected_profile_id=owner_id,
+                profile_changes={
+                    "summary": "Backend engineer. Improves APIs.",
+                },
+            )
+            assert first.tool_result.ok is True
+
+            duplicate_experience = _valid_profile_json()["experiences"][0]
+            second = await propose_profile_update(
+                session_factory=factory,
+                normalizer=normalizer,
+                expected_profile_id=owner_id,
+                profile_changes={
+                    "summary": (
+                        "Backend engineer. Improves APIs. Improves APIs. "
+                        "Leads platform work."
+                    ),
+                    "experiences": [duplicate_experience, duplicate_experience],
+                },
+            )
+
+            assert second.tool_result.ok is True
+            assert second.tool_result.data is not None
+            assert second.tool_result.data["duplicate_content_removed"] == 2
+            assert second.draft is not None
+            assert second.draft.candidate_profile.summary == (
+                "Backend engineer. Improves APIs. Leads platform work."
+            )
+            assert len(second.draft.candidate_profile.experiences) == 1
+
+            async with factory() as session:
+                draft = await prof_repo.get_current_draft(session)
+                assert draft is not None
+                assert draft.draft_json["candidate_profile"]["summary"] == (
+                    "Backend engineer. Improves APIs. Leads platform work."
+                )
+                assert len(draft.draft_json["candidate_profile"]["experiences"]) == 1
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_propose_update_invalid_payload_leaves_prior_unchanged(
     db_path: Path,
 ) -> None:

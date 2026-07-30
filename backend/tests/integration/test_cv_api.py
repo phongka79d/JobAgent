@@ -1498,6 +1498,7 @@ def test_get_profile_empty_state(
             "active_attachment": None,
             "draft_present": False,
             "pending_attachment": None,
+            "pending_review": None,
         }
         assert "storage_path" not in response.text
         assert "%PDF" not in response.text
@@ -1550,6 +1551,7 @@ def test_pending_selected_profile_is_not_exposed_as_approved_compatibility_data(
             "active_attachment": None,
             "draft_present": False,
             "pending_attachment": None,
+            "pending_review": None,
         }
 
         cv = client.get("/api/profile/cv")
@@ -1618,6 +1620,7 @@ def test_get_profile_active_and_cv_stream_safe_disposition(
         assert body["preferences"]["target_roles"] == ["Backend Engineer"]
         assert body["active_attachment"]["id"] == att_id
         assert body["active_attachment"]["state"] == ATTACHMENT_STATE_ACTIVE
+        assert body["pending_review"] is None
         assert "storage_path" not in response.text
         assert "storage_path" not in body["active_attachment"]
         assert set(body["active_attachment"].keys()) == {
@@ -1646,6 +1649,72 @@ def test_get_profile_active_and_cv_stream_safe_disposition(
         assert att_id not in disposition  # no storage path leakage
         assert cv.content == pdf_bytes
         assert "storage_path" not in disposition
+
+
+def test_get_profile_projects_active_pending_review(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Active profile reads expose a durable pending review action."""
+    from app.core.ids import new_uuid
+    from app.storage.attachments import AttachmentStorage
+
+    _db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+
+    pdf_bytes = b"%PDF-1.4 active-cv-bytes\n%%EOF\n"
+    att_id = new_uuid()
+
+    async def _seed() -> tuple[str, str]:
+        storage.write_bytes(att_id, pdf_bytes)
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.create_staged(
+                session,
+                file_hash="profile-review-projection",
+                original_name="active.pdf",
+                size_bytes=len(pdf_bytes),
+                storage_path=att_id,
+                page_count=1,
+                attachment_id=att_id,
+            )
+            await att_repo.mark_active(session, att_id, page_count=1)
+            profile = await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=att_id,
+                profile_json=_approved_profile_json(),
+            )
+            await profile_repo.upsert_job_preferences(
+                session, preferences_json=_approved_prefs_json()
+            )
+            draft = deepcopy(_approved_profile_json())
+            draft["summary"] = "Updated summary from agent"
+            row = await profile_repo.upsert_current_draft(
+                session,
+                draft_json={
+                    "candidate_profile": draft,
+                    "job_preferences": _approved_prefs_json(),
+                },
+                source_attachment_id=None,
+                target_profile_id=profile.id,
+            )
+            await session.commit()
+            return profile.id, row.updated_at.isoformat()
+
+    profile_id, _revision = run_async(_seed())
+
+    with health_client() as client:
+        response = client.get("/api/profile")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["draft_present"] is True
+    assert body["pending_attachment"] is None
+    assert body["pending_review"]["profile_id"] == profile_id
+    assert body["pending_review"]["source"] == "agent_update"
+    assert body["pending_review"]["can_review"] is True
+    assert body["pending_review"]["revision"]
 
 
 def test_get_profile_cv_missing_file_is_safe(

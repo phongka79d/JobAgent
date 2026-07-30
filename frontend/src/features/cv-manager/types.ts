@@ -162,12 +162,19 @@ export type ProfileFieldChange = {
   after: string | number | null;
 };
 
+export type ProfilePreferenceChange = {
+  field: 'target_roles' | 'preferred_locations' | 'acceptable_work_modes' | 'target_seniority';
+  before: string[];
+  after: string[];
+};
+
 export type ProfileReextractReview = {
   profile_id: string;
   revision: string;
   current: PublicProfileSnapshot;
   proposed: PublicProfileSnapshot;
   changed_fields: ProfileFieldChange[];
+  preference_changes: ProfilePreferenceChange[];
   skills_added: string[];
   skills_removed: string[];
   collection_deltas: {experiences: number; education: number; languages: number; certifications: number};
@@ -184,7 +191,7 @@ export type ProfileReextractApprovalResponse = {
 };
 
 const EVENT_KEYS = ['event_id', 'operation_id', 'profile_id', 'timestamp', 'event', 'payload'] as const;
-const REVIEW_KEYS = ['profile_id', 'revision', 'current', 'proposed', 'changed_fields', 'skills_added', 'skills_removed', 'collection_deltas', 'extraction_confidence', 'can_approve', 'can_discard'] as const;
+const REVIEW_KEYS = ['profile_id', 'revision', 'current', 'proposed', 'changed_fields', 'preference_changes', 'skills_added', 'skills_removed', 'collection_deltas', 'extraction_confidence', 'can_approve', 'can_discard'] as const;
 const SNAPSHOT_KEYS = ['full_name', 'location', 'phone', 'email', 'github_url', 'summary', 'current_title', 'skill_labels'] as const;
 
 function stringList(value: unknown, name: string): string[] {
@@ -257,6 +264,18 @@ export function parseProfileReextractReview(raw: unknown): ProfileReextractRevie
     if (!validValue(change.before) || !validValue(change.after)) throw new Error('invalid field change value');
     return {field: change.field as ProfileFieldChange['field'], before: change.before as ProfileFieldChange['before'], after: change.after as ProfileFieldChange['after']};
   });
+  if (!Array.isArray(value.preference_changes)) throw new Error('preference_changes must be an array');
+  const preference_changes = value.preference_changes.map((rawChange) => {
+    const change = record(rawChange, 'profile preference change');
+    exact(change, ['field', 'before', 'after'], 'profile preference change');
+    const fields = ['target_roles', 'preferred_locations', 'acceptable_work_modes', 'target_seniority'] as const;
+    if (!fields.includes(change.field as (typeof fields)[number])) throw new Error('invalid preference change field');
+    return {
+      field: change.field as ProfilePreferenceChange['field'],
+      before: stringList(change.before, 'preference change before'),
+      after: stringList(change.after, 'preference change after'),
+    };
+  });
   const deltas = record(value.collection_deltas, 'collection deltas');
   exact(deltas, ['experiences', 'education', 'languages', 'certifications'], 'collection deltas');
   let extraction_confidence: ProfileReextractReview['extraction_confidence'] = null;
@@ -267,7 +286,7 @@ export function parseProfileReextractReview(raw: unknown): ProfileReextractRevie
   }
   return {
     profile_id: uuid(value.profile_id, 'profile_id'), revision: timestamp(value.revision, 'revision'),
-    current: parseSnapshot(value.current), proposed: parseSnapshot(value.proposed), changed_fields,
+    current: parseSnapshot(value.current), proposed: parseSnapshot(value.proposed), changed_fields, preference_changes,
     skills_added: stringList(value.skills_added, 'skills_added'), skills_removed: stringList(value.skills_removed, 'skills_removed'),
     collection_deltas: {experiences: finite(deltas.experiences, 'experiences'), education: finite(deltas.education, 'education'), languages: finite(deltas.languages, 'languages'), certifications: finite(deltas.certifications, 'certifications')},
     extraction_confidence, can_approve: bool(value.can_approve, 'can_approve'), can_discard: bool(value.can_discard, 'can_discard'),

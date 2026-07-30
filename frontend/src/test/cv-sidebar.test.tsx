@@ -114,6 +114,7 @@ function emptyProfile(): ProfileReadResponse {
     active_attachment: null,
     draft_present: false,
     pending_attachment: null,
+    pending_review: null,
   };
 }
 
@@ -143,6 +144,33 @@ function activeProfile(
     },
     draft_present: false,
     pending_attachment: null,
+    pending_review: null,
+  };
+}
+
+function activeProfileWithPendingReview(): ProfileReadResponse {
+  return {
+    ...activeProfile('my-cv.pdf'),
+    draft_present: true,
+    pending_review: {
+      profile_id: PROFILE_ID,
+      revision: NOW,
+      source: 'agent_update',
+      can_review: true,
+    },
+  };
+}
+
+function activeProfileWithStuckPendingReview(): ProfileReadResponse {
+  return {
+    ...activeProfile('my-cv.pdf'),
+    draft_present: true,
+    pending_review: {
+      profile_id: PROFILE_ID,
+      revision: NOW,
+      source: 'reextract',
+      can_review: false,
+    },
   };
 }
 
@@ -241,9 +269,17 @@ describe('profile transport parsers', () => {
         state: 'active',
         failure_code: null,
       },
+      pending_review: {
+        profile_id: PROFILE_ID,
+        revision: NOW,
+        source: 'agent_update',
+        can_review: true,
+      },
     });
     expect(active.present).toBe(true);
     expect(active.active_attachment?.original_name).toBe('cv.pdf');
+    expect(active.pending_review?.profile_id).toBe(PROFILE_ID);
+    expect(active.pending_review?.source).toBe('agent_update');
   });
 
   it('rejects storage_path leakage in attachment and upload payloads', () => {
@@ -666,6 +702,170 @@ describe('CvSidebar empty / active states', () => {
       expect(screen.getByText(/PDF_TOO_LARGE/)).toBeInTheDocument();
     });
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('shows pending review action at the upload error location', async () => {
+    const loadProfile = vi
+      .fn()
+      .mockResolvedValueOnce(activeProfile('my-cv.pdf'))
+      .mockResolvedValueOnce(activeProfileWithPendingReview());
+    const upload = vi
+      .fn()
+      .mockRejectedValue(
+        new ChatApiError(
+          409,
+          'PROFILE_REVIEW_PENDING',
+          'Approve or discard the pending profile review first',
+        ),
+      );
+    const getProfileReextractReview = vi.fn().mockResolvedValue({
+      profile_id: PROFILE_ID,
+      revision: NOW,
+      current: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Approved',
+        current_title: 'Engineer',
+        skill_labels: [],
+      },
+      proposed: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Proposed',
+        current_title: 'Senior Engineer',
+        skill_labels: [],
+      },
+      changed_fields: [
+        {field: 'summary', before: 'Approved', after: 'Proposed'},
+      ],
+      preference_changes: [],
+      skills_added: [],
+      skills_removed: [],
+      collection_deltas: {
+        experiences: 0,
+        education: 0,
+        languages: 0,
+        certifications: 0,
+      },
+      extraction_confidence: null,
+      can_approve: true,
+      can_discard: true,
+    });
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          {...productControllers()}
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          deps={{
+            loadProfile,
+            uploadCv: upload,
+            cvManager: {getProfileReextractReview},
+          }}
+        />
+      </Theme>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('Upload new CV')).toBeInTheDocument();
+    });
+
+    const file = new File(['%PDF-1.4 fake'], 'new.pdf', {
+      type: 'application/pdf',
+    });
+    const input = screen.getByTestId('jobagent-cv-upload') as HTMLInputElement;
+    await userEvent.upload(input, file);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('jobagent-cv-upload-error')).toHaveTextContent(
+        'Approve or discard the pending profile review first',
+      );
+    });
+    const reviewButton = screen.getByRole('button', {
+      name: 'Review pending changes',
+    });
+    await userEvent.click(reviewButton);
+
+    await waitFor(() =>
+      expect(getProfileReextractReview).toHaveBeenCalledWith(
+        PROFILE_ID,
+        expect.any(AbortSignal),
+      ),
+    );
+    const review = await screen.findByTestId('jobagent-profile-reextract-review');
+    expect(review).toBeInTheDocument();
+    expect(
+      within(review).getByRole('button', {name: 'Save review'}),
+    ).toBeInTheDocument();
+    expect(
+      within(review).getByRole('button', {name: 'Discard review'}),
+    ).toBeInTheDocument();
+  });
+
+  it('lets users discard a stuck pending review from the upload error', async () => {
+    const loadProfile = vi
+      .fn()
+      .mockResolvedValueOnce(activeProfile('my-cv.pdf'))
+      .mockResolvedValueOnce(activeProfileWithStuckPendingReview())
+      .mockResolvedValueOnce(activeProfile('my-cv.pdf'));
+    const upload = vi
+      .fn()
+      .mockRejectedValue(
+        new ChatApiError(
+          409,
+          'PROFILE_REVIEW_PENDING',
+          'Approve or discard the pending profile review first',
+        ),
+      );
+    const discardProfileReextractReview = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          {...productControllers()}
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          deps={{
+            loadProfile,
+            uploadCv: upload,
+            cvManager: {discardProfileReextractReview},
+          }}
+        />
+      </Theme>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('Upload new CV')).toBeInTheDocument();
+    });
+
+    const file = new File(['%PDF-1.4 fake'], 'new.pdf', {
+      type: 'application/pdf',
+    });
+    await userEvent.upload(screen.getByTestId('jobagent-cv-upload'), file);
+
+    expect(
+      await screen.findByText(/no longer matches the active CV/i),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Discard pending review'}),
+    );
+
+    await waitFor(() =>
+      expect(discardProfileReextractReview).toHaveBeenCalledWith(
+        PROFILE_ID,
+        NOW,
+        expect.any(AbortSignal),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/pending profile review/i)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('jobagent-cv-upload-error')).not.toBeInTheDocument();
   });
 
   it('rejects retry responses that replace the bootstrap conversation', async () => {

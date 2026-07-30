@@ -17,6 +17,7 @@ from app.api.dependencies import CVTailoringDeps, get_cv_tailoring_deps
 from app.api.sse import open_sse_response
 from app.db.models.chat import AgentRun
 from app.db.models.cv_tailoring import CVTailoringSession, CVTailoringVersion
+from app.db.models.jobs import JobPost
 from app.repositories import agent_activities as activities_repo
 from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import profiles as profiles_repo
@@ -39,6 +40,7 @@ from app.schemas.cv_tailoring import (
     parse_tailored_content,
     parse_tailoring_provenance,
 )
+from app.schemas.jobs import JobPostExtraction, parse_job_post_extraction
 from app.services.agent_activity import activity_payload
 from app.services.cv_tailoring import (
     TAILORING_ARTIFACT_UNAVAILABLE,
@@ -49,6 +51,7 @@ from app.services.cv_tailoring import (
     TailoringError,
 )
 from app.services.cv_tailoring_deletion import delete_tailoring_session
+from app.services.cv_tailoring_fit import fit_warning_for_content_change
 from app.services.tailoring_issue_projection import (
     decode_internal_issue,
     is_internal_issue_activity,
@@ -122,8 +125,6 @@ async def _summary(session: Any, row: CVTailoringSession) -> TailoringSessionSum
     profile = await profiles_repo.get_profile(session, row.profile_id)
     job_updated_at = None
     if row.job_id is not None:
-        from app.db.models.jobs import JobPost
-
         job = await session.get(JobPost, row.job_id)
         job_updated_at = job.updated_at if job is not None else None
     label = (
@@ -160,6 +161,38 @@ def _version_summary(row: CVTailoringVersion) -> TailoringVersionSummary:
         page_count=row.page_count,
         page_warning=row.page_warning,
         created_at=_aware(row.created_at),
+    )
+
+
+def _parse_job_context(row: JobPost | None) -> JobPostExtraction | None:
+    if row is None or row.extraction_json is None:
+        return None
+    try:
+        return parse_job_post_extraction(row.extraction_json)
+    except Exception:
+        return None
+
+
+async def _fit_warning(
+    session: Any,
+    *,
+    owner: CVTailoringSession,
+    selected: CVTailoringVersion | None,
+) -> str | None:
+    if selected is None or selected.parent_version_id is None:
+        return None
+    parent = await tailoring_repo.get_version(session, selected.parent_version_id)
+    if parent is None or parent.session_id != owner.id:
+        return None
+    job_context = _parse_job_context(
+        await session.get(JobPost, owner.job_id) if owner.job_id is not None else None
+    )
+    if job_context is None:
+        return None
+    return fit_warning_for_content_change(
+        content=parse_tailored_content(selected.content_json),
+        parent=parse_tailored_content(parent.content_json),
+        job_context=job_context,
     )
 
 
@@ -300,6 +333,9 @@ async def get_session(
                 content=content,
                 evidence=evidence,
                 latest_run=latest_run,
+                fit_warning=await _fit_warning(
+                    session, owner=owner, selected=selected
+                ),
                 source_available=source_available,
                 pdf_available=pdf_available,
             )

@@ -317,6 +317,8 @@ def build_tailoring_graph(
             HumanMessage(
                 content=_json(
                     {
+                        "instruction": state["instruction"],
+                        "job_context": state["job_context"],
                         "selected_sections": state["selected_sections"],
                         "identity_skeleton": state["identity_skeleton"],
                         "fact_bank": state["fact_bank"],
@@ -380,6 +382,8 @@ def build_tailoring_graph(
             HumanMessage(
                 content=_json(
                     {
+                        "instruction": state["instruction"],
+                        "job_context": state["job_context"],
                         "selected_sections": state["selected_sections"],
                         "identity_skeleton": state["identity_skeleton"],
                         "fact_bank": state["fact_bank"],

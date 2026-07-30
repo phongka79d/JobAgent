@@ -309,6 +309,7 @@ class TailoringSessionDetailResponse(BaseModel):
     content: TailoredCVContent | None
     evidence: list[TailoredFactEvidence]
     latest_run: TailoringRunSummary | None
+    fit_warning: str | None = Field(default=None, max_length=500)
     source_available: bool
     pdf_available: bool
 

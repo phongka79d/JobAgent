@@ -23,14 +23,18 @@ from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.profile import (
     CandidateProfile,
+    JobPreferences,
     SafeWarning,
     parse_candidate_profile,
+    parse_job_preferences,
     parse_profile_draft_payload,
 )
 from app.schemas.profile_reextraction import (
     ConfidenceDelta,
     ProfileCollectionDeltas,
     ProfileFieldChange,
+    ProfilePreferenceChange,
+    ProfilePreferenceField,
     ProfileReextractApprovalResponse,
     ProfileReextractEvent,
     ProfileReextractEventName,
@@ -60,6 +64,13 @@ _SCALAR_FIELDS: tuple[ProfileReviewField, ...] = (
     "github_url",
     "summary",
     "current_title",
+)
+
+_PREFERENCE_FIELDS: tuple[ProfilePreferenceField, ...] = (
+    "target_roles",
+    "preferred_locations",
+    "acceptable_work_modes",
+    "target_seniority",
 )
 
 _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
@@ -118,10 +129,38 @@ def _collection_size(profile: CandidateProfile, field: str) -> int:
     return len(value) if isinstance(value, (list, tuple)) else 0
 
 
+def _empty_preferences() -> JobPreferences:
+    return JobPreferences(
+        target_roles=[],
+        preferred_locations=[],
+        acceptable_work_modes=[],
+        target_seniority=[],
+    )
+
+
+def _preference_changes(
+    current: JobPreferences | None,
+    proposed: JobPreferences | None,
+) -> list[ProfilePreferenceChange]:
+    if current is None or proposed is None:
+        return []
+    changes: list[ProfilePreferenceChange] = []
+    for field in _PREFERENCE_FIELDS:
+        before = list(getattr(current, field))
+        after = list(getattr(proposed, field))
+        if before != after:
+            changes.append(
+                ProfilePreferenceChange(field=field, before=before, after=after)
+            )
+    return changes
+
+
 def build_review(
     *,
     current: CandidateProfile,
     proposed: CandidateProfile,
+    current_preferences: JobPreferences | None = None,
+    proposed_preferences: JobPreferences | None = None,
     profile_id: str,
     revision: datetime,
 ) -> ProfileReextractReview:
@@ -159,6 +198,9 @@ def build_review(
         current=current_snapshot,
         proposed=proposed_snapshot,
         changed_fields=changes,
+        preference_changes=_preference_changes(
+            current_preferences, proposed_preferences
+        ),
         skills_added=skills_added,
         skills_removed=skills_removed,
         collection_deltas=ProfileCollectionDeltas(
@@ -372,41 +414,65 @@ class ProfileReextractionCoordinator:
                     "PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
                     "No review is available for this profile",
                 )
-            if draft.source_attachment_id != profile.attachment_id:
+            source_id = draft.source_attachment_id
+            if source_id is not None and source_id != profile.attachment_id:
                 raise ProfileReextractError(
                     "PROFILE_INCONSISTENT", "The review does not match this profile"
                 )
-            document_draft = await cv_doc_repo.get_draft(
-                session, profile.attachment_id
-            )
-            if document_draft is None:
-                raise ProfileReextractError(
-                    "PROFILE_REEXTRACT_DRAFT_INVALID",
-                    "The review data is incomplete",
-                )
             try:
                 current = parse_candidate_profile(profile.profile_json)
-                proposed = parse_profile_draft_payload(
-                    draft.draft_json
-                ).candidate_profile
-                document_profile = parse_candidate_profile(
-                    document_draft.profile_json
-                )
+                draft_payload = parse_profile_draft_payload(draft.draft_json)
+                proposed = draft_payload.candidate_profile
             except (TypeError, ValidationError) as exc:
                 raise ProfileReextractError(
                     "PROFILE_REEXTRACT_DRAFT_INVALID",
                     "The review data is invalid",
                 ) from exc
-            if document_profile.model_dump(mode="json") != proposed.model_dump(
-                mode="json"
-            ):
-                raise ProfileReextractError(
-                    "PROFILE_REEXTRACT_DRAFT_INVALID",
-                    "The review data is inconsistent",
+            prefs_row = await profile_repo.get_profile_preferences(
+                session, profile_id
+            )
+            if prefs_row is None:
+                current_preferences = _empty_preferences()
+            else:
+                try:
+                    current_preferences = parse_job_preferences(
+                        prefs_row.preferences_json
+                    )
+                except (TypeError, ValidationError) as exc:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_DRAFT_INVALID",
+                        "The review data is invalid",
+                    ) from exc
+            if source_id is not None:
+                document_draft = await cv_doc_repo.get_draft(
+                    session, profile.attachment_id
+                )
+                if document_draft is None:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_DRAFT_INVALID",
+                        "The review data is incomplete",
+                    )
+                try:
+                    document_profile = parse_candidate_profile(
+                        document_draft.profile_json
+                    )
+                except (TypeError, ValidationError) as exc:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_DRAFT_INVALID",
+                        "The review data is invalid",
+                    ) from exc
+                if document_profile.model_dump(mode="json") != proposed.model_dump(
+                    mode="json"
+                ):
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_DRAFT_INVALID",
+                        "The review data is inconsistent",
                 )
             return build_review(
                 current=current,
                 proposed=proposed,
+                current_preferences=current_preferences,
+                proposed_preferences=draft_payload.job_preferences,
                 profile_id=profile_id,
                 revision=draft.updated_at,
             )

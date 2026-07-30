@@ -9,6 +9,7 @@ import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 import {HStack} from '@astryxdesign/core/HStack';
 import {VStack} from '@astryxdesign/core/VStack';
+import type {PendingProfileReview} from './types';
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
@@ -25,9 +26,14 @@ export type ProfileOverviewPanelProps = {
   isUploadDisabled: boolean;
   isUploading: boolean;
   disabledReason?: string;
+  pendingReview: PendingProfileReview | null;
+  isDiscardingPendingReview?: boolean;
+  pendingReviewDiscardError?: string | null;
   canViewDownload: boolean;
   onFileChange: (files: File | File[] | null) => void;
   onUpload: (files: File | File[] | null) => Promise<void>;
+  onReviewPendingChanges: () => void;
+  onDiscardPendingReview: () => void;
   onViewDownload: () => void;
   onManageCvs?: () => void;
 };
@@ -43,12 +49,39 @@ export function ProfileOverviewPanel({
   isUploadDisabled,
   isUploading,
   disabledReason,
+  pendingReview,
+  isDiscardingPendingReview = false,
+  pendingReviewDiscardError = null,
   canViewDownload,
   onFileChange,
   onUpload,
+  onReviewPendingChanges,
+  onDiscardPendingReview,
   onViewDownload,
   onManageCvs,
 }: ProfileOverviewPanelProps) {
+  const pendingReviewDescription = pendingReview?.can_review
+    ? 'Approve or discard the pending profile review before uploading another CV.'
+    : 'This pending profile review no longer matches the active CV. Discard it before uploading another CV.';
+  const pendingReviewAction = pendingReview ? (
+    pendingReview.can_review ? (
+      <Button
+        label="Review pending changes"
+        variant="secondary"
+        size="sm"
+        onClick={onReviewPendingChanges}
+      />
+    ) : (
+      <Button
+        label="Discard pending review"
+        variant="secondary"
+        size="sm"
+        isLoading={isDiscardingPendingReview}
+        onClick={onDiscardPendingReview}
+      />
+    )
+  ) : undefined;
+
   return (
     <VStack
       gap={3}
@@ -89,9 +122,31 @@ export function ProfileOverviewPanel({
         <Banner
           status="error"
           title="Upload failed"
-          description={uploadError}
+          description={
+            pendingReview && !pendingReview.can_review
+              ? pendingReviewDescription
+              : uploadError
+          }
+          endContent={pendingReviewAction}
           container="card"
           data-testid="jobagent-cv-upload-error"
+        />
+      ) : null}
+      {pendingReviewDiscardError ? (
+        <Banner
+          status="error"
+          title="Pending profile review could not be discarded"
+          description={pendingReviewDiscardError}
+          container="card"
+        />
+      ) : null}
+      {!uploadError && pendingReview ? (
+        <Banner
+          status="warning"
+          title="Pending profile review"
+          description={pendingReviewDescription}
+          endContent={pendingReviewAction}
+          container="card"
         />
       ) : null}
 

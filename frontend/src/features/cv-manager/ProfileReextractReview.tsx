@@ -12,14 +12,21 @@ import type {CvManagerController} from './state';
 
 type ReviewController = Pick<CvManagerController, 'state' | 'startReextract' | 'loadReview' | 'approveReview' | 'discardReview' | 'closeReview'>;
 
-export function ProfileReextractReview({controller, onApproved}: {controller: ReviewController; onApproved?: () => void}) {
+function formatList(values: string[]): string {
+  return values.length > 0 ? values.join(', ') : 'None';
+}
+
+export function ProfileReextractReview({controller, onApproved, onDiscarded}: {controller: ReviewController; onApproved?: () => void; onDiscarded?: () => void}) {
   const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false);
   const state = controller.state.reextract;
   if (!state || state.phase === 'idle') return null;
 
   const requestDiscard = () => setIsDiscardConfirmOpen(true);
   const confirmDiscard = async () => {
-    if (await controller.discardReview()) setIsDiscardConfirmOpen(false);
+    if (await controller.discardReview()) {
+      setIsDiscardConfirmOpen(false);
+      onDiscarded?.();
+    }
   };
 
   if (state.phase === 'loading') {
@@ -58,6 +65,11 @@ export function ProfileReextractReview({controller, onApproved}: {controller: Re
         {review.changed_fields.map((change) => <Text id={`jobagent-profile-review-change-${change.field}`} key={change.field} type="supporting">{change.field.replaceAll('_', ' ')}: {String(change.before ?? 'Not provided')} → {String(change.after ?? 'Not provided')}</Text>)}
       </VStack>
     </Collapsible> : <Text type="supporting">No profile detail changes.</Text>}
+    {review.preference_changes.length > 0 ? <Collapsible trigger="Job preference changes" defaultIsOpen>
+      <VStack gap={1}>
+        {review.preference_changes.map((change) => <Text id={`jobagent-profile-review-preference-${change.field}`} key={change.field} type="supporting">{change.field.replaceAll('_', ' ')}: {formatList(change.before)} -&gt; {formatList(change.after)}</Text>)}
+      </VStack>
+    </Collapsible> : null}
     <Collapsible trigger="Skill changes" defaultIsOpen>
       <VStack gap={1}>
         <Text type="supporting">Skills added: {review.skills_added.join(', ') || 'None'}</Text>

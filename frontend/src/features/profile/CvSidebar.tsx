@@ -22,7 +22,7 @@ import {
   useSideNavRenderMode,
 } from '@astryxdesign/core/SideNav';
 
-import type {CvManagerApi} from '../cv-manager/api';
+import {defaultCvManagerApi, type CvManagerApi} from '../cv-manager/api';
 import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
 import {useCvManagerState} from '../cv-manager/state';
 import type {SavedJobsController} from '../jobs/savedJobsState';
@@ -60,6 +60,7 @@ export type CvSidebarProps = {
   /** After confirmed delete success (profile summary may need refresh). */
   onCvDeleted?: () => void;
   onProfileApproved?: () => void;
+  onProfileDiscarded?: () => void;
   cvManagerRequest?: {requestKey: number; profileId: string; startAt: 'reextract'} | null;
   onCvManagerRequestHandled?: (requestKey: number) => void;
   /** Increment / change to force a profile reload (e.g. after Save Profile). */
@@ -215,6 +216,7 @@ export function useCvSidebarWorkspace({
   onSidebarUploadSuccess,
   onCvDeleted,
   onProfileApproved,
+  onProfileDiscarded,
   cvManagerRequest = null,
   onCvManagerRequestHandled,
   refreshKey = 0,
@@ -262,6 +264,9 @@ export function useCvSidebarWorkspace({
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
+  const discardProfileReextractReview =
+    deps?.cvManager?.discardProfileReextractReview ??
+    defaultCvManagerApi.discardProfileReextractReview;
 
   const [profile, setProfile] = useState<ProfileReadResponse | null>(null);
   const profileScope = workspace.state.activeProfileId ?? 'legacy';
@@ -275,6 +280,11 @@ export function useCvSidebarWorkspace({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDiscardingPendingReview, setIsDiscardingPendingReview] =
+    useState(false);
+  const [pendingReviewDiscardError, setPendingReviewDiscardError] = useState<
+    string | null
+  >(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const loadedRefreshKey = useRef(refreshKey);
   const loadedActivationKey = useRef(activationKey);
@@ -343,6 +353,7 @@ export function useCvSidebarWorkspace({
       const file = Array.isArray(files) ? (files[0] ?? null) : files;
       setSelectedFile(file);
       setUploadError(null);
+      setPendingReviewDiscardError(null);
     },
     [],
   );
@@ -369,6 +380,9 @@ export function useCvSidebarWorkspace({
               ? err.message
               : 'CV upload failed';
         setUploadError(`${summary} (${code})`);
+        if (code === 'PROFILE_REVIEW_PENDING') {
+          await reload();
+        }
       } finally {
         setIsUploading(false);
       }
@@ -432,6 +446,63 @@ export function useCvSidebarWorkspace({
     onCvDeleted?.();
   }, [onCvDeleted, reload]);
 
+  const handleReviewPendingChanges = useCallback(() => {
+    const pendingReview = scopedProfile?.pending_review;
+    if (!pendingReview?.can_review) {
+      return;
+    }
+    const controller = new AbortController();
+    setIsCvManagerOpen(true);
+    void cvManager.loadReview(
+      pendingReview.profile_id,
+      pendingReview.revision,
+      controller.signal,
+    );
+  }, [cvManager, scopedProfile?.pending_review]);
+
+  const handleDiscardPendingReview = useCallback(async () => {
+    const pendingReview = scopedProfile?.pending_review;
+    if (!pendingReview || isDiscardingPendingReview) {
+      return;
+    }
+    const controller = new AbortController();
+    setIsDiscardingPendingReview(true);
+    setPendingReviewDiscardError(null);
+    try {
+      await discardProfileReextractReview(
+        pendingReview.profile_id,
+        pendingReview.revision,
+        controller.signal,
+      );
+      setUploadError(null);
+      await reload(controller.signal);
+      onProfileDiscarded?.();
+    } catch (err) {
+      const summary =
+        err instanceof ChatApiError
+          ? err.summary
+          : err instanceof Error
+            ? err.message
+            : 'Unable to discard the pending profile review';
+      setPendingReviewDiscardError(summary);
+    } finally {
+      setIsDiscardingPendingReview(false);
+    }
+  }, [
+    discardProfileReextractReview,
+    isDiscardingPendingReview,
+    onProfileDiscarded,
+    reload,
+    scopedProfile?.pending_review,
+  ]);
+
+  const handleProfileReviewDiscarded = useCallback(() => {
+    setUploadError(null);
+    setPendingReviewDiscardError(null);
+    void reload();
+    onProfileDiscarded?.();
+  }, [onProfileDiscarded, reload]);
+
   const state = profileStateLabel(scopedProfile);
   const activeName = scopedProfile?.active_attachment?.original_name ?? null;
   const pendingName = scopedProfile?.pending_attachment?.original_name ?? null;
@@ -475,9 +546,14 @@ export function useCvSidebarWorkspace({
         isUploadDisabled={isUploadDisabled}
         isUploading={isUploading}
         disabledReason={disabledReason}
+        pendingReview={scopedProfile?.pending_review ?? null}
+        isDiscardingPendingReview={isDiscardingPendingReview}
+        pendingReviewDiscardError={pendingReviewDiscardError}
         canViewDownload={hasActive}
         onFileChange={handleFileChange}
         onUpload={handleUpload}
+        onReviewPendingChanges={handleReviewPendingChanges}
+        onDiscardPendingReview={handleDiscardPendingReview}
         onViewDownload={handleViewDownload}
         onManageCvs={() => {
           setIsCvManagerOpen(true);
@@ -541,6 +617,7 @@ export function useCvSidebarWorkspace({
       }}
       onDeleted={handleCvManagerDeleted}
       onProfileApproved={onProfileApproved}
+      onProfileDiscarded={handleProfileReviewDiscarded}
     />
   );
 

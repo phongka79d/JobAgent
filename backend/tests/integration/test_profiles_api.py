@@ -805,6 +805,7 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
                 current=snapshot,
                 proposed=snapshot,
                 changed_fields=[],
+                preference_changes=[],
                 skills_added=[],
                 skills_removed=[],
                 collection_deltas=ProfileCollectionDeltas(

@@ -47,12 +47,28 @@ ProfileReviewField = Literal[
 ]
 
 
+ProfilePreferenceField = Literal[
+    "target_roles",
+    "preferred_locations",
+    "acceptable_work_modes",
+    "target_seniority",
+]
+
+
 class ProfileFieldChange(BaseModel):
     model_config = StrictModelConfig
 
     field: ProfileReviewField
     before: str | float | None
     after: str | float | None
+
+
+class ProfilePreferenceChange(BaseModel):
+    model_config = StrictModelConfig
+
+    field: ProfilePreferenceField
+    before: list[str] = Field(max_length=50)
+    after: list[str] = Field(max_length=50)
 
 
 class ProfileCollectionDeltas(BaseModel):
@@ -79,6 +95,7 @@ class ProfileReextractReview(BaseModel):
     current: PublicProfileSnapshot
     proposed: PublicProfileSnapshot
     changed_fields: list[ProfileFieldChange] = Field(max_length=24)
+    preference_changes: list[ProfilePreferenceChange] = Field(max_length=8)
     skills_added: list[str] = Field(max_length=50)
     skills_removed: list[str] = Field(max_length=50)
     collection_deltas: ProfileCollectionDeltas
@@ -151,6 +168,8 @@ __all__ = [
     "ConfidenceDelta",
     "ProfileCollectionDeltas",
     "ProfileFieldChange",
+    "ProfilePreferenceChange",
+    "ProfilePreferenceField",
     "ProfileReextractApprovalResponse",
     "ProfileReextractApproveRequest",
     "ProfileReextractEvent",

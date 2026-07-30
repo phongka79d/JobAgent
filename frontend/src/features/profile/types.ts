@@ -82,6 +82,13 @@ export type JobPreferencesSummary = {
   target_seniority: string[];
 };
 
+export type PendingProfileReview = {
+  profile_id: string;
+  revision: string;
+  source: 'agent_update' | 'reextract';
+  can_review: boolean;
+};
+
 /** GET /api/profile body: explicit empty or active state. */
 export type ProfileReadResponse = {
   present: boolean;
@@ -92,6 +99,7 @@ export type ProfileReadResponse = {
   draft_present: boolean;
   /** Staged attachment backing the draft, when any (safe metadata only). */
   pending_attachment: AttachmentPublic | null;
+  pending_review: PendingProfileReview | null;
 };
 
 /** Pending PDF attachment for the chat composer (ID + display name only). */
@@ -110,6 +118,37 @@ function asString(value: unknown): string | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
+}
+
+function parsePendingProfileReview(raw: unknown): PendingProfileReview | null {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (!isObject(raw)) {
+    throw new Error('pending_review must be an object or null');
+  }
+  exact(raw, ['profile_id', 'revision', 'source', 'can_review']);
+  const profile_id = asString(raw.profile_id);
+  const revision = asString(raw.revision);
+  const can_review = asBoolean(raw.can_review);
+  if (!profile_id) {
+    throw new Error('pending_review.profile_id must be string');
+  }
+  if (!revision) {
+    throw new Error('pending_review.revision must be string');
+  }
+  if (raw.source !== 'agent_update' && raw.source !== 'reextract') {
+    throw new Error('pending_review.source is invalid');
+  }
+  if (can_review === null) {
+    throw new Error('pending_review.can_review must be boolean');
+  }
+  return {
+    profile_id,
+    revision,
+    source: raw.source,
+    can_review,
+  };
 }
 
 const UPLOAD_OUTCOMES: ReadonlySet<string> = new Set([
@@ -283,6 +322,7 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
     raw.pending_attachment === null || raw.pending_attachment === undefined
       ? null
       : parseAttachmentPublic(raw.pending_attachment);
+  const pending_review = parsePendingProfileReview(raw.pending_review);
 
   if (!present) {
     return {
@@ -292,6 +332,7 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
       active_attachment: null,
       draft_present,
       pending_attachment,
+      pending_review,
     };
   }
   if (!isObject(raw.profile)) {
@@ -354,5 +395,6 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
     active_attachment,
     draft_present,
     pending_attachment,
+    pending_review,
   };
 }

@@ -82,6 +82,7 @@ function durableDetail(
       activities: [],
       issues: [],
     },
+    fit_warning: null,
     source_available: hasVersion,
     pdf_available: hasVersion,
   };

@@ -28,6 +28,25 @@ _EMAIL_TOKEN_RE = re.compile(
     r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
     r"(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9.-]+"
 )
+_SUPPORT_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_SUPPORT_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
 
 
 class GroundingIssue(BaseModel):
@@ -119,6 +138,34 @@ def _unsupported_anchor(
     return False
 
 
+def _support_words(text: str) -> set[str]:
+    normalized = normalize_assertion_text(text)
+    return {
+        word
+        for word in _SUPPORT_WORD_RE.findall(normalized)
+        if len(word) >= 3 and word not in _SUPPORT_STOPWORDS
+    }
+
+
+def _deterministically_source_supported(
+    text: str,
+    *,
+    evidence: Sequence[str],
+) -> bool:
+    normalized = normalize_assertion_text(text)
+    if not normalized:
+        return True
+    if any(normalized in normalize_assertion_text(item) for item in evidence):
+        return True
+    output_words = _support_words(text)
+    if not output_words:
+        return True
+    evidence_words: set[str] = set()
+    for item in evidence:
+        evidence_words.update(_support_words(item))
+    return output_words.issubset(evidence_words)
+
+
 def _attribute_names_for_section(parent_section: TailoredSection) -> list[str]:
     names: list[str] = []
     for item in parent_section.items:
@@ -194,6 +241,8 @@ def validate_patch_structure_and_facts(
     fact_bank: Mapping[str, TailoredFactEvidence],
     approved_skill_labels: Sequence[str],
     semantic_checker: SemanticSupportChecker | None,
+    require_semantic_support: bool = True,
+    require_deterministic_support: bool = False,
 ) -> list[GroundingIssue]:
     issues: list[GroundingIssue] = []
     allowed = list(allowed_section_ids)
@@ -317,7 +366,17 @@ def validate_patch_structure_and_facts(
                         GroundingIssue(code="UNSUPPORTED_ANCHOR", path=field_path)
                     )
                     continue
-                if cited and not any(
+                if require_deterministic_support and not (
+                    _deterministically_source_supported(
+                        bound_text.text,
+                        evidence=cited,
+                    )
+                ):
+                    issues.append(
+                        GroundingIssue(code="UNSUPPORTED_ANCHOR", path=field_path)
+                    )
+                    continue
+                if require_semantic_support and cited and not any(
                     normalize_assertion_text(bound_text.text)
                     in normalize_assertion_text(evidence)
                     for evidence in cited
@@ -378,6 +437,8 @@ def guard_tailored_patch(
     fact_bank: Mapping[str, TailoredFactEvidence],
     approved_skill_labels: Sequence[str],
     semantic_checker: SemanticSupportChecker | None,
+    require_semantic_support: bool = True,
+    require_deterministic_support: bool = False,
 ) -> tuple[TailoredCVContent | None, tuple[GroundingIssue, ...]]:
     issues = validate_patch_structure_and_facts(
         patch,
@@ -386,6 +447,8 @@ def guard_tailored_patch(
         fact_bank=fact_bank,
         approved_skill_labels=approved_skill_labels,
         semantic_checker=semantic_checker,
+        require_semantic_support=require_semantic_support,
+        require_deterministic_support=require_deterministic_support,
     )
     if issues:
         return None, tuple(issues)
@@ -401,6 +464,7 @@ def guard_manual_tailored_content(
     approved_skill_labels: Sequence[str],
     semantic_checker: SemanticSupportChecker | None,
 ) -> tuple[TailoredCVContent | None, tuple[GroundingIssue, ...]]:
+    # Manual edits remain subject to deterministic source, provenance, and anchors.
     identity_issues = _manual_content_identity_issues(content, parent=parent)
     if identity_issues:
         return None, tuple(identity_issues)
@@ -411,6 +475,8 @@ def guard_manual_tailored_content(
         fact_bank=fact_bank,
         approved_skill_labels=approved_skill_labels,
         semantic_checker=semantic_checker,
+        require_semantic_support=False,
+        require_deterministic_support=True,
     )
 
 

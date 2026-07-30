@@ -248,7 +248,7 @@ def test_graph_has_exact_fixed_nodes_and_no_tool_or_spawn_topology() -> None:
     assert "spawn" not in node_names
 
 
-def test_prompts_are_split_by_selection_and_selected_source_context() -> None:
+def test_rewrite_prompts_receive_bounded_instruction_and_job_context() -> None:
     invoker = RecordingInvoker(patches=[_patch("summary")])
     result = _build(invoker).compiled.invoke(_state())
 
@@ -263,14 +263,27 @@ def test_prompts_are_split_by_selection_and_selected_source_context() -> None:
     assert "Prioritize the structured role requirements" in selection_text
     assert "Summary" in selection_text and "Experience" in selection_text
 
-    assert "JOB_STRUCTURED_SENTINEL" not in rewrite_text
-    assert "Prioritize the structured role requirements" not in rewrite_text
+    assert "JOB_STRUCTURED_SENTINEL" in rewrite_text
+    assert "Prioritize the structured role requirements" in rewrite_text
     assert "Synthetic Candidate" not in rewrite_text
     assert "+84900000000" not in rewrite_text
     assert "experience" not in rewrite_text.casefold()
     assert "REFERENCE_ONLY_SENTINEL_7429" not in selection_text + rewrite_text
     assert "RAW_JOB_SENTINEL" not in selection_text + rewrite_text
     assert "SERVER_PATH_SENTINEL" not in selection_text + rewrite_text
+
+
+def test_repair_prompt_retains_bounded_instruction_and_job_context() -> None:
+    invoker = RecordingInvoker(
+        patches=[_patch("summary", unknown_fact=True), _patch("summary")]
+    )
+
+    result = _build(invoker).compiled.invoke(_state())
+
+    assert result["error"] is None
+    repair_text = _messages_text(invoker.rewrite_calls[1][0])
+    assert "JOB_STRUCTURED_SENTINEL" in repair_text
+    assert "Prioritize the structured role requirements" in repair_text
 
 
 def test_requested_scope_is_not_widened_by_provider_selection() -> None:

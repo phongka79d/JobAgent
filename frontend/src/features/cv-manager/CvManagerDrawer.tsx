@@ -27,6 +27,7 @@ export type CvManagerDrawerProps = {
   onRetryUpload?: (attachmentId: string) => void;
   onDeleted?: () => void;
   onProfileApproved?: () => void;
+  onProfileDiscarded?: () => void;
 };
 
 function statusVariant(state: CvManagerItem['state']): 'success' | 'neutral' | 'warning' | 'error' {
@@ -48,7 +49,7 @@ function CvActions({item, controller, onActivateProfile, onRetryUpload}: Pick<Cv
   </HStack>;
 }
 
-export function CvManagerDrawer({isOpen, onOpenChange, controller, onActivateProfile, onRetryUpload, onDeleted, onProfileApproved}: CvManagerDrawerProps) {
+export function CvManagerDrawer({isOpen, onOpenChange, controller, onActivateProfile, onRetryUpload, onDeleted, onProfileApproved, onProfileDiscarded}: CvManagerDrawerProps) {
   const isNarrow = useMediaQuery('(max-width: 48rem)');
   const {state} = controller;
   const deleteItem = state.deleteTargetId === null ? null : state.items.find((item) => item.id === state.deleteTargetId) ?? null;
@@ -69,7 +70,7 @@ export function CvManagerDrawer({isOpen, onOpenChange, controller, onActivatePro
     <Dialog isOpen={isOpen} onOpenChange={handleOpenChange} purpose="info" aria-label={CV_MANAGER_COPY.title} position={isNarrow ? undefined : {top: 0, right: 0, bottom: 0}} data-position={isNarrow ? undefined : 'right'} variant={isNarrow ? 'fullscreen' : 'standard'} width="min(32rem, 100vw)" maxHeight="100vh" className="jobagent-cv-manager-dialog">
       <Layout height="auto" header={<DialogHeader title={CV_MANAGER_COPY.title} onOpenChange={handleOpenChange} />} content={<LayoutContent label={CV_MANAGER_COPY.title}>
         <VStack gap={3}>
-          <ProfileReextractReview controller={controller} onApproved={() => { onProfileApproved?.(); handleOpenChange(false); }} />
+          <ProfileReextractReview controller={controller} onApproved={() => { onProfileApproved?.(); handleOpenChange(false); }} onDiscarded={onProfileDiscarded} />
           {listError ? <Banner status="error" title={listError.summary} /> : null}
           {state.phase === 'loading' && state.items.length === 0 ? <Text type="body">{CV_MANAGER_COPY.loading}</Text> : null}
           {state.phase !== 'loading' && state.items.length === 0 ? <Text type="body">{CV_MANAGER_COPY.emptyTitle}</Text> : null}

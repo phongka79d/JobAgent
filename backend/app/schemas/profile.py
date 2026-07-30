@@ -179,6 +179,20 @@ def parse_profile_draft_payload(payload: Any) -> ProfileDraftPayload:
 # ---------------------------------------------------------------------------
 
 
+ProfileReviewSource = Literal["agent_update", "reextract"]
+
+
+class ProfilePendingReview(BaseModel):
+    """Actionable durable review waiting on the active ready profile."""
+
+    model_config = StrictModelConfig
+
+    profile_id: UuidStr
+    revision: AwareUtcDatetime
+    source: ProfileReviewSource
+    can_review: bool
+
+
 class ProfileReadResponse(BaseModel):
     """``GET /api/profile`` body: active profile state or explicit empty.
 
@@ -198,6 +212,7 @@ class ProfileReadResponse(BaseModel):
     active_attachment: AttachmentPublic | None = None
     draft_present: bool = False
     pending_attachment: AttachmentPublic | None = None
+    pending_review: ProfilePendingReview | None = None
 
 
 class ProfileSkillTag(BaseModel):
@@ -339,6 +354,7 @@ def empty_profile_read_response(
     *,
     draft_present: bool = False,
     pending_attachment: AttachmentPublic | None = None,
+    pending_review: ProfilePendingReview | None = None,
 ) -> ProfileReadResponse:
     """Explicit empty/approved-absent public profile state."""
     return ProfileReadResponse(
@@ -348,4 +364,5 @@ def empty_profile_read_response(
         active_attachment=None,
         draft_present=draft_present,
         pending_attachment=pending_attachment,
+        pending_review=pending_review,
     )
