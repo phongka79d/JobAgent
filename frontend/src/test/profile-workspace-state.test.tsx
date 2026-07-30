@@ -643,13 +643,15 @@ describe('profile workspace state', () => {
     ]);
   });
 
-  it('rehydrates a persisted pageshow and removes the listener on cleanup', async () => {
+  it('rehydrates every pageshow and removes the listener on cleanup', async () => {
     const reload = vi.fn(async () => undefined);
     const {unmount} = renderHook(() => useWorkspaceLifecycle(reload));
-    window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: false}));
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(2));
     unmount();
     window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(2);
   });
 });

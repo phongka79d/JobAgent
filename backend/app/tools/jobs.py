@@ -51,6 +51,7 @@ from app.services.jd_ingestion import (
     ingest_raw_text,
     ingest_url,
 )
+from app.services.job_display import derive_saved_job_display_label
 from app.services.job_projection import EmbeddingClient, JobSyncFn
 from app.services.job_save_confirmation import (
     InitiatingMessage,
@@ -126,10 +127,17 @@ def _compact_from_repo_row(row: JobCompact) -> CompactJobToolRow:
     created = row["created_at"]
     updated = row["updated_at"]
     quality = row["jd_quality"]
+    display_label = derive_saved_job_display_label(
+        title=row["title"],
+        company=row["company"],
+        summary=row["summary"],
+        saved_at=created,
+    )
     return CompactJobToolRow(
         job_id=row["id"],
         title=row["title"],
         company=row["company"],
+        display_label=display_label,
         source_url=row["source_url"],
         processing_status=cast(JobProcessingStatus, row["processing_status"]),
         jd_quality=cast(JobJdQuality | None, quality),
@@ -158,10 +166,12 @@ def _save_result_data(
 ) -> dict[str, Any]:
     title = compact.title if compact is not None else None
     company = compact.company if compact is not None else None
+    display_label = compact.display_label if compact is not None else None
     payload = SaveJobResultData(
         job_id=ingest.job_id,
         title=title,
         company=company,
+        display_label=display_label,
         source_url=ingest.source_url,
         processing_status=cast(JobProcessingStatus, ingest.processing_status),
         jd_quality=cast(JobJdQuality | None, ingest.jd_quality),

@@ -5,7 +5,7 @@
  * schemas strictly; reuse parseMatchResult for evaluation.result.
  */
 
-import {isUuidV4, type JsonObject, type JsonValue} from '../chat/types';
+import {type JsonObject, type JsonValue} from '../chat/types';
 import {
   parseMatchResult,
   type CompactMatchResult,
@@ -58,6 +58,7 @@ export const SAVE_JOB_RESULT_DATA_KEYS = [
   'job_id',
   'title',
   'company',
+  'display_label',
   'source_url',
   'processing_status',
   'jd_quality',
@@ -78,6 +79,7 @@ export interface CompactSaveJobResult {
   jobId: string;
   title: string | null;
   company: string | null;
+  displayLabel?: string | null;
   sourceUrl: string | null;
   processingStatus: JobProcessingStatus;
   jdQuality: JobJdQuality | null;
@@ -211,6 +213,13 @@ export function parseSaveJobResultData(
   if (company === undefined) {
     return null;
   }
+  const hasDisplayLabel = Object.prototype.hasOwnProperty.call(data, 'display_label');
+  const displayLabel = hasDisplayLabel
+    ? asNullableString(data.display_label)
+    : null;
+  if (displayLabel === undefined) {
+    return null;
+  }
   if (!Object.prototype.hasOwnProperty.call(data, 'source_url')) {
     return null;
   }
@@ -270,6 +279,14 @@ export function parseSaveJobResultData(
       pasteInstruction === null || pasteInstruction.trim() === ''
         ? null
         : pasteInstruction,
+    ...(hasDisplayLabel
+      ? {
+          displayLabel:
+            displayLabel === null || displayLabel.trim() === ''
+              ? null
+              : displayLabel,
+        }
+      : {}),
   };
 }
 
@@ -647,42 +664,6 @@ function asNonEmptyString(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
-}
-
-function asUuidV4(value: unknown, label: string): string {
-  const text = asNonEmptyString(value, label);
-  if (!isUuidV4(text)) {
-    throw new Error(`${label} must be a UUID v4`);
-  }
-  return text.toLowerCase();
-}
-
-const AWARE_UTC_TIMESTAMP_RE =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|\+00:00)$/;
-
-function asAwareUtcTimestamp(value: unknown, label: string): string {
-  const text = asNonEmptyString(value, label);
-  const match = AWARE_UTC_TIMESTAMP_RE.exec(text);
-  if (!match) {
-    throw new Error(`${label} must be a timezone-aware UTC timestamp`);
-  }
-  const [year, month, day, hour, minute, second] = match
-    .slice(1, 7)
-    .map(Number);
-  const parsed = new Date(text);
-  if (
-    Number.isNaN(parsed.getTime()) ||
-    year! < 1 ||
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() + 1 !== month ||
-    parsed.getUTCDate() !== day ||
-    parsed.getUTCHours() !== hour ||
-    parsed.getUTCMinutes() !== minute ||
-    parsed.getUTCSeconds() !== second
-  ) {
-    throw new Error(`${label} must be a valid timezone-aware UTC timestamp`);
-  }
-  return text;
 }
 
 function asNullableDisplayString(

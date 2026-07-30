@@ -546,6 +546,7 @@ def test_save_job_created_compact_and_no_raw(db_path: Path) -> None:
             assert result.data["job_id"]
             assert result.data["title"] == "Backend Engineer"
             assert result.data["company"] == "Acme"
+            assert result.data["display_label"] == "Backend Engineer · Acme"
             assert result.data["processing_status"] == JOB_PROCESSING_STATUS_PROCESSED
             assert result.data["jd_quality"] == JOB_JD_QUALITY_FULL
             assert result.data["sqlite_committed"] is True
@@ -1020,6 +1021,7 @@ def test_query_jobs_default_limit_filters_order_and_ties(db_path: Path) -> None:
                     "job_id",
                     "title",
                     "company",
+                    "display_label",
                     "source_url",
                     "processing_status",
                     "jd_quality",

@@ -148,14 +148,14 @@ describe('AgentActivityTimeline', () => {
     render(timeline(runningRun()));
 
     const current = screen
-      .getAllByText('Rank matching jobs')
+      .getAllByText('Checking job matches')
       .find((element) => element.getAttribute('aria-live') === 'polite');
     expect(current).toHaveAttribute('aria-live', 'polite');
     expect(
-      screen.getByRole('status', {name: 'Running: Rank matching jobs'}),
+      screen.getByRole('status', {name: 'Running: Checking job matches'}),
     ).toBeInTheDocument();
     const disclosure = screen.getByRole('button', {
-      name: /Rank matching jobs/i,
+      name: /Checking job matches/i,
     });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
 
@@ -164,7 +164,7 @@ describe('AgentActivityTimeline', () => {
 
     expect(screen.getByText('Read active CV')).toBeInTheDocument();
     expect(screen.getByText('Complete')).toBeInTheDocument();
-    expect(screen.getByText('Checking job matches')).toBeInTheDocument();
+    expect(screen.getAllByText('Checking job matches')).toHaveLength(2);
     expect(screen.getByText('In progress')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/response_generation|match_jobs|25ms/i);
     expect(document.body).not.toHaveTextContent(
@@ -180,7 +180,7 @@ describe('AgentActivityTimeline', () => {
     expect(card).toHaveClass('astryx-card');
 
     const disclosure = screen.getByRole('button', {
-      name: /Rank matching jobs/i,
+      name: /Checking job matches/i,
     });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     expect(disclosure.parentElement).toHaveClass(
@@ -190,7 +190,7 @@ describe('AgentActivityTimeline', () => {
       screen.getByTestId('jobagent-agent-activity-summary-marker'),
     ).toHaveAttribute('data-marker', 'spinner');
     expect(
-      screen.getAllByRole('status', {name: 'Running: Rank matching jobs'}),
+      screen.getAllByRole('status', {name: 'Running: Checking job matches'}),
     ).toHaveLength(1);
 
     await user.click(disclosure);
@@ -201,7 +201,7 @@ describe('AgentActivityTimeline', () => {
       screen.getByTestId('jobagent-agent-activity-summary-marker'),
     ).toHaveAttribute('data-marker', 'clock');
     expect(
-      screen.getAllByRole('status', {name: 'Running: Rank matching jobs'}),
+      screen.getAllByRole('status', {name: 'Running: Checking job matches'}),
     ).toHaveLength(1);
   });
 
@@ -210,7 +210,7 @@ describe('AgentActivityTimeline', () => {
     render(timeline(markerRun()));
 
     await user.click(
-      screen.getByRole('button', {name: /Rank matching jobs/i}),
+      screen.getByRole('button', {name: /Checking job matches/i}),
     );
 
     const list = screen.getByTestId('jobagent-agent-activity-list');
@@ -241,7 +241,7 @@ describe('AgentActivityTimeline', () => {
 
     expect(screen.getAllByText('Complete').length).toBeGreaterThan(0);
     expect(screen.getByText('Could not complete')).toBeInTheDocument();
-    expect(screen.getByText('Checking job matches')).toBeInTheDocument();
+    expect(screen.getAllByText('Checking job matches')).toHaveLength(2);
     expect(document.body).not.toHaveTextContent(
       /response_generation|check_provider_response|match_jobs|40ms|PROVIDER_UNAVAILABLE/i,
     );
@@ -312,13 +312,13 @@ describe('AgentActivityTimeline', () => {
 
     view.rerender(timeline(runningRun(), 'disconnected'));
     expect(
-      screen.getByText('Connection lost — Agent may still be running'),
+      screen.getByText('Connection lost. Your request may still be running.'),
     ).toBeInTheDocument();
     expect(
       screen.getByTestId('jobagent-agent-activity-summary-marker'),
     ).toHaveAttribute('data-marker', 'warning');
     expect(
-      screen.getByText('Connection lost — Agent may still be running'),
+      screen.getByText('Connection lost. Your request may still be running.'),
     ).toHaveAttribute('data-running', 'false');
   });
 

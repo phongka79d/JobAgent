@@ -89,9 +89,11 @@ from app.services.jd_ingestion import (
 )
 from app.services.job_deletion import (
     ERROR_JOB_DELETE_GRAPH_FAILED,
-    ERROR_JOB_NOT_FOUND as DELETE_JOB_NOT_FOUND,
     JobDeleteError,
     delete_job,
+)
+from app.services.job_deletion import (
+    ERROR_JOB_NOT_FOUND as DELETE_JOB_NOT_FOUND,
 )
 from app.services.job_display import derive_saved_job_display_label
 from app.services.job_evaluation import (
@@ -140,9 +142,7 @@ async def _assert_public_mutation_idle(
 ) -> None:
     try:
         async with session_scope(session_factory) as session:
-            await assert_workspace_idle(
-                session, code="SAVED_JOB_MUTATION_BLOCKED"
-            )
+            await assert_workspace_idle(session, code="SAVED_JOB_MUTATION_BLOCKED")
     except ActivityBlockedError as exc:
         raise SavedJobsServiceError(exc.code, exc.summary) from exc
 
@@ -273,9 +273,7 @@ async def _lookup_state(
 
     if profile_id is None:
         return "none", None
-    latest = await eval_repo.get_latest_for_job(
-        session, job_id, profile_id=profile_id
-    )
+    latest = await eval_repo.get_latest_for_job(session, job_id, profile_id=profile_id)
     if latest is None:
         return "none", None
     return "stale", _record_from_orm(latest)
@@ -379,9 +377,7 @@ async def get_saved_jobs_page(
             profile_id=shared.profile_id if shared is not None else None,
             current_context_hash=context_hash,
         )
-        items.append(
-            _list_item(row, evaluation_state=state, evaluation=evaluation)
-        )
+        items.append(_list_item(row, evaluation_state=state, evaluation=evaluation))
 
     return SavedJobListPage(items=items, next_cursor=next_cursor)
 
@@ -416,9 +412,7 @@ async def get_saved_job_detail(
         compact=compact,
         extraction=_validated_extraction(row),
         raw_content=row.raw_content if isinstance(row.raw_content, str) else None,
-        latest_evaluation=_evaluation_view(
-            evaluation, evaluation_state=state
-        ),
+        latest_evaluation=_evaluation_view(evaluation, evaluation_state=state),
     )
 
 
@@ -765,11 +759,7 @@ async def delete_saved_job(
             kwargs["graph_absent_fn"] = graph_absent_fn
         await delete_job(job_id, **kwargs)  # type: ignore[arg-type]
     except JobDeleteError as exc:
-        code = (
-            ERROR_JOB_NOT_FOUND
-            if exc.code == DELETE_JOB_NOT_FOUND
-            else exc.code
-        )
+        code = ERROR_JOB_NOT_FOUND if exc.code == DELETE_JOB_NOT_FOUND else exc.code
         raise SavedJobsServiceError(code, exc.message) from exc
 
 

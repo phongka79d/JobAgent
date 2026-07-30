@@ -106,9 +106,7 @@ class ToolStatusPayload(BaseModel):
                 )
         if self.status in (TOOL_STATUS_COMPLETED, TOOL_STATUS_FAILED):
             if self.duration_ms is None:
-                raise ValueError(
-                    "tool_status completed|failed requires duration_ms"
-                )
+                raise ValueError("tool_status completed|failed requires duration_ms")
         if self.status not in (TOOL_STATUS_COMPLETED, TOOL_STATUS_FAILED):
             if self.duration_ms is not None:
                 raise ValueError(
@@ -172,7 +170,7 @@ class RunCompletedPayload(BaseModel):
     version_number: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def terminal_identity(self) -> "RunCompletedPayload":
+    def terminal_identity(self) -> RunCompletedPayload:
         has_identity = self.version_id is not None or self.version_number is not None
         if self.outcome is None and has_identity:
             raise ValueError("tailoring identity requires an outcome")

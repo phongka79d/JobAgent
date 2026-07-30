@@ -1,6 +1,11 @@
 import {afterEach, expect, it, vi} from 'vitest';
 
-import {activateProfile} from '../features/profile/api';
+import {
+  activateProfile,
+  fetchActiveProfileCompat,
+  fetchProfileConversations,
+  fetchProfiles,
+} from '../features/profile/api';
 import {
   parseProfileDetail,
   parseProfileListResponse,
@@ -141,6 +146,47 @@ it('sends the profile id in the activation path', async () => {
   vi.stubGlobal('fetch', fetchMock);
   await expect(activateProfile(PROFILE_ID)).rejects.toThrow();
   expect(fetchMock.mock.calls[0]?.[0]).toContain(`/api/profiles/${PROFILE_ID}/activate`);
+});
+
+it('uses no-store for profile restoration GETs while preserving their request contracts', async () => {
+  const controller = new AbortController();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [], active_profile_id: null}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [], next_cursor: null}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({present: false}), {status: 200}));
+  vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+  vi.stubGlobal('fetch', fetchMock);
+
+  await fetchProfiles(controller.signal);
+  await fetchProfileConversations(
+    PROFILE_ID,
+    {limit: 20, before: 'cursor-1'},
+    controller.signal,
+  );
+  await fetchActiveProfileCompat(controller.signal);
+
+  expect(fetchMock).toHaveBeenNthCalledWith(1, 'http://api.test/api/profiles', {
+    method: 'GET',
+    headers: {Accept: 'application/json'},
+    signal: controller.signal,
+    cache: 'no-store',
+  });
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    2,
+    `http://api.test/api/profiles/${PROFILE_ID}/conversations?limit=20&before=cursor-1`,
+    {
+      method: 'GET',
+      headers: {Accept: 'application/json'},
+      signal: controller.signal,
+      cache: 'no-store',
+    },
+  );
+  expect(fetchMock).toHaveBeenNthCalledWith(3, 'http://api.test/api/profile', {
+    method: 'GET',
+    headers: {Accept: 'application/json'},
+    signal: controller.signal,
+    cache: 'no-store',
+  });
 });
 
 it('strictly parses all pending bootstrap outcomes and safe nullable metadata', () => {

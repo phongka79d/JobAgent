@@ -2,7 +2,7 @@ import {act, cleanup, render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
 import {
   App,
@@ -21,6 +21,19 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+beforeAll(() => {
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.setAttribute('open', '');
+    };
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    HTMLDialogElement.prototype.close = function close() {
+      this.removeAttribute('open');
+    };
+  }
 });
 
 function deferred<T>() {
@@ -71,6 +84,7 @@ describe('App foundation shell', () => {
       id: '11111111-1111-4111-8111-111111111111',
       title: 'Synthetic job',
       company: 'Synthetic Co',
+      display_label: 'Synthetic job · Synthetic Co',
       processing_status: 'processed' as const,
       jd_quality: 'full' as const,
       source_type: 'text' as const,
@@ -226,7 +240,7 @@ describe('App foundation shell', () => {
     });
   });
 
-  it('removes stale chat while a persisted workspace reloads and remounts for the new identities', async () => {
+  it('removes stale chat while a non-persisted pageshow reloads and remounts for the new identities', async () => {
     const first = deferred<ProfileListResponse>();
     const second = deferred<ProfileListResponse>();
     const profileA = appProfile('profile-a', true);
@@ -290,7 +304,7 @@ describe('App foundation shell', () => {
     await waitFor(() => expect(loadConversationHistory).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: false}));
     });
     await waitFor(() => expect(fetchProfiles).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId('jobagent-chat-page')).not.toBeInTheDocument();
@@ -475,14 +489,14 @@ describe('App foundation shell', () => {
       </Theme>,
     );
 
-    const openEditor = await screen.findByRole('button', {name: 'Mở CV đã chỉnh'});
+    const openEditor = await screen.findByRole('button', {name: 'Open tailored CV'});
     const chat = screen.getByTestId('jobagent-chat-page');
     await userEvent.click(openEditor);
     await waitFor(() => {
       expect(fetchSession).toHaveBeenCalledWith(sessionId, undefined, expect.any(AbortSignal));
     });
     expect(
-      screen.getByRole('heading', {level: 1, name: 'CV đã chỉnh'}),
+      screen.getByRole('heading', {level: 1, name: 'Tailored CV'}),
     ).toBeInTheDocument();
     const hiddenChatWorkspace = chat.closest('[hidden]');
     expect(hiddenChatWorkspace).not.toBeNull();
@@ -492,16 +506,18 @@ describe('App foundation shell', () => {
     );
     expect(screen.getByTestId('jobagent-chat-page')).toBe(chat);
     expect(loadConversationHistory).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole('button', {name: /Profile/}));
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Edit profile information'}),
+    );
     await waitFor(() => expect(streamProfileReextract).toHaveBeenCalledWith(profileId, expect.any(Object), expect.any(AbortSignal)));
-    expect(screen.getByRole('heading', {level: 1, name: 'CV Ä‘Ã£ chá»‰nh'})).toBeInTheDocument();
+    expect(screen.getByRole('heading', {level: 1, name: 'Tailored CV'})).toBeInTheDocument();
     expect(screen.getByRole('dialog', {name: 'CV Manager'})).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole('button', {name: 'Quay lại chat'}),
+      screen.getByRole('button', {name: 'Back to chat'}),
     );
     await waitFor(() => {
       expect(
-        screen.queryByRole('heading', {level: 1, name: 'CV đã chỉnh'}),
+        screen.queryByRole('heading', {level: 1, name: 'Tailored CV'}),
       ).not.toBeInTheDocument();
       expect(chat.closest('[hidden]')).toBeNull();
     });
@@ -594,7 +610,11 @@ describe('App foundation shell', () => {
       expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument(),
     );
 
-    await userEvent.click(sessionRow);
+    await userEvent.click(screen.getByRole('button', {name: 'Back to chat'}));
+    const reopenedSessionRow = await screen.findByTestId(
+      'jobagent-tailoring-session-' + sessionId,
+    );
+    await userEvent.click(reopenedSessionRow);
     await waitFor(() => expect(fetchSession).toHaveBeenCalledTimes(2));
 
     await act(async () => {

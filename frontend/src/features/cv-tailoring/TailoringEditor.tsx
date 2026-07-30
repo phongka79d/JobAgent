@@ -25,7 +25,7 @@ import {TailoredSectionEditor} from './TailoredSectionEditor';
 import {TailoringPdfPreview} from './TailoringPdfPreview';
 import {TailoringSessionDeleteDialog} from './TailoringSessionDeleteDialog';
 import {sessionDisplayLabel} from './presentation';
-import {tailoringFieldId, tailoringIssueId, type TailoredCVContent, type TailoredSection} from './types';
+import {tailoringFieldId, tailoringIssueId, tailoringSectionId, type TailoredCVContent, type TailoredSection} from './types';
 import './cv-tailoring.css';
 
 export type TailoringEditorProps = {
@@ -149,9 +149,13 @@ export function TailoringEditor({
 
   useEffect(() => {
     const target = state.pendingFocus?.issue;
-    if (!target || target.item_index === null || target.field === 'section') return;
-    const id = tailoringFieldId(target.section_id, target.item_index, target.field);
-    const field = document.getElementById(id) ?? document.querySelector<HTMLElement>(`[id^="${id}-"]`);
+    if (!target) return;
+    const id = target.item_index === null || target.field === 'section'
+      ? tailoringSectionId(target.section_id)
+      : tailoringFieldId(target.section_id, target.item_index, target.field);
+    const field = document.getElementById(id)
+      ?? document.querySelector<HTMLElement>(`[name="${id}"]`)
+      ?? document.querySelector<HTMLElement>(`[name^="${id}-"]`);
     field?.focus();
   }, [state.pendingFocus]);
 
@@ -299,7 +303,7 @@ export function TailoringEditor({
                 </Text>
                 <Text type="supporting">
                   {selectedVersion
-                    ? new Intl.DateTimeFormat('vi-VN', {
+                    ? new Intl.DateTimeFormat('en-CA', {
                         dateStyle: 'short',
                         timeStyle: 'short',
                       }).format(new Date(selectedVersion.created_at))
@@ -307,7 +311,7 @@ export function TailoringEditor({
                 </Text>
                 {selectedVersion ? (
                   <Text type="supporting">
-                    {selectedVersion.page_count} trang
+                    {TAILORING_COPY.pageCount(selectedVersion.page_count)}
                   </Text>
                 ) : null}
               </VStack>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, cast
 
 from app.schemas.cv_tailoring import TailoredCVContent, TailoringUserIssue
 from app.services.cv_tailoring_guard import GroundingIssue
@@ -19,6 +19,18 @@ _Reason = Literal[
     "structure_changed",
     "required_source_missing",
     "unsupported_value",
+]
+_GroundingCode = Literal[
+    "UNKNOWN_FACT",
+    "CROSS_SECTION_FACT",
+    "UNSUPPORTED_ANCHOR",
+    "EMPTY_PROVENANCE",
+    "SECTION_IDENTITY_CHANGED",
+    "ATTRIBUTE_IDENTITY_CHANGED",
+    "CONTENT_BOUNDS_EXCEEDED",
+]
+_UserField = Literal[
+    "title", "subtitle", "date", "location", "body", "bullet", "attribute", "section"
 ]
 _REASONS: dict[str, _Reason] = {
     "UNKNOWN_FACT": "required_source_missing",
@@ -58,14 +70,12 @@ def decode_internal_issue(value: str | None) -> GroundingIssue | None:
     if separator == "" or not _is_safe_path(path):
         return None
     try:
-        return GroundingIssue(code=code, path=path)
+        return GroundingIssue(code=cast(_GroundingCode, code), path=path)
     except ValueError:
         return None
 
 
-def _field(value: str | None) -> Literal[
-    "title", "subtitle", "date", "location", "body", "bullet", "attribute", "section"
-]:
+def _field(value: str | None) -> _UserField:
     if value is None:
         return "section"
     if value == "date_text":
@@ -75,7 +85,7 @@ def _field(value: str | None) -> Literal[
     if value.startswith("attributes"):
         return "attribute"
     if value in {"title", "subtitle", "location", "body"}:
-        return value
+        return cast(_UserField, value)
     return "section"
 
 

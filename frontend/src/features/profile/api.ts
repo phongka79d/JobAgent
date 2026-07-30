@@ -42,6 +42,7 @@ export async function fetchActiveProfileCompat(
     method: 'GET',
     headers: {Accept: 'application/json'},
     signal,
+    cache: 'no-store',
   });
   const text = await response.text();
   if (!response.ok) {
@@ -88,7 +89,7 @@ const jsonHeaders = {'Content-Type': 'application/json', Accept: 'application/js
 const profilePath = (profileId: string) => `/api/profiles/${encodeURIComponent(profileId)}`;
 
 export function fetchProfiles(signal?: AbortSignal): Promise<ProfileListResponse> {
-  return jsonRequest('/api/profiles', {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseProfileListResponse);
+  return jsonRequest('/api/profiles', {method: 'GET', headers: {Accept: 'application/json'}, signal, cache: 'no-store'}, parseProfileListResponse);
 }
 export function fetchProfile(profileId: string, signal?: AbortSignal): Promise<ProfileDetail> {
   return jsonRequest(profilePath(profileId), {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseProfileDetail);
@@ -105,7 +106,7 @@ export function deleteProfile(profileId: string, signal?: AbortSignal): Promise<
 export function fetchProfileConversations(profileId: string, query: {limit?: number; before?: string | null} = {}, signal?: AbortSignal): Promise<ConversationListResponse> {
   const params = new URLSearchParams(); if (query.limit !== undefined) params.set('limit', String(query.limit)); if (query.before) params.set('before', query.before);
   const suffix = params.size ? `?${params}` : '';
-  return jsonRequest(`${profilePath(profileId)}/conversations${suffix}`, {method: 'GET', headers: {Accept: 'application/json'}, signal}, parseConversationListResponse);
+  return jsonRequest(`${profilePath(profileId)}/conversations${suffix}`, {method: 'GET', headers: {Accept: 'application/json'}, signal, cache: 'no-store'}, parseConversationListResponse);
 }
 export function createProfileConversation(profileId: string, signal?: AbortSignal): Promise<ConversationMutationResponse> {
   return jsonRequest(`${profilePath(profileId)}/conversations`, {method: 'POST', headers: {Accept: 'application/json'}, signal}, parseConversationMutationResponse);

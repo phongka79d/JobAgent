@@ -189,7 +189,9 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     reextractGenerationRef.current = reextractGeneration;
     publish((previous) => ({...previous, reextract: {phase: 'loading', profileId, stage: 'validating_source', review: null, error: null, draftAvailable: false}}));
     let reviewRevision: string | null = null;
-    let failure: {error: CvManagerSafeError; draftAvailable: boolean} | null = null;
+    const failureRef: {current: {error: CvManagerSafeError; draftAvailable: boolean} | null} = {
+      current: null,
+    };
     try {
       await api.streamProfileReextract(profileId, {
         onEvent: (event) => {
@@ -199,13 +201,17 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
           } else if (event.event === 'reextract_review_ready') {
             reviewRevision = event.payload.revision;
           } else {
-            failure = {error: {code: event.payload.code, summary: event.payload.summary}, draftAvailable: event.payload.draft_available};
+            failureRef.current = {
+              error: {code: event.payload.code, summary: event.payload.summary},
+              draftAvailable: event.payload.draft_available,
+            };
           }
         },
         onMalformed: () => undefined,
         onDisconnected: () => undefined,
       }, controller.signal);
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration) return false;
+      const failure = failureRef.current;
       if (failure !== null) {
         if (failure.draftAvailable) {
           return await loadReview(profileId, undefined, controller.signal, failure.error);

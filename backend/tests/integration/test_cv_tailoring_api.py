@@ -17,7 +17,10 @@ from app.db.session import build_async_engine
 from app.repositories import cv_tailoring as tailoring_repo
 from app.repositories import workspace_state as workspace_repo
 from app.repositories.cv_tailoring import CVTailoringVersionWrite
-from app.schemas.cv_tailoring import TailoringUserIssue, TailoringVersionMutationResponse
+from app.schemas.cv_tailoring import (
+    TailoringUserIssue,
+    TailoringVersionMutationResponse,
+)
 from app.schemas.sse import build_sse_event
 from app.services.cv_tailoring import (
     TAILORING_ARTIFACT_UNAVAILABLE,
@@ -88,9 +91,7 @@ class _RouteCoordinator:
             launch.run_id,
             {"state": "running", "resumed": False},
         )
-        yield build_sse_event(
-            "run_completed", launch.run_id, {"state": "completed"}
-        )
+        yield build_sse_event("run_completed", launch.run_id, {"state": "completed"})
 
     async def create_manual_version(
         self, **kwargs: Any
@@ -135,12 +136,14 @@ def test_cv_tailoring_router_exposes_exact_authorized_endpoint_shapes() -> None:
         (route.path, next(iter(route.methods or ()))): route.response_model
         for route in router.routes
     }
-    assert response_models[
-        ("/cv-tailoring/sessions/{session_id}/manual-versions", "POST")
-    ] is TailoringVersionMutationResponse
-    assert response_models[
-        ("/cv-tailoring/sessions/{session_id}", "DELETE")
-    ] is TailoringDeleteResponse
+    assert (
+        response_models[("/cv-tailoring/sessions/{session_id}/manual-versions", "POST")]
+        is TailoringVersionMutationResponse
+    )
+    assert (
+        response_models[("/cv-tailoring/sessions/{session_id}", "DELETE")]
+        is TailoringDeleteResponse
+    )
 
 
 def test_main_app_registers_tailoring_routes_and_exposes_session_header() -> None:
@@ -162,9 +165,10 @@ def test_job_backed_session_persists_shared_display_label(
     from app.api.cv_tailoring import router
     from app.db.models.cv_documents import CVDocument as CVDocumentRow
     from app.repositories import jobs as jobs_repo
+    from app.services.cv_document_projection import project_outline
     from app.services.cv_tailoring import TailoringCoordinator
-    from app.services.cv_tailoring_projection import project_outline
     from app.services.job_display import derive_saved_job_display_label
+
     from tests.support.graph_rebuild import extraction_payload
     from tests.unit.test_cv_tailoring_projection import _document, _profile
 
@@ -185,9 +189,7 @@ def test_job_backed_session_persists_shared_display_label(
             session.add(attachment)
             await session.flush()
             profile_model = _profile()
-            document = _document().model_copy(
-                update={"attachment_id": attachment.id}
-            )
+            document = _document().model_copy(update={"attachment_id": attachment.id})
             profile = Profile(
                 attachment_id=attachment.id,
                 display_name="Synthetic Candidate",
@@ -421,9 +423,9 @@ def test_source_download_verifies_hash_and_returns_safe_exact_headers(
             )
             assert response.headers["x-content-type-options"] == "nosniff"
 
-            storage.resolve_artifact(
-                relative_path=paths.tex_relative_path
-            ).write_bytes(b"corrupt")
+            storage.resolve_artifact(relative_path=paths.tex_relative_path).write_bytes(
+                b"corrupt"
+            )
             with pytest.raises(TailoringError) as caught:
                 await _download(version.id, kind="source", deps=deps)
             assert caught.value.code == TAILORING_ARTIFACT_UNAVAILABLE
@@ -558,9 +560,7 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
             )
             await session.commit()
 
-        coordinator = _RouteCoordinator(
-            profile_id=profile.id, session_id=owner.id
-        )
+        coordinator = _RouteCoordinator(profile_id=profile.id, session_id=owner.id)
         deps = CVTailoringDeps(
             coordinator=cast(Any, coordinator),
             storage=storage,
@@ -569,9 +569,7 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
         )
         return deps, coordinator, owner.id, other_owner.id, version_id, engine
 
-    deps, coordinator, owner_id, other_owner_id, version_id, engine = run_async(
-        _seed()
-    )
+    deps, coordinator, owner_id, other_owner_id, version_id, engine = run_async(_seed())
     app = FastAPI()
     app.include_router(router, prefix="/api")
     app.dependency_overrides[get_cv_tailoring_deps] = lambda: deps
@@ -613,12 +611,13 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
             assert detail.status_code == 200
             assert detail.json()["selected_version"]["id"] == version_id
             assert detail.json()["content"] == _content()
-            assert client.get(
-                f"/api/cv-tailoring/sessions/{other_owner_id}"
-            ).status_code == 404
-            assert client.get(
-                "/api/cv-tailoring/sessions/not-a-uuid"
-            ).status_code == 422
+            assert (
+                client.get(f"/api/cv-tailoring/sessions/{other_owner_id}").status_code
+                == 404
+            )
+            assert (
+                client.get("/api/cv-tailoring/sessions/not-a-uuid").status_code == 422
+            )
 
             retried = client.post(
                 f"/api/cv-tailoring/sessions/{owner_id}/ai-versions",
@@ -648,21 +647,35 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
             coordinator.manual_error = TailoringError(
                 "TAILORING_GROUNDING_FAILED",
                 "Tailored content is not source-supported",
-                user_issues=(TailoringUserIssue(section_id="summary", section_heading="Summary", item_index=None, field="section", reason="required_source_missing"),),
+                user_issues=(
+                    TailoringUserIssue(
+                        section_id="summary",
+                        section_heading="Summary",
+                        item_index=None,
+                        field="section",
+                        reason="required_source_missing",
+                    ),
+                ),
             )
             rejected_manual = client.post(
                 f"/api/cv-tailoring/sessions/{owner_id}/manual-versions",
                 json={"parent_version_id": version_id, "content": _content()},
             )
             assert rejected_manual.status_code == 422
-            assert rejected_manual.json()["detail"]["issues"] == [{"section_id": "summary", "section_heading": "Summary", "item_index": None, "field": "section", "reason": "required_source_missing"}]
+            assert rejected_manual.json()["detail"]["issues"] == [
+                {
+                    "section_id": "summary",
+                    "section_heading": "Summary",
+                    "item_index": None,
+                    "field": "section",
+                    "reason": "required_source_missing",
+                }
+            ]
             assert "provider" not in rejected_manual.text
             coordinator.manual_error = None
 
             streams_before_reads = list(coordinator.stream_calls)
-            source = client.get(
-                f"/api/cv-tailoring/versions/{version_id}/source"
-            )
+            source = client.get(f"/api/cv-tailoring/versions/{version_id}/source")
             assert source.status_code == 200
             assert source.content == b"synthetic tex"
             assert source.headers["content-type"] == "text/x-tex; charset=utf-8"
@@ -685,8 +698,9 @@ def test_direct_routes_enforce_transport_ownership_and_artifact_contracts(
             deleted = client.delete(f"/api/cv-tailoring/sessions/{owner_id}")
             assert deleted.status_code == 200
             assert deleted.json() == {"deleted_session_id": owner_id}
-            assert client.get(
-                f"/api/cv-tailoring/versions/{version_id}/pdf"
-            ).status_code == 404
+            assert (
+                client.get(f"/api/cv-tailoring/versions/{version_id}/pdf").status_code
+                == 404
+            )
     finally:
         run_async(engine.dispose())

@@ -20,7 +20,7 @@ import './agent-activity.css';
 type MarkerKind = 'clock' | 'error' | 'spinner' | 'success' | 'warning';
 
 function countLabel(count: number): string {
-  return `${count} ${count === 1 ? 'step' : 'steps'}`;
+  return CHAT_COPY.stepCount(count);
 }
 
 function latestActivity(
@@ -35,16 +35,16 @@ function latestActivity(
 function runSummary(run: ClientRun, streamPhase: StreamPhase): string {
   const count = countLabel(run.activities.length);
   if (streamPhase === 'disconnected' && run.state === 'running') {
-    return 'Connection lost. Your request may still be running.';
+    return CHAT_COPY.connectionLost;
   }
   if (run.state === 'interrupted') {
-    return `Waiting for your confirmation · ${count}`;
+    return CHAT_COPY.waitingForConfirmation(count);
   }
   if (run.state === 'completed') {
-    return `Completed · ${count}`;
+    return CHAT_COPY.completed(count);
   }
   if (run.state === 'failed') {
-    return `Unable to complete · ${count}`;
+    return CHAT_COPY.unableToComplete(count);
   }
     return latestActivity(run.activities)
       ? activityLabel(latestActivity(run.activities)!.technicalName, latestActivity(run.activities)!.label)
@@ -107,7 +107,7 @@ function StatusMarker({
       data-marker={kind}
       data-testid={testId}>
       {kind === 'spinner' ? (
-        <Spinner size="sm" aria-label={`Running: ${label}`} />
+        <Spinner size="sm" aria-label={CHAT_COPY.runningStatus(label)} />
       ) : (
         <Icon
           icon={kind}
@@ -159,10 +159,10 @@ export function AgentActivityTimeline({
         {hasActivities ? (
           <Text type="supporting" color="secondary" as="span">
             {isOpen
-              ? 'Hide activity'
+              ? CHAT_COPY.hideActivity
               : run.state === 'running'
-                ? `View activity · ${countLabel(run.activities.length)}`
-                : 'View activity'}
+                ? CHAT_COPY.viewActivityCount(countLabel(run.activities.length))
+                : CHAT_COPY.viewActivity}
           </Text>
         ) : null}
       </VStack>
@@ -203,7 +203,7 @@ export function AgentActivityTimeline({
                           ? 'clock'
                           : activityMarkerKind(activity.state)
                       }
-                      label={activity.label}
+                      label={activityLabel(activity.technicalName, activity.label)}
                       testId={`jobagent-agent-activity-marker-${activity.activityId}`}
                     />
                     <VStack gap={0} width="100%">

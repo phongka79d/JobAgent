@@ -18,7 +18,7 @@ import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import type {CachedResource, SavedJobActionKind} from './savedJobsState';
-import {savedJobDisplayLabel} from './copy';
+import {JOB_COPY, savedJobDisplayLabel} from './copy';
 import {MatchCard} from './MatchCard';
 import {REEXTRACT_GRAPH_FAILURE_CODE} from './types';
 import type {
@@ -258,7 +258,7 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
       data-testid="jobagent-saved-job-extraction"
     >
       <Text type="label" as="p">
-        Thông tin JD
+        {JOB_COPY.extractionHeading}
       </Text>
 
       <VStack
@@ -272,7 +272,7 @@ function ExtractionGroups({extraction}: {extraction: JobPostExtractionView}) {
               {extraction.title?.trim() || 'Unknown'}
             </Text>
           </MetadataListItem>
-          <MetadataListItem label="Công ty">
+          <MetadataListItem label="Company">
             {extraction.company?.trim() || 'Unknown'}
           </MetadataListItem>
           <MetadataListItem label="Summary">
@@ -434,7 +434,7 @@ export function SavedJobDetailView({
         vAlign="center"
         className="jobagent-saved-job-row-actions"
         role="group"
-        aria-label="Thao tác JD"
+        aria-label={JOB_COPY.actions}
         data-testid={`jobagent-saved-job-actions-${job.id}`}
       >
         {canCreateTailoredCv &&
@@ -483,7 +483,7 @@ export function SavedJobDetailView({
         />
 
         <Button
-          label="Xoá JD"
+          label={JOB_COPY.deleteJob}
           variant="destructive"
           size="sm"
           isDisabled={isPending}
@@ -521,13 +521,13 @@ export function SavedJobDetailView({
         />
         <Tab
           value="overview"
-          label="Job overview"
+          label={JOB_COPY.overviewTab}
           role="tab"
           aria-selected={activeTab === 'overview'}
         />
         <Tab
           value="source"
-          label="Source text"
+          label={JOB_COPY.sourceTab}
           role="tab"
           aria-selected={activeTab === 'source'}
         />
@@ -548,7 +548,7 @@ export function SavedJobDetailView({
         <Banner
           status="error"
           title="Unable to load details"
-          description={`${detail.error.summary} (${detail.error.code})`}
+          description={detail.error.summary}
           container="section"
           data-testid="jobagent-saved-job-detail-error"
         />
@@ -619,7 +619,7 @@ export function SavedJobDetailView({
               ? 'Related data needs recovery'
               : 'Action failed'
           }
-          description={`${actionError.summary} (${actionError.code})`}
+          description={actionError.summary}
           container="section"
           data-testid={`jobagent-saved-job-action-error-${job.id}`}
         />

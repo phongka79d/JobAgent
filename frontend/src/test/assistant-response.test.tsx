@@ -194,6 +194,77 @@ describe('placeActiveCvCitationMarker', () => {
 });
 
 describe('AssistantResponse Markdown semantics', () => {
+  it('hides a legacy saved-job marker while preserving the rendered assistant narration', () => {
+    const legacyJobId = '11111111-1111-4111-8111-111111111111';
+    renderWithTheme(
+      <AssistantResponse
+        content={`Your job was saved (job_id = ${legacyJobId}). You can review it in Saved Jobs.`}
+        evidence={null}
+      />,
+    );
+
+    const response = screen.getByTestId('jobagent-assistant-response');
+    expect(response).toHaveTextContent(
+      'Your job was saved. You can review it in Saved Jobs.',
+    );
+    expect(response).not.toHaveTextContent(/job_id\s*=/i);
+    expect(response).not.toHaveTextContent(legacyJobId);
+  });
+
+  it.each(['a', 'g', '_suffix', '-suffix'])(
+    'leaves an invalid identifier continuation %s unchanged',
+    (continuation) => {
+      const invalidMarker =
+        `job_id = 11111111-1111-4111-8111-111111111111${continuation}`;
+      const content = `Keep ${invalidMarker} visible.`;
+      renderWithTheme(<AssistantResponse content={content} evidence={null} />);
+
+      expect(
+        screen.getByTestId('jobagent-assistant-response'),
+      ).toHaveTextContent(content);
+    },
+  );
+
+  it.each([
+    ['a non-v4 UUID version', 'job_id = 11111111-1111-5111-8111-111111111111'],
+    ['an invalid UUID variant', 'job_id = 11111111-1111-4111-7111-111111111111'],
+    ['an incomplete UUID', 'job_id = 11111111-1111-4111-8111'],
+    ['a marker without an equals sign', 'job_id 11111111-1111-4111-8111-111111111111'],
+  ])('leaves %s byte-for-byte visible', (_description, marker) => {
+    const content = `Keep ${marker} visible.`;
+    renderWithTheme(<AssistantResponse content={content} evidence={null} />);
+
+    expect(
+      screen.getByTestId('jobagent-assistant-response').textContent,
+    ).toBe(content);
+  });
+
+  it('preserves paragraph and citation placement around a standalone legacy marker', () => {
+    const legacyJobId = '11111111-1111-4111-8111-111111111111';
+    const content = [
+      'Opening narration.',
+      '',
+      `job_id = ${legacyJobId}`,
+      '',
+      'Evidence remains in its own paragraph.',
+    ].join('\n');
+    const bundle = bundleFromPage();
+    renderWithTheme(
+      <AssistantResponse content={content} evidence={bundle} />,
+    );
+
+    const markdown = screen.getByTestId('jobagent-assistant-markdown');
+    const paragraphs = markdown.querySelectorAll('[role="paragraph"]');
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]).toHaveTextContent('Opening narration.');
+    expect(paragraphs[0]).toContainElement(
+      screen.getByTestId('jobagent-active-cv-citation'),
+    );
+    expect(paragraphs[1]).toHaveTextContent(
+      'Evidence remains in its own paragraph.',
+    );
+  });
+
   it('renders headings, emphasis, lists, links, and code without raw syntax', () => {
     const md = [
       '# Top',

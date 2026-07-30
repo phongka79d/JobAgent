@@ -626,15 +626,13 @@ describe('Streamed profile_commit approval card', () => {
     await waitFor(() => {
       // Visible truthful failure: stream notice and/or exact tool status.
       const body = document.body.textContent ?? '';
-      expect(body).toMatch(/NEO4J_SYNC_FAILED|graph sync failed|Neo4j sync failed/i);
+      expect(body).toMatch(/Profile saved in SQLite but graph sync failed/i);
       expect(body).toMatch(/\bfailed\b/);
       expect(body).not.toMatch(/saved successfully/i);
+      expect(body).not.toMatch(/commit_profile_draft|NEO4J_SYNC_FAILED|12ms/);
     });
-    expect(
-      screen.getByText(
-        'commit_profile_draft · failed · 12ms · NEO4J_SYNC_FAILED',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
+    expect(screen.getByText('Could not complete')).toBeInTheDocument();
     void container;
   });
 });
@@ -1093,6 +1091,7 @@ describe('Save Profile refreshes sidebar', () => {
           id: jobId,
           title: 'Backend Engineer',
           company: 'Acme',
+          display_label: 'Backend Engineer · Acme',
           processing_status: 'processed',
           jd_quality: 'full',
           source_type: 'text',

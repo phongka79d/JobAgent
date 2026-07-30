@@ -5,8 +5,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from app.schemas.profile import CandidateProfile
 from app.schemas.profile_reextraction import (
     ProfileReextractEvent,
@@ -17,7 +15,7 @@ from app.services.profile_reextraction import (
     ProfileReextractionCoordinator,
     build_review,
 )
-
+from pydantic import ValidationError
 
 PROFILE_ID = "11111111-1111-4111-8111-111111111111"
 EVENT_ID = "22222222-2222-4222-8222-222222222222"
@@ -99,9 +97,9 @@ def test_build_review_projects_scalar_skill_collection_and_confidence_deltas() -
         revision=REVISION,
     )
 
-    assert [(change.field, change.before, change.after) for change in review.changed_fields] == [
-        ("summary", "Backend engineer", "Senior backend engineer")
-    ]
+    assert [
+        (change.field, change.before, change.after) for change in review.changed_fields
+    ] == [("summary", "Backend engineer", "Senior backend engineer")]
     assert review.skills_added == ["FastAPI"]
     assert review.skills_removed == ["Python"]
     assert review.collection_deltas.experiences == 1

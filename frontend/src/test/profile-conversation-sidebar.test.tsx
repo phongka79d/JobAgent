@@ -149,6 +149,7 @@ describe('profile and conversation navigation', () => {
     );
 
     expect(screen.getByText('Platform role search')).toBeInTheDocument();
+    expect(screen.getByText(/Last activity.*Jul.*2026/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', {name: 'New chat'}));
     expect(create).toHaveBeenCalledWith(PROFILE_ID);
   });
@@ -220,7 +221,7 @@ describe('profile and conversation navigation', () => {
     );
 
     expect(screen.getByRole('button', {name: 'Actions for Ada Lovelace'})).toBeDisabled();
-    expect(screen.getByRole('button', {name: /Chat/})).toBeDisabled();
+    expect(screen.getByRole('button', {name: 'New chat'})).toBeDisabled();
     expect(
       screen.getByRole('button', {name: 'Actions for conversation Platform role search'}),
     ).toHaveAttribute('aria-disabled', 'true');

@@ -985,7 +985,7 @@ describe('ActiveCvSourceDialog exact evidence and original CV', () => {
       'aria-label',
       ACTIVE_CV_SOURCE_DIALOG_TITLE,
     );
-    expect(dialog).toHaveAttribute('aria-label', 'Nguồn từ CV');
+    expect(dialog).toHaveAttribute('aria-label', 'Source from CV');
     expect(screen.getByText(ACTIVE_CV_SOURCE_DIALOG_TITLE)).toBeInTheDocument();
     // Title receives focus on open (DialogHeader contract).
     expect(document.activeElement?.textContent).toContain(

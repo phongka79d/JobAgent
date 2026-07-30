@@ -75,7 +75,10 @@ from app.services.cv_tailoring_compiler import (
     TailoringCompileResult,
     compile_latex_cv,
 )
-from app.services.cv_tailoring_guard import GroundingIssue, guard_manual_tailored_content
+from app.services.cv_tailoring_guard import (
+    GroundingIssue,
+    guard_manual_tailored_content,
+)
 from app.services.cv_tailoring_projection import (
     TailoringBaseline,
     project_tailoring_baseline,
@@ -184,9 +187,7 @@ def _same_revision(left: datetime, right: datetime) -> bool:
     return _aware_utc(left) == _aware_utc(right)
 
 
-def _error(
-    code: str, *, issues: tuple[GroundingIssue, ...] = ()
-) -> TailoringError:
+def _error(code: str, *, issues: tuple[GroundingIssue, ...] = ()) -> TailoringError:
     return TailoringError(code, _SAFE_MESSAGES[code], issues=issues)
 
 
@@ -291,9 +292,7 @@ class TailoringCoordinator:
             async with open_checkpointer(
                 self._sqlite_path,
                 settings=(
-                    self._settings
-                    if isinstance(self._settings, Settings)
-                    else None
+                    self._settings if isinstance(self._settings, Settings) else None
                 ),
             ) as saver:
                 snapshot, parent, baseline = await self._generation_context(prepared)
@@ -349,9 +348,7 @@ class TailoringCoordinator:
                         parsed_issues = (
                             GroundingIssue(code="UNKNOWN_FACT", path="sections"),
                         )
-                    raise _error(
-                        TAILORING_GROUNDING_FAILED, issues=parsed_issues
-                    )
+                    raise _error(TAILORING_GROUNDING_FAILED, issues=parsed_issues)
                 content = parse_tailored_content(result["patch"])
                 selected_ids = tuple(result.get("selected_section_ids") or ())
                 if (
@@ -375,9 +372,7 @@ class TailoringCoordinator:
                 await self._delete_checkpoint(launch.run_id)
         except (asyncio.CancelledError, GeneratorExit):
             with CancelScope(shield=True):
-                if await self._fail_generation(
-                    prepared, TAILORING_GROUNDING_FAILED
-                ):
+                if await self._fail_generation(prepared, TAILORING_GROUNDING_FAILED):
                     await self._delete_checkpoint(launch.run_id)
             raise
         except TailoringError as exc:
@@ -668,9 +663,7 @@ class TailoringCoordinator:
                 _SAFE_MESSAGES[TAILORING_GROUNDING_FAILED],
                 issues=(generic_issue,),
                 user_issues=tuple(
-                    project_grounding_issues(
-                        issue_list=(generic_issue,), parent=parent
-                    )
+                    project_grounding_issues(issue_list=(generic_issue,), parent=parent)
                 ),
             ) from exc
 
@@ -732,16 +725,12 @@ class TailoringCoordinator:
         if (
             snapshot.attachment_id != owner.source_attachment_id
             or snapshot.source_hash != owner.source_hash
-            or not _same_revision(
-                snapshot.profile_updated_at, owner.profile_updated_at
-            )
+            or not _same_revision(snapshot.profile_updated_at, owner.profile_updated_at)
             or (
                 owner.job_updated_at is not None
                 and (
                     snapshot.job_updated_at is None
-                    or not _same_revision(
-                        snapshot.job_updated_at, owner.job_updated_at
-                    )
+                    or not _same_revision(snapshot.job_updated_at, owner.job_updated_at)
                 )
             )
         ):
@@ -764,13 +753,8 @@ class TailoringCoordinator:
             or profile.source_hash is None
         ):
             raise _error(source_error)
-        document_row = await documents_repo.get_document(
-            session, profile.attachment_id
-        )
-        if (
-            document_row is None
-            or document_row.source_hash != profile.source_hash
-        ):
+        document_row = await documents_repo.get_document(session, profile.attachment_id)
+        if document_row is None or document_row.source_hash != profile.source_hash:
             raise _error(source_error)
         try:
             profile_model = parse_candidate_profile(profile.profile_json)
@@ -790,8 +774,7 @@ class TailoringCoordinator:
             if (
                 job is None
                 or job.processing_status != JOB_PROCESSING_STATUS_PROCESSED
-                or job.jd_quality
-                not in {JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL}
+                or job.jd_quality not in {JOB_JD_QUALITY_FULL, JOB_JD_QUALITY_PARTIAL}
                 or job.extraction_json is None
             ):
                 raise _error(job_error)
@@ -854,8 +837,7 @@ class TailoringCoordinator:
                 if (
                     version is None
                     or version.session_id != owner.id
-                    or version.version_number
-                    != prepared.expected_latest_version_number
+                    or version.version_number != prepared.expected_latest_version_number
                 ):
                     raise _error(TAILORING_PARENT_CONFLICT)
                 parent = parse_tailored_content(version.content_json)
@@ -910,9 +892,7 @@ class TailoringCoordinator:
             profile_updated_at=snapshot.profile_updated_at,
             source_hash=snapshot.source_hash,
             job_updated_at=snapshot.job_updated_at,
-            template_version=cast(
-                Literal["latex-cv-v1"], TAILORING_TEMPLATE_VERSION
-            ),
+            template_version=cast(Literal["latex-cv-v1"], TAILORING_TEMPLATE_VERSION),
         )
         try:
             async with session_scope(self._session_factory) as session:
@@ -1020,9 +1000,7 @@ class TailoringCoordinator:
                         await tailoring_repo.restore_session_ready(session, owner.id)
                 run = await runs_repo.get_run(session, prepared.launch.run_id)
                 if run is not None and run.state == AGENT_RUN_STATE_RUNNING:
-                    await runs_repo.fail_run(
-                        session, run.id, error_code=error_code
-                    )
+                    await runs_repo.fail_run(session, run.id, error_code=error_code)
             if issues:
                 await self._activity_service.record_grounding_issues(
                     run_id=prepared.launch.run_id, issues=issues
@@ -1043,9 +1021,7 @@ class TailoringCoordinator:
             async with open_checkpointer(
                 self._sqlite_path,
                 settings=(
-                    self._settings
-                    if isinstance(self._settings, Settings)
-                    else None
+                    self._settings if isinstance(self._settings, Settings) else None
                 ),
             ) as saver:
                 await delete_run_checkpoint(saver, run_id)
@@ -1101,9 +1077,7 @@ class TailoringCoordinator:
             {
                 "message": label,
                 "activity": (
-                    activity.model_dump(mode="json")
-                    if activity is not None
-                    else None
+                    activity.model_dump(mode="json") if activity is not None else None
                 ),
             },
         )

@@ -583,7 +583,6 @@ export function useSavedJobsState(options: UseSavedJobsOptions = {}) {
   const beginLatestRequest = useLatestRequest();
   /** Synchronous pending guard so rapid double-clicks cannot race re-render. */
   const actionInFlightRef = useRef<Set<string>>(new Set());
-  const profileId = options.profileId ?? null;
   const scopeKey = savedJobsScopeKey(options.profileId, options.profileReady);
   const profileScopeRef = useRef(scopeKey);
   profileScopeRef.current = scopeKey;

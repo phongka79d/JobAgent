@@ -9,14 +9,14 @@ import {TextArea} from '@astryxdesign/core/TextArea';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 
+import {TAILORING_COPY} from './copy';
+import {tailoringFieldId, tailoringIssueId, tailoringSectionId} from './types';
 import type {
   SourceBoundText,
   TailoredFactEvidence,
   TailoredItem,
   TailoredSection,
   TailoringUserIssue,
-  tailoringFieldId,
-  tailoringIssueId,
 } from './types';
 
 export type TailoredSectionEditorProps = {
@@ -65,12 +65,22 @@ export function TailoredSectionEditor({
   useEffect(() => {
     if (isEvidenceOpen && evidenceFocusKey > 0) {
       setEvidenceOpen(true);
-      requestAnimationFrame(() => evidenceRef.current?.focus());
     }
   }, [evidenceFocusKey, isEvidenceOpen]);
-  const describedBy = (itemIndex: number, field: TailoringUserIssue['field']) => {
-    const ids = issues.filter((issue) => issue.item_index === itemIndex && issue.field === field).map(tailoringIssueId);
-    return ids.length > 0 ? ids.join(' ') : undefined;
+  useEffect(() => {
+    if (!evidenceOpen) return;
+    const frame = requestAnimationFrame(() => evidenceRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [evidenceFocusKey, evidenceOpen]);
+  const fieldStatus = (itemIndex: number, field: TailoringUserIssue['field']) => {
+    const messages = issues
+      .filter((issue) => issue.item_index === itemIndex && issue.field === field)
+      .map((issue) => TAILORING_COPY.issueReasons[issue.reason]);
+    if (messages.length === 0) return undefined;
+    return {
+      type: 'error' as const,
+      message: `Needs attention: ${[...new Set(messages)].join(' ')}`,
+    };
   };
   const sectionIssueIds = issues.filter((issue) => issue.item_index === null || issue.field === 'section').map(tailoringIssueId).join(' ') || undefined;
   const updateItem = (index: number, item: TailoredItem) => {
@@ -79,6 +89,8 @@ export function TailoredSectionEditor({
 
   return (
     <Section
+      id={tailoringSectionId(section.id)}
+      tabIndex={-1}
       aria-describedby={sectionIssueIds}
       variant="transparent"
       dividers={['bottom']}
@@ -153,8 +165,8 @@ export function TailoredSectionEditor({
 
               {item.title ? (
                 <TextInput
-                  id={tailoringFieldId(section.id, itemIndex, 'title')}
-                  aria-describedby={describedBy(itemIndex, 'title')}
+                  htmlName={tailoringFieldId(section.id, itemIndex, 'title')}
+                  status={fieldStatus(itemIndex, 'title')}
                   label={`Title ${itemLabel(section, itemIndex)}`}
                   value={item.title.text}
                   isDisabled={isDisabled}
@@ -168,8 +180,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.subtitle ? (
                 <TextInput
-                  id={tailoringFieldId(section.id, itemIndex, 'subtitle')}
-                  aria-describedby={describedBy(itemIndex, 'subtitle')}
+                  htmlName={tailoringFieldId(section.id, itemIndex, 'subtitle')}
+                  status={fieldStatus(itemIndex, 'subtitle')}
                   label={`Subtitle ${itemLabel(section, itemIndex)}`}
                   value={item.subtitle.text}
                   isDisabled={isDisabled}
@@ -183,8 +195,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.date_text ? (
                 <TextInput
-                  id={tailoringFieldId(section.id, itemIndex, 'date')}
-                  aria-describedby={describedBy(itemIndex, 'date')}
+                  htmlName={tailoringFieldId(section.id, itemIndex, 'date')}
+                  status={fieldStatus(itemIndex, 'date')}
                   label={`Dates ${itemLabel(section, itemIndex)}`}
                   value={item.date_text.text}
                   isDisabled={isDisabled}
@@ -198,8 +210,8 @@ export function TailoredSectionEditor({
               ) : null}
               {item.location ? (
                 <TextInput
-                  id={tailoringFieldId(section.id, itemIndex, 'location')}
-                  aria-describedby={describedBy(itemIndex, 'location')}
+                  htmlName={tailoringFieldId(section.id, itemIndex, 'location')}
+                  status={fieldStatus(itemIndex, 'location')}
                   label={`Location ${itemLabel(section, itemIndex)}`}
                   value={item.location.text}
                   isDisabled={isDisabled}
@@ -212,9 +224,9 @@ export function TailoredSectionEditor({
                 />
               ) : null}
               <TextArea
-                id={tailoringFieldId(section.id, itemIndex, 'body')}
+                htmlName={tailoringFieldId(section.id, itemIndex, 'body')}
                 aria-label={`${section.heading} body`}
-                aria-describedby={describedBy(itemIndex, 'body')}
+                status={fieldStatus(itemIndex, 'body')}
                 label={`Body ${itemLabel(section, itemIndex)}`}
                 value={item.body.text}
                 rows={3}
@@ -236,8 +248,8 @@ export function TailoredSectionEditor({
                   wrap="wrap"
                 >
                   <TextArea
-                    id={`${tailoringFieldId(section.id, itemIndex, 'bullet')}-${bulletIndex}`}
-                    aria-describedby={describedBy(itemIndex, 'bullet')}
+                    htmlName={`${tailoringFieldId(section.id, itemIndex, 'bullet')}-${bulletIndex}`}
+                    status={fieldStatus(itemIndex, 'bullet')}
                     label={`Bullet ${bulletIndex + 1} · ${itemLabel(section, itemIndex)}`}
                     value={bullet.text}
                     rows={2}
@@ -307,8 +319,8 @@ export function TailoredSectionEditor({
                     <Text type="label">{attribute.name}</Text>
                     {attribute.values.map((attributeValue, valueIndex) => (
                       <TextInput
-                        id={`${tailoringFieldId(section.id, itemIndex, 'attribute')}-${attributeIndex}-${valueIndex}`}
-                        aria-describedby={describedBy(itemIndex, 'attribute')}
+                        htmlName={`${tailoringFieldId(section.id, itemIndex, 'attribute')}-${attributeIndex}-${valueIndex}`}
+                        status={fieldStatus(itemIndex, 'attribute')}
                         key={`${attribute.name}-${valueIndex}`}
                         label={`${attribute.name} ${valueIndex + 1}`}
                         value={attributeValue.text}

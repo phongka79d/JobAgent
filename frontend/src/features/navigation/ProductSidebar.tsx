@@ -1,4 +1,11 @@
-import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react';
 import {SideNavItem, SideNavSection, useSideNavCollapse} from '@astryxdesign/core/SideNav';
 import {VStack} from '@astryxdesign/core/VStack';
 
@@ -17,7 +24,15 @@ export type ProductSidebarProps = {
   readonly isTailoringPending?: boolean;
   readonly onOpenTailoringSession?: (sessionId: string) => void;
   readonly editorMode?: boolean;
+  readonly selectedDestination?: ProductDestination;
+  readonly onSelectedDestinationChange?: (destination: ProductDestination) => void;
+  readonly editorMemoryRef?: MutableRefObject<ProductSidebarEditorMemory>;
 };
+
+export type ProductSidebarEditorMemory = {
+  selected: ProductDestination;
+  collapsed: boolean;
+} | null;
 
 export function ProductSidebar({
   overview,
@@ -28,27 +43,42 @@ export function ProductSidebar({
   isTailoringPending = false,
   onOpenTailoringSession = () => undefined,
   editorMode = false,
+  selectedDestination,
+  onSelectedDestinationChange,
+  editorMemoryRef,
 }: ProductSidebarProps) {
-  const [selected, setSelected] = useState<ProductDestination>('overview');
-  const {isCollapsed, setIsCollapsed} = useSideNavCollapse();
+  const [localSelected, setLocalSelected] = useState<ProductDestination>('overview');
+  const selected = selectedDestination ?? localSelected;
+  const updateSelected = useCallback(
+    (destination: ProductDestination) => {
+      if (onSelectedDestinationChange) {
+        onSelectedDestinationChange(destination);
+      } else {
+        setLocalSelected(destination);
+      }
+    },
+    [onSelectedDestinationChange],
+  );
+  const {isCollapsed, toggle: toggleCollapsed} = useSideNavCollapse();
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
-  const beforeEditorRef = useRef<{selected: ProductDestination; collapsed: boolean} | null>(null);
+  const localEditorMemoryRef = useRef<ProductSidebarEditorMemory>(null);
+  const beforeEditorRef = editorMemoryRef ?? localEditorMemoryRef;
 
   useEffect(() => {
     if (editorMode) {
       if (beforeEditorRef.current === null) {
         beforeEditorRef.current = {selected, collapsed: isCollapsed};
       }
-      if (!isCollapsed) setIsCollapsed(true);
+      if (!isCollapsed) toggleCollapsed();
       return;
     }
     const previous = beforeEditorRef.current;
     if (previous !== null) {
       beforeEditorRef.current = null;
-      setSelected(previous.selected);
-      setIsCollapsed(previous.collapsed);
+      updateSelected(previous.selected);
+      if (isCollapsed !== previous.collapsed) toggleCollapsed();
     }
-  }, [editorMode, isCollapsed, selected, setIsCollapsed]);
+  }, [beforeEditorRef, editorMode, isCollapsed, selected, toggleCollapsed, updateSelected]);
 
   const refreshPendingSavedJobsInvalidation = useCallback(() => {
     if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
@@ -102,8 +132,8 @@ export function ProductSidebar({
 
   const selectDestination = (destination: ProductDestination) => {
     if (editorMode) return;
-    setSelected(destination);
-    if (isCollapsed) setIsCollapsed(false);
+    updateSelected(destination);
+    if (isCollapsed) toggleCollapsed();
   };
 
   return (

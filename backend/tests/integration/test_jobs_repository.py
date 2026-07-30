@@ -748,6 +748,7 @@ def test_list_compact_filters_limit_and_newest_order(db_path: Path) -> None:
                         "failure_code",
                         "title",
                         "company",
+                        "summary",
                         "created_at",
                         "updated_at",
                     }

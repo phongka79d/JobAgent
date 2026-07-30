@@ -69,6 +69,7 @@ function compactSaveData(overrides?: JsonObject): JsonObject {
     job_id: JOB_ID,
     title: 'Staff Engineer',
     company: 'Acme Corp',
+    display_label: 'Staff Engineer · Acme Corp',
     source_url: 'https://example.com/jobs/1',
     processing_status: 'processed',
     jd_quality: 'full',
@@ -215,6 +216,7 @@ describe('strict compact save_job parsing', () => {
       compactSaveData({
         title: null,
         company: null,
+        display_label: 'Untitled saved job · 2026-07-14',
         source_url: null,
         jd_quality: 'partial',
         outcome: 'returned',
@@ -224,6 +226,7 @@ describe('strict compact save_job parsing', () => {
       jobId: JOB_ID,
       title: null,
       company: null,
+      displayLabel: 'Untitled saved job · 2026-07-14',
       sourceUrl: null,
       processingStatus: 'processed',
       jdQuality: 'partial',
@@ -250,6 +253,14 @@ describe('strict compact save_job parsing', () => {
     expect(
       parseSaveJobResultData(compactSaveData({jd_quality: 'excellent'})),
     ).toBeNull();
+  });
+
+  it('keeps legacy compact history readable when display_label is absent', () => {
+    const legacy = compactSaveData();
+    delete legacy.display_label;
+    const parsed = parseSaveJobResultData(legacy);
+    expect(parsed?.displayLabel).toBeUndefined();
+    expect(parsed?.title).toBe('Staff Engineer');
   });
 
   it('rejects missing sync_ok and unexpected keys (exact parser)', () => {
@@ -357,10 +368,10 @@ describe('SavedJobCard rendering', () => {
     );
     expect(screen.getByTestId('jobagent-saved-job-card')).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
-      'processed',
+      'Processed',
     );
     expect(screen.getByTestId('jobagent-job-quality-badge')).toHaveTextContent(
-      'full',
+      'Complete',
     );
     // Badge is only for processing status and JD quality — not outcome.
     expect(
@@ -380,11 +391,12 @@ describe('SavedJobCard rendering', () => {
     expect(screen.queryByText(/FULL JD/i)).not.toBeInTheDocument();
   });
 
-  it('renders failed fetch/extraction card with stable code', () => {
+  it('renders failed fetch/extraction card with safe recovery copy', () => {
     const data = parseSaveJobResultData(
       compactSaveData({
         title: null,
         company: null,
+        display_label: null,
         source_url: null,
         processing_status: 'failed',
         jd_quality: null,
@@ -402,9 +414,10 @@ describe('SavedJobCard rendering', () => {
       />,
     );
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
-      'failed',
+      'Processing failed',
     );
-    expect(screen.getByText(/URL_FETCH_FAILED/)).toBeInTheDocument();
+    expect(screen.getByText('The saved job could not be processed.')).toBeInTheDocument();
+    expect(screen.queryByText(/URL_FETCH_FAILED/)).not.toBeInTheDocument();
     expect(screen.getByText(/Paste the job text/)).toBeInTheDocument();
     expect(screen.queryByTestId('jobagent-job-quality-badge')).not.toBeInTheDocument();
     expect(
@@ -412,7 +425,7 @@ describe('SavedJobCard rendering', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('NEO4J_SYNC_FAILED shows processed SQLite truth without graph success', () => {
+  it('related-data failure shows safe recovery copy without technical details', () => {
     const data = parseSaveJobResultData(
       compactSaveData({
         sync_ok: false,
@@ -428,15 +441,16 @@ describe('SavedJobCard rendering', () => {
       />,
     );
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
-      'processed',
+      'Processed',
     );
-    expect(screen.getByText(/SQLite remains authoritative/i)).toBeInTheDocument();
+    expect(screen.getByText('Needs recovery')).toBeInTheDocument();
+    expect(screen.queryByText(/SQLite|Neo4j|graph/i)).not.toBeInTheDocument();
     expect(
       screen.getByText(/Related data remains unavailable/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/^Synced$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/rank|matching success/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/rebuild/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/rebuild/i)).not.toBeInTheDocument();
   });
 
   it('omits null title/company/source and shows outcome as plain metadata', () => {
@@ -444,6 +458,7 @@ describe('SavedJobCard rendering', () => {
       compactSaveData({
         title: null,
         company: null,
+        display_label: null,
         source_url: null,
         outcome: 'retried',
         jd_quality: 'unscorable',
@@ -586,13 +601,14 @@ describe('ChatPage durable saved-job card', () => {
       expect(screen.getByTestId('jobagent-saved-job-card')).toBeInTheDocument();
     });
     expect(screen.getAllByTestId('jobagent-saved-job-card')).toHaveLength(1);
-    expect(screen.getByText('Save job')).toBeInTheDocument();
-    expect(
-      screen.getByText('save_job · completed · 120ms'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Saving this job')).toBeInTheDocument();
+    expect(screen.getByTestId('jobagent-job-quality-badge')).toHaveTextContent(
+      'Complete',
+    );
+    expect(document.body).not.toHaveTextContent(/save_job|120ms/i);
     expect(screen.queryByText(JOB_ID)).not.toBeInTheDocument();
     expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
-      'processed',
+      'Processed',
     );
     expect(
       screen.queryByTestId('jobagent-job-outcome-badge'),
@@ -828,7 +844,8 @@ describe('ChatPage durable saved-job card', () => {
     await waitFor(() => {
       expect(screen.getByText('Search jobs')).toBeInTheDocument();
     });
-    expect(screen.getByText('query_jobs · completed · 10ms')).toBeInTheDocument();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/query_jobs|10ms/i);
     expect(screen.queryByText('Found 1 job(s)')).not.toBeInTheDocument();
     expect(screen.queryByTestId('jobagent-saved-job-card')).not.toBeInTheDocument();
     expect(screen.queryByText(/rank|score/i)).not.toBeInTheDocument();
@@ -865,14 +882,14 @@ describe('ChatPage durable saved-job card', () => {
       expect(screen.getByTestId('jobagent-saved-job-card')).toBeInTheDocument();
     });
     expect(screen.getAllByTestId('jobagent-saved-job-card')).toHaveLength(1);
-    expect(
-      screen.getByText(
-        `save_job · failed · 120ms · ${NEO4J_SYNC_FAILED_CODE}`,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
-      'processed',
+    expect(screen.getByText('Could not complete')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(
+      new RegExp(`save_job|120ms|${NEO4J_SYNC_FAILED_CODE}`, 'i'),
     );
-    expect(screen.getByText(/SQLite remains authoritative/i)).toBeInTheDocument();
+    expect(screen.getByTestId('jobagent-job-processing-badge')).toHaveTextContent(
+      'Processed',
+    );
+    expect(screen.getByText('Needs recovery')).toBeInTheDocument();
+    expect(screen.queryByText(/SQLite|Neo4j|graph/i)).not.toBeInTheDocument();
   });
 });

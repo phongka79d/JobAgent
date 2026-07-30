@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
 from app.agent.graph import (
     DECISION_NODE_NAME,
     ERROR_TOOL_LOOP_LIMIT_EXCEEDED,
@@ -18,15 +19,19 @@ from app.agent.graph import (
     AgentGraphBundle,
     _build_model_messages,
     _format_attachment_ids_block,
+    _project_save_job_narration,
     build_agent_graph,
 )
 from app.agent.graph import initial_graph_state as _production_initial_graph_state
-from app.agent.state import AGENT_STATE_FIELDS
 from app.agent.prompt import build_system_prompt
+from app.agent.state import AGENT_STATE_FIELDS
 from app.services import job_save_confirmation as conf
+from app.tools.cv_tailoring import CREATE_TAILORED_CV_NAME
 from app.tools.jobs import SAVE_JOB_NAME, save_job_openai_tool_schema
 from app.tools.registry import ToolRegistry, production_registry
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 
@@ -48,9 +53,7 @@ CONVERSATION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee01"
 PROFILE_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee02"
 
 
-def initial_graph_state(
-    *, run_id: str, user_text: str, **kwargs: Any
-) -> Any:
+def initial_graph_state(*, run_id: str, user_text: str, **kwargs: Any) -> Any:
     """Build graph state with explicit durable test ownership."""
     return _production_initial_graph_state(
         run_id=run_id,
@@ -101,6 +104,22 @@ def read_active_cv_tool(mode: str, section_id: str) -> dict[str, Any]:
                 }
             ],
             "mode": mode,
+        },
+    }
+
+
+@tool(CREATE_TAILORED_CV_NAME)
+def create_tailored_cv_graph_tool(instruction: str) -> dict[str, Any]:
+    """Return a bounded durable-result-shaped tailoring fixture."""
+    return {
+        "ok": True,
+        "code": None,
+        "summary": "Tailored CV version created",
+        "data": {
+            "outcome": "version_created",
+            "version_id": "11111111-2222-4333-8444-555555555555",
+            "version_number": 1,
+            "instruction": instruction,
         },
     }
 
@@ -273,6 +292,42 @@ def _ai_tool_call(
     )
 
 
+class TailoringIntentAwareFake(FakeChatModel):
+    """Choose the tailoring tool only when the received user turn requests it."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del stop, run_manager, kwargs
+        self.call_log.append(list(messages))
+        if any(isinstance(message, ToolMessage) for message in messages):
+            response = _ai_text("The requested tailored CV version is ready.")
+        else:
+            user_text = " ".join(
+                str(message.content)
+                for message in messages
+                if isinstance(message, HumanMessage)
+            ).casefold()
+            requested = any(
+                verb in user_text
+                for verb in ("tailor", "edit", "revise", "customize", "generate")
+            )
+            response = (
+                _ai_tool_call(
+                    CREATE_TAILORED_CV_NAME,
+                    {"instruction": "Prioritize source-supported experience"},
+                    call_id=f"tailoring-intent-{len(self.call_log)}",
+                )
+                if requested
+                else _ai_text("No tailoring change was requested.")
+            )
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+
 def _bundle(
     model: FakeChatModel,
     tools: list[Any] | None = None,
@@ -314,7 +369,62 @@ def test_tailoring_prompt_covers_explicit_editing_intent_and_durable_success() -
     prompt = build_system_prompt(["create_tailored_cv"])
     for verb in ("tailor", "edit", "revise", "customize", "generate", "create"):
         assert verb in prompt
-    assert "Claim success only after a successful exact create_tailored_cv ToolResult" in prompt
+    assert (
+        "Claim success only after a successful exact create_tailored_cv ToolResult"
+        in prompt
+    )
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Tailor my CV for this saved job",
+        "Edit my resume to emphasize the API work",
+        "Revise my CV for the selected role",
+        "Customize my resume for this job",
+        "Generate a CV targeted at the selected role",
+    ],
+)
+def test_explicit_tailoring_intents_execute_only_the_tailoring_tool(
+    user_text: str,
+) -> None:
+    model = TailoringIntentAwareFake()
+    bundle = _bundle(model, [create_tailored_cv_graph_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=user_text)
+    )
+
+    calls = _tool_calls_from_state(out)
+    assert [call["name"] for call in calls] == [CREATE_TAILORED_CV_NAME]
+    assert any(isinstance(message, ToolMessage) for message in out[MESSAGES_KEY])
+    assert any(
+        user_text in str(message.content)
+        for message in model.call_log[0]
+        if isinstance(message, HumanMessage)
+    )
+
+
+def test_unrelated_request_does_not_execute_the_tailoring_tool() -> None:
+    model = TailoringIntentAwareFake()
+    out = _bundle(model, [create_tailored_cv_graph_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text="Summarize my current CV")
+    )
+
+    assert _tool_calls_from_state(out) == []
+    assert not any(isinstance(message, ToolMessage) for message in out[MESSAGES_KEY])
+
+
+def test_prose_only_tailoring_success_claim_has_no_durable_result() -> None:
+    unsupported_claim = "Your CV was tailored successfully."
+    model = FakeChatModel(responses=[_ai_text(unsupported_claim)])
+    bundle = _bundle(model, [create_tailored_cv_graph_tool])
+    out = bundle.compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text="Please tailor my CV")
+    )
+
+    assert _tool_calls_from_state(out) == []
+    assert not any(isinstance(message, ToolMessage) for message in out[MESSAGES_KEY])
+    assert out[MESSAGES_KEY][-1].content == unsupported_claim
 
 
 def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:
@@ -332,9 +442,7 @@ def test_graph_has_exactly_one_decision_and_one_tool_node() -> None:
     assert TOOLS_NODE_NAME in graph_nodes
     # No extra application nodes beyond the single decision + single ToolNode.
     app_nodes = {
-        n
-        for n in graph_nodes
-        if n not in {"__start__", "__end__", "START", "END"}
+        n for n in graph_nodes if n not in {"__start__", "__end__", "START", "END"}
     }
     assert app_nodes == {DECISION_NODE_NAME, TOOLS_NODE_NAME}
 
@@ -380,9 +488,7 @@ def test_build_model_messages_includes_staged_attachment_ids() -> None:
     messages = _build_model_messages(state, "system prompt")
     texts = [str(getattr(m, "content", "")) for m in messages]
     assert any(att in t and "Staged attachment IDs" in t for t in texts)
-    assert any(
-        "I uploaded my CV. Please process the attached PDF." in t for t in texts
-    )
+    assert any("I uploaded my CV. Please process the attached PDF." in t for t in texts)
 
 
 def test_build_model_messages_omits_attachment_block_when_empty() -> None:
@@ -517,9 +623,7 @@ def test_other_active_cv_question_remains_model_driven() -> None:
         initial_graph_state(
             run_id=RUN_ID,
             user_text="Can you summarize my CV?",
-            active_cv_context=_experience_outline(
-                "cv-document-v1:s0:experience"
-            ),
+            active_cv_context=_experience_outline("cv-document-v1:s0:experience"),
         )
     )
     assert model.invoke_count == 1
@@ -599,10 +703,10 @@ def test_injected_tools_without_changing_graph_construction() -> None:
         "commit_profile_draft",
         "save_job",
         "query_jobs",
-            "match_jobs",
-            "read_active_cv",
-            "create_tailored_cv",
-        ]
+        "match_jobs",
+        "read_active_cv",
+        "create_tailored_cv",
+    ]
     assert not injected.registry.is_empty()
     assert injected.registry.tool_names() == ["echo_tool"]
 
@@ -620,9 +724,7 @@ def test_six_tool_passes_allowed_then_direct_answer() -> None:
     responses.append(_ai_text("finished after six"))
     model = FakeChatModel(responses=responses)
     bundle = _bundle(model, [counter_tool], tool_loop_limit=6)
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text="loop")
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="loop"))
     assert out["error"] is None
     assert out["tool_iteration_count"] == 6
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
@@ -659,9 +761,7 @@ def test_custom_limit_of_one() -> None:
         ]
     )
     bundle = _bundle(model, [counter_tool], tool_loop_limit=1)
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text="once")
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text="once"))
     assert out["error"] == ERROR_TOOL_LOOP_LIMIT_EXCEEDED
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
     assert len(tool_msgs) == 1
@@ -810,9 +910,7 @@ def test_named_save_job_plain_text_is_discarded_and_repaired_once() -> None:
     """First plain-text mutation claim is discarded; one repair sole call runs."""
     model = FakeChatModel(
         responses=[
-            _ai_text(
-                "I created a new Job entry for https://example.com successfully."
-            ),
+            _ai_text("I created a new Job entry for https://example.com successfully."),
             _ai_tool_call(
                 SAVE_JOB_NAME,
                 {"url": "https://example.com"},
@@ -842,7 +940,7 @@ def test_named_save_job_plain_text_is_discarded_and_repaired_once() -> None:
     assert not (final.tool_calls or [])
     final_text = str(final.content)
     assert "returned" in final_text.lower() or "reused" in final_text.lower()
-    assert "job-dup-1" in final_text
+    assert "job-dup-1" not in final_text
     assert "brand new" not in final_text.lower()
     assert "I created a new Job entry" not in " ".join(
         str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
@@ -918,7 +1016,7 @@ def test_named_save_job_sole_call_projects_returned_from_tool_result() -> None:
     assert isinstance(final, AIMessage)
     text = str(final.content).lower()
     assert "returned" in text or "reused" in text
-    assert "job-dup-1" in str(final.content)
+    assert "job-dup-1" not in str(final.content)
     assert "no new job was created" in text
     # Must not narrate duplicate as newly created.
     assert "brand new" not in text
@@ -946,8 +1044,45 @@ def test_named_save_job_created_outcome_projection() -> None:
         )
     )
     final = str(out[MESSAGES_KEY][-1].content)
-    assert "job-new-1" in final
+    assert "job-new-1" not in final
     assert "Saved job description" in final
+
+
+@pytest.mark.parametrize(
+    ("outcome", "summary", "required_text"),
+    [
+        (
+            "returned",
+            "Returned existing job for exact content match",
+            "no new Job was created",
+        ),
+        ("created", "Saved job description", "Saved job description"),
+        (
+            "retried",
+            "Retried failed job in place after exact content match",
+            "Retried failed job",
+        ),
+    ],
+)
+def test_save_job_narration_keeps_outcome_meaning_without_identifier(
+    outcome: str,
+    summary: str,
+    required_text: str,
+) -> None:
+    job_id = "11111111-2222-4333-8444-555555555555"
+
+    narration = _project_save_job_narration(
+        {
+            "ok": True,
+            "code": None,
+            "summary": summary,
+            "data": {"outcome": outcome, "job_id": job_id},
+        }
+    )
+
+    assert required_text.lower() in narration.lower()
+    assert job_id not in narration
+    assert job_id[:8] not in narration
 
 
 def test_named_save_job_already_called_skips_second_repair() -> None:
@@ -968,7 +1103,7 @@ def test_named_save_job_already_called_skips_second_repair() -> None:
     )
     assert model.invoke_count == 1
     assert out["tool_iteration_count"] == 1
-    assert "job-dup-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-dup-1" not in str(out[MESSAGES_KEY][-1].content)
 
 
 def test_unnamed_save_request_and_greeting_paths_unchanged() -> None:
@@ -1042,9 +1177,7 @@ def test_named_save_job_gate_has_ponytail_and_topology_intact() -> None:
 def test_opt_out_suppresses_exact_name_and_passive_repair() -> None:
     """Clear opt-out wins over exact-name repair and passive-JD repair."""
     # Exact-name token plus clear opt-out: no forced save_job repair.
-    named_opt = (
-        "Use save_job with url https://example.com but please don't save it."
-    )
+    named_opt = "Use save_job with url https://example.com but please don't save it."
     assert conf.message_has_clear_opt_out(named_opt)
     model = FakeChatModel(
         responses=[
@@ -1110,9 +1243,7 @@ def test_positive_exact_name_precedes_passive_jd_repair() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=body)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=body))
     assert out["tool_iteration_count"] == 1
     assert model.invoke_count == 2  # first + exact-name repair
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
@@ -1184,18 +1315,15 @@ def test_passive_canonical_tool_success_projects_without_provider() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
     assert out["error"] is None
     assert out["tool_iteration_count"] == 1
     assert model.invoke_count == 0
     final = str(out[MESSAGES_KEY][-1].content)
-    assert "job-cm-1" in final
+    assert "job-cm-1" not in final
     assert "brand new" not in final.lower()
     assert not any(
-        isinstance(m, AIMessage)
-        and "brand new" in str(m.content).lower()
+        isinstance(m, AIMessage) and "brand new" in str(m.content).lower()
         for m in out[MESSAGES_KEY]
     )
 
@@ -1218,9 +1346,7 @@ def test_passive_vietnamese_dispatch_discards_provider_script() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
     assert out["tool_iteration_count"] == 1
     assert model.invoke_count == 0
     joined = " ".join(
@@ -1229,7 +1355,7 @@ def test_passive_vietnamese_dispatch_discards_provider_script() -> None:
     assert "I already saved this JD" not in joined
     assert "Created successfully." not in joined
     final = str(out[MESSAGES_KEY][-1].content)
-    assert "job-cm-1" in final
+    assert "job-cm-1" not in final
     ai_calls = [
         m
         for m in out[MESSAGES_KEY]
@@ -1258,9 +1384,7 @@ def test_passive_malformed_provider_call_cannot_override_canonical_source() -> N
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
 
     assert out["error"] is None
     assert model.invoke_count == 0
@@ -1278,7 +1402,7 @@ def test_passive_malformed_provider_call_cannot_override_canonical_source() -> N
     assert str(call["id"]).startswith("canonical-save-current-message-")
     assert call["args"] == {"source": "current_message"}
     final = str(out[MESSAGES_KEY][-1].content)
-    assert "job-cm-1" in final
+    assert "job-cm-1" not in final
     assert "brand new" not in final.lower()
 
 
@@ -1296,9 +1420,7 @@ def test_passive_malformed_repair_script_cannot_block_confirmation() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
 
     assert out["error"] is None
     assert model.invoke_count == 0
@@ -1328,13 +1450,11 @@ def test_passive_plain_text_provider_script_is_not_invoked() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
     assert out["tool_iteration_count"] == 1
     assert model.invoke_count == 0
     assert any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
     joined = " ".join(
         str(m.content) for m in out[MESSAGES_KEY] if isinstance(m, AIMessage)
     )
@@ -1352,12 +1472,10 @@ def test_passive_wrong_provider_tools_are_not_invoked() -> None:
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool, echo_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
     assert model.invoke_count == 0
     assert out["tool_iteration_count"] == 1
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
 
     url_model = FakeChatModel(
         responses=[
@@ -1375,7 +1493,7 @@ def test_passive_wrong_provider_tools_are_not_invoked() -> None:
     )
     assert url_model.invoke_count == 0
     assert url_out["tool_iteration_count"] == 1
-    assert "job-cm-1" in str(url_out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(url_out[MESSAGES_KEY][-1].content)
 
 
 def test_cancellation_narration_from_tool_result_only() -> None:
@@ -1462,9 +1580,7 @@ def test_passive_binding_aware_provider_is_bound_but_not_invoked() -> None:
         permit_valid_repair=True,
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
 
     assert out["error"] is None
     assert model.invoke_count == 0
@@ -1480,7 +1596,7 @@ def test_passive_binding_aware_provider_is_bound_but_not_invoked() -> None:
     assert len(ai_calls) == 1
     assert ai_calls[0].tool_calls[0]["args"] == {"source": "current_message"}
     final = str(out[MESSAGES_KEY][-1].content)
-    assert "job-cm-1" in final
+    assert "job-cm-1" not in final
 
     # Two binds: normal multi-tool (no choice) + repair-only canonical choice.
     assert len(model.binding_log) == 2
@@ -1504,9 +1620,7 @@ def test_passive_canonical_dispatch_ignores_binding_aware_mixed_output() -> None
         permit_valid_repair=False,
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
 
     assert out["error"] is None
     assert model.invoke_count == 0
@@ -1520,7 +1634,7 @@ def test_passive_canonical_dispatch_ignores_binding_aware_mixed_output() -> None
     ]
     assert len(calls) == 1
     assert calls[0]["args"] == {"source": "current_message"}
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
 
 
 def test_passive_canonical_dispatch_logs_no_content_or_rejection(
@@ -1552,7 +1666,7 @@ def test_passive_canonical_dispatch_logs_no_content_or_rejection(
     finally:
         graph_logger.disabled = was_disabled
 
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
     repair_logs = [
         record.getMessage()
         for record in caplog.records
@@ -1700,9 +1814,7 @@ def test_one_line_intent_mixed_source_canonicalizes_to_current_message() -> None
         ]
     )
     bundle = _bundle(model, [save_job_current_message_tool])
-    out = bundle.compiled.invoke(
-        initial_graph_state(run_id=RUN_ID, user_text=jd)
-    )
+    out = bundle.compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
 
     assert out["error"] is None
     assert out["tool_iteration_count"] == 1
@@ -1718,7 +1830,7 @@ def test_one_line_intent_mixed_source_canonicalizes_to_current_message() -> None
     tool_msgs = [m for m in out[MESSAGES_KEY] if isinstance(m, ToolMessage)]
     assert len(tool_msgs) == 1
     assert getattr(tool_msgs[0], "name", None) == SAVE_JOB_NAME
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
     assert "provider narration" not in str(out[MESSAGES_KEY][-1].content).lower()
 
 
@@ -1780,9 +1892,7 @@ def test_one_line_intent_analysis_and_opt_out_no_confirmation() -> None:
     ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=analysis))
     assert analysis_out["tool_iteration_count"] == 0
     assert analysis_model.invoke_count == 2  # first + one reconsideration
-    assert not any(
-        isinstance(m, ToolMessage) for m in analysis_out[MESSAGES_KEY]
-    )
+    assert not any(isinstance(m, ToolMessage) for m in analysis_out[MESSAGES_KEY])
     assert "Still analysing only" in str(analysis_out[MESSAGES_KEY][-1].content)
 
     opt = f"{jd} do not save"
@@ -1827,7 +1937,7 @@ def test_one_line_intent_no_tool_reconsideration_source_only() -> None:
     assert len(calls) == 1
     assert calls[0]["args"] == {"source": "current_message"}
     assert str(calls[0]["id"]).startswith("canonical-save-current-message-")
-    assert "job-cm-1" in str(out[MESSAGES_KEY][-1].content)
+    assert "job-cm-1" not in str(out[MESSAGES_KEY][-1].content)
 
 
 def test_one_line_intent_reconsideration_invalid_tools_refused() -> None:
@@ -1848,9 +1958,9 @@ def test_one_line_intent_reconsideration_invalid_tools_refused() -> None:
             ),
         ]
     )
-    out = _bundle(
-        model, [save_job_current_message_tool, echo_tool]
-    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
+    out = _bundle(model, [save_job_current_message_tool, echo_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
     assert model.invoke_count == 2  # first + one reconsideration only
     assert out["tool_iteration_count"] == 0
     assert not any(isinstance(m, ToolMessage) for m in out[MESSAGES_KEY])
@@ -1888,9 +1998,9 @@ def test_one_line_intent_multi_tool_save_repair_then_refuse() -> None:
     )
     # Repair path uses forced tool_choice binding when available; FakeChatModel
     # shares the same scripted queue sequence for normal and repair binds.
-    out = _bundle(
-        model, [save_job_current_message_tool, echo_tool]
-    ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
+    out = _bundle(model, [save_job_current_message_tool, echo_tool]).compiled.invoke(
+        initial_graph_state(run_id=RUN_ID, user_text=jd)
+    )
     # First multi-tool + one repair. Repair sole save_job is canonicalized.
     assert model.invoke_count == 2
     calls = _tool_calls_from_state(out)
@@ -1926,9 +2036,7 @@ def test_one_line_intent_multi_tool_save_repair_then_refuse() -> None:
     ).compiled.invoke(initial_graph_state(run_id=RUN_ID, user_text=jd))
     assert refuse_model.invoke_count == 2
     assert refuse_out["tool_iteration_count"] == 0
-    assert not any(
-        isinstance(m, ToolMessage) for m in refuse_out[MESSAGES_KEY]
-    )
+    assert not any(isinstance(m, ToolMessage) for m in refuse_out[MESSAGES_KEY])
     assert refuse_out[MESSAGES_KEY][-1].content == PASSIVE_JD_NO_CONFIRMATION_TEXT
 
 
@@ -1945,9 +2053,7 @@ def test_one_line_intent_skips_reconsideration_for_url_and_legacy() -> None:
 
     legacy_model = FakeChatModel(responses=[_ai_text("legacy narration")])
     legacy_out = _bundle(legacy_model, [save_job_created_tool]).compiled.invoke(
-        initial_graph_state(
-            run_id=RUN_ID, user_text=EXPLICIT_DIRECT_TEXT_REQUEST
-        )
+        initial_graph_state(run_id=RUN_ID, user_text=EXPLICIT_DIRECT_TEXT_REQUEST)
     )
     legacy_calls = _tool_calls_from_state(legacy_out)
     assert len(legacy_calls) == 1

@@ -17,7 +17,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {formatDisplayScore} from './matchResult';
-import {savedJobDisplayLabel} from './copy';
+import {JOB_COPY, savedJobDisplayLabel} from './copy';
 import './jobs.css';
 import {JobDeleteDialog} from './JobDeleteDialog';
 import {JobReextractDialog} from './JobReextractDialog';
@@ -263,7 +263,7 @@ export function SavedJobsPanel({
         data-testid="jobagent-saved-jobs-master-pane"
       >
         <SavedJobsPanelHeader
-          eyebrow="Danh sách"
+          eyebrow={JOB_COPY.savedJobsEyebrow}
           title="Saved jobs"
           onRefresh={onRefresh}
           isRefreshing={list.phase === 'loading'}
@@ -281,7 +281,7 @@ export function SavedJobsPanel({
           <Banner
             status="error"
             title="Unable to load saved jobs"
-            description={`${list.error.summary} (${list.error.code})`}
+            description={list.error.summary}
             container="section"
             data-testid="jobagent-obs-saved-jobs-error"
           />
@@ -301,7 +301,7 @@ export function SavedJobsPanel({
           <List
             density="compact"
             hasDividers
-            header={`${items.length} JD`}
+            header={`${items.length} saved jobs`}
             data-testid="jobagent-obs-saved-jobs-list"
           >
             {items.map((item) => {

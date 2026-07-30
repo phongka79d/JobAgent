@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from app.api.dependencies import ChatAgentDeps, get_chat_agent_deps
 from app.main import create_app
+from app.schemas.profile_reextraction import ProfileReextractEvent
 from app.schemas.sse import parse_sse_event
 from app.tools.registry import ToolRegistry, production_registry
 from fastapi.testclient import TestClient
@@ -88,6 +89,33 @@ def parse_sse_wire(body: str) -> list[dict[str, Any]]:
     return events
 
 
+def parse_profile_reextract_wire(body: str) -> list[dict[str, Any]]:
+    """Parse the separate direct profile re-extraction SSE contract."""
+    events: list[dict[str, Any]] = []
+    for chunk in re.split(r"\n\n+", body.strip()):
+        if not chunk.strip() or chunk.strip().startswith(":"):
+            continue
+        event_name: str | None = None
+        data_lines: list[str] = []
+        event_id: str | None = None
+        for line in chunk.splitlines():
+            if line.startswith("event:"):
+                event_name = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:") :].strip())
+            elif line.startswith("id:"):
+                event_id = line[len("id:") :].strip()
+        if not data_lines:
+            continue
+        data = json.loads("\n".join(data_lines))
+        typed = ProfileReextractEvent.model_validate(data)
+        assert typed.event == event_name or event_name is None
+        if event_id is not None:
+            assert typed.event_id == event_id
+        events.append(data)
+    return events
+
+
 def override_chat_deps(
     client: TestClient,
     *,
@@ -146,4 +174,5 @@ __all__ = [
     "direct_model",
     "override_chat_deps",
     "parse_sse_wire",
+    "parse_profile_reextract_wire",
 ]

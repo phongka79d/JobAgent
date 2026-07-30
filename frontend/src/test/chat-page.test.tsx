@@ -411,9 +411,9 @@ describe('ChatPage history and load-older', () => {
     expect(screen.getByText('History assistant reply')).toBeInTheDocument();
     expect(screen.getByText('Completed · 1 step')).toBeInTheDocument();
     expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
-    expect(
-      screen.getByText('lookup_status · completed · 42ms'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
+    expect(screen.getAllByText('Complete').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/lookup_status|42ms/)).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', {name: /Completed · 1 step/i}),
     ).toHaveAttribute('aria-expanded', 'false');
@@ -435,8 +435,9 @@ describe('ChatPage history and load-older', () => {
       screen.getByRole('button', {name: /Completed · 1 step/i}),
     ).toHaveAttribute('aria-expanded', 'false');
     expect(
-      screen.getByText('lookup_status · completed · 42ms'),
+      screen.getByText('Check lookup availability'),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/lookup_status|42ms/)).not.toBeInTheDocument();
   });
 
   it('shows disconnected activity when reload history ends with a running user run', async () => {
@@ -448,19 +449,20 @@ describe('ChatPage history and load-older', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Connection lost — Agent may still be running'),
+        screen.getByText('Connection lost. Your request may still be running.'),
       ).toBeInTheDocument();
     });
     expect(screen.queryByText(/^Completed ·/)).not.toBeInTheDocument();
 
     const disclosure = screen.getByRole('button', {
-      name: /Connection lost — Agent may still be running/i,
+      name: /Connection lost\. Your request may still be running\./i,
     });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
 
     await user.click(disclosure);
     expect(screen.getByText('Generating reply')).toBeInTheDocument();
-    expect(screen.getByText('response_generation · running')).toBeInTheDocument();
+    expect(screen.getByText('In progress')).toBeInTheDocument();
+    expect(screen.queryByText(/response_generation/)).not.toBeInTheDocument();
   });
 
   it('shows failed activity when reload history ends without an assistant message', async () => {
@@ -551,9 +553,8 @@ describe('ChatPage history and load-older', () => {
     });
     expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
     expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
-    expect(
-      screen.getByText('lookup_status · failed · 11ms · TOOL_ERROR'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Could not complete')).toBeInTheDocument();
+    expect(screen.queryByText(/lookup_status|11ms|TOOL_ERROR/)).not.toBeInTheDocument();
     expect(screen.queryByText('lookup failed durably')).not.toBeInTheDocument();
     expect(screen.queryByText(/^complete$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^error$/)).not.toBeInTheDocument();
@@ -766,7 +767,8 @@ describe('ChatPage send / stream / lock', () => {
         .getAllByText('Use synthetic tool')
         .find((element) => element.getAttribute('aria-live') === 'polite');
       expect(current).toBeInTheDocument();
-      expect(screen.getByText('synthetic_tool · running')).toBeInTheDocument();
+      expect(screen.getByText('In progress')).toBeInTheDocument();
+      expect(screen.queryByText(/synthetic_tool/)).not.toBeInTheDocument();
       expect(screen.queryByText('…')).not.toBeInTheDocument();
     });
     // In-flight: contentEditable disabled via isDisabled on ChatComposer.
@@ -788,9 +790,8 @@ describe('ChatPage send / stream / lock', () => {
     await waitFor(() => {
       expect(screen.getByText('After tools')).toBeInTheDocument();
       expect(screen.getByText('Completed · 1 step')).toBeInTheDocument();
-      expect(
-        screen.getByText('synthetic_tool · completed · 120ms'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Complete')).toBeInTheDocument();
+      expect(screen.queryByText(/synthetic_tool|120ms/)).not.toBeInTheDocument();
       expect(screen.queryByText('done')).not.toBeInTheDocument();
     });
   });
@@ -897,10 +898,11 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
     await waitFor(() => {
       expect(screen.getByText('Unable to complete · 1 step')).toBeInTheDocument();
       expect(
-        screen.getByText(
-          'response_generation · failed · 1s · PROVIDER_TIMEOUT',
-        ),
+        screen.getByText('Could not complete'),
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/response_generation|PROVIDER_TIMEOUT|1s/),
+      ).not.toBeInTheDocument();
     });
     expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
   });
@@ -989,10 +991,11 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText('Connection lost — Agent may still be running'),
+        screen.getByText('Connection lost. Your request may still be running.'),
       ).toBeInTheDocument();
       expect(screen.getByText('Check lookup availability')).toBeInTheDocument();
-      expect(screen.getByText('lookup_status · running')).toBeInTheDocument();
+      expect(screen.getByText('In progress')).toBeInTheDocument();
+      expect(screen.queryByText(/lookup_status/)).not.toBeInTheDocument();
     });
     expect(screen.queryByText('Run completed')).not.toBeInTheDocument();
     expect(screen.queryByText(/^completed$/)).not.toBeInTheDocument();
@@ -1055,7 +1058,9 @@ describe('ChatPage failure / disconnect / interrupted visibility', () => {
       expect(
         screen.getByLabelText('Waiting for your confirmation · 1 step'),
       ).toHaveAttribute('data-variant', 'warning');
-      expect(screen.getByText('Run interrupted')).toBeInTheDocument();
+      expect(
+        screen.getByText('Run interrupted — new turns are blocked until resumed'),
+      ).toBeInTheDocument();
       expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
         'false',
       );
@@ -1333,7 +1338,7 @@ describe('ChatPage active-CV source from durable history (03A)', () => {
     };
   }
 
-  it('hydrates history with one Nguồn citation and exact dialog evidence', async () => {
+  it('hydrates history with one Source citation and exact dialog evidence', async () => {
     if (!HTMLDialogElement.prototype.showModal) {
       HTMLDialogElement.prototype.showModal = function showModal() {
         this.setAttribute('open', '');
@@ -1356,11 +1361,11 @@ describe('ChatPage active-CV source from durable history (03A)', () => {
     expect(screen.queryByText(/\*\*1\*\*/)).not.toBeInTheDocument();
     const citations = screen.getAllByTestId('jobagent-active-cv-citation');
     expect(citations).toHaveLength(1);
-    expect(citations[0]).toHaveTextContent('Nguồn');
+    expect(citations[0]).toHaveTextContent('Source');
 
     await user.click(citations[0]);
     await waitFor(() => {
-      expect(screen.getByText('Nguồn từ CV')).toBeInTheDocument();
+      expect(screen.getByText('Source from CV')).toBeInTheDocument();
     });
     expect(
       screen.getByText('Cloud practitioner certificate.'),

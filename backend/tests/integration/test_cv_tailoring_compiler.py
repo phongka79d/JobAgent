@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from pypdf import PdfReader
 from app.core.ids import new_uuid
 from app.schemas.cv_tailoring import (
     SourceBoundText,
@@ -20,6 +19,7 @@ from app.schemas.cv_tailoring import (
 from app.services.cv_tailoring_compiler import compile_latex_cv
 from app.services.cv_tailoring_renderer import render_latex_cv
 from app.storage.cv_tailoring import TailoringArtifactStorage
+from pypdf import PdfReader
 
 
 @dataclass
@@ -50,6 +50,7 @@ async def test_real_fixed_bilingual_template_compiles_when_pdflatex_exists(
             "fixed bilingual template requires missing TeX inputs: "
             + ", ".join(missing_inputs)
         )
+
     def item(item_id: str, body: str, title: str | None = None) -> TailoredItem:
         return TailoredItem(
             id=item_id,

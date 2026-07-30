@@ -91,42 +91,64 @@ export function buildSavedJobSummaryLines(
   const isSyncFailed =
     code === NEO4J_SYNC_FAILED_CODE || data.syncOk === false;
 
-  if (summary && summary.trim() !== '') {
-    lines.push(summary.trim());
-  }
-
   if (isSyncFailed) {
-    if (!lines.some((l) => /neo4j|sync failed|rebuild/i.test(l))) {
-      lines.push(
-        'The saved job is available, but related data could not be refreshed.',
-      );
-    }
-    if (data.rebuildInstruction) {
-      lines.push(data.rebuildInstruction);
-    }
+    lines.push(
+      'The saved job is available, but related data could not be refreshed.',
+    );
     // Explicit partial success: never claim related-data refresh succeeded.
     lines.push('Related data remains unavailable until recovery succeeds.');
-  } else if (data.processingStatus === 'failed') {
+    return lines;
+  }
+
+  if (data.processingStatus === 'failed') {
     lines.push('The saved job could not be processed.');
     if (data.pasteInstruction) {
       lines.push(data.pasteInstruction);
     }
-  } else if (lines.length === 0) {
+    return lines;
+  }
+
+  if (summary && summary.trim() !== '') {
+    lines.push(summary.trim());
+  } else {
     lines.push(
-      `${outcomeLabel(data.outcome)} — ${data.processingStatus}` +
-        (data.jdQuality ? `/${data.jdQuality}` : ''),
+      `${outcomeLabel(data.outcome)} — ${processingStatusLabel(data.processingStatus)}`,
     );
   }
 
   return lines;
 }
 
+function processingStatusLabel(status: JobProcessingStatus): string {
+  switch (status) {
+    case 'processed':
+      return 'Processed';
+    case 'processing':
+      return 'Processing';
+    case 'failed':
+      return 'Processing failed';
+    case 'received':
+    default:
+      return 'Received';
+  }
+}
+
+function qualityLabel(quality: JobJdQuality): string {
+  switch (quality) {
+    case 'full':
+      return 'Complete';
+    case 'partial':
+      return 'Partial';
+    case 'unscorable':
+      return 'Not scorable';
+    default:
+      return 'Not available';
+  }
+}
+
 export function SavedJobCard({data, summary, errorCode}: SavedJobCardProps) {
   const lines = buildSavedJobSummaryLines(data, summary, errorCode);
-  const heading =
-    data.title?.trim() ||
-    data.company?.trim() ||
-    'Saved job';
+  const heading = data.displayLabel?.trim() || 'Saved job';
   const code = errorCode ?? data.failureCode;
   const isSyncFailed =
     code === NEO4J_SYNC_FAILED_CODE || data.syncOk === false;
@@ -151,13 +173,13 @@ export function SavedJobCard({data, summary, errorCode}: SavedJobCardProps) {
         <HStack gap={1}>
           <Badge
             variant={processingBadgeVariant(data.processingStatus)}
-            label={data.processingStatus}
+            label={processingStatusLabel(data.processingStatus)}
             data-testid="jobagent-job-processing-badge"
           />
           {data.jdQuality ? (
             <Badge
               variant={qualityBadgeVariant(data.jdQuality)}
-              label={data.jdQuality}
+              label={qualityLabel(data.jdQuality)}
               data-testid="jobagent-job-quality-badge"
             />
           ) : null}
@@ -183,15 +205,15 @@ export function SavedJobCard({data, summary, errorCode}: SavedJobCardProps) {
           <MetadataListItem label="Outcome">
             {outcomeLabel(data.outcome)}
           </MetadataListItem>
-          <MetadataListItem label="SQLite">
-            {data.sqliteCommitted ? 'Committed' : 'Not committed'}
+          <MetadataListItem label="Saved status">
+            {data.sqliteCommitted ? 'Saved' : 'Not saved'}
           </MetadataListItem>
           {isSyncFailed ? (
-            <MetadataListItem label="Graph">
-              Sync failed (SQLite remains authoritative)
+            <MetadataListItem label="Related data">
+              Needs recovery
             </MetadataListItem>
           ) : data.syncOk === true ? (
-            <MetadataListItem label="Graph">Synced</MetadataListItem>
+            <MetadataListItem label="Related data">Available</MetadataListItem>
           ) : null}
         </MetadataList>
         {lines.map((line, index) => (

@@ -36,14 +36,14 @@ from app.services.profile_activation import (
 )
 from app.services.profile_deletion import ProfileDeletionError
 from app.services.profile_deletion import delete_profile as delete_profile_service
-from app.services.profile_reextraction import (
-    ProfileReextractError,
-    ProfileReextractionCoordinator,
-)
 from app.services.profile_projection import (
     ProfileProjectionError,
     build_profile_detail,
     build_profile_list_response,
+)
+from app.services.profile_reextraction import (
+    ProfileReextractError,
+    ProfileReextractionCoordinator,
 )
 from app.storage.attachments import AttachmentStorage
 
@@ -80,6 +80,7 @@ def _http_for_reextract_error(exc: Exception) -> HTTPException:
         status_code=status,
         detail={"code": exc.code, "summary": exc.summary},
     )
+
 
 router = APIRouter(tags=["profiles"])
 

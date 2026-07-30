@@ -1,7 +1,6 @@
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {join, normalize} from 'node:path';
-import {fileURLToPath} from 'node:url';
-import {render, screen, waitFor} from '@testing-library/react';
+import {cleanup, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {
@@ -9,7 +8,7 @@ import {
   useSideNavCollapse,
 } from '@astryxdesign/core/SideNav';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import type {CvTailoringController} from '../features/cv-tailoring/state';
 import {
@@ -20,8 +19,10 @@ import type {SavedJobListItem} from '../features/jobs/types';
 import {ProductSidebar} from '../features/navigation/ProductSidebar';
 import {PRODUCT_DESTINATIONS} from '../features/navigation/productNavigation';
 
-const sourceRoot = fileURLToPath(new URL('../features', import.meta.url));
+const sourceRoot = join(process.cwd(), 'src', 'features');
 const JOB_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+afterEach(cleanup);
 
 function job(): SavedJobListItem {
   return {
@@ -93,9 +94,9 @@ function tailoringController(): CvTailoringController {
 }
 
 function CollapseProbe() {
-  const {isCollapsed, setIsCollapsed} = useSideNavCollapse();
+  const {isCollapsed, toggle} = useSideNavCollapse();
   return (
-    <button type="button" onClick={() => setIsCollapsed(!isCollapsed)}>
+    <button type="button" onClick={toggle}>
       {isCollapsed ? 'Collapsed' : 'Expanded'}
     </button>
   );
@@ -149,10 +150,39 @@ describe('product navigation', () => {
     const source = frontendSourceFiles(sourceRoot)
       .map((file) => readFileSync(file, 'utf8'))
       .join('\n');
-    expect(source).not.toContain('LLM chunks');
-    expect(source).not.toContain('Neo4j graph');
-    expect(source).not.toContain('Agent runs');
-    expect(source).not.toContain('features/observability');
+    const forbiddenTechnicalLabels = [
+      'LLM ' + 'chunks',
+      'Neo4j ' + 'graph',
+      'Agent ' + 'runs',
+      'features/' + 'observability',
+    ];
+    for (const label of forbiddenTechnicalLabels) {
+      expect(source).not.toContain(label);
+    }
+    expect(source).not.toMatch(
+      /SQLite remains authoritative|Neo4j sync failed|docker compose exec backend/i,
+    );
+    expect(source).not.toMatch(/<MetadataListItem label="(?:SQLite|Graph)">/);
+    expect(source).not.toMatch(/description=\{`[^`]*\.code/);
+
+    const forbiddenProductChrome = [
+      'Xoá JD',
+      'Thông tin JD',
+      'Công ty',
+      'Thao tác JD',
+      'Danh sách',
+      'Nguồn',
+      'Mở CV gốc',
+      'Đóng',
+      'Lưu JD',
+      'Không lưu',
+      'Đã nhận diện nội dung JD',
+      'Chưa có kết quả đánh giá',
+      'Lưu JD & đánh giá lại',
+    ];
+    for (const literal of forbiddenProductChrome) {
+      expect(source).not.toContain(literal);
+    }
   });
 
   it('keeps retained product copy English and visible fallbacks UUID-free', () => {
@@ -164,22 +194,15 @@ describe('product navigation', () => {
   });
 
   it('keeps saved-job and CV-tailoring controller ownership in App', () => {
-    const app = readFileSync(
-      fileURLToPath(new URL('../app/App.tsx', import.meta.url)),
-      'utf8',
-    );
+    const app = readFileSync(join(process.cwd(), 'src', 'app', 'App.tsx'), 'utf8');
     const controllerDefinitions = new Set(
       [
-        fileURLToPath(
-          new URL('../features/jobs/savedJobsState.ts', import.meta.url),
-        ),
-        fileURLToPath(
-          new URL('../features/cv-tailoring/state.ts', import.meta.url),
-        ),
+        join(process.cwd(), 'src', 'features', 'jobs', 'savedJobsState.ts'),
+        join(process.cwd(), 'src', 'features', 'cv-tailoring', 'state.ts'),
       ].map(normalize),
     );
     const featureSource = frontendSourceFiles(
-      fileURLToPath(new URL('../features', import.meta.url)),
+      sourceRoot,
     )
       .filter((file) => !controllerDefinitions.has(normalize(file)))
       .map((file) => readFileSync(file, 'utf8'))
@@ -200,11 +223,12 @@ describe('product navigation', () => {
     expect(savedJobs.loadList).not.toHaveBeenCalled();
     expect(tailoring.loadSessions).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', {name: 'Expanded'}));
-    expect(screen.getByRole('button', {name: 'Collapsed'})).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
+    const shell = screen.getByTestId('jobagent-product-sidebar').closest('nav')!;
+    await userEvent.click(within(shell).getByRole('button', {name: 'Expanded'}));
+    expect(within(shell).getByRole('button', {name: 'Collapsed'})).toBeInTheDocument();
+    await userEvent.click(within(shell).getByRole('button', {name: 'Saved Jobs'}));
 
-    expect(screen.getByRole('button', {name: 'Expanded'})).toBeInTheDocument();
+    expect(within(shell).getByRole('button', {name: 'Expanded'})).toBeInTheDocument();
     await waitFor(() => expect(savedJobs.loadList).toHaveBeenCalledTimes(1));
     expect(tailoring.loadSessions).not.toHaveBeenCalled();
 
@@ -214,7 +238,7 @@ describe('product navigation', () => {
     expect(savedJobs.selectJob).toHaveBeenCalledWith(JOB_ID);
     expect(savedJobs.loadDetail).toHaveBeenCalledWith(JOB_ID);
 
-    await userEvent.click(screen.getByRole('button', {name: 'Tailored CVs'}));
+    await userEvent.click(within(shell).getByRole('button', {name: 'Tailored CVs'}));
     await waitFor(() => expect(tailoring.loadSessions).toHaveBeenCalledTimes(1));
     expect(savedJobs.loadList).toHaveBeenCalledTimes(1);
   });
@@ -223,22 +247,23 @@ describe('product navigation', () => {
     const savedJobs = savedJobsController();
     const tailoring = tailoringController();
     const view = render(productShell(savedJobs, tailoring));
-    await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
-    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
+    const shell = screen.getByTestId('jobagent-product-sidebar').closest('nav')!;
+    await userEvent.click(within(shell).getByRole('button', {name: 'Saved Jobs'}));
+    expect(within(view.container).getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
     view.rerender(productShell(savedJobs, tailoring, 0, true));
-    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-editor-mode', 'true');
-    expect(screen.queryByTestId(`jobagent-saved-job-select-${JOB_ID}`)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Collapsed'})).toBeInTheDocument();
+    expect(within(view.container).getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-editor-mode', 'true');
+    expect(within(view.container).queryByTestId(`jobagent-saved-job-select-${JOB_ID}`)).not.toBeInTheDocument();
+    expect(within(shell).getByRole('button', {name: 'Collapsed'})).toBeInTheDocument();
     view.rerender(productShell(savedJobs, tailoring));
-    expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
-    expect(screen.getByRole('button', {name: 'Expanded'})).toBeInTheDocument();
+    expect(within(view.container).getByTestId('jobagent-product-sidebar')).toHaveAttribute('data-selected-destination', 'saved-jobs');
+    expect(within(shell).getByRole('button', {name: 'Expanded'})).toBeInTheDocument();
   });
 
   it('refreshes open Saved Jobs after invalidation and keeps closed destinations lazy', async () => {
     const openSavedJobs = savedJobsController(JOB_ID);
     const openTailoring = tailoringController();
     const openView = render(productShell(openSavedJobs, openTailoring));
-    await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
+    await userEvent.click(within(openView.container).getByRole('button', {name: 'Saved Jobs'}));
     await waitFor(() => expect(openSavedJobs.loadList).toHaveBeenCalledTimes(1));
     vi.mocked(openSavedJobs.loadList).mockClear();
 
@@ -264,7 +289,7 @@ describe('product navigation', () => {
     expect(closedSavedJobs.loadList).not.toHaveBeenCalled();
     expect(closedSavedJobs.loadDetail).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
+    await userEvent.click(within(closedView.container).getByRole('button', {name: 'Saved Jobs'}));
     await waitFor(() => {
       expect(closedSavedJobs.loadList).toHaveBeenCalledTimes(1);
       expect(closedSavedJobs.loadList).toHaveBeenCalledWith({}, {force: true});

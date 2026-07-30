@@ -4,8 +4,6 @@ from collections.abc import AsyncIterator
 
 import anyio
 import pytest
-from fastapi import HTTPException
-
 from app.api.sse import (
     format_profile_reextract_sse,
     format_validated_sse,
@@ -18,6 +16,7 @@ from app.schemas.profile_reextraction import (
 )
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.chat_turns import ChatTurnError
+from fastapi import HTTPException
 
 RUN_ID = "11111111-1111-4111-8111-111111111111"
 PROFILE_ID = "22222222-2222-4222-8222-222222222222"

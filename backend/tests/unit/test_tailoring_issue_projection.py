@@ -34,7 +34,12 @@ def _content():
                             "subtitle": None,
                             "date_text": None,
                             "location": None,
-                            "body": {"text": "Grounded", "source_fact_ids": ["sf_11111111111111111111111111111111"]},
+                            "body": {
+                                "text": "Grounded",
+                                "source_fact_ids": [
+                                    "sf_11111111111111111111111111111111"
+                                ],
+                            },
                             "bullets": [],
                             "attributes": [],
                         }
@@ -48,9 +53,7 @@ def _content():
 def test_maps_internal_issue_to_bounded_user_issue() -> None:
     projected = project_grounding_issues(
         issue_list=[
-            GroundingIssue(
-                code="CROSS_SECTION_FACT", path="sections[0].items[0].body"
-            )
+            GroundingIssue(code="CROSS_SECTION_FACT", path="sections[0].items[0].body")
         ],
         parent=_content(),
     )
@@ -80,9 +83,10 @@ def test_durable_activity_codec_round_trips_only_allowlisted_identity() -> None:
         code="EMPTY_PROVENANCE", path="sections[0].items[0].bullets[1]"
     )
     assert decode_internal_issue(encode_internal_issue(issue)) == issue
-    assert decode_internal_issue(
-        "tailoring-grounding:v1:UNKNOWN_FACT|provider.secret[99]"
-    ) is None
+    assert (
+        decode_internal_issue("tailoring-grounding:v1:UNKNOWN_FACT|provider.secret[99]")
+        is None
+    )
     assert decode_internal_issue(
         encode_internal_issue(
             GroundingIssue(code="UNKNOWN_FACT", path="provider.secret[99]")
@@ -110,6 +114,4 @@ def test_chat_failure_omits_issues_while_tailoring_failure_is_safe() -> None:
         summary="Tailored content is not source-supported",
         issues=[issue],
     )
-    assert tailored.model_dump(mode="json")["issues"] == [
-        issue.model_dump(mode="json")
-    ]
+    assert tailored.model_dump(mode="json")["issues"] == [issue.model_dump(mode="json")]

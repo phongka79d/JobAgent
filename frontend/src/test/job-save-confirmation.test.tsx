@@ -790,7 +790,7 @@ describe('Live and restart JD confirmation host', () => {
     expect(
       screen.getByText('Waiting for your confirmation · 1 step'),
     ).toBeInTheDocument();
-    expect(screen.getByText('save_job · running')).toBeInTheDocument();
+    expect(screen.getByText('Saving this job')).toBeInTheDocument();
     expect(screen.queryByText('Run interrupted')).not.toBeInTheDocument();
     expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
       'false',
@@ -820,7 +820,7 @@ describe('Live and restart JD confirmation host', () => {
     expect(
       screen.getByText('Waiting for your confirmation · 1 step'),
     ).toBeInTheDocument();
-    expect(screen.getByText('save_job · running')).toBeInTheDocument();
+    expect(screen.getByText('Saving this job')).toBeInTheDocument();
     expect(screen.queryByText('Run interrupted')).not.toBeInTheDocument();
     expect(getComposerEditable(container).getAttribute('contenteditable')).toBe(
       'false',
@@ -839,7 +839,9 @@ describe('Live and restart JD confirmation host', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Run interrupted')).toBeInTheDocument();
+      expect(
+        screen.getByText('Run interrupted — new turns are blocked until resumed'),
+      ).toBeInTheDocument();
     });
     expect(
       screen.queryByTestId('jobagent-jd-confirmation-card'),

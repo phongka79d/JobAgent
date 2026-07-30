@@ -65,9 +65,7 @@ class _Invoker:
         self.messages.append(messages)
         return self.patch.model_copy(deep=True)
 
-    def supports(
-        self, *, output_text: str, cited_evidence: Sequence[str]
-    ) -> bool:
+    def supports(self, *, output_text: str, cited_evidence: Sequence[str]) -> bool:
         del output_text, cited_evidence
         return True
 
@@ -139,9 +137,7 @@ async def _seed_ready_source(factory):
         )
         session.add(attachment)
         await session.flush()
-        document_model = _document().model_copy(
-            update={"attachment_id": attachment.id}
-        )
+        document_model = _document().model_copy(update={"attachment_id": attachment.id})
         profile = Profile(
             attachment_id=attachment.id,
             display_name="Synthetic Candidate",
@@ -367,12 +363,9 @@ def test_later_ai_and_manual_no_changes_preserve_one_immutable_parent(
                 instruction="Tailor the summary",
                 parent_run_id=None,
             )
-            assert (
-                [event async for event in coordinator.stream_initial_version(initial)][
-                    -1
-                ].payload.outcome
-                == "version_created"
-            )
+            assert [
+                event async for event in coordinator.stream_initial_version(initial)
+            ][-1].payload.outcome == "version_created"
 
             async with factory() as session:
                 first = await tailoring_repo.get_latest_version(
@@ -669,7 +662,9 @@ def test_grounding_failure_persists_only_bounded_internal_issue_identity(
         from app.services.tailoring_issue_projection import decode_internal_issue
 
         class RejectingInvoker(_Invoker):
-            def supports(self, *, output_text: str, cited_evidence: Sequence[str]) -> bool:
+            def supports(
+                self, *, output_text: str, cited_evidence: Sequence[str]
+            ) -> bool:
                 del output_text, cited_evidence
                 return False
 
@@ -680,8 +675,22 @@ def test_grounding_failure_persists_only_bounded_internal_issue_identity(
             patch = _patch_for_summary(document, profile_model)
             section = patch.sections[0]
             item = section.items[0]
-            changed_body = item.body.model_copy(update={"text": "Unsupported synthetic claim"})
-            patch = patch.model_copy(update={"sections": [section.model_copy(update={"items": [item.model_copy(update={"body": changed_body})]})]})
+            changed_body = item.body.model_copy(
+                update={"text": "Unsupported synthetic claim"}
+            )
+            patch = patch.model_copy(
+                update={
+                    "sections": [
+                        section.model_copy(
+                            update={
+                                "items": [
+                                    item.model_copy(update={"body": changed_body})
+                                ]
+                            }
+                        )
+                    ]
+                }
+            )
             coordinator = TailoringCoordinator(
                 session_factory=factory,
                 storage=TailoringArtifactStorage(tmp_path / "files"),
@@ -696,13 +705,19 @@ def test_grounding_failure_persists_only_bounded_internal_issue_identity(
                 instruction="Add unsupported detail",
                 parent_run_id=None,
             )
-            events = [event async for event in coordinator.stream_initial_version(launch)]
+            events = [
+                event async for event in coordinator.stream_initial_version(launch)
+            ]
             assert events[-1].event == "run_failed"
             assert events[-1].payload.issues
             assert "Unsupported synthetic claim" not in events[-1].model_dump_json()
             async with factory() as session:
                 rows = await activities_repo.list_for_run_ids(session, [launch.run_id])
-                issue_rows = [row for row in rows if decode_internal_issue(row.technical_name) is not None]
+                issue_rows = [
+                    row
+                    for row in rows
+                    if decode_internal_issue(row.technical_name) is not None
+                ]
                 assert 1 <= len(issue_rows) <= 10
                 assert all(row.label == "Source support check" for row in issue_rows)
         finally:

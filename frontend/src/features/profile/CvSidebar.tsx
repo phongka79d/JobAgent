@@ -26,7 +26,11 @@ import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
 import {useCvManagerState} from '../cv-manager/state';
 import type {SavedJobsController} from '../jobs/savedJobsState';
 import type {CvTailoringController} from '../cv-tailoring/state';
-import {ProductSidebar} from '../navigation/ProductSidebar';
+import {
+  ProductSidebar,
+  type ProductSidebarEditorMemory,
+} from '../navigation/ProductSidebar';
+import type {ProductDestination} from '../navigation/productNavigation';
 import {
   ChatApiError,
   fetchActiveProfileCompat,
@@ -119,7 +123,7 @@ function CvSidebarShell({children}: {children?: ReactNode}) {
         defaultWidth: Math.round(viewportWidth * 0.6),
         minWidth: 360,
         maxWidth: Math.round(viewportWidth * 0.72),
-        autoSaveId: 'jobagent-observability-sidebar-width-v2',
+        // ponytail: Intentionally no autoSaveId: Astryx restores collapsed width 0 independently of SideNav collapse state.
       }}
       collapsible={{hasButton: false}}
       className="jobagent-cv-sidebar-shell"
@@ -176,6 +180,9 @@ function CvSidebarController({
     profileReady: selectedWorkspaceProfile?.state === 'ready',
   });
   const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
+  const [productDestination, setProductDestination] =
+    useState<ProductDestination>('overview');
+  const productEditorMemoryRef = useRef<ProductSidebarEditorMemory>(null);
   const handledCvManagerRequests = useRef(new Set<number>());
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
@@ -183,17 +190,24 @@ function CvSidebarController({
 
   const [profile, setProfile] = useState<ProfileReadResponse | null>(null);
   const profileScope = workspace.state.activeProfileId ?? 'legacy';
+  const workspaceIsReady =
+    workspace.state.phase === undefined || workspace.state.phase === 'ready';
   const [loadedProfileScope, setLoadedProfileScope] = useState<string | null>(
     null,
   );
   const scopedProfile =
-    loadedProfileScope === profileScope ? profile : null;
+    workspaceIsReady && loadedProfileScope === profileScope ? profile : null;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const loadedRefreshKey = useRef(refreshKey);
   const loadedActivationKey = useRef(activationKey);
+
+  useEffect(() => {
+    if (!workspaceIsReady) setLoadedProfileScope(null);
+  }, [workspaceIsReady]);
+
   useEffect(() => {
     loadedActivationKey.current = activationKey;
   }, [activationKey]);
@@ -209,6 +223,7 @@ function CvSidebarController({
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
+      if (!workspaceIsReady) return;
       try {
         const next = await loadProfile(signal);
         if (!signal?.aborted) {
@@ -229,10 +244,11 @@ function CvSidebarController({
         setLoadError(summary);
       }
     },
-    [loadProfile, profileScope],
+    [loadProfile, profileScope, workspaceIsReady],
   );
 
   useEffect(() => {
+    if (!workspaceIsReady) return;
     const isRefreshRequested = loadedRefreshKey.current !== refreshKey;
     loadedRefreshKey.current = refreshKey;
     const isProfileScopeChanged = loadedProfileScope !== profileScope;
@@ -245,7 +261,7 @@ function CvSidebarController({
     return () => {
       controller.abort();
     };
-  }, [loadedProfileScope, profile, profileScope, reload, refreshKey]);
+  }, [loadedProfileScope, profile, profileScope, reload, refreshKey, workspaceIsReady]);
 
   const handleFileChange = useCallback(
     (files: File | File[] | null) => {
@@ -393,17 +409,6 @@ function CvSidebarController({
           void cvManager.open();
         }}
       />
-      <CvManagerDrawer
-        isOpen={isCvManagerOpen}
-        onOpenChange={setIsCvManagerOpen}
-        controller={cvManager}
-        onActivateProfile={(attachmentId) => {
-          const item = cvManager.state.items.find((candidate) => candidate.id === attachmentId);
-          if (item?.profile_id) void workspace.activate(item.profile_id);
-        }}
-        onDeleted={handleCvManagerDeleted}
-        onProfileApproved={onProfileApproved}
-      />
     </VStack>
   );
 
@@ -418,6 +423,22 @@ function CvSidebarController({
         tailoring={tailoring}
         onOpenTailoringSession={onOpenTailoringSession}
         editorMode={editorMode}
+        selectedDestination={productDestination}
+        onSelectedDestinationChange={setProductDestination}
+        editorMemoryRef={productEditorMemoryRef}
+      />
+      <CvManagerDrawer
+        isOpen={isCvManagerOpen}
+        onOpenChange={setIsCvManagerOpen}
+        controller={cvManager}
+        onActivateProfile={(attachmentId) => {
+          const item = cvManager.state.items.find(
+            (candidate) => candidate.id === attachmentId,
+          );
+          if (item?.profile_id) void workspace.activate(item.profile_id);
+        }}
+        onDeleted={handleCvManagerDeleted}
+        onProfileApproved={onProfileApproved}
       />
     </CvSidebarShell>
   );

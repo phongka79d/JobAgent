@@ -75,6 +75,7 @@ class JobCompact(TypedDict):
     failure_code: str | None
     title: str | None
     company: str | None
+    summary: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -490,6 +491,7 @@ async def list_compact(
 def _to_compact(row: JobPost) -> JobCompact:
     title: str | None = None
     company: str | None = None
+    summary: str | None = None
     extraction = row.extraction_json
     if isinstance(extraction, dict):
         raw_title = extraction.get("title")
@@ -498,6 +500,9 @@ def _to_compact(row: JobPost) -> JobCompact:
             title = raw_title
         if isinstance(raw_company, str):
             company = raw_company
+        raw_summary = extraction.get("summary")
+        if isinstance(raw_summary, str):
+            summary = raw_summary
     return JobCompact(
         id=row.id,
         source_type=row.source_type,
@@ -507,6 +512,7 @@ def _to_compact(row: JobPost) -> JobCompact:
         failure_code=row.failure_code,
         title=title,
         company=company,
+        summary=summary,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -14,4 +14,5 @@ export const TAILORING_COPY = {
     required_source_missing: 'Required source evidence is missing.',
     unsupported_value: 'This value is outside the supported content bounds.',
   },
+  pageCount: (count: number) => `${count} ${count === 1 ? 'page' : 'pages'}`,
 } as const;

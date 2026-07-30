@@ -858,7 +858,6 @@ def _project_save_job_narration(payload: dict[str, Any]) -> str:
     data = payload.get("data")
     data_dict = data if isinstance(data, dict) else {}
     outcome = data_dict.get("outcome")
-    job_id = data_dict.get("job_id")
     ok = payload.get("ok") is True
 
     if not ok:
@@ -878,23 +877,14 @@ def _project_save_job_narration(payload: dict[str, Any]) -> str:
         base = summary or "Returned existing job for exact content match"
         if "created" in base.lower() and "return" not in base.lower():
             base = "Returned existing job for exact content match"
-        if isinstance(job_id, str) and job_id.strip():
-            return (
-                f"{base} Existing job_id={job_id.strip()} was reused; "
-                "no new Job was created."
-            )
         return f"{base} No new Job was created."
 
     if outcome == "created":
         base = summary or "Saved job description"
-        if isinstance(job_id, str) and job_id.strip():
-            return f"{base} job_id={job_id.strip()}."
         return base
 
     if outcome == "retried":
         base = summary or "Retried failed job in place after exact content match"
-        if isinstance(job_id, str) and job_id.strip():
-            return f"{base} job_id={job_id.strip()}."
         return base
 
     if summary:

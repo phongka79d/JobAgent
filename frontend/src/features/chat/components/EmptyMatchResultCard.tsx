@@ -1,6 +1,6 @@
 /**
  * Zero-result match_jobs recovery card (Plan 10 Zero-Result Chat UX).
- * Exact Vietnamese heading/CTA; durable source_message_id action only.
+ * English heading/CTA; durable source_message_id action only.
  * Success reuses MatchCard; unavailable/error keeps truthful recovery UI.
  */
 
@@ -13,19 +13,17 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import {MatchCard} from '../../jobs/MatchCard';
 import type {CompactMatchResult} from '../../jobs/matchResult';
+import {CHAT_COPY} from '../copy';
 
-export const EMPTY_MATCH_HEADING = 'Chưa có kết quả đánh giá';
-export const EMPTY_MATCH_CTA = 'Lưu JD & đánh giá lại';
+export const EMPTY_MATCH_HEADING = CHAT_COPY.noMatch;
+export const EMPTY_MATCH_CTA = CHAT_COPY.saveAndEvaluate;
 
 /** One short nontechnical explanation (Master §15.5 / Plan 10). */
-export const EMPTY_MATCH_EXPLANATION =
-  'JD từ tin nhắn này chưa có đánh giá đã lưu.';
+export const EMPTY_MATCH_EXPLANATION = CHAT_COPY.noSavedEvaluation;
 
-export const EMPTY_MATCH_UNAVAILABLE_HINT =
-  'JD có thể đã được lưu nhưng chưa đánh giá được. Thử lại hoặc gửi lại tin nhắn.';
+export const EMPTY_MATCH_UNAVAILABLE_HINT = CHAT_COPY.evaluationUnavailable;
 
-export const EMPTY_MATCH_ERROR_HINT =
-  'Không thể lưu và đánh giá lúc này. Thử lại hoặc gửi lại tin nhắn.';
+export const EMPTY_MATCH_ERROR_HINT = CHAT_COPY.evaluationError;
 
 export type EmptyMatchResultCardProps = {
   /** Durable initiating user message id only — never composer/latest inference. */
@@ -85,7 +83,7 @@ export function EmptyMatchResultCard({
         {failureHint ? (
           <Banner
             status="warning"
-            title="Chưa đánh giá được"
+            title={CHAT_COPY.evaluationUnavailableTitle}
             description={failureHint}
             container="section"
             data-testid="jobagent-empty-match-failure"

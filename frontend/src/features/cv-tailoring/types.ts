@@ -203,6 +203,10 @@ export function tailoringIssueId(issue: TailoringUserIssue): string {
   return `tailoring-issue-${safeIssueToken(issue.section_id)}-${issue.item_index ?? 'section'}-${issue.field}-${issue.reason}`;
 }
 
+export function tailoringSectionId(sectionId: string): string {
+  return `tailoring-section-${safeIssueToken(sectionId)}`;
+}
+
 export function tailoringFieldId(
   sectionId: string,
   itemIndex: number,

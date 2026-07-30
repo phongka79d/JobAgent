@@ -2,6 +2,7 @@
  * CV sidebar + shared upload path tests (04A).
  */
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -293,6 +294,33 @@ describe('profile transport parsers', () => {
 });
 
 describe('CvSidebar empty / active states', () => {
+  it('recovers product navigation from a legacy zero-width SideNav resize value', async () => {
+    const legacyResizeKey =
+      'astryx-resizable:jobagent-observability-sidebar-width-v2';
+    window.localStorage.setItem(legacyResizeKey, JSON.stringify(0));
+    try {
+      render(
+        <Theme theme={neutralTheme}>
+          <CvSidebar
+            {...productControllers()}
+            isUploadDisabled={false}
+            onSidebarUploadSuccess={vi.fn()}
+            deps={{loadProfile: vi.fn().mockResolvedValue(emptyProfile()), uploadCv: vi.fn()}}
+          />
+        </Theme>,
+      );
+
+      expect(screen.getByTestId('jobagent-cv-sidebar')).not.toHaveStyle({width: '0px'});
+      await userEvent.click(screen.getByRole('button', {name: 'Saved Jobs'}));
+      expect(screen.getByTestId('jobagent-product-sidebar')).toHaveAttribute(
+        'data-selected-destination',
+        'saved-jobs',
+      );
+    } finally {
+      window.localStorage.removeItem(legacyResizeKey);
+    }
+  });
+
   it('reloads active profile details when the workspace profile changes', async () => {
     const profileA = {
       ...uploadResponse('profile-a.pdf').bootstrap!.profile,
@@ -376,6 +404,135 @@ describe('CvSidebar empty / active states', () => {
       );
     });
     expect(loadProfile).toHaveBeenCalledTimes(2);
+  });
+
+  it('withholds a global profile result until the rehydrated workspace scope is ready', async () => {
+    const profileA = {
+      ...uploadResponse('ava.pdf').bootstrap!.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'ava-source',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const profileB = {
+      ...profileA,
+      id: PROFILE_B_ID,
+      display_name: 'Noah',
+      cv_filename: 'noah.pdf',
+      source_hash: 'noah-source',
+      is_active: false,
+    };
+    const avaProfile = activeProfile('ava.pdf');
+    avaProfile.profile!.current_title = 'Ava Engineer';
+    const noahProfile = activeProfile('noah.pdf');
+    noahProfile.profile!.current_title = 'Noah Principal';
+    let resolveStaleGlobalProfile!: (profile: ProfileReadResponse) => void;
+    let resolveReadyProfile!: (profile: ProfileReadResponse) => void;
+    const staleGlobalProfile = new Promise<ProfileReadResponse>((resolve) => {
+      resolveStaleGlobalProfile = resolve;
+    });
+    const readyProfile = new Promise<ProfileReadResponse>((resolve) => {
+      resolveReadyProfile = resolve;
+    });
+    const loadProfile = vi
+      .fn()
+      .mockResolvedValueOnce(avaProfile)
+      .mockReturnValueOnce(staleGlobalProfile)
+      .mockReturnValueOnce(readyProfile);
+
+    function Harness() {
+      const [phase, setPhase] = useState<'ready' | 'rehydrating'>('ready');
+      const [activeProfileId, setActiveProfileId] = useState(PROFILE_ID);
+      const [refreshKey, setRefreshKey] = useState(0);
+      const workspace: ProfileWorkspaceController = {
+        state: {
+          phase,
+          profiles: [
+            {...profileA, is_active: activeProfileId === PROFILE_ID},
+            {...profileB, is_active: activeProfileId === PROFILE_B_ID},
+          ],
+          activeProfileId,
+          selectedConversationId: CONVERSATION_ID,
+          conversations: [],
+          pending: new Set(),
+          error: null,
+        },
+        activate: vi.fn(),
+        createConversation: vi.fn(),
+        selectConversation: vi.fn(),
+        deleteConversation: vi.fn(),
+        renameProfile: vi.fn(),
+        deleteProfile: vi.fn(),
+        reload: vi.fn(),
+        adoptBootstrap: vi.fn(),
+      };
+      return (
+        <>
+          <button type="button" onClick={() => setRefreshKey(1)}>
+            Refresh global profile
+          </button>
+          <button type="button" onClick={() => setPhase('rehydrating')}>
+            Start rehydration
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveProfileId(PROFILE_B_ID);
+              setPhase('ready');
+            }}
+          >
+            Publish Noah workspace
+          </button>
+          <CvSidebar
+            {...productControllers()}
+            isUploadDisabled={false}
+            onSidebarUploadSuccess={vi.fn()}
+            workspace={workspace}
+            refreshKey={refreshKey}
+            deps={{loadProfile, uploadCv: vi.fn()}}
+          />
+        </>
+      );
+    }
+
+    render(
+      <Theme theme={neutralTheme}>
+        <Harness />
+      </Theme>,
+    );
+    expect(await screen.findByTestId('jobagent-active-cv-filename')).toHaveTextContent(
+      'ava.pdf',
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: 'Refresh global profile'}));
+    await waitFor(() => expect(loadProfile).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole('button', {name: 'Start rehydration'}));
+    await act(async () => {
+      resolveStaleGlobalProfile(noahProfile);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('jobagent-profile-state')).toHaveTextContent('Loading...');
+    expect(screen.queryByText('Noah Principal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('jobagent-active-cv-filename')).not.toHaveTextContent(
+      'noah.pdf',
+    );
+
+    await userEvent.click(screen.getByRole('button', {name: 'Publish Noah workspace'}));
+    await waitFor(() => expect(loadProfile).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      resolveReadyProfile(noahProfile);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('jobagent-profile-state')).toHaveTextContent(
+        'Active - Noah Principal',
+      );
+      expect(screen.getByTestId('jobagent-active-cv-filename')).toHaveTextContent(
+        'noah.pdf',
+      );
+    });
   });
 
   it('shows empty profile state, upload, and disabled download', async () => {

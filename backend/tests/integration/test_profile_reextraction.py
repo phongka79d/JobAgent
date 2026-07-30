@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy import func, select
-
 from app.core.ids import new_uuid
 from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
 from app.db.session import build_async_engine
@@ -28,6 +26,7 @@ from app.services.profile_reextraction import (
     ProfileReextractionCoordinator,
 )
 from app.storage.attachments import AttachmentStorage
+from sqlalchemy import func, select
 
 from tests.integration.test_profile_approval import _seed_cv_document_draft
 from tests.support.db_migration import run_async, session_factory
@@ -56,9 +55,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
     pdf = CV_DIR / "digital_cv_01.pdf"
     invoker = CoveringDocumentInvoker()
     scorer = Mock(side_effect=AssertionError("re-extraction must not score"))
-    monkeypatch.setattr(
-        "app.services.job_evaluation.project_single_job_match", scorer
-    )
+    monkeypatch.setattr("app.services.job_evaluation.project_single_job_match", scorer)
 
     async def _unexpected_activation(*args: object, **kwargs: object) -> None:
         raise AssertionError("ready re-extraction must not activate attachments")
@@ -180,9 +177,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 before_counts: list[int | None] = []
                 for model in (ChatMessage, AgentRun, ToolExecution, Conversation):
                     before_counts.append(
-                        await session.scalar(
-                            select(func.count()).select_from(model)
-                        )
+                        await session.scalar(select(func.count()).select_from(model))
                     )
 
             coordinator = ProfileReextractionCoordinator(
@@ -224,17 +219,13 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
             async with factory() as session:
                 assert await profile_repo.get_current_draft(session) is None
                 assert await cv_doc_repo.get_draft(session, attachment_id) is None
-            republished = [
-                event async for event in coordinator.stream(profile_id)
-            ]
+            republished = [event async for event in coordinator.stream(profile_id)]
             assert republished[-1].event == "reextract_review_ready"
             async with factory() as session:
                 after_counts: list[int | None] = []
                 for model in (ChatMessage, AgentRun, ToolExecution, Conversation):
                     after_counts.append(
-                        await session.scalar(
-                            select(func.count()).select_from(model)
-                        )
+                        await session.scalar(select(func.count()).select_from(model))
                     )
                 assert after_counts == before_counts
                 draft = await profile_repo.get_current_draft(session)
@@ -300,9 +291,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
 
             async with factory() as session:
                 refreshed = await profile_repo.get_profile(session, profile_id)
-                prefs = await profile_repo.get_profile_preferences(
-                    session, profile_id
-                )
+                prefs = await profile_repo.get_profile_preferences(session, profile_id)
                 document = await cv_doc_repo.get_document(session, attachment_id)
                 conversations = await conversations_repo.list_for_profile(
                     session, profile_id=profile_id, limit=50, before=None

@@ -71,6 +71,7 @@ function listItemPayload(
     id,
     title: 'Backend Engineer',
     company: 'Acme',
+    display_label: 'Backend Engineer · Acme',
     processing_status: 'processed',
     jd_quality: 'full',
     source_type: 'text',

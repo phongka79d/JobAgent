@@ -13,24 +13,28 @@ export function ScoreBreakdown({data}: ScoreBreakdownProps) {
     <Collapsible trigger={JOB_COPY.whyThisScore} defaultIsOpen={false} data-testid="jobagent-match-score-breakdown">
       <VStack gap={2} width="100%">
         <Text type="supporting" color="secondary" as="p">
-          Overall match: {formatDisplayScore(data.finalScore)}
+          {JOB_COPY.overallMatch(formatDisplayScore(data.finalScore))}
         </Text>
-        <Text type="label" as="p">Matched skills</Text>
+        <Text type="label" as="p">{JOB_COPY.matchedSkills}</Text>
         {data.matchedRequiredSkills.map((skill) => (
           <Token key={skill.jobSkillKey} label={skill.jobSkillDisplayName} size="sm" color="green" />
         ))}
-        <Text type="label" as="p">Related skills</Text>
+        <Text type="label" as="p">{JOB_COPY.relatedSkills}</Text>
         {data.relatedSkills.map((skill) => (
           <Token key={skill.jobSkillKey} label={skill.jobSkillDisplayName} size="sm" color="blue" />
         ))}
-        <Text type="label" as="p">Missing skills</Text>
+        <Text type="label" as="p">{JOB_COPY.missingSkills}</Text>
         {data.missingRequiredSkills.map((skill) => (
           <Token key={skill.jobSkillKey} label={skill.jobSkillDisplayName} size="sm" color="red" />
         ))}
         {data.components.experienceScore === null ? (
           <Text type="supporting" color="secondary" as="p">{JOB_COPY.notEnoughExperience}</Text>
         ) : null}
-        <Text type="supporting" color="secondary" as="p">{JOB_COPY.incompleteConfidence}</Text>
+        {data.qualityMultiplier < 1 ? (
+          <Text type="supporting" color="secondary" as="p">
+            {JOB_COPY.incompleteConfidence}
+          </Text>
+        ) : null}
       </VStack>
     </Collapsible>
   );

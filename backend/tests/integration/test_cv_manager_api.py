@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,21 +23,15 @@ from app.db.models.attachments import (
 )
 from app.db.models.profiles import Profile
 from app.db.session import build_async_engine, get_session_factory
-from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
-from app.repositories import chat_messages as messages_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profiles as prof_repo
-from app.repositories import tool_executions as tool_repo
 from app.repositories import workspace_state as workspace_repo
 from app.services.cv_manager_projection import allowed_actions
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 from app.tools.profile import (
-    PROFILE_COMMIT_ACTIONS,
-    PROFILE_COMMIT_KIND,
-    PROPOSE_PROFILE_FROM_CV_NAME,
     build_commit_profile_draft_tool,
     build_propose_profile_from_cv_tool,
 )
@@ -47,10 +42,8 @@ from tests.support.db_migration import run_async, session_factory
 from tests.support.health import install_fake_driver, prepare_health_env
 from tests.support.public_api import (
     ai_text,
-    ai_tool_call,
     client_with_fake_chat,
-    override_chat_deps,
-    parse_sse_wire,
+    parse_profile_reextract_wire,
 )
 
 
@@ -170,6 +163,27 @@ def _event_names(events: list[dict[str, Any]]) -> list[str]:
     return [e["event"] for e in events]
 
 
+def _override_direct_reextract(
+    client: Any,
+    *,
+    storage: AttachmentStorage,
+    invoker: _CoveringDocumentInvoker,
+    normalizer: SkillNormalizer,
+) -> None:
+    """Route CV Manager tests through the direct typed re-extraction owner."""
+    from app.api.dependencies import get_profile_reextract_deps
+
+    client.app.dependency_overrides[get_profile_reextract_deps] = lambda: (
+        SimpleNamespace(
+            session_factory=get_session_factory(),
+            storage=storage,
+            document_invoker=invoker,
+            normalizer=normalizer,
+            graph_driver=None,
+        )
+    )
+
+
 def _write_real_pdf(storage: AttachmentStorage, attachment_id: str) -> str:
     pdf = _cv_fixture("digital_cv_01.pdf")
     return storage.write_bytes(attachment_id, pdf.read_bytes())
@@ -219,9 +233,7 @@ def _approval_profile_json() -> dict[str, Any]:
 
 
 @pytest.fixture
-def reprocess_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> tuple[Path, Path]:
+def reprocess_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
     db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
     install_fake_driver(monkeypatch)
     return db_path, files_dir
@@ -273,13 +285,14 @@ async def _seed_cv_manager_matrix(
     factory = session_factory(engine)
     try:
         async with factory() as session:
+
             async def seed(
                 marker: str, name: str, *, state: str = ATTACHMENT_STATE_FAILED
             ) -> Any:
                 aid = new_uuid()
                 row = await att_repo.create_staged(
                     session,
-                    file_hash=f'manager-{marker}',
+                    file_hash=f"manager-{marker}",
                     original_name=name,
                     size_bytes=32,
                     storage_path=_write_real_pdf(storage, aid),
@@ -295,75 +308,71 @@ async def _seed_cv_manager_matrix(
                     await att_repo.mark_deleting(session, aid)
                 else:
                     await att_repo.mark_failed(
-                        session, aid, failure_code='NO_EXTRACTABLE_TEXT'
+                        session, aid, failure_code="NO_EXTRACTABLE_TEXT"
                     )
                 return row
 
             archived = await seed(
-                'archived', 'archived.pdf', state=ATTACHMENT_STATE_ARCHIVED
+                "archived", "archived.pdf", state=ATTACHMENT_STATE_ARCHIVED
             )
             await prof_repo.create_profile(
                 session,
                 attachment_id=archived.id,
-                display_name='Archived profile',
+                display_name="Archived profile",
                 profile_json=_approval_profile_json(),
                 location=None,
-                extraction_version='v1',
-                source_hash='manager-archived-source',
+                extraction_version="v1",
+                source_hash="manager-archived-source",
             )
-            active = await seed(
-                'active', 'active.pdf', state=ATTACHMENT_STATE_ACTIVE
-            )
+            active = await seed("active", "active.pdf", state=ATTACHMENT_STATE_ACTIVE)
             active_profile = await prof_repo.create_profile(
                 session,
                 attachment_id=active.id,
-                display_name='Active profile',
+                display_name="Active profile",
                 profile_json=_approval_profile_json(),
                 location=None,
-                extraction_version='v1',
-                source_hash='manager-active-source',
+                extraction_version="v1",
+                source_hash="manager-active-source",
             )
-            pending = await seed('pending', 'pending.pdf')
+            pending = await seed("pending", "pending.pdf")
             await prof_repo.create_pending_profile(
                 session,
                 attachment_id=pending.id,
-                display_name='Pending profile',
+                display_name="Pending profile",
             )
             deleting = await seed(
-                'deleting', 'deleting.pdf', state=ATTACHMENT_STATE_DELETING
+                "deleting", "deleting.pdf", state=ATTACHMENT_STATE_DELETING
             )
             deleting_profile = await prof_repo.create_profile(
                 session,
                 attachment_id=deleting.id,
-                display_name='Deleting profile',
+                display_name="Deleting profile",
                 profile_json=_approval_profile_json(),
                 location=None,
-                extraction_version='v1',
-                source_hash='manager-deleting-source',
+                extraction_version="v1",
+                source_hash="manager-deleting-source",
             )
-            deleting_profile.state = 'deleting'
-            failed_ready = await seed('failed-ready', 'failed-ready.pdf')
+            deleting_profile.state = "deleting"
+            failed_ready = await seed("failed-ready", "failed-ready.pdf")
             await prof_repo.create_profile(
                 session,
                 attachment_id=failed_ready.id,
-                display_name='Failed ready profile',
+                display_name="Failed ready profile",
                 profile_json=_approval_profile_json(),
                 location=None,
-                extraction_version='v1',
-                source_hash='manager-failed-ready-source',
+                extraction_version="v1",
+                source_hash="manager-failed-ready-source",
             )
-            orphan = await seed('orphan', 'orphan.pdf')
-            await workspace_repo.set_active_profile_id(
-                session, active_profile.id
-            )
+            orphan = await seed("orphan", "orphan.pdf")
+            await workspace_repo.set_active_profile_id(session, active_profile.id)
             await session.commit()
             return {
-                'active': active.id,
-                'archived': archived.id,
-                'pending': pending.id,
-                'deleting': deleting.id,
-                'failed_ready': failed_ready.id,
-                'orphan': orphan.id,
+                "active": active.id,
+                "archived": archived.id,
+                "pending": pending.id,
+                "deleting": deleting.id,
+                "failed_ready": failed_ready.id,
+                "orphan": orphan.id,
             }
     finally:
         await engine.dispose()
@@ -389,24 +398,29 @@ def test_cv_manager_list_projects_actions_without_storage_or_hash(
     db_path, files_dir = reprocess_env
     ids = run_async(_seed_cv_manager_matrix(db_path, AttachmentStorage(files_dir)))
     with client_with_fake_chat(
-        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+        db_path, FakeChatModel(responses=[ai_text("noop")]), ToolRegistry([])
     ) as client:
-        response = client.get('/api/cvs')
+        response = client.get("/api/cvs")
 
     assert response.status_code == 200
-    by_id = {item['id']: item for item in response.json()['items']}
-    assert by_id[ids['active']]['allowed_actions'] == [
-        'preview', 'download', 'reextract'
+    by_id = {item["id"]: item for item in response.json()["items"]}
+    assert by_id[ids["active"]]["allowed_actions"] == [
+        "preview",
+        "download",
+        "reextract",
     ]
-    assert by_id[ids['archived']]['allowed_actions'] == [
-        'preview', 'download', 'activate_profile', 'reextract'
+    assert by_id[ids["archived"]]["allowed_actions"] == [
+        "preview",
+        "download",
+        "activate_profile",
+        "reextract",
     ]
-    assert by_id[ids['pending']]['allowed_actions'] == ['retry_upload']
-    assert by_id[ids['deleting']]['allowed_actions'] == []
-    assert by_id[ids['failed_ready']]['allowed_actions'] == []
-    assert by_id[ids['orphan']]['allowed_actions'] == ['delete_cv']
+    assert by_id[ids["pending"]]["allowed_actions"] == ["retry_upload"]
+    assert by_id[ids["deleting"]]["allowed_actions"] == []
+    assert by_id[ids["failed_ready"]]["allowed_actions"] == []
+    assert by_id[ids["orphan"]]["allowed_actions"] == ["delete_cv"]
     assert all(
-        'storage_path' not in item and 'file_hash' not in item
+        "storage_path" not in item and "file_hash" not in item
         for item in by_id.values()
     )
 
@@ -417,26 +431,24 @@ def test_cv_manager_file_route_validates_disposition_and_ownership(
     db_path, files_dir = reprocess_env
     ids = run_async(_seed_cv_manager_matrix(db_path, AttachmentStorage(files_dir)))
     with client_with_fake_chat(
-        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+        db_path, FakeChatModel(responses=[ai_text("noop")]), ToolRegistry([])
     ) as client:
-        inline = client.get('/api/cvs/' + ids['active'] + '/file')
+        inline = client.get("/api/cvs/" + ids["active"] + "/file")
         attachment = client.get(
-            '/api/cvs/' + ids['active'] + '/file?disposition=attachment'
+            "/api/cvs/" + ids["active"] + "/file?disposition=attachment"
         )
-        invalid = client.get(
-            '/api/cvs/' + ids['active'] + '/file?disposition=download'
-        )
-        pending = client.get('/api/cvs/' + ids['pending'] + '/file')
+        invalid = client.get("/api/cvs/" + ids["active"] + "/file?disposition=download")
+        pending = client.get("/api/cvs/" + ids["pending"] + "/file")
 
     assert inline.status_code == 200
-    assert inline.headers['content-disposition'] == (
-        'inline; filename="active.pdf"; filename*=UTF-8\'\'active.pdf'
+    assert inline.headers["content-disposition"] == (
+        "inline; filename=\"active.pdf\"; filename*=UTF-8''active.pdf"
     )
-    assert inline.headers['x-content-type-options'] == 'nosniff'
-    assert inline.content.startswith(b'%PDF-')
+    assert inline.headers["x-content-type-options"] == "nosniff"
+    assert inline.content.startswith(b"%PDF-")
     assert attachment.status_code == 200
-    assert attachment.headers['content-disposition'] == (
-        'attachment; filename="active.pdf"; filename*=UTF-8\'\'active.pdf'
+    assert attachment.headers["content-disposition"] == (
+        "attachment; filename=\"active.pdf\"; filename*=UTF-8''active.pdf"
     )
     assert invalid.status_code == 422
     assert pending.status_code == 404
@@ -579,51 +591,36 @@ def test_reprocess_active_sse_approval_and_ownership(
 
     att_id, profile_id = run_async(_seed())
     factory = get_session_factory()
-    registry = _build_registry(
-        factory=factory,
-        storage=storage,
-        invoker=invoker,
-        normalizer=normalizer,
-    )
-    model = FakeChatModel(
-        responses=[
-            ai_tool_call(
-                PROPOSE_PROFILE_FROM_CV_NAME,
-                call_id="call-reprocess-active",
-                args={"attachment_id": att_id, "reprocess": True},
-            ),
-        ]
-    )
-    with client_with_fake_chat(db_path, model, registry) as client:
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[]), ToolRegistry([])
+    ) as client:
+        _override_direct_reextract(
+            client,
+            storage=storage,
+            invoker=invoker,
+            normalizer=normalizer,
+        )
         resp = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert resp.status_code == 200, resp.text
-        events = parse_sse_wire(resp.text)
+        events = parse_profile_reextract_wire(resp.text)
         names = _event_names(events)
-        assert names[0] == "run_started"
-        assert "tool_status" in names
-        assert names[-1] == "approval_required"
-        assert "run_completed" not in names
-        approval = events[-1]
-        assert approval["payload"]["kind"] == PROFILE_COMMIT_KIND
-        assert approval["payload"]["allowed_actions"] == list(PROFILE_COMMIT_ACTIONS)
-        run_id = approval["run_id"]
+        assert names[0] == "reextract_progress"
+        assert names[-1] == "reextract_review_ready"
+        assert not ({"run_started", "tool_status", "approval_required"} & set(names))
+        review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
+        assert review.status_code == 200, review.text
+        assert review.json()["profile_id"] == profile_id
+        assert review.json()["revision"] == events[-1]["payload"]["revision"]
 
     async def _assert_pending() -> None:
+        from app.db.models.chat import AgentRun, ChatMessage, ToolExecution
+        from sqlalchemy import func, select
+
         async with factory() as session:
-            run = await runs_repo.get_run(session, run_id)
-            assert run is not None
-            assert run.state == "interrupted"
-            assert run.source_attachment_id == att_id
-            owner = await runs_repo.resolve_run_owner(session, run_id)
-            assert owner is not None
-            msgs = await messages_repo.list_messages(
-                session, conversation_id=owner.conversation_id
-            )
-            owned = [m for m in msgs if m.source_attachment_id == att_id]
-            assert owned
             draft = await prof_repo.get_current_draft(session)
             assert draft is not None
             assert draft.source_attachment_id == att_id
+            assert draft.target_profile_id == profile_id
             doc = await cv_doc_repo.get_draft(session, att_id)
             assert doc is not None
             att = await att_repo.get_by_id(session, att_id)
@@ -631,14 +628,11 @@ def test_reprocess_active_sse_approval_and_ownership(
             assert att.state == ATTACHMENT_STATE_ACTIVE
             profile = await prof_repo.get_active_profile(session)
             assert profile is not None
+            assert profile.id == profile_id
             assert profile.active_attachment_id == att_id
-            # Prior approved document (if any) absent; active profile unchanged.
-            tools = await tool_repo.list_for_run_ids(session, [run_id])
-            propose_tools = [
-                t for t in tools if t.tool_name == PROPOSE_PROFILE_FROM_CV_NAME
-            ]
-            assert propose_tools
-            assert propose_tools[0].source_attachment_id == att_id
+            for model in (AgentRun, ChatMessage, ToolExecution):
+                count = await session.scalar(select(func.count()).select_from(model))
+                assert int(count or 0) == 0
 
     run_async(_assert_pending())
     assert invoker.calls >= 1
@@ -713,9 +707,7 @@ def test_reextract_rechecks_active_profile_before_creating_run_or_provider_work(
                 )
                 from app.repositories import workspace_state as workspace_repo
 
-                await workspace_repo.set_active_profile_id(
-                    session, target_profile.id
-                )
+                await workspace_repo.set_active_profile_id(session, target_profile.id)
                 await session.commit()
                 return (
                     target_attachment_id,
@@ -733,9 +725,7 @@ def test_reextract_rechecks_active_profile_before_creating_run_or_provider_work(
         await real_assert(**kwargs)
         async with factory() as session:
             profiles = await prof_repo.list_profiles(session)
-            other_profile = next(
-                row for row in profiles if row.id != target_profile_id
-            )
+            other_profile = next(row for row in profiles if row.id != target_profile_id)
             from app.repositories import workspace_state as workspace_repo
 
             await workspace_repo.set_active_profile_id(session, other_profile.id)
@@ -764,17 +754,26 @@ def test_reextract_rechecks_active_profile_before_creating_run_or_provider_work(
         assert exc_info.value.code == "PROFILE_NOT_READY"
         assert model.invoke_count == 0
         async with factory() as session:
-            assert int(
-                (await session.execute(select(func.count()).select_from(AgentRun)))
-                .scalar_one()
-            ) == 0
-            assert int(
-                (
-                    await session.execute(
-                        select(func.count()).select_from(ChatMessage)
-                    )
-                ).scalar_one()
-            ) == 0
+            assert (
+                int(
+                    (
+                        await session.execute(
+                            select(func.count()).select_from(AgentRun)
+                        )
+                    ).scalar_one()
+                )
+                == 0
+            )
+            assert (
+                int(
+                    (
+                        await session.execute(
+                            select(func.count()).select_from(ChatMessage)
+                        )
+                    ).scalar_one()
+                )
+                == 0
+            )
             assert await prof_repo.get_current_draft(session) is None
 
     run_async(_exercise())
@@ -813,28 +812,23 @@ def test_reprocess_approval_required_blocks_second(
             await engine.dispose()
 
     att_id, profile_id = run_async(_seed())
-    factory = get_session_factory()
-    registry = _build_registry(
-        factory=factory,
-        storage=storage,
-        invoker=invoker,
-        normalizer=normalizer,
-    )
-    model = FakeChatModel(
-        responses=[
-            ai_tool_call(
-                PROPOSE_PROFILE_FROM_CV_NAME,
-                call_id="call-lock",
-                args={"attachment_id": att_id, "reprocess": True},
-            ),
-        ]
-    )
-    with client_with_fake_chat(db_path, model, registry) as client:
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[]), ToolRegistry([])
+    ) as client:
+        _override_direct_reextract(
+            client,
+            storage=storage,
+            invoker=invoker,
+            normalizer=normalizer,
+        )
         first = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert first.status_code == 200
+        assert _event_names(parse_profile_reextract_wire(first.text))[-1] == (
+            "reextract_review_ready"
+        )
         second = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert second.status_code == 409
-        assert second.json()["detail"]["code"] == "PROFILE_SWITCH_BLOCKED"
+        assert second.json()["detail"]["code"] == "PROFILE_REVIEW_PENDING"
 
 
 def test_legacy_attachment_reprocess_route_is_not_available(
@@ -850,7 +844,6 @@ def test_legacy_attachment_reprocess_route_is_not_available(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Not Found"
-
 
 
 def test_reprocess_same_active_save_refreshes_document(
@@ -887,36 +880,27 @@ def test_reprocess_same_active_save_refreshes_document(
 
     att_id, profile_id = run_async(_seed())
     factory = get_session_factory()
-    registry = _build_registry(
-        factory=factory,
-        storage=storage,
-        invoker=invoker,
-        normalizer=normalizer,
-    )
-    model = FakeChatModel(
-        responses=[
-            ai_tool_call(
-                PROPOSE_PROFILE_FROM_CV_NAME,
-                call_id="call-same",
-                args={"attachment_id": att_id, "reprocess": True},
-            ),
-        ]
-    )
-    with client_with_fake_chat(db_path, model, registry) as client:
+    with client_with_fake_chat(
+        db_path, FakeChatModel(responses=[]), ToolRegistry([])
+    ) as client:
+        _override_direct_reextract(
+            client,
+            storage=storage,
+            invoker=invoker,
+            normalizer=normalizer,
+        )
         propose = client.post(f"/api/profiles/{profile_id}/reextract", json={})
         assert propose.status_code == 200
-        run_id = parse_sse_wire(propose.text)[-1]["run_id"]
-        override_chat_deps(
-            client,
-            model=FakeChatModel(responses=[ai_text("saved")]),
-            registry=registry,
-            db_path=db_path,
-        )
+        events = parse_profile_reextract_wire(propose.text)
+        assert _event_names(events)[-1] == "reextract_review_ready"
+        review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
+        assert review.status_code == 200, review.text
         save = client.post(
-            f"/api/chat/runs/{run_id}/resume",
-            json={"action": "save_profile"},
+            f"/api/profiles/{profile_id}/reextract-draft/approve",
+            json={"revision": review.json()["revision"]},
         )
         assert save.status_code == 200
+        assert save.json()["approved"] is True
 
     async def _assert() -> None:
         async with factory() as session:
@@ -949,8 +933,8 @@ def test_cv_manager_file_route_encodes_unicode_original_name(
                 attachment_id = new_uuid()
                 await att_repo.create_staged(
                     session,
-                    file_hash='unicode-name',
-                    original_name='CV \u0110\u1eb7ng.pdf',
+                    file_hash="unicode-name",
+                    original_name="CV \u0110\u1eb7ng.pdf",
                     size_bytes=32,
                     storage_path=_write_real_pdf(storage, attachment_id),
                     page_count=1,
@@ -965,31 +949,29 @@ def test_cv_manager_file_route_encodes_unicode_original_name(
 
     attachment_id = run_async(_seed())
     with client_with_fake_chat(
-        db_path, FakeChatModel(responses=[ai_text('noop')]), ToolRegistry([])
+        db_path, FakeChatModel(responses=[ai_text("noop")]), ToolRegistry([])
     ) as client:
-        inline = client.get(f'/api/cvs/{attachment_id}/file')
-        attachment = client.get(
-            f'/api/cvs/{attachment_id}/file?disposition=attachment'
-        )
+        inline = client.get(f"/api/cvs/{attachment_id}/file")
+        attachment = client.get(f"/api/cvs/{attachment_id}/file?disposition=attachment")
 
     expected_filename_star = "filename*=UTF-8''CV%20%C4%90%E1%BA%B7ng.pdf"
     for response, disposition in (
-        (inline, 'inline'),
-        (attachment, 'attachment'),
+        (inline, "inline"),
+        (attachment, "attachment"),
     ):
         assert response.status_code == 200
-        header = response.headers['content-disposition']
+        header = response.headers["content-disposition"]
         assert header.startswith(f'{disposition}; filename="CV __ng.pdf"; ')
         assert expected_filename_star in header
         assert all(ord(char) < 128 for char in header)
 
 
 def test_cv_manager_active_ready_policy_never_allows_activation() -> None:
-    ready_owner = Profile(state='ready')
+    ready_owner = Profile(state="ready")
 
     assert allowed_actions(
         state=ATTACHMENT_STATE_ACTIVE,
         owner=ready_owner,
         is_active=False,
         file_available=True,
-    ) == ['preview', 'download', 'reextract']
+    ) == ["preview", "download", "reextract"]

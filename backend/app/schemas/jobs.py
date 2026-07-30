@@ -322,6 +322,7 @@ class CompactJobToolRow(BaseModel):
     job_id: str
     title: str | None = None
     company: str | None = None
+    display_label: str | None = None
     source_url: str | None = None
     processing_status: JobProcessingStatus
     jd_quality: JobJdQuality | None = None
@@ -338,6 +339,7 @@ class SaveJobResultData(BaseModel):
     job_id: str
     title: str | None = None
     company: str | None = None
+    display_label: str | None = None
     source_url: str | None = None
     processing_status: JobProcessingStatus
     jd_quality: JobJdQuality | None = None

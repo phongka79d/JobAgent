@@ -106,7 +106,7 @@ function detail(
     parent_version_id: VERSION_ID,
     created_by: 'user' as const,
     page_count: 2,
-    page_warning: 'CV dài 2 trang',
+    page_warning: 'This tailored CV is 2 pages long.',
     created_at: NOW,
   };
   return {
@@ -224,6 +224,32 @@ it('renders the feature-local no-change message without appending a version', ()
   expect(value.state.detail.data?.versions).toHaveLength(2);
 });
 
+it('renders the selected version date in English and singular page copy', () => {
+  const selected = detail();
+  const firstVersion = selected.versions[0];
+  if (!firstVersion) throw new Error('Expected the Version 1 fixture');
+  const value = controller('current', {}, {
+    selectedVersionId: firstVersion.id,
+    detail: {
+      phase: 'ready',
+      data: {...selected, selected_version: firstVersion},
+      error: null,
+    },
+  });
+
+  renderEditor(value);
+
+  expect(
+    screen.getByText(
+      new Intl.DateTimeFormat('en-CA', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(new Date(firstVersion.created_at)),
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByText('1 page')).toBeInTheDocument();
+});
+
 it('binds safe issues to fields and exposes source, undo, and retry actions', async () => {
   const issue = {section_id: 'summary', section_heading: 'Summary', item_index: 0, field: 'body' as const, reason: 'not_in_source' as const};
   const focusIssue = vi.fn();
@@ -232,9 +258,17 @@ it('binds safe issues to fields and exposes source, undo, and retry actions', as
   const createAiVersion = vi.fn();
   const value = controller('current', {focusIssue, undoIssue, retryIssue, createAiVersion}, {stream: {phase: 'error', data: null, error: {code: 'TAILORING_GROUNDING_FAILED', summary: 'Not source-supported', issues: [issue]}}});
   renderEditor(value);
-  expect(screen.getByRole('textbox', {name: 'Summary body'})).toHaveAttribute('aria-describedby', expect.stringContaining('tailoring-issue'));
+  expect(screen.getByText('Summary: This value is not supported by the selected source.')).toHaveAttribute('id', 'tailoring-issue-summary-0-body-not_in_source');
+  const groundedField = screen.getByRole('textbox', {name: 'Summary body'});
+  expect(groundedField).toHaveAttribute('aria-invalid', 'true');
+  expect(groundedField).toHaveAccessibleDescription(
+    /Needs attention: This value is not supported by the selected source\./,
+  );
   await userEvent.click(screen.getByRole('button', {name: 'View source'}));
-  expect(await screen.findByRole('region', {name: 'Summary source evidence'})).toHaveFocus();
+  const sourceEvidence = await screen.findByRole('region', {
+    name: 'Summary source evidence',
+  });
+  await waitFor(() => expect(sourceEvidence).toHaveFocus());
   await userEvent.click(screen.getByRole('button', {name: 'Focus field'}));
   await userEvent.click(screen.getByRole('button', {name: 'Undo change'}));
   await userEvent.click(screen.getByRole('button', {name: 'Try again'}));
@@ -242,6 +276,92 @@ it('binds safe issues to fields and exposes source, undo, and retry actions', as
   expect(undoIssue).toHaveBeenCalledWith(issue);
   expect(retryIssue).toHaveBeenCalledWith(issue);
   expect(createAiVersion).not.toHaveBeenCalled();
+});
+
+it('focuses source evidence only after the disclosure is open', async () => {
+  const nativeFocus = HTMLElement.prototype.focus;
+  vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function focus(
+    this: HTMLElement,
+  ) {
+    if (this.getAttribute('role') === 'region') {
+      const trigger = this.parentElement?.parentElement?.querySelector(
+        ':scope > button[aria-expanded]',
+      );
+      if (trigger?.getAttribute('aria-expanded') === 'false') return;
+    }
+    nativeFocus.call(this);
+  });
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  });
+  const issue = {
+    section_id: 'summary',
+    section_heading: 'Summary',
+    item_index: 0,
+    field: 'body' as const,
+    reason: 'not_in_source' as const,
+  };
+  const value = controller('current', {}, {
+    stream: {
+      phase: 'error',
+      data: null,
+      error: {
+        code: 'TAILORING_GROUNDING_FAILED',
+        summary: 'Not source-supported',
+        issues: [issue],
+      },
+    },
+  });
+
+  renderEditor(value);
+  await userEvent.click(screen.getByRole('button', {name: 'View source'}));
+
+  expect(
+    await screen.findByRole('region', {name: 'Summary source evidence'}),
+  ).toHaveFocus();
+});
+
+it('focuses the section container for a section-level grounding issue', async () => {
+  const issue = {
+    section_id: 'summary',
+    section_heading: 'Summary',
+    item_index: null,
+    field: 'section' as const,
+    reason: 'structure_changed' as const,
+  };
+  const value = controller('current', {}, {
+    pendingFocus: {key: 1, issue},
+  });
+
+  renderEditor(value);
+
+  await waitFor(() => {
+    expect(
+      screen.getByTestId('jobagent-tailored-section-summary'),
+    ).toHaveFocus();
+  });
+});
+
+it('focuses the exact input for an item-level grounding issue', async () => {
+  const issue = {
+    section_id: 'summary',
+    section_heading: 'Summary',
+    item_index: 0,
+    field: 'body' as const,
+    reason: 'not_in_source' as const,
+  };
+  const value = controller('current', {}, {
+    pendingFocus: {key: 1, issue},
+  });
+
+  renderEditor(value);
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole('textbox', {name: 'Summary body'}),
+    ).toHaveFocus();
+  });
 });
 
 it('uses a new tab only for preview and keeps download failures in the editor', async () => {
@@ -252,7 +372,7 @@ it('uses a new tab only for preview and keeps download failures in the editor', 
   expect(open).toHaveBeenCalledWith(expect.stringContaining('/pdf'), '_blank', 'noopener,noreferrer');
   await userEvent.click(screen.getByRole('button', {name: 'Download PDF'}));
   expect(await screen.findByText('The PDF could not be downloaded.')).toBeInTheDocument();
-  expect(screen.getByRole('heading', {level: 1, name: 'CV đã chỉnh'})).toBeInTheDocument();
+  expect(screen.getByRole('heading', {level: 1, name: 'Tailored CV'})).toBeInTheDocument();
 });
 
 afterEach(() => {
@@ -276,12 +396,12 @@ describe('TailoringEditor', () => {
     expect(headings.indexOf('Awards')).toBeLessThan(
       headings.indexOf('Community Work'),
     );
-    expect(screen.getByLabelText('Họ và tên')).toHaveValue('Synthetic Candidate');
-    expect(screen.getByLabelText('Họ và tên')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByLabelText('Full name')).toHaveValue('Synthetic Candidate');
+    expect(screen.getByLabelText('Full name')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.queryByLabelText('GitHub')).not.toBeInTheDocument();
     expect(screen.getByText('Category')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Nội dung Summary 1'), {
+    fireEvent.change(screen.getByLabelText('Body Summary 1'), {
       target: {value: 'Updated grounded summary'},
     });
     expect(value.setDraft).toHaveBeenCalled();
@@ -291,17 +411,17 @@ describe('TailoringEditor', () => {
       source_fact_ids: ['sf_summary'],
     });
 
-    await userEvent.click(screen.getByText('Nguồn đối chiếu'));
+    await userEvent.click(screen.getByText('Source evidence'));
     expect(screen.getByText('Approved source summary')).toBeInTheDocument();
     expect(
-      screen.getByTitle('Xem trước PDF CV'),
+      screen.getByTitle('Tailored CV PDF preview'),
     ).toHaveAttribute('src', expect.stringContaining(VERSION_2_ID));
+    expect(screen.getByText('2 pages')).toBeInTheDocument();
     expect(screen.getByRole('button', {name: 'Preview PDF'})).toBeInTheDocument();
     expect(screen.getByRole('button', {name: 'Download PDF'})).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', {name: 'Advanced'}));
     expect(screen.getByRole('button', {name: 'Download LaTeX source'})).toBeInTheDocument();
-    expect(screen.getByText('CV dài 2 trang')).toBeInTheDocument();
-    expect(screen.getByText('2 trang')).toBeInTheDocument();
+    expect(screen.getByText('This tailored CV is 2 pages long.')).toBeInTheDocument();
     expect(document.querySelectorAll('[data-scroll-owner="viewport"]')).toHaveLength(2);
   });
 
@@ -309,19 +429,19 @@ describe('TailoringEditor', () => {
     const value = controller('current', {}, {draftDirty: true});
     renderEditor(value);
 
-    fireEvent.click(screen.getByRole('button', {name: 'Lưu version & tạo PDF'}));
-    fireEvent.click(screen.getByRole('button', {name: 'Lưu version & tạo PDF'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Save version and create PDF'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Save version and create PDF'}));
     await waitFor(() => expect(value.saveManualVersion).toHaveBeenCalledTimes(1));
 
     await userEvent.click(
-      screen.getAllByRole('button', {name: 'Nhờ AI chỉnh section này'})[0],
+      screen.getAllByRole('button', {name: 'Ask AI to revise this section'})[0],
     );
-    expect(screen.getByRole('heading', {name: 'Nhờ AI chỉnh Summary'})).toBeInTheDocument();
+    expect(screen.getByRole('heading', {name: 'Ask AI to revise Summary'})).toBeInTheDocument();
     await userEvent.type(
-      screen.getByLabelText('Yêu cầu chỉnh sửa'),
+      screen.getByLabelText('Revision request'),
       'Nhấn mạnh kết quả phân tích',
     );
-    await userEvent.click(screen.getByRole('button', {name: 'Gửi cho AI'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Send to AI'}));
     await waitFor(() =>
       expect(value.createAiVersion).toHaveBeenCalledWith(SESSION_ID, {
         parent_version_id: VERSION_2_ID,
@@ -336,10 +456,10 @@ describe('TailoringEditor', () => {
     const onCreateFresh = vi.fn();
     renderEditor(value, {onCreateFresh});
 
-    expect(screen.getByText('Dữ liệu nguồn đã thay đổi')).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Lưu version & tạo PDF'})).toBeDisabled();
+    expect(screen.getByText('Source data changed')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Save version and create PDF'})).toBeDisabled();
     await userEvent.click(
-      screen.getByRole('button', {name: 'Tạo phiên mới từ dữ liệu hiện tại'}),
+      screen.getByRole('button', {name: 'Create a new session from current data'}),
     );
     expect(onCreateFresh).toHaveBeenCalledTimes(1);
 
@@ -347,9 +467,9 @@ describe('TailoringEditor', () => {
     await userEvent.click(screen.getByText('Version 1 · AI'));
     expect(value.selectVersion).not.toHaveBeenCalled();
     expect(
-      screen.getByRole('alertdialog', {name: 'Bỏ thay đổi chưa lưu?'}),
+      screen.getByRole('alertdialog', {name: 'Discard unsaved changes?'}),
     ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', {name: 'Bỏ thay đổi'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Discard changes'}));
     await waitFor(() =>
       expect(value.selectVersion).toHaveBeenCalledWith(VERSION_ID, true),
     );
@@ -378,7 +498,7 @@ describe('TailoringEditor', () => {
     renderEditor(value, {onReloadLatest});
 
     await userEvent.click(
-      screen.getByRole('button', {name: 'Tải version mới nhất'}),
+      screen.getByRole('button', {name: 'Load latest version'}),
     );
 
     expect(onReloadLatest).toHaveBeenCalledTimes(1);

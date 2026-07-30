@@ -182,6 +182,7 @@ function listItemPayload(id: string) {
     id,
     title: 'Backend Engineer',
     company: 'Acme',
+    display_label: 'Backend Engineer · Acme',
     processing_status: 'processed' as const,
     jd_quality: 'full' as const,
     source_type: 'text' as const,
@@ -209,6 +210,7 @@ function saveSuccessResponse(
         jobId: JOB_ID,
         title: 'Backend Engineer',
         company: 'Acme',
+        displayLabel: 'Backend Engineer · Acme',
         location: 'Berlin',
         workMode: 'hybrid',
         sourceUrl: null,
@@ -279,7 +281,7 @@ function activityFromHistory(
 }
 
 describe('EmptyMatchResultCard copy and presentation', () => {
-  it('renders exact Vietnamese heading, CTA, and one short explanation', () => {
+  it('renders exact English heading, CTA, and one short explanation', () => {
     const onSave = vi.fn();
     renderWithTheme(
       <EmptyMatchResultCard
@@ -299,8 +301,8 @@ describe('EmptyMatchResultCard copy and presentation', () => {
     expect(
       screen.getByRole('button', {name: EMPTY_MATCH_CTA}),
     ).toBeInTheDocument();
-    expect(EMPTY_MATCH_HEADING).toBe('Chưa có kết quả đánh giá');
-    expect(EMPTY_MATCH_CTA).toBe('Lưu JD & đánh giá lại');
+    expect(EMPTY_MATCH_HEADING).toBe('No match result yet');
+    expect(EMPTY_MATCH_CTA).toBe('Save job and evaluate');
   });
 
   it('disables CTA while pending and invokes durable source id only', async () => {

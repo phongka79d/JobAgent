@@ -120,7 +120,7 @@ function StreamNotices({
   if (streamPhase === 'failed' && streamError) {
     notices.push({
       key: 'failed',
-      text: `Run failed: ${streamError.summary} (${streamError.code})`,
+      text: `Run failed: ${streamError.summary}`,
     });
   } else if (streamPhase === 'failed') {
     notices.push({key: 'failed', text: 'Run failed'});

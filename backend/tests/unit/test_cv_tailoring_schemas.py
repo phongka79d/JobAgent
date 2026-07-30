@@ -15,8 +15,8 @@ from app.schemas.cv_tailoring import (
     TailoredHeaderSnapshot,
     TailoredItem,
     TailoredSection,
-    TailoringSourceRevision,
     TailoringJobLabel,
+    TailoringSourceRevision,
     TailoringVersionMutationResponse,
     parse_tailored_content,
     tailored_content_equal,
@@ -78,7 +78,9 @@ def test_tailored_content_round_trips_and_models_are_strict() -> None:
         )
 
 
-def test_canonical_content_equality_and_mutation_terminal_identity_are_coupled() -> None:
+def test_canonical_content_equality_and_mutation_terminal_identity_are_coupled() -> (
+    None
+):
     content = _content()
     assert tailored_content_equal(content, content.model_copy(deep=True))
     response = TailoringVersionMutationResponse(
@@ -179,5 +181,7 @@ def test_source_revision_uses_frozen_template_literal_and_aware_times() -> None:
 def test_tailoring_job_label_accepts_old_snapshots_and_server_display_label() -> None:
     old = TailoringJobLabel.model_validate({"title": "Engineer", "company": "Acme"})
     assert old.display_label is None
-    current = TailoringJobLabel(title="Engineer", company="Acme", display_label="Engineer · Acme")
+    current = TailoringJobLabel(
+        title="Engineer", company="Acme", display_label="Engineer · Acme"
+    )
     assert current.display_label == "Engineer · Acme"

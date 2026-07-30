@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from app.schemas.matching import MatchResult
 from app.db.models.jobs import (
     JOB_JD_QUALITY_FULL,
     JOB_JD_QUALITY_PARTIAL,
     JOB_JD_QUALITY_UNSCORABLE,
 )
+from app.schemas.matching import MatchResult
 from app.services.match_components import (
     MatchScoreComponents,
     compute_experience_score,
@@ -172,9 +172,7 @@ def test_hybrid_score_renormalizes_every_missing_component_combination(
         )
     )
 
-    available_components = {
-        name for name, value in values.items() if value is not None
-    }
+    available_components = {name for name, value in values.items() if value is not None}
     assert set(result.effective_weights) == available_components
     assert sum(result.effective_weights.values()) == pytest.approx(1.0)
     assert result.base_score == pytest.approx(_expected_base_score(values))
@@ -204,7 +202,6 @@ def test_match_result_label_is_backward_compatible() -> None:
             "matched_required_skills": [],
             "related_skills": [],
             "missing_required_skills": [],
-            "missing_preferred_skills": [],
             "components": {
                 "semantic_similarity": 0.5,
                 "skill_score": 0.5,

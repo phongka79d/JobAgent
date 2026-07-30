@@ -22,10 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.settings import Settings, get_settings
 from app.db.session import get_session_factory
-from app.services.cv_tailoring import TailoringCoordinator
 from app.services.cv_document_extraction import (
     ShopAIKeyStructuredCVDocumentInvoker,
 )
+from app.services.cv_tailoring import TailoringCoordinator
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 from app.storage.cv_tailoring import TailoringArtifactStorage

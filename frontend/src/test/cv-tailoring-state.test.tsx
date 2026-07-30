@@ -166,6 +166,7 @@ describe('CV tailoring state owner', () => {
     expect(result.current.state.sessions.error).toEqual({
       code: 'REQUEST_FAILED',
       summary: 'CV tailoring request failed',
+      issues: [],
     });
   });
 

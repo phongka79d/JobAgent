@@ -1,5 +1,5 @@
 /**
- * Assistant-only Astryx Markdown + exact-one active-CV Nguồn citation (Plan 12 03A).
+ * Assistant-only Astryx Markdown + exact-one active-CV source citation (Plan 12 03A).
  * Display-only transform: never mutates message.content, history, or reducer state.
  */
 
@@ -11,15 +11,33 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import type {ActiveCvEvidenceBundle} from '../activeCvEvidence';
 import {ActiveCvSourceDialog} from './ActiveCvSourceDialog';
+import {CHAT_COPY} from '../copy';
 
 /** Reserved source id for Markdown sources map — never shown as raw text when wired. */
 export const ACTIVE_CV_CITATION_SOURCE_ID = 'jobagent-nguon' as const;
-export const ACTIVE_CV_CITATION_LABEL = 'Nguồn' as const;
+export const ACTIVE_CV_CITATION_LABEL = CHAT_COPY.sourceCitation;
 export const ACTIVE_CV_CITATION_MARKER =
   `[${ACTIVE_CV_CITATION_SOURCE_ID}]` as const;
 
+const LEGACY_JOB_ID_V4 =
+  '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const LEGACY_JOB_ID_MARKER = new RegExp(
+  String.raw`(?:[^\S\r\n]*(?:\([^\S\r\n]*|[:,-][^\S\r\n]*)?)?\bjob_id\b[^\S\r\n]*=[^\S\r\n]*${LEGACY_JOB_ID_V4}(?![0-9a-z_-])(?:[^\S\r\n]*\))?[^\S\r\n]*`,
+  'gi',
+);
+
 /** Internal hash target so Citation renders as an activatable link without navigation. */
 const CITATION_HREF = '#jobagent-active-cv-source';
+
+function displayAssistantContent(content: string): string {
+  return content.replace(
+    LEGACY_JOB_ID_MARKER,
+    (marker, offset: number, source: string) => {
+      const next = source[offset + marker.length];
+      return next && !/[\s,.!?;:)\]]/.test(next) ? ' ' : '';
+    },
+  );
+}
 
 export type AssistantResponseProps = {
   content: string;
@@ -141,7 +159,7 @@ function NguonCitationChip({
 
 /**
  * Renders assistant prose via public Astryx Markdown (compact, heading 4,
- * streaming). When evidence is present, shows exactly one Nguồn citation that
+ * streaming). When evidence is present, shows exactly one source citation that
  * opens ActiveCvSourceDialog.
  */
 export function AssistantResponse({
@@ -151,16 +169,20 @@ export function AssistantResponse({
 }: AssistantResponseProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const hasEvidence = evidence !== null && evidence.pages.length > 0;
+  const displayContent = useMemo(
+    () => displayAssistantContent(content),
+    [content],
+  );
 
   const placement = useMemo(() => {
     if (!hasEvidence) {
       return {
-        displayContent: content,
+        displayContent,
         placement: 'fallback' as const,
       };
     }
-    return placeActiveCvCitationMarker(content);
-  }, [content, hasEvidence]);
+    return placeActiveCvCitationMarker(displayContent);
+  }, [displayContent, hasEvidence]);
 
   const openDialog = useCallback(() => {
     setDialogOpen(true);

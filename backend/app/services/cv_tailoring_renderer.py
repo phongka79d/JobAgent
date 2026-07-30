@@ -190,7 +190,9 @@ def _display_item_title(
     item: TailoredItem, section_heading: str
 ) -> SourceBoundText | None:
     title = item.title
-    if title is None or _comparison_text(title.text) == _comparison_text(section_heading):
+    if title is None or _comparison_text(title.text) == _comparison_text(
+        section_heading
+    ):
         return None
     return title
 

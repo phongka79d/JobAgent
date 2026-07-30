@@ -61,6 +61,18 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   value: ResizeObserverStub,
 });
 
+// Astryx Dialog uses the native dialog methods, which jsdom does not provide.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+}
+if (!HTMLDialogElement.prototype.close) {
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
+}
+
 // Spinner (tool activity / load-older) may call canvas getContext in jsdom.
 HTMLCanvasElement.prototype.getContext = function getContext(
   this: HTMLCanvasElement,

@@ -26,7 +26,7 @@ function formatActivity(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat('en-CA', {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date);

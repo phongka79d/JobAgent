@@ -70,6 +70,7 @@ function matchResult(jobId: string, score: number) {
     jobId,
     title: 'Backend Engineer',
     company: 'Acme',
+    displayLabel: 'Backend Engineer · Acme',
     location: 'Berlin',
     workMode: 'hybrid' as const,
     sourceUrl: null,

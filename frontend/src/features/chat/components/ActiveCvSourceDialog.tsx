@@ -27,6 +27,7 @@ import {
   type ActiveCvRecord,
 } from '../activeCvEvidence';
 import {cvFileUrl} from '../../cv-manager/api';
+import {CHAT_COPY} from '../copy';
 
 export type ActiveCvSourceDialogProps = {
   isOpen: boolean;
@@ -34,12 +35,10 @@ export type ActiveCvSourceDialogProps = {
   evidence: ActiveCvEvidenceBundle;
 };
 
-export const ACTIVE_CV_SOURCE_DIALOG_TITLE = 'Nguồn từ CV' as const;
-export const ACTIVE_CV_SOURCE_DIALOG_SUBTITLE =
-  'Bằng chứng Agent đã đọc cho câu trả lời này.' as const;
-export const ACTIVE_CV_OPEN_ORIGINAL_LABEL = 'Mở CV gốc' as const;
-export const ACTIVE_CV_PARTIAL_NOTICE =
-  'Bằng chứng một phần: một số trang hoặc bản ghi bị cắt ngắn, hoặc còn trang Agent chưa đọc.' as const;
+export const ACTIVE_CV_SOURCE_DIALOG_TITLE = CHAT_COPY.activeCvSourceTitle;
+export const ACTIVE_CV_SOURCE_DIALOG_SUBTITLE = CHAT_COPY.activeCvSourceSubtitle;
+export const ACTIVE_CV_OPEN_ORIGINAL_LABEL = CHAT_COPY.activeCvOpenOriginal;
+export const ACTIVE_CV_PARTIAL_NOTICE = CHAT_COPY.activeCvPartial;
 
 /** True when any page/record discloses truncation or additional pages. */
 export function evidenceIsPartial(evidence: ActiveCvEvidenceBundle): boolean {
@@ -196,7 +195,7 @@ function PageView({page, pageIndex}: {page: ActiveCvPage; pageIndex: number}) {
 
 /**
  * Modal listing every selected page/record in durable order without dedup,
- * with partial-evidence notice and Mở CV gốc for the answer attachment.
+ * with partial-evidence notice and an Open original CV action.
  */
 export function ActiveCvSourceDialog({
   isOpen,
@@ -256,7 +255,7 @@ export function ActiveCvSourceDialog({
                 }}
               />
               <Button
-                label="Đóng"
+                label={CHAT_COPY.close}
                 variant="secondary"
                 data-testid="jobagent-active-cv-close"
                 onClick={() => {

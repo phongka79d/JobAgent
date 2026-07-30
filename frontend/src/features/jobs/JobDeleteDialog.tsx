@@ -5,6 +5,8 @@
 
 import {AlertDialog} from '@astryxdesign/core/AlertDialog';
 
+import {JOB_COPY} from './copy';
+
 export type JobDeleteDialogProps = {
   isOpen: boolean;
   /** Display name used in title/description (title · company or fallback). */
@@ -16,8 +18,8 @@ export type JobDeleteDialogProps = {
 
 /** Scope warning shared by the dialog and panel tests. */
 export const JOB_DELETE_SCOPE_WARNING =
-  'This permanently removes the Job, its evaluations, and its Neo4j Job node and incident relationships. ' +
-  'Shared Skills, seed edges, Candidate/CV data, and unrelated Jobs are preserved.';
+  'This permanently removes the saved job and its evaluations. ' +
+  'Your profile, CVs, and unrelated saved jobs are preserved.';
 
 export function JobDeleteDialog({
   isOpen,
@@ -26,7 +28,7 @@ export function JobDeleteDialog({
   onOpenChange,
   onConfirm,
 }: JobDeleteDialogProps) {
-  const title = `Xoá JD ${jobLabel}?`;
+  const title = JOB_COPY.deleteJobTitle(jobLabel);
   const description = `Delete “${jobLabel}”? ${JOB_DELETE_SCOPE_WARNING}`;
 
   return (
@@ -40,7 +42,7 @@ export function JobDeleteDialog({
       }}
       title={title}
       description={description}
-      actionLabel="Xoá JD"
+      actionLabel={JOB_COPY.deleteJob}
       cancelLabel="Cancel"
       actionVariant="destructive"
       isActionLoading={isDeleting}

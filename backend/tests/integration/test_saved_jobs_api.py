@@ -1998,7 +1998,8 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert body.job.evaluation_state == "stale"
         assert body.job.latest_score == pytest.approx(0.77)
         assert body.job.title == "Backend Engineer"
-        assert body.job.display_label == expected_label
+        expected_updated_label = body.job.display_label
+        assert expected_updated_label == "Backend Engineer · Acme"
         _assert_no_forbidden_list(ok.json())
         assert evaluate_calls == []
         assert invoker.call_count >= 1
@@ -2027,7 +2028,7 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         assert warn.code == "NEO4J_SYNC_FAILED"
         assert warn.rebuild_instruction == NEO4J_REBUILD_INSTRUCTION
         assert warn.job.evaluation_state == "stale"
-        assert warn.job.display_label == expected_label
+        assert warn.job.display_label == expected_updated_label
         _assert_no_forbidden_list(partial.json())
         assert evaluate_calls == []
 
@@ -2037,8 +2038,8 @@ def test_reextract_success_and_graph_partial_stale_no_evaluate(
         listed_before_delete = SavedJobListPage.model_validate(
             client.get("/api/jobs").json()
         )
-        assert detail_before_delete.compact.display_label == expected_label
-        assert listed_before_delete.items[0].display_label == expected_label
+        assert detail_before_delete.compact.display_label == expected_updated_label
+        assert listed_before_delete.items[0].display_label == expected_updated_label
 
         async def _fake_delete(
             delete_job_id: str,

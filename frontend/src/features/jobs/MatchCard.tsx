@@ -19,13 +19,12 @@ import {VStack} from '@astryxdesign/core/VStack';
 
 import {
   formatDisplayScore,
-  formatQualityMultiplier,
   type CompactMatchResult,
   type CompactMatchSkillEvidence,
   type CompactMissingRequiredSkill,
 } from './matchResult';
 import {ScoreBreakdown} from './ScoreBreakdown';
-import {matchDisplayLabel} from './copy';
+import {JOB_COPY, matchDisplayLabel} from './copy';
 
 export type MatchCardProps = {
   data: CompactMatchResult;
@@ -72,17 +71,7 @@ function SkillTokens({
 }
 
 function workModeLabel(mode: CompactMatchResult['workMode']): string {
-  switch (mode) {
-    case 'remote':
-      return 'Remote';
-    case 'hybrid':
-      return 'Hybrid';
-    case 'onsite':
-      return 'On-site';
-    case 'unknown':
-    default:
-      return 'Unknown';
-  }
+  return JOB_COPY.workModes[mode];
 }
 
 export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
@@ -108,7 +97,7 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
         >
           <VStack gap={0} className="jobagent-match-score-primary">
             <Text type="supporting" color="secondary" as="span">
-              Match score
+              {JOB_COPY.matchScore}
             </Text>
             <Text
               type="large"
@@ -118,32 +107,9 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
               {formatDisplayScore(data.finalScore)}
             </Text>
           </VStack>
-          <VStack gap={0} className="jobagent-match-score-metric">
-            <Text type="supporting" color="secondary" as="span">
-              Semantic similarity
-            </Text>
-            <Text type="label" as="span">
-              {formatDisplayScore(data.components.semanticSimilarity)}
-            </Text>
-          </VStack>
-          <VStack gap={0} className="jobagent-match-score-metric">
-            <Text type="supporting" color="secondary" as="span">
-              Skill coverage
-            </Text>
-            <Text type="label" as="span">
-              {data.components.skillScore === null
-                ? 'Not available'
-                : formatDisplayScore(data.components.skillScore)}
-            </Text>
-          </VStack>
-          <VStack gap={0} className="jobagent-match-score-metric">
-            <Text type="supporting" color="secondary" as="span">
-              Extraction confidence
-            </Text>
-            <Text type="label" as="span">
-              {formatQualityMultiplier(data.qualityMultiplier)}
-            </Text>
-          </VStack>
+          <Text type="supporting" color="secondary" as="span">
+            {JOB_COPY.scoreExplanation}
+          </Text>
         </HStack>
         {showJobMetadata ? (
           <MetadataList
@@ -152,19 +118,19 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
             data-testid="jobagent-match-metadata"
           >
             {data.company ? (
-              <MetadataListItem label="Company">{data.company}</MetadataListItem>
+              <MetadataListItem label={JOB_COPY.company}>{data.company}</MetadataListItem>
             ) : null}
             {data.title ? (
-              <MetadataListItem label="Role">{data.title}</MetadataListItem>
+              <MetadataListItem label={JOB_COPY.role}>{data.title}</MetadataListItem>
             ) : null}
             {data.location ? (
-              <MetadataListItem label="Location">{data.location}</MetadataListItem>
+              <MetadataListItem label={JOB_COPY.location}>{data.location}</MetadataListItem>
             ) : null}
-            <MetadataListItem label="Work mode">
+            <MetadataListItem label={JOB_COPY.workMode}>
               {workModeLabel(data.workMode)}
             </MetadataListItem>
             {data.sourceUrl ? (
-              <MetadataListItem label="Source">
+              <MetadataListItem label={JOB_COPY.source}>
                 <Link href={data.sourceUrl} isExternalLink hasUnderline>
                   {data.sourceUrl}
                 </Link>
@@ -175,11 +141,11 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Matched skills
+            {JOB_COPY.matchedSkills}
           </Text>
           <SkillTokens
             skills={data.matchedRequiredSkills}
-            emptyLabel="None"
+            emptyLabel={JOB_COPY.noSkills}
             color="green"
             testId="jobagent-match-matched-required"
           />
@@ -187,11 +153,11 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Related skills
+            {JOB_COPY.relatedSkills}
           </Text>
           <SkillTokens
             skills={data.relatedSkills}
-            emptyLabel="None"
+            emptyLabel={JOB_COPY.noSkills}
             color="blue"
             testId="jobagent-match-related-skills"
           />
@@ -199,21 +165,15 @@ export function MatchCard({data, showJobMetadata = true}: MatchCardProps) {
 
         <VStack gap={1} width="100%">
           <Text type="label" as="p">
-            Missing skills
+            {JOB_COPY.missingSkills}
           </Text>
           <SkillTokens
             skills={data.missingRequiredSkills}
-            emptyLabel="None"
+            emptyLabel={JOB_COPY.noSkills}
             color="red"
             testId="jobagent-match-missing-required"
           />
         </VStack>
-
-        {data.summary ? (
-          <Text type="supporting" color="secondary" as="p">
-            {data.summary}
-          </Text>
-        ) : null}
 
         <ScoreBreakdown data={data} />
       </VStack>

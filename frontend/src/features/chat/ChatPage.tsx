@@ -472,33 +472,6 @@ export function ChatPage({
     }
   }, []);
 
-  /** Focus the existing chat approval card after a profile_commit interrupt. */
-  const focusApprovalCard = useCallback(() => {
-    const focus = () => {
-      const card = document.querySelector(
-        '[data-testid="jobagent-approval-card"]',
-      );
-      if (card instanceof HTMLElement) {
-        card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
-        const action = card.querySelector(
-          '[data-testid="jobagent-approval-save"]',
-        );
-        if (action instanceof HTMLElement) {
-          action.focus();
-        } else {
-          card.focus();
-        }
-      }
-    };
-    if (typeof queueMicrotask === 'function') {
-      queueMicrotask(() => {
-        requestAnimationFrame(focus);
-      });
-    } else {
-      setTimeout(focus, 0);
-    }
-  }, []);
-
   const handleApprovalAction = useCallback(
     (runId: string, action: ChatApprovalAction) => {
       // One accepted action per run: ignore rapid repeats and second store.
@@ -644,14 +617,13 @@ export function ChatPage({
         });
         setComposerFile(null);
       } catch (err) {
-        const code = err instanceof ChatApiError ? err.code : 'UPLOAD_FAILED';
         const summary =
           err instanceof ChatApiError
             ? err.summary
             : err instanceof Error
               ? err.message
               : 'CV attach failed';
-        setAttachError(`${summary} (${code})`);
+        setAttachError(summary);
         setPendingPdf(null);
       } finally {
         setIsAttaching(false);
@@ -681,7 +653,7 @@ export function ChatPage({
       : state.streamPhase === 'failed' && state.streamError
         ? {
             type: 'warning' as const,
-            message: `${state.streamError.summary} (${state.streamError.code})`,
+            message: state.streamError.summary,
           }
         : state.streamPhase === 'disconnected'
           ? {

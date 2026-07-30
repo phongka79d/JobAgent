@@ -10,6 +10,7 @@ import type {
   ClientRun,
 } from './model';
 import type {HistoryPage, JsonObject, JsonValue} from './types';
+import {CHAT_COPY} from './copy';
 
 export const JOB_SAVE_CONFIRMATION_KIND = 'job_save_confirmation' as const;
 export const SAVE_JOB_ACTION = 'save_job' as const;
@@ -19,11 +20,10 @@ export type JobSaveConfirmationAction =
   | typeof SAVE_JOB_ACTION
   | typeof CANCEL_SAVE_JOB_ACTION;
 
-export const SAVE_JOB_LABEL = 'Lưu JD';
-export const CANCEL_SAVE_JOB_LABEL = 'Không lưu';
-export const JD_CONFIRMATION_HEADING = 'Đã nhận diện nội dung JD';
-export const JD_CONFIRMATION_SENTENCE =
-  'JD này chưa được lưu. Bạn có muốn lưu JD này không?';
+export const SAVE_JOB_LABEL = CHAT_COPY.jobSave;
+export const CANCEL_SAVE_JOB_LABEL = CHAT_COPY.cancel;
+export const JD_CONFIRMATION_HEADING = CHAT_COPY.jobDetected;
+export const JD_CONFIRMATION_SENTENCE = CHAT_COPY.jobNotSaved;
 
 export const CURRENT_MESSAGE_SOURCE = 'current_message' as const;
 export const TEXT_LENGTH_MIN = 1;

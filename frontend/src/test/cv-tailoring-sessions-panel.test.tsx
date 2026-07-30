@@ -1,4 +1,4 @@
-import {cleanup, render, screen, waitFor} from '@testing-library/react';
+import {cleanup, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
@@ -116,9 +116,9 @@ describe('TailoringSessionsPanel', () => {
 
     await waitFor(() => expect(value.loadSessions).toHaveBeenCalledTimes(1));
     expect(screen.getByText('Data Analyst · Synthetic Co')).toBeInTheDocument();
-    expect(screen.getAllByText('Đang tạo').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Dữ liệu cũ').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Thất bại').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Creating').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
     expect(screen.queryByText(READY_ID)).not.toBeInTheDocument();
     expect(screen.getByTestId(`jobagent-tailoring-session-${READY_ID}`)).toHaveAttribute(
       'aria-selected',
@@ -146,19 +146,22 @@ describe('TailoringSessionsPanel', () => {
     );
     renderPanel(value);
 
-    await userEvent.click(screen.getByRole('button', {name: 'Thử tạo lại'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Retry'}));
     expect(retry).toHaveBeenCalledWith(FAILED_ID, {
       parent_version_id: null,
       instruction: '',
       target_section_ids: [],
     });
 
-    await userEvent.click(screen.getByRole('button', {name: 'Xóa phiên CV'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Delete session'}));
     expect(
-      screen.getByRole('alertdialog', {name: 'Xóa phiên CV đã chỉnh?'}),
+      screen.getByRole('alertdialog', {name: 'Delete tailored CV session?'}),
     ).toBeInTheDocument();
     expect(remove).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', {name: 'Xóa phiên'}));
+    await userEvent.click(
+      within(screen.getByRole('alertdialog', {name: 'Delete tailored CV session?'}))
+        .getByRole('button', {name: 'Delete session'}),
+    );
     await waitFor(() => expect(remove).toHaveBeenCalledWith(FAILED_ID));
   });
 
@@ -167,7 +170,7 @@ describe('TailoringSessionsPanel', () => {
       sessions: {phase: 'empty', data: {items: []}, error: null},
     });
     renderPanel(emptyController);
-    expect(screen.getByText('Chưa có CV đã chỉnh')).toBeInTheDocument();
+    expect(screen.getByText('No tailored CVs yet')).toBeInTheDocument();
     cleanup();
 
     const errorController = controller([], {}, {
@@ -177,17 +180,18 @@ describe('TailoringSessionsPanel', () => {
         error: {
           code: 'REQUEST_FAILED',
           summary: String.raw`C:\private\resume.tex \documentclass raw JD candidate@example.test`,
+          issues: [],
         },
       },
     });
     renderPanel(errorController);
     expect(
-      screen.getByText('Không thể tải danh sách CV đã chỉnh.'),
+      screen.getByText('The tailored CV list could not be loaded.'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/private|documentclass|raw JD|candidate@/i),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', {name: 'Thử lại'}));
+    await userEvent.click(screen.getByRole('button', {name: 'Retry'}));
     expect(errorController.loadSessions).toHaveBeenCalledTimes(2);
   });
 });
