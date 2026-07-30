@@ -665,7 +665,7 @@ it('contains no product imports or labels for technical panels', () => {
 });
 ```
 
-- [ ] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
+- [x] **Step 2: Run navigation/Saved Jobs tests and verify seven-tab assumptions fail**
 
 ```powershell
 Set-Location frontend
@@ -725,7 +725,7 @@ it('keeps singleton product state hooks in App', () => {
 });
 ```
 
-- [ ] **Step 6: Verify navigation, build, and static removal**
+- [x] **Step 6: Verify navigation, build, and static removal**
 
 ```powershell
 npm test -- --run src/test/product-navigation.test.tsx src/test/saved-jobs-panel.test.tsx src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-state.test.tsx src/test/cv-sidebar.test.tsx src/app/App.test.tsx
@@ -876,7 +876,7 @@ class ProfileReextractEvent(BaseModel):
 
 Use a pure `build_review(current, proposed, profile_id, revision)` helper and tests for scalar changes, skill set changes, collection counts, confidence deltas, bounded output, and absence of `raw_text`, `storage_path`, `source_attachment_id`, `fact_id`, and provider fields.
 
-- [ ] **Step 2: Run the new schema tests and verify missing-contract failure**
+- [x] **Step 2: Run the new schema tests and verify missing-contract failure**
 
 ```powershell
 Set-Location backend
@@ -971,7 +971,7 @@ assert (await profile_repo.get_current_draft(session)).target_profile_id == prof
 
 The stream must contain `reextract_progress`/`reextract_review_ready` or one `reextract_failed`, never `run_started`, `approval_required`, a synthetic user sentence, attachment UUID display text, or a chat conversation id.
 
-- [ ] **Step 7: Run direct re-extraction backend gates**
+- [x] **Step 7: Run direct re-extraction backend gates**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_profile_reextraction.py tests/unit/test_api_sse.py tests/integration/test_profile_reextraction.py tests/integration/test_profiles_api.py tests/integration/test_profile_selection.py tests/integration/test_cv_api.py tests/integration/test_profile_deletion.py -q
@@ -1042,7 +1042,7 @@ it('keeps approved values until Save review and discards only matching drafts', 
 
 Update `ApprovalCard` fixture expectations so an initial proposal with `{profile: {summary, current_title, phone, email}, preferences: {...}}` renders those actual values instead of the empty fallback.
 
-- [ ] **Step 2: Run focused frontend tests and verify old chat reprocess wiring fails**
+- [x] **Step 2: Run focused frontend tests and verify old chat reprocess wiring fails**
 
 ```powershell
 Set-Location frontend
@@ -1071,7 +1071,7 @@ Delete `CvReprocessRequest`, `CvReprocessTerminal`, `CV_REPROCESS_TURN_MESSAGE`,
 
 Keep the sidebar upload's initial profile bootstrap/chat approval path unchanged; only the later active/archived re-extraction path becomes direct.
 
-- [ ] **Step 5: Make review accessible and verify state preservation**
+- [x] **Step 5: Make review accessible and verify state preservation**
 
 Use Astryx `AlertDialog`, `Disclosure`, `Banner`, `Button`, and `Text` with an accessible name, focus restoration, Escape behavior, live region for progress/error, and disabled reasons. Each changed field has a stable `id` and the summary/error has `aria-describedby`. Add keyboard tests for Save, Discard, Retry, Escape, and focus return to **Manage CVs**.
 
@@ -1149,7 +1149,7 @@ async def test_later_ai_no_change_completes_run_without_version_or_timestamp_cha
 
 Retain the initial-generation test and assert Version 1 is still created when its content equals the baseline.
 
-- [ ] **Step 2: Run the tailoring coordinator tests and confirm the old version-creation behavior fails**
+- [x] **Step 2: Run the tailoring coordinator tests and confirm the old version-creation behavior fails**
 
 ```powershell
 Set-Location backend
@@ -1215,7 +1215,7 @@ class RunCompletedPayload(BaseModel):
 
 Chat completion events continue to contain only `{"state":"completed"}`. Update `get_completed_version` to return the completed run's latest version, which is the parent for `no_change`.
 
-- [ ] **Step 5: Add API and persistence recovery assertions**
+- [x] **Step 5: Add API and persistence recovery assertions**
 
 Update `POST /cv-tailoring/sessions/{id}/versions` to use the new response model. Assert a disconnected AI stream can recover by fetching session detail and comparing the known parent ID with the unchanged latest version; no new no-op database column is permitted.
 
@@ -1284,7 +1284,7 @@ it('recovers a disconnected no-op by matching the known parent to durable detail
 });
 ```
 
-- [ ] **Step 2: Run focused frontend tests and verify parser failures**
+- [x] **Step 2: Run focused frontend tests and verify parser failures**
 
 ```powershell
 Set-Location frontend
@@ -1315,7 +1315,7 @@ export const TAILORING_COPY = {
 
 On `no_change`, keep the selected detail/version/draft, clear the mutation error, set `lastOutcome`, and do not alter the session list's latest version. On `version_created`, retain current behavior. On disconnect, fetch detail and classify no-change only when the known parent ID/number is still the durable selected version and the latest run is completed; otherwise keep the existing disconnected recovery state.
 
-- [ ] **Step 5: Verify UI and transport behavior**
+- [x] **Step 5: Verify UI and transport behavior**
 
 ```powershell
 npm test -- --run src/test/cv-tailoring-api.test.ts src/test/cv-tailoring-state.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/sse-reducer.test.ts
@@ -1391,7 +1391,7 @@ def test_durable_activity_codec_round_trips_only_allowlisted_identity() -> None:
     assert decode_internal_issue(key) == GroundingIssue(code="EMPTY_PROVENANCE", path="sections[0].items[2].bullets[1]")
 ```
 
-- [ ] **Step 2: Run mapping tests and verify missing safe projection**
+- [x] **Step 2: Run mapping tests and verify missing safe projection**
 
 ```powershell
 Set-Location backend
@@ -1435,7 +1435,7 @@ class RunFailedPayload(BaseModel):
 
 Chat failures continue to omit `issues`; a tailoring failure includes only the safe projection.
 
-- [ ] **Step 5: Verify disconnect/detail/API privacy recovery**
+- [x] **Step 5: Verify disconnect/detail/API privacy recovery**
 
 Add integration assertions that after an AI grounding failure and stream disconnect, `GET /cv-tailoring/sessions/{id}` returns the same safe `issues`, while `technical_name`, raw error paths, source text, fact IDs, and provider payloads are absent. Verify manual HTTP errors return the same `issues` shape and preserve the local draft.
 
@@ -1496,7 +1496,7 @@ it('Try again preserves the previous instruction but does not submit automatical
 });
 ```
 
-- [ ] **Step 2: Run editor tests and verify the current generic error behavior fails**
+- [x] **Step 2: Run editor tests and verify the current generic error behavior fails**
 
 ```powershell
 Set-Location frontend
@@ -1521,7 +1521,7 @@ retryIssue(issue: TailoringUserIssue): void;
 
 Create stable field IDs from section ID/item index/field using the already parsed safe values. Pass `issueIds` into `TailoredSectionEditor`, render an English reason from `copy.ts`, and attach `aria-describedby`. Use `View source`, `Undo change`, and `Try again` buttons with visible labels/tooltips and live-region announcements. Do not show internal code/path or rejected text.
 
-- [ ] **Step 5: Verify all recovery actions and static accessibility rules**
+- [x] **Step 5: Verify all recovery actions and static accessibility rules**
 
 ```powershell
 npm test -- --run src/test/cv-tailoring-state.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/cv-tailoring-accessibility.test.tsx
@@ -1575,7 +1575,7 @@ def test_genuine_item_title_is_retained() -> None:
 
 Extend the real `pdflatex` integration fixture to include SUMMARY, EDUCATION, TECHNICAL SKILLS, and PROJECTS, extract PDF text with `pypdf.PdfReader`, and assert each section heading occurs once while `Resume parser` occurs once. Keep the existing skip when `pdflatex` is unavailable.
 
-- [ ] **Step 2: Run renderer tests and verify duplicate headings remain**
+- [x] **Step 2: Run renderer tests and verify duplicate headings remain**
 
 ```powershell
 Set-Location backend
@@ -1602,7 +1602,7 @@ def _display_item_title(item: TailoredItem, section_heading: str) -> SourceBound
 
 Pass `section.heading` into `_render_simple_item`, `_render_compact_item`, and `_render_generic_item`. Omit only the presentation title; retain `content_json`, provenance, source IDs, and all other fields unchanged. Do not use this helper for job/project/certificate titles that do not equal the containing heading.
 
-- [ ] **Step 4: Verify and commit renderer behavior**
+- [x] **Step 4: Verify and commit renderer behavior**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_cv_tailoring_renderer.py tests/integration/test_cv_tailoring_compiler.py -q
@@ -1659,7 +1659,7 @@ it('keeps the editor open and shows a safe error when an artifact fetch fails', 
 });
 ```
 
-- [ ] **Step 2: Run artifact tests and verify direct-link navigation fails the new contract**
+- [x] **Step 2: Run artifact tests and verify direct-link navigation fails the new contract**
 
 ```powershell
 Set-Location frontend
@@ -1696,7 +1696,7 @@ export function safeArtifactName(label: string, extension: 'pdf' | 'tex'): strin
 
 Keep the iframe on the inline PDF URL for embedded preview, use `window.open` only for **Preview PDF**, and use `downloadArtifact` for **Download PDF** and **Advanced → Download LaTeX source**. Show a feature-local English error and leave `window.location` untouched.
 
-- [ ] **Step 4: Verify and commit artifact delivery**
+- [x] **Step 4: Verify and commit artifact delivery**
 
 ```powershell
 npm test -- --run src/test/artifact-download.test.ts src/test/cv-tailoring-api.test.ts src/test/cv-tailoring-editor.test.tsx
@@ -1745,7 +1745,7 @@ it('uses Content and Preview tabs on a narrow viewport with one scroll owner per
 });
 ```
 
-- [ ] **Step 2: Run layout tests and verify the current persistent-column behavior fails**
+- [x] **Step 2: Run layout tests and verify the current persistent-column behavior fails**
 
 ```powershell
 Set-Location frontend
@@ -1762,7 +1762,7 @@ Move session label, currentness, version, actions, and context into the editor h
 
 `ProductSidebar` stores the previous selected destination/collapse state in a ref when `editorMode` becomes true, exposes the rail only, and restores the ref when returning to chat/list. `App` passes `editorMode={mainWorkspace.kind === 'cv-tailoring'}` and an `onOpenCvManager` callback. `TailoringEditor` **Edit Profile Information** invokes that callback instead of focusing the chat composer.
 
-- [ ] **Step 5: Run Astryx/a11y gates and commit**
+- [x] **Step 5: Run Astryx/a11y gates and commit**
 
 ```powershell
 npx astryx docs layout
@@ -1809,7 +1809,7 @@ def test_saved_job_label_uses_first_summary_sentence_then_date() -> None:
 
 Add API assertions that list, detail, evaluate, re-extract, and delete projections carry the same `display_label`, and that no UUID prefix appears when title/company/summary are absent.
 
-- [ ] **Step 2: Run label tests and verify missing DTO fields**
+- [x] **Step 2: Run label tests and verify missing DTO fields**
 
 ```powershell
 Set-Location backend
@@ -1840,7 +1840,7 @@ Call it only from `saved_jobs.py::_list_item`, using validated extraction summar
 
 Add optional `display_label: str | None = Field(default=None, max_length=140)` to `MatchResult`; populate it in `match_scoring.py` from the same helper without changing scores, ordering, weights, or formula. Old stored results remain valid because the field is optional. Add optional `display_label` to `TailoringJobLabel`; `_resolve_new_snapshot` stores the same server projection. Parsers accept old `{title, company}` JSON and derive the label at display time.
 
-- [ ] **Step 5: Verify label consistency and commit backend contracts**
+- [x] **Step 5: Verify label consistency and commit backend contracts**
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m pytest tests/unit/test_job_display.py tests/integration/test_saved_jobs_api.py tests/unit/test_match_components.py tests/unit/test_cv_tailoring_schemas.py tests/integration/test_cv_tailoring_api.py tests/integration/test_cv_tailoring_repository.py -q
@@ -1909,7 +1909,7 @@ it('hides technical activity names, codes, and timing', async () => {
 });
 ```
 
-- [ ] **Step 2: Run retained presentation tests and verify duplicated fallbacks fail**
+- [x] **Step 2: Run retained presentation tests and verify duplicated fallbacks fail**
 
 ```powershell
 Set-Location frontend
@@ -1941,7 +1941,7 @@ Use it in sessions list, editor header, delete dialog, and `safeArtifactName`. U
 
 Move all retained product strings to feature-local `copy.ts` modules. Update profile/conversation/status/dialog labels to English while leaving source CV/JD text and skill names untouched. Add a static test scanning retained feature source for known Vietnamese product literals and raw UUID fallback patterns.
 
-- [ ] **Step 5: Verify presentation and English copy**
+- [x] **Step 5: Verify presentation and English copy**
 
 ```powershell
 npm test -- --run src/test/saved-jobs-panel.test.tsx src/test/saved-job-card.test.tsx src/test/match-card.test.tsx src/test/agent-activity-timeline.test.tsx src/test/cv-tailoring-sessions-panel.test.tsx src/test/cv-tailoring-editor.test.tsx src/test/profile-conversation-sidebar.test.tsx
@@ -1951,7 +1951,7 @@ npm run typecheck
 
 Expected: PASS; no retained UI test contains a UUID-based user-facing assertion.
 
-- [ ] **Step 6: Commit presentation cleanup**
+- [x] **Step 6: Commit presentation cleanup**
 
 ```powershell
 Set-Location ..
@@ -2002,7 +2002,7 @@ def test_assistant_prose_cannot_claim_tailoring_success_without_tool_result(fake
     assert state["messages"][-1].content != "Your CV was tailored successfully."
 ```
 
-- [ ] **Step 2: Run title/intent tests and verify current defaults/decision gaps**
+- [x] **Step 2: Run title/intent tests and verify current defaults/decision gaps**
 
 ```powershell
 Set-Location backend
@@ -2029,7 +2029,7 @@ npm test -- --run src/test/conversation-api.test.ts src/test/profile-api.test.ts
 
 Expected: PASS with no synthetic re-extraction title/message regression.
 
-- [ ] **Step 5: Commit title and intent contracts**
+- [x] **Step 5: Commit title and intent contracts**
 
 ```powershell
 Set-Location ..
@@ -2051,7 +2051,7 @@ git commit -m "fix: use clear conversation titles and tailoring intent"
 - Modify: `backend/tests/e2e/test_cv_tailoring_flow.py`
 - Modify: `backend/tests/e2e/test_demo_flow.py`
 
-- [ ] **Step 1: Add static and accessibility acceptance tests**
+- [x] **Step 1: Add static and accessibility acceptance tests**
 
 The static test must assert:
 
@@ -2071,7 +2071,7 @@ expect(nonAppOwners).not.toMatch(/useSavedJobsState\(|useCvTailoringState\(/);
 
 Scope the state-hook assertion to files other than `src/app/App.tsx`, where the two legitimate state-owner calls remain. Add dialog accessible-name/focus, live-region, keyboard order, reduced-motion, narrow drawer, and no-overlapping-scroll assertions to `cv-tailoring-accessibility.test.tsx` and CV Manager tests.
 
-- [ ] **Step 2: Run complete local automated gates**
+- [x] **Step 2: Run complete local automated gates**
 
 ```powershell
 Set-Location backend
@@ -2092,11 +2092,11 @@ git status --short
 
 Expected: all commands exit 0. A TeX integration test may report its documented skip when `pdflatex` is unavailable; report that skip rather than claiming compiler evidence.
 
-- [ ] **Step 3: Update the sanitized acceptance checklist and README**
+- [x] **Step 3: Update the sanitized acceptance checklist and README**
 
 Document only synthetic data and user-visible checks in `docs/acceptance/product-ux-trust-repair-checklist.md`: two-profile Back/Forward restoration, direct re-extract progress/review/Discard/Retry/Save, no chat side effects, no-op AI/manual mutation, grounding recovery buttons, CV/profile deletion scope, PDF/LaTeX downloads, non-repeated headings, three primary destinations, no UUID/raw-score/internal activity text, desktop/narrow keyboard/focus/reduced-motion behavior. Update README links/runtime workflow without exposing provider payloads, private paths, or logs.
 
-- [ ] **Step 4: Perform browser acceptance through the frontend only**
+- [x] **Step 4: Perform browser acceptance through the frontend only**
 
 Start the supported local stack:
 
@@ -2107,7 +2107,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 
 Use the in-app Browser skill at `http://localhost:5173` with synthetic CV/JD data. Do not inspect backend logs. Execute the checklist as a non-technical user: select a JD, create a tailored CV, open it so the chat workspace is replaced, return to chat, edit each section, exercise no-op and grounding recovery, open Manage CVs, re-extract and review, preview/download artifacts, switch profiles, use browser Back, and verify every label/action is understandable. Record only screenshots/visible outcomes and safe error summaries.
 
-- [ ] **Step 5: Inspect final diff and commit acceptance evidence**
+- [x] **Step 5: Inspect final diff and commit acceptance evidence**
 
 ```powershell
 git diff --check
