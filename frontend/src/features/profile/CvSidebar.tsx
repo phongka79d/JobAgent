@@ -8,6 +8,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
 } from 'react';
 import {VStack} from '@astryxdesign/core/VStack';
@@ -28,6 +29,8 @@ import type {SavedJobsController} from '../jobs/savedJobsState';
 import type {CvTailoringController} from '../cv-tailoring/state';
 import {
   ProductSidebar,
+  ProductSidebarContent,
+  ProductSidebarNav,
   type ProductSidebarEditorMemory,
 } from '../navigation/ProductSidebar';
 import type {ProductDestination} from '../navigation/productNavigation';
@@ -78,6 +81,9 @@ export type CvSidebarProps = {
   tailoring: CvTailoringController;
   onOpenTailoringSession?: (sessionId: string) => void;
   editorMode?: boolean;
+  selectedDestination?: ProductDestination;
+  onSelectedDestinationChange?: (destination: ProductDestination) => void;
+  editorMemoryRef?: MutableRefObject<ProductSidebarEditorMemory>;
   deps?: CvSidebarDeps;
 };
 
@@ -114,15 +120,29 @@ function SidebarCollapseControl() {
   );
 }
 
-function CvSidebarShell({children}: {children?: ReactNode}) {
+function CvSidebarShell({
+  children,
+  mode = 'panel',
+}: {
+  children?: ReactNode;
+  mode?: 'rail' | 'panel';
+}) {
   const viewportWidth = window.innerWidth;
+  const railWidth = Math.min(
+    220,
+    Math.max(180, Math.round(viewportWidth * 0.12)),
+  );
+  const panelWidth = Math.min(
+    420,
+    Math.max(320, Math.round(viewportWidth * 0.24)),
+  );
 
   return (
     <SideNav
       resizable={{
-        defaultWidth: Math.round(viewportWidth * 0.6),
-        minWidth: 360,
-        maxWidth: Math.round(viewportWidth * 0.72),
+        defaultWidth: mode === 'rail' ? railWidth : panelWidth,
+        minWidth: mode === 'rail' ? 160 : 300,
+        maxWidth: mode === 'rail' ? 240 : 460,
         // ponytail: Intentionally no autoSaveId: Astryx restores collapsed width 0 independently of SideNav collapse state.
       }}
       collapsible={{hasButton: false}}
@@ -152,7 +172,45 @@ export function CvSidebar(props: CvSidebarProps) {
   return <CvSidebarController {...props} />;
 }
 
-function CvSidebarController({
+function CvSidebarController(props: CvSidebarProps) {
+  const workspace = useCvSidebarWorkspace(props);
+
+  return (
+    <CvSidebarShell>
+      {workspace.legacySidebar}
+      {workspace.drawer}
+    </CvSidebarShell>
+  );
+}
+
+export type CvSidebarWorkspace = {
+  readonly sideNav: ReactNode;
+  readonly workspacePanel: ReactNode;
+  readonly drawer: ReactNode;
+  readonly legacySidebar: ReactNode;
+};
+
+function CvWorkspaceSideNav({
+  rail,
+  drawer,
+}: {
+  rail: ReactNode;
+  drawer: ReactNode;
+}) {
+  const renderMode = useSideNavRenderMode();
+  const content =
+    renderMode === 'drawer' || renderMode === 'drawer-content'
+      ? drawer
+      : rail;
+
+  return (
+    <CvSidebarShell mode={renderMode === 'default' ? 'rail' : 'panel'}>
+      {content}
+    </CvSidebarShell>
+  );
+}
+
+export function useCvSidebarWorkspace({
   isUploadDisabled,
   onSidebarUploadSuccess,
   onCvDeleted,
@@ -169,8 +227,11 @@ function CvSidebarController({
   tailoring,
   onOpenTailoringSession,
   editorMode = false,
+  selectedDestination,
+  onSelectedDestinationChange,
+  editorMemoryRef,
   deps,
-}: CvSidebarProps) {
+}: CvSidebarProps): CvSidebarWorkspace {
   const selectedWorkspaceProfile = workspace.state.profiles.find(
     (candidate) => candidate.id === workspace.state.activeProfileId,
   );
@@ -180,9 +241,23 @@ function CvSidebarController({
     profileReady: selectedWorkspaceProfile?.state === 'ready',
   });
   const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
-  const [productDestination, setProductDestination] =
+  const [localProductDestination, setLocalProductDestination] =
     useState<ProductDestination>('overview');
-  const productEditorMemoryRef = useRef<ProductSidebarEditorMemory>(null);
+  const productDestination = selectedDestination ?? localProductDestination;
+  const setProductDestination = useCallback(
+    (destination: ProductDestination) => {
+      if (onSelectedDestinationChange) {
+        onSelectedDestinationChange(destination);
+      } else {
+        setLocalProductDestination(destination);
+      }
+    },
+    [onSelectedDestinationChange],
+  );
+  const localProductEditorMemoryRef =
+    useRef<ProductSidebarEditorMemory>(null);
+  const productEditorMemoryRef =
+    editorMemoryRef ?? localProductEditorMemoryRef;
   const handledCvManagerRequests = useRef(new Set<number>());
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
@@ -412,34 +487,62 @@ function CvSidebarController({
     </VStack>
   );
 
-  return (
-    <CvSidebarShell>
-      <ProductSidebar
-        overview={overview}
-        savedJobs={savedJobs}
-        savedJobsInvalidateKey={savedJobsInvalidateKey}
-        onCreateTailoredCv={onCreateTailoredCv}
-        isTailoringPending={isTailoringPending}
-        tailoring={tailoring}
-        onOpenTailoringSession={onOpenTailoringSession}
-        editorMode={editorMode}
-        selectedDestination={productDestination}
-        onSelectedDestinationChange={setProductDestination}
-        editorMemoryRef={productEditorMemoryRef}
-      />
-      <CvManagerDrawer
-        isOpen={isCvManagerOpen}
-        onOpenChange={setIsCvManagerOpen}
-        controller={cvManager}
-        onActivateProfile={(attachmentId) => {
-          const item = cvManager.state.items.find(
-            (candidate) => candidate.id === attachmentId,
-          );
-          if (item?.profile_id) void workspace.activate(item.profile_id);
-        }}
-        onDeleted={handleCvManagerDeleted}
-        onProfileApproved={onProfileApproved}
-      />
-    </CvSidebarShell>
+  const legacySidebar = (
+    <ProductSidebar
+      overview={overview}
+      savedJobs={savedJobs}
+      savedJobsInvalidateKey={savedJobsInvalidateKey}
+      onCreateTailoredCv={onCreateTailoredCv}
+      isTailoringPending={isTailoringPending}
+      tailoring={tailoring}
+      onOpenTailoringSession={onOpenTailoringSession}
+      editorMode={editorMode}
+      selectedDestination={productDestination}
+      onSelectedDestinationChange={setProductDestination}
+      editorMemoryRef={productEditorMemoryRef}
+    />
   );
+  const workspacePanel = (
+    <ProductSidebarContent
+      overview={overview}
+      savedJobs={savedJobs}
+      savedJobsInvalidateKey={savedJobsInvalidateKey}
+      onCreateTailoredCv={onCreateTailoredCv}
+      isTailoringPending={isTailoringPending}
+      tailoring={tailoring}
+      onOpenTailoringSession={onOpenTailoringSession}
+      editorMode={editorMode}
+      selectedDestination={productDestination}
+    />
+  );
+  const sideNav = (
+    <CvWorkspaceSideNav
+      rail={
+        <ProductSidebarNav
+          selectedDestination={productDestination}
+          onSelectedDestinationChange={setProductDestination}
+          editorMode={editorMode}
+          editorMemoryRef={productEditorMemoryRef}
+        />
+      }
+      drawer={legacySidebar}
+    />
+  );
+  const drawer = (
+    <CvManagerDrawer
+      isOpen={isCvManagerOpen}
+      onOpenChange={setIsCvManagerOpen}
+      controller={cvManager}
+      onActivateProfile={(attachmentId) => {
+        const item = cvManager.state.items.find(
+          (candidate) => candidate.id === attachmentId,
+        );
+        if (item?.profile_id) void workspace.activate(item.profile_id);
+      }}
+      onDeleted={handleCvManagerDeleted}
+      onProfileApproved={onProfileApproved}
+    />
+  );
+
+  return {sideNav, workspacePanel, drawer, legacySidebar};
 }

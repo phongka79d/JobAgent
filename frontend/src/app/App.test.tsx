@@ -197,6 +197,9 @@ describe('App foundation shell', () => {
 
   it('renders AppShell with CV sidebar and chat page', async () => {
     vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    window.localStorage.removeItem(
+      'astryx-resizable:jobagent-product-workspace-panel-width-v1',
+    );
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes('/api/profiles')) {
@@ -231,6 +234,19 @@ describe('App foundation shell', () => {
     const shell = container.querySelector('.astryx-app-shell');
     expect(shell).not.toBeNull();
     expect(shell).toHaveAttribute('data-variant', 'surface');
+    const workspacePanel = await screen.findByTestId(
+      'jobagent-product-workspace-panel',
+    );
+    expect(workspacePanel).toHaveClass('jobagent-hidden-scrollbar');
+    expect(screen.getByTestId('jobagent-product-workspace')).toHaveClass(
+      'jobagent-hidden-scrollbar',
+    );
+    const resizeHandle = screen.getByRole('separator', {
+      name: 'Resize workspace panel',
+    });
+    expect(resizeHandle).toHaveAttribute('aria-valuenow', '420');
+    expect(resizeHandle).toHaveAttribute('aria-valuemin', '320');
+    expect(resizeHandle).toHaveAttribute('aria-valuemax', '720');
     expect(await screen.findByTestId('jobagent-chat-page')).toBeInTheDocument();
     expect(screen.getByTestId('jobagent-cv-sidebar')).toBeInTheDocument();
     await waitFor(() => {

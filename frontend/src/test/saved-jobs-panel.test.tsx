@@ -273,12 +273,15 @@ describe('evaluateActionLabel currentness matrix', () => {
 });
 
 describe('SavedJobsPanel list, detail, and actions', () => {
-  it('uses a master-detail workspace and opens the CV comparison first', () => {
+  it('uses a resizable master-detail workspace and opens the CV comparison first', () => {
     const current = listItem(JOB_CURRENT, {
       evaluation_state: 'current',
       latest_score: 0.536,
     });
 
+    window.localStorage.removeItem(
+      'astryx-resizable:jobagent-saved-jobs-master-width-v1',
+    );
     renderPanel({items: [current], selectedJobId: JOB_CURRENT});
 
     expect(
@@ -287,6 +290,12 @@ describe('SavedJobsPanel list, detail, and actions', () => {
     expect(
       screen.getByTestId('jobagent-saved-jobs-detail-pane'),
     ).toBeInTheDocument();
+    const resizeHandle = screen.getByRole('separator', {
+      name: 'Resize saved jobs list',
+    });
+    expect(resizeHandle).toHaveAttribute('aria-valuenow', '240');
+    expect(resizeHandle).toHaveAttribute('aria-valuemin', '200');
+    expect(resizeHandle).toHaveAttribute('aria-valuemax', '320');
     expect(
       screen.getByRole('tab', {name: 'CV match'}),
     ).toHaveAttribute('aria-selected', 'true');

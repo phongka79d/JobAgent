@@ -34,7 +34,85 @@ export type ProductSidebarEditorMemory = {
   collapsed: boolean;
 } | null;
 
-export function ProductSidebar({
+export type ProductSidebarNavProps = {
+  readonly selectedDestination: ProductDestination;
+  readonly onSelectedDestinationChange: (destination: ProductDestination) => void;
+  readonly editorMode?: boolean;
+  readonly editorMemoryRef?: MutableRefObject<ProductSidebarEditorMemory>;
+};
+
+export function ProductSidebarNav({
+  selectedDestination,
+  onSelectedDestinationChange,
+  editorMode = false,
+  editorMemoryRef,
+}: ProductSidebarNavProps) {
+  const {isCollapsed, toggle: toggleCollapsed} = useSideNavCollapse();
+  const localEditorMemoryRef = useRef<ProductSidebarEditorMemory>(null);
+  const beforeEditorRef = editorMemoryRef ?? localEditorMemoryRef;
+
+  useEffect(() => {
+    if (editorMode) {
+      if (beforeEditorRef.current === null) {
+        beforeEditorRef.current = {
+          selected: selectedDestination,
+          collapsed: isCollapsed,
+        };
+      }
+      if (!isCollapsed) toggleCollapsed();
+      return;
+    }
+    const previous = beforeEditorRef.current;
+    if (previous !== null) {
+      beforeEditorRef.current = null;
+      onSelectedDestinationChange(previous.selected);
+      if (isCollapsed !== previous.collapsed) toggleCollapsed();
+    }
+  }, [
+    beforeEditorRef,
+    editorMode,
+    isCollapsed,
+    onSelectedDestinationChange,
+    selectedDestination,
+    toggleCollapsed,
+  ]);
+
+  const selectDestination = (destination: ProductDestination) => {
+    if (editorMode) return;
+    onSelectedDestinationChange(destination);
+    if (isCollapsed) toggleCollapsed();
+  };
+
+  return (
+    <VStack
+      gap={2}
+      data-testid="jobagent-product-sidebar-nav"
+      data-editor-mode={String(editorMode)}
+      data-selected-destination={selectedDestination}
+    >
+      <SideNavSection title="Workspace">
+        {PRODUCT_DESTINATIONS.map((destination) => (
+          <SideNavItem
+            key={destination.id}
+            label={destination.label}
+            icon={destination.icon}
+            isSelected={selectedDestination === destination.id}
+            onClick={() => selectDestination(destination.id)}
+          />
+        ))}
+      </SideNavSection>
+    </VStack>
+  );
+}
+
+export type ProductSidebarContentProps = Omit<
+  ProductSidebarProps,
+  'selectedDestination' | 'onSelectedDestinationChange' | 'editorMemoryRef'
+> & {
+  readonly selectedDestination: ProductDestination;
+};
+
+export function ProductSidebarContent({
   overview,
   savedJobs,
   tailoring,
@@ -44,41 +122,8 @@ export function ProductSidebar({
   onOpenTailoringSession = () => undefined,
   editorMode = false,
   selectedDestination,
-  onSelectedDestinationChange,
-  editorMemoryRef,
-}: ProductSidebarProps) {
-  const [localSelected, setLocalSelected] = useState<ProductDestination>('overview');
-  const selected = selectedDestination ?? localSelected;
-  const updateSelected = useCallback(
-    (destination: ProductDestination) => {
-      if (onSelectedDestinationChange) {
-        onSelectedDestinationChange(destination);
-      } else {
-        setLocalSelected(destination);
-      }
-    },
-    [onSelectedDestinationChange],
-  );
-  const {isCollapsed, toggle: toggleCollapsed} = useSideNavCollapse();
+}: ProductSidebarContentProps) {
   const handledSavedJobsInvalidateKey = useRef(savedJobsInvalidateKey);
-  const localEditorMemoryRef = useRef<ProductSidebarEditorMemory>(null);
-  const beforeEditorRef = editorMemoryRef ?? localEditorMemoryRef;
-
-  useEffect(() => {
-    if (editorMode) {
-      if (beforeEditorRef.current === null) {
-        beforeEditorRef.current = {selected, collapsed: isCollapsed};
-      }
-      if (!isCollapsed) toggleCollapsed();
-      return;
-    }
-    const previous = beforeEditorRef.current;
-    if (previous !== null) {
-      beforeEditorRef.current = null;
-      updateSelected(previous.selected);
-      if (isCollapsed !== previous.collapsed) toggleCollapsed();
-    }
-  }, [beforeEditorRef, editorMode, isCollapsed, selected, toggleCollapsed, updateSelected]);
 
   const refreshPendingSavedJobsInvalidation = useCallback(() => {
     if (handledSavedJobsInvalidateKey.current === savedJobsInvalidateKey) {
@@ -98,14 +143,11 @@ export function ProductSidebar({
   ]);
 
   useEffect(() => {
-    if (selected !== 'saved-jobs') {
+    if (selectedDestination !== 'saved-jobs') {
       return;
     }
     refreshPendingSavedJobsInvalidation();
-  }, [
-    refreshPendingSavedJobsInvalidation,
-    selected,
-  ]);
+  }, [refreshPendingSavedJobsInvalidation, selectedDestination]);
 
   const selectSavedJob = useCallback(
     (jobId: string) => {
@@ -130,32 +172,18 @@ export function ProductSidebar({
     [savedJobs.loadDetail],
   );
 
-  const selectDestination = (destination: ProductDestination) => {
-    if (editorMode) return;
-    updateSelected(destination);
-    if (isCollapsed) toggleCollapsed();
-  };
-
   return (
     <VStack
+      className="jobagent-product-workspace jobagent-hidden-scrollbar"
       gap={2}
-      data-testid="jobagent-product-sidebar"
+      height="100%"
+      width="100%"
+      data-testid="jobagent-product-workspace"
       data-editor-mode={String(editorMode)}
-      data-selected-destination={selected}
+      data-selected-destination={selectedDestination}
     >
-      <SideNavSection title="Workspace">
-        {PRODUCT_DESTINATIONS.map((destination) => (
-          <SideNavItem
-            key={destination.id}
-            label={destination.label}
-            icon={destination.icon}
-            isSelected={selected === destination.id}
-            onClick={() => selectDestination(destination.id)}
-          />
-        ))}
-      </SideNavSection>
-      {!editorMode && selected === 'overview' ? overview : null}
-      {!editorMode && selected === 'saved-jobs' ? (
+      {!editorMode && selectedDestination === 'overview' ? overview : null}
+      {!editorMode && selectedDestination === 'saved-jobs' ? (
         <SavedJobsPanel
           list={savedJobs.state.list}
           details={savedJobs.state.details}
@@ -174,12 +202,53 @@ export function ProductSidebar({
           onCreateTailoredCv={onCreateTailoredCv}
         />
       ) : null}
-      {!editorMode && selected === 'tailored-cvs' ? (
+      {!editorMode && selectedDestination === 'tailored-cvs' ? (
         <TailoringSessionsPanel
           controller={tailoring}
           onOpenSession={onOpenTailoringSession}
         />
       ) : null}
+    </VStack>
+  );
+}
+
+export function ProductSidebar({
+  selectedDestination,
+  onSelectedDestinationChange,
+  editorMemoryRef,
+  ...contentProps
+}: ProductSidebarProps) {
+  const [localSelected, setLocalSelected] =
+    useState<ProductDestination>('overview');
+  const selected = selectedDestination ?? localSelected;
+  const updateSelected = useCallback(
+    (destination: ProductDestination) => {
+      if (onSelectedDestinationChange) {
+        onSelectedDestinationChange(destination);
+      } else {
+        setLocalSelected(destination);
+      }
+    },
+    [onSelectedDestinationChange],
+  );
+
+  return (
+    <VStack
+      gap={2}
+      data-testid="jobagent-product-sidebar"
+      data-editor-mode={String(contentProps.editorMode ?? false)}
+      data-selected-destination={selected}
+    >
+      <ProductSidebarNav
+        selectedDestination={selected}
+        onSelectedDestinationChange={updateSelected}
+        editorMode={contentProps.editorMode}
+        editorMemoryRef={editorMemoryRef}
+      />
+      <ProductSidebarContent
+        {...contentProps}
+        selectedDestination={selected}
+      />
     </VStack>
   );
 }

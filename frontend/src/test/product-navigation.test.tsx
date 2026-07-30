@@ -219,6 +219,9 @@ describe('product navigation', () => {
     const tailoring = tailoringController();
     render(productShell(savedJobs, tailoring));
 
+    expect(screen.getByTestId('jobagent-product-workspace')).toHaveClass(
+      'jobagent-product-workspace',
+    );
     expect(screen.getByText('Overview content')).toBeInTheDocument();
     expect(savedJobs.loadList).not.toHaveBeenCalled();
     expect(tailoring.loadSessions).not.toHaveBeenCalled();

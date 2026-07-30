@@ -8,9 +8,12 @@
  */
 
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useMediaQuery} from '@astryxdesign/core';
 import {AppShell} from '@astryxdesign/core/AppShell';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
+import {Layout, LayoutContent, LayoutPanel} from '@astryxdesign/core/Layout';
+import {ResizeHandle, useResizable} from '@astryxdesign/core/Resizable';
 import {VStack} from '@astryxdesign/core/VStack';
 
 import {
@@ -20,7 +23,7 @@ import {
 } from '../features/chat/ChatPage';
 import {SIDEBAR_CV_TURN_MESSAGE} from '../features/profile/api';
 import {
-  CvSidebar,
+  useCvSidebarWorkspace,
   type CvSidebarDeps,
 } from '../features/profile/CvSidebar';
 import type {CvUploadResponse} from '../features/profile/types';
@@ -41,6 +44,7 @@ import {
   type ProfileWorkspaceApi,
 } from '../features/profile/workspaceState';
 import {useWorkspaceLifecycle} from '../features/profile/useWorkspaceLifecycle';
+import type {ProductDestination} from '../features/navigation/productNavigation';
 
 export {SIDEBAR_CV_TURN_MESSAGE} from '../features/profile/api';
 
@@ -130,6 +134,13 @@ function WorkspaceStatus({
 
 export function App({deps}: AppProps = {}) {
   const [uploadLocked, setUploadLocked] = useState(false);
+  const isCompactWorkspace = useMediaQuery('(max-width: 64rem)');
+  const productWorkspacePanel = useResizable({
+    defaultSize: 420,
+    minSizePx: 320,
+    maxSizePx: 720,
+    autoSaveId: 'jobagent-product-workspace-panel-width-v1',
+  });
   const workspaceApi = useMemo(() => deps?.workspace ?? {}, [deps?.workspace]);
   const workspace = useProfileWorkspaceState(workspaceApi, uploadLocked);
   useWorkspaceLifecycle(workspace.reload);
@@ -177,6 +188,8 @@ export function App({deps}: AppProps = {}) {
   const [mainWorkspace, setMainWorkspace] = useState<MainWorkspace>({
     kind: 'chat',
   });
+  const [productDestination, setProductDestination] =
+    useState<ProductDestination>('overview');
   useEffect(() => {
     if (workspaceScopeChanged) {
       setMainWorkspace({kind: 'chat'});
@@ -288,83 +301,122 @@ export function App({deps}: AppProps = {}) {
     setSavedJobsInvalidateKey((k) => k + 1);
   }, [savedJobs.invalidateCurrentness]);
 
+  const cvSidebar = useCvSidebarWorkspace({
+    isUploadDisabled: interactionLocked,
+    onSidebarUploadSuccess: handleSidebarUploadSuccess,
+    onCvDeleted: handleCvDeleted,
+    onProfileApproved: handleProfileSaved,
+    cvManagerRequest,
+    onCvManagerRequestHandled: handleCvManagerRequestHandled,
+    refreshKey: profileRefreshKey,
+    activationKey,
+    savedJobsInvalidateKey,
+    workspace,
+    savedJobs,
+    onCreateTailoredCv: (jobId) => {
+      void handleCreateTailoredCv(jobId);
+    },
+    isTailoringPending: tailoringLocked,
+    tailoring,
+    onOpenTailoringSession: (sessionId) => {
+      void handleOpenTailoringEditor(sessionId);
+    },
+    editorMode: mainWorkspace.kind === 'cv-tailoring',
+    selectedDestination: productDestination,
+    onSelectedDestinationChange: setProductDestination,
+    deps: deps?.sidebar,
+  });
+  const showProductWorkspacePanel =
+    !showTailoringEditor && !isCompactWorkspace;
+
   return (
     <AppShell
       contentPadding={0}
       height="fill"
       variant="surface"
       data-main-workspace={mainWorkspace.kind}
-      sideNav={
-        <CvSidebar
-          isUploadDisabled={interactionLocked}
-          onSidebarUploadSuccess={handleSidebarUploadSuccess}
-          onCvDeleted={handleCvDeleted}
-          onProfileApproved={handleProfileSaved}
-          cvManagerRequest={cvManagerRequest}
-          onCvManagerRequestHandled={handleCvManagerRequestHandled}
-          refreshKey={profileRefreshKey}
-          activationKey={activationKey}
-          savedJobsInvalidateKey={savedJobsInvalidateKey}
-          workspace={workspace}
-          savedJobs={savedJobs}
-          onCreateTailoredCv={(jobId) => {
-            void handleCreateTailoredCv(jobId);
-          }}
-          isTailoringPending={tailoringLocked}
-          tailoring={tailoring}
-          onOpenTailoringSession={(sessionId) => {
-            void handleOpenTailoringEditor(sessionId);
-          }}
-          editorMode={mainWorkspace.kind === 'cv-tailoring'}
-          deps={deps?.sidebar}
-        />
-      }
+      sideNav={cvSidebar.sideNav}
     >
-      <VStack
-        className="jobagent-chat-workspace"
-        hidden={showTailoringEditor}
-        height="100%"
-        width="100%"
-      >
-        {workspace.state.phase === 'ready' ? (
-          <ChatPage
-            key={`${workspace.state.activeProfileId ?? 'no-profile'}:${workspace.state.selectedConversationId ?? 'no-conversation'}`}
-            conversationId={workspace.state.selectedConversationId}
-            selectedProfileState={selectedProfile?.state ?? null}
-            selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
-            selectedJobId={savedJobs.state.selectedJobId}
-            deps={deps?.chat}
-            onInteractionLockChange={setUploadLocked}
-            sidebarAttachmentTurn={sidebarTurn}
-            onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
-            onProfileSaved={handleProfileSaved}
-            onProfileSetupChanged={workspace.reload}
-            onCvUploadSuccess={handleSidebarUploadSuccess}
-            onSavedJobsInvalidated={handleSavedJobsInvalidated}
-            onOpenTailoringEditor={(sessionId) => {
-              void handleOpenTailoringEditor(sessionId);
-            }}
-          />
-        ) : workspace.state.phase === 'rehydrating' ? (
-          <WorkspaceStatus title="Loading your workspace..." />
-        ) : (
-          <WorkspaceStatus
-            title="Your workspace could not be loaded"
-            actionLabel="Retry"
-            onAction={() => void workspace.reload()}
-          />
-        )}
-      </VStack>
-      {showTailoringEditor ? (
-        <TailoringEditor
-          controller={tailoring}
-          onBackToChat={() => setMainWorkspace({kind: 'chat'})}
-          onEditProfile={handleEditProfileFromTailoring}
-          canCreateFresh={currentFreshTailoringRequest !== null}
-          onCreateFresh={handleCreateFreshTailoredCv}
-          onReloadLatest={handleReloadLatestTailoring}
-        />
-      ) : null}
+      <Layout
+        height="fill"
+        start={
+          showProductWorkspacePanel ? (
+            <>
+              <LayoutPanel
+                className="jobagent-hidden-scrollbar"
+                data-testid="jobagent-product-workspace-panel"
+                hasDivider={false}
+                label="JobAgent workspace"
+                padding={0}
+                resizable={productWorkspacePanel.props}
+                role="complementary"
+              >
+                {cvSidebar.workspacePanel}
+              </LayoutPanel>
+              <ResizeHandle
+                direction="horizontal"
+                hasDivider
+                label="Resize workspace panel"
+                resizable={productWorkspacePanel.props}
+              />
+            </>
+          ) : undefined
+        }
+        content={
+          <LayoutContent
+            className="jobagent-main-workspace jobagent-hidden-scrollbar"
+            label="Main workspace"
+            padding={0}
+          >
+            <VStack
+              className="jobagent-chat-workspace jobagent-hidden-scrollbar"
+              hidden={showTailoringEditor}
+              height="100%"
+              width="100%"
+            >
+              {workspace.state.phase === 'ready' ? (
+                <ChatPage
+                  key={`${workspace.state.activeProfileId ?? 'no-profile'}:${workspace.state.selectedConversationId ?? 'no-conversation'}`}
+                  conversationId={workspace.state.selectedConversationId}
+                  selectedProfileState={selectedProfile?.state ?? null}
+                  selectedProfileSetupStatus={selectedProfile?.setup_status ?? null}
+                  selectedJobId={savedJobs.state.selectedJobId}
+                  deps={deps?.chat}
+                  onInteractionLockChange={setUploadLocked}
+                  sidebarAttachmentTurn={sidebarTurn}
+                  onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
+                  onProfileSaved={handleProfileSaved}
+                  onProfileSetupChanged={workspace.reload}
+                  onCvUploadSuccess={handleSidebarUploadSuccess}
+                  onSavedJobsInvalidated={handleSavedJobsInvalidated}
+                  onOpenTailoringEditor={(sessionId) => {
+                    void handleOpenTailoringEditor(sessionId);
+                  }}
+                />
+              ) : workspace.state.phase === 'rehydrating' ? (
+                <WorkspaceStatus title="Loading your workspace..." />
+              ) : (
+                <WorkspaceStatus
+                  title="Your workspace could not be loaded"
+                  actionLabel="Retry"
+                  onAction={() => void workspace.reload()}
+                />
+              )}
+            </VStack>
+            {showTailoringEditor ? (
+              <TailoringEditor
+                controller={tailoring}
+                onBackToChat={() => setMainWorkspace({kind: 'chat'})}
+                onEditProfile={handleEditProfileFromTailoring}
+                canCreateFresh={currentFreshTailoringRequest !== null}
+                onCreateFresh={handleCreateFreshTailoredCv}
+                onReloadLatest={handleReloadLatestTailoring}
+              />
+            ) : null}
+          </LayoutContent>
+        }
+      />
+      {cvSidebar.drawer}
     </AppShell>
   );
 }

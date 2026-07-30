@@ -3,7 +3,7 @@
  * Composes accepted savedJobsState; reuses MatchCard via SavedJobDetail.
  */
 
-import {useEffect, useState} from 'react';
+import {useEffect, useState, type CSSProperties} from 'react';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
@@ -11,6 +11,7 @@ import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {List, ListItem} from '@astryxdesign/core/List';
+import {ResizeHandle, useResizable} from '@astryxdesign/core/Resizable';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Skeleton} from '@astryxdesign/core/Skeleton';
 import {Text} from '@astryxdesign/core/Text';
@@ -237,6 +238,15 @@ export function SavedJobsPanel({
   );
   const [reextractTarget, setReextractTarget] =
     useState<SavedJobListItem | null>(null);
+  const savedJobsMasterPane = useResizable({
+    defaultSize: 240,
+    minSizePx: 200,
+    maxSizePx: 320,
+    autoSaveId: 'jobagent-saved-jobs-master-width-v1',
+  });
+  const workspaceStyle = {
+    '--jobagent-saved-jobs-master-width': `${savedJobsMasterPane.size}px`,
+  } as CSSProperties;
 
   // Load once when the tab panel mounts; state owner skips when already cached.
   // Mount-only on purpose: remount on tab re-entry; parent callback identity may churn.
@@ -255,6 +265,7 @@ export function SavedJobsPanel({
     <VStack
       gap={2}
       className="jobagent-saved-jobs-workspace"
+      style={workspaceStyle}
       data-testid="jobagent-saved-jobs"
     >
       <VStack
@@ -345,6 +356,14 @@ export function SavedJobsPanel({
           </List>
         ) : null}
       </VStack>
+
+      <ResizeHandle
+        className="jobagent-saved-jobs-resize-handle"
+        direction="horizontal"
+        hasDivider
+        label="Resize saved jobs list"
+        resizable={savedJobsMasterPane.props}
+      />
 
       <VStack
         gap={2}
