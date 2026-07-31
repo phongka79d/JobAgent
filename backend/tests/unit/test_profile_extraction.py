@@ -43,6 +43,7 @@ from app.services.profile_drafts import (
     ERROR_ATTACHMENT_NOT_FOUND,
     arguments_summary_for_propose_cv,
     propose_profile_from_cv,
+    stage_cv_document,
 )
 from app.services.profile_extraction import (
     EXTRACTION_SCHEMA_STRATEGY,
@@ -1016,6 +1017,48 @@ def files_root(tmp_path: Path) -> Path:
 
 def _write_pdf(storage: AttachmentStorage, attachment_id: str, src: Path) -> str:
     return storage.write_bytes(attachment_id, src.read_bytes())
+
+
+def test_stage_cv_document_has_no_open_session_and_no_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Staging is provider/file work only; publication owns all DB writes."""
+    import inspect
+    from types import SimpleNamespace
+
+    import app.services.profile_drafts as profile_drafts
+
+    attachment_id = new_uuid()
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    storage_path = _write_pdf(storage, attachment_id, CV_DIR / "digital_cv_01.pdf")
+    attachment = SimpleNamespace(id=attachment_id, storage_path=storage_path)
+
+    assert "session" not in inspect.signature(stage_cv_document).parameters
+    assert "session_factory" not in inspect.signature(stage_cv_document).parameters
+    monkeypatch.setattr(profile_drafts, "session_scope", pytest.fail)
+    monkeypatch.setattr(profile_drafts.cv_doc_repo, "upsert_draft", pytest.fail)
+    monkeypatch.setattr(
+        profile_drafts.profile_repo, "upsert_draft_for_profile", pytest.fail
+    )
+    monkeypatch.setattr(profile_drafts, "persist_canonical_chunks", pytest.fail)
+
+    staged = run_async(
+        stage_cv_document(
+            attachment=attachment,
+            storage=storage,
+            invoker=CoveringDocumentInvoker(),
+            normalizer=_normalizer(),
+        )
+    )
+
+    from app.services.profile_drafts import StagedCvProposal
+
+    assert isinstance(staged, StagedCvProposal)
+    assert staged.draft_payload.candidate_profile.summary.startswith(
+        "Backend engineer"
+    )
 
 
 def test_propose_active_reuses_profile_without_provider(

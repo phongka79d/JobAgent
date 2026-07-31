@@ -27,9 +27,11 @@ import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, TypeVar
+from datetime import datetime
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import (
@@ -43,11 +45,14 @@ from app.db.models.profiles import (
     PROFILE_DRAFT_ID,
     PROFILE_STATE_PENDING,
     PROFILE_STATE_READY,
+    Profile,
 )
 from app.db.session import session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import cv_documents as cv_doc_repo
+from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.profile import (
     CandidateProfile,
     CandidateSkill,
@@ -60,6 +65,8 @@ from app.schemas.profile import (
 from app.schemas.tools import ToolResult
 from app.services.profile_extraction import (
     FAILURE_NO_EXTRACTABLE_TEXT,
+    CanonicalChunk,
+    DocumentPublicationArtifacts,
     ProfileExtractionError,
     compact_draft_summary,
     compact_profile_summary,
@@ -119,6 +126,36 @@ class ProposeFromCvResult:
     provider_retries_used: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class StagedCvProposal:
+    """In-memory CV extraction artifacts awaiting re-extraction publication."""
+
+    attachment_id: str
+    chunks: Sequence[CanonicalChunk]
+    draft_payload: ProfileDraftPayload
+    document_json: dict[str, Any]
+    profile_json: dict[str, Any]
+    outline_json: dict[str, Any]
+    extraction_version: str
+    source_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublishResult:
+    """Outcome of a revision-guarded re-extraction publication attempt."""
+
+    state: Literal["review_ready", "stale"]
+    revision: datetime | None
+
+
+class PublishCasMismatch(Exception):
+    """The claimed operation no longer owns the exact staged source state."""
+
+    def __init__(self, operation_id: str) -> None:
+        self.operation_id = operation_id
+        super().__init__(operation_id)
+
+
 def _tool_ok(summary: str, data: dict[str, Any]) -> ToolResult:
     return ToolResult(ok=True, code=None, summary=summary, data=data)
 
@@ -159,6 +196,121 @@ async def _load_attachment(
     session: AsyncSession, attachment_id: str
 ) -> Attachment | None:
     return await att_repo.get_by_id(session, attachment_id)
+
+
+async def stage_cv_document(
+    *,
+    attachment: Attachment,
+    storage: AttachmentStorage,
+    normalizer: SkillNormalizer,
+    invoker: Any,
+) -> StagedCvProposal:
+    """Extract a CV into memory without opening a database session."""
+    artifacts: DocumentPublicationArtifacts = extract_document_publication_from_pdf(
+        storage.resolve_path(attachment.storage_path),
+        attachment_id=attachment.id,
+        invoker=invoker,
+        normalizer=normalizer,
+    )
+    return StagedCvProposal(
+        attachment_id=attachment.id,
+        chunks=artifacts.chunks,
+        draft_payload=artifacts.draft,
+        document_json=artifacts.document_json,
+        profile_json=artifacts.profile_json,
+        outline_json=artifacts.outline_json,
+        extraction_version=artifacts.extraction_version,
+        source_hash=artifacts.source_hash,
+    )
+
+
+async def has_incomplete_profile_setup(session: AsyncSession) -> bool:
+    """Whether a pending profile setup blocks re-extraction publication."""
+    return (
+        await session.execute(
+            select(Profile.id).where(Profile.state == PROFILE_STATE_PENDING)
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def _publish_reextract_stage_transaction(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    profile_id: str,
+    operation_id: str,
+    staged: StagedCvProposal,
+) -> PublishResult:
+    """Atomically publish only a still-current re-extraction stage."""
+    async with session_scope(session_factory) as session:
+        operation = await operation_repo.get_operation(
+            session, profile_id=profile_id, operation_id=operation_id
+        )
+        profile = await profile_repo.get_profile(session, profile_id)
+        workspace = await workspace_repo.get_state(session)
+        if (
+            operation is None
+            or profile is None
+            or workspace is None
+            or operation.state != "running"
+            or await workspace_repo.get_active_profile_id(session) != profile_id
+            or operation.source_attachment_id != staged.attachment_id
+            or profile.attachment_id != staged.attachment_id
+            or profile.updated_at != operation.base_profile_updated_at
+            or workspace.updated_at != operation.base_workspace_updated_at
+            or await profile_repo.get_draft_for_profile(session, profile_id)
+            is not None
+            or await has_incomplete_profile_setup(session)
+        ):
+            raise PublishCasMismatch(operation_id)
+
+        await persist_canonical_chunks(
+            session, attachment_id=staged.attachment_id, chunks=staged.chunks
+        )
+        await cv_doc_repo.upsert_draft(
+            session,
+            attachment_id=staged.attachment_id,
+            document_json=staged.document_json,
+            profile_json=staged.profile_json,
+            outline_json=staged.outline_json,
+            extraction_version=staged.extraction_version,
+            source_hash=staged.source_hash,
+        )
+        draft = await profile_repo.upsert_draft_for_profile(
+            session,
+            profile_id=profile_id,
+            draft_json=staged.draft_payload.model_dump(mode="json"),
+            source_attachment_id=staged.attachment_id,
+            reextract_operation_id=operation_id,
+        )
+        changed = await operation_repo.transition_running_operation(
+            session,
+            profile_id=profile_id,
+            operation_id=operation_id,
+            to_state="review_ready",
+            error_code=None,
+        )
+        if not changed:
+            raise PublishCasMismatch(operation_id)
+        return PublishResult(state="review_ready", revision=draft.updated_at)
+
+
+async def publish_reextract_stage(**kwargs: object) -> PublishResult:
+    """Publish a stage or separately mark its still-running operation stale."""
+    operation_id = cast(str, kwargs["operation_id"])
+    try:
+        return await _publish_reextract_stage_transaction(**kwargs)  # type: ignore[arg-type]
+    except PublishCasMismatch:
+        async with session_scope(
+            cast(async_sessionmaker[AsyncSession], kwargs["session_factory"])
+        ) as session:
+            await operation_repo.transition_running_operation(
+                session,
+                profile_id=cast(str, kwargs["profile_id"]),
+                operation_id=operation_id,
+                to_state="stale",
+                error_code="PROFILE_REEXTRACT_STALE",
+            )
+        return PublishResult(state="stale", revision=None)
 
 
 async def propose_profile_from_cv(
@@ -1251,10 +1403,16 @@ __all__ = [
     "ERROR_INVALID_PROFILE_UPDATE",
     "ERROR_NO_PROFILE_CONTEXT",
     "FAILURE_NO_EXTRACTABLE_TEXT",
+    "PublishCasMismatch",
+    "PublishResult",
     "ProposeFromCvResult",
     "ProposeUpdateResult",
+    "StagedCvProposal",
     "arguments_summary_for_propose_cv",
     "arguments_summary_for_propose_update",
+    "has_incomplete_profile_setup",
+    "publish_reextract_stage",
     "propose_profile_from_cv",
     "propose_profile_update",
+    "stage_cv_document",
 ]

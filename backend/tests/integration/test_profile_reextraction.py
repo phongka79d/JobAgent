@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 from app.core.ids import new_uuid
+from app.core.time import utc_now
+from app.db.models.attachment_text_chunks import AttachmentTextChunk
 from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
 from app.db.models.profiles import (
     Profile,
@@ -19,6 +21,7 @@ from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import job_evaluations as evaluation_repo
 from app.repositories import jobs as jobs_repo
+from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
 from app.services.evaluation_context import (
@@ -26,7 +29,11 @@ from app.services.evaluation_context import (
     evaluation_context_hash,
 )
 from app.services.profile_approval import commit_approved_draft
-from app.services.profile_drafts import propose_profile_update
+from app.services.profile_drafts import (
+    propose_profile_update,
+    publish_reextract_stage,
+    stage_cv_document,
+)
 from app.services.profile_reextraction import (
     ProfileReextractError,
     ProfileReextractionCoordinator,
@@ -435,6 +442,168 @@ def test_operation_draft_rejects_ownership_mutations_without_mutating_rows(
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_publish_marks_operation_stale_without_partial_writes_when_workspace_revision_changes(  # noqa: E501
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            storage_path = storage.write_bytes(attachment_id, pdf.read_bytes())
+            async with factory() as session:
+                attachment = await att_repo.create_staged(
+                    session,
+                    file_hash="publish-cas-workspace",
+                    original_name="ready.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=storage_path,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id)
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="Ready",
+                    profile_json=_valid_profile().model_dump(mode="json"),
+                    location=None,
+                    extraction_version="old-v1",
+                    source_hash="old-source-hash",
+                )
+                workspace = await workspace_repo.set_active_profile_id(
+                    session, profile.id
+                )
+                await _seed_cv_document_draft(
+                    session,
+                    attachment_id=attachment_id,
+                    profile_json=profile.profile_json,
+                    chunk_text="existing canonical chunk",
+                )
+                operation = await operation_repo.claim_operation(
+                    session,
+                    profile_id=profile.id,
+                    source_attachment_id=attachment_id,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
+                )
+                await session.commit()
+
+                before_chunks = [
+                    (
+                        row.ordinal,
+                        row.text,
+                        row.preview,
+                        row.char_count,
+                        row.token_estimate,
+                    )
+                    for row in (
+                        await session.scalars(
+                            select(AttachmentTextChunk)
+                            .where(AttachmentTextChunk.attachment_id == attachment_id)
+                            .order_by(AttachmentTextChunk.ordinal)
+                        )
+                    ).all()
+                ]
+                before_document = await cv_doc_repo.get_draft(session, attachment_id)
+                assert before_document is not None
+                before_document_values = (
+                    before_document.document_json,
+                    before_document.profile_json,
+                    before_document.outline_json,
+                    before_document.extraction_version,
+                    before_document.source_hash,
+                )
+                profile_id = profile.id
+                operation_id = operation.id
+
+            staged = await stage_cv_document(
+                attachment=attachment,
+                storage=storage,
+                invoker=CoveringDocumentInvoker(),
+                normalizer=_normalizer(),
+            )
+            async with factory() as session:
+                workspace = await workspace_repo.get_state(session)
+                assert workspace is not None
+                workspace.updated_at = utc_now()
+                await session.commit()
+
+            result = await publish_reextract_stage(
+                session_factory=factory,
+                profile_id=profile_id,
+                operation_id=operation_id,
+                staged=staged,
+            )
+            assert result.state == "stale"
+
+            async with factory() as session:
+                assert await profile_repo.get_draft_for_operation(
+                    session, profile_id, operation_id
+                ) is None
+                after_document = await cv_doc_repo.get_draft(session, attachment_id)
+                assert after_document is not None
+                assert (
+                    after_document.document_json,
+                    after_document.profile_json,
+                    after_document.outline_json,
+                    after_document.extraction_version,
+                    after_document.source_hash,
+                ) == before_document_values
+                after_chunks = [
+                    (
+                        row.ordinal,
+                        row.text,
+                        row.preview,
+                        row.char_count,
+                        row.token_estimate,
+                    )
+                    for row in (
+                        await session.scalars(
+                            select(AttachmentTextChunk)
+                            .where(AttachmentTextChunk.attachment_id == attachment_id)
+                            .order_by(AttachmentTextChunk.ordinal)
+                        )
+                    ).all()
+                ]
+                assert after_chunks == before_chunks
+                operation = await operation_repo.get_operation(
+                    session, profile_id=profile_id, operation_id=operation_id
+                )
+                assert operation is not None
+                assert operation.state == "stale"
+                assert operation.error_code == "PROFILE_REEXTRACT_STALE"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_publish_compares_profile_workspace_attachment_and_operation() -> None:
+    """Publication keeps every claimed owner/revision check ahead of writes."""
+    import inspect
+
+    from app.services.profile_drafts import _publish_reextract_stage_transaction
+
+    source = inspect.getsource(_publish_reextract_stage_transaction)
+    for invariant in (
+        'operation.state != "running"',
+        "workspace_repo.get_active_profile_id(session) != profile_id",
+        "operation.source_attachment_id != staged.attachment_id",
+        "profile.attachment_id != staged.attachment_id",
+        "profile.updated_at != operation.base_profile_updated_at",
+        "workspace.updated_at != operation.base_workspace_updated_at",
+        "profile_repo.get_draft_for_profile(session, profile_id)",
+        "has_incomplete_profile_setup(session)",
+    ):
+        assert invariant in source
 
 
 def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
