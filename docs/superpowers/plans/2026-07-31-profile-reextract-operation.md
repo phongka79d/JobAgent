@@ -589,7 +589,7 @@ git commit -m "refactor: separate profile extraction staging"
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 - Modify: `backend/tests/integration/test_interrupt_resume.py`
 
-- [ ] **Step 1: Write failing claim-before-work, cancellation, pool, and startup tests.**
+- [x] **Step 1: Write failing claim-before-work, cancellation, pool, and startup tests.**
 
 ```python
 async def test_stream_claims_before_first_event_or_provider_call() -> None:
@@ -616,13 +616,13 @@ async def test_startup_changes_running_only_to_interrupted() -> None:
     assert await states(factory) == ["interrupted", "review_ready"]
 ```
 
-- [ ] **Step 2: Run durable-stream tests to verify they fail.**
+- [x] **Step 2: Run durable-stream tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/unit/test_profile_reextraction.py::test_stream_claims_before_first_event_or_provider_call tests/unit/test_profile_reextraction.py::test_cancelled_stream_persists_interrupted_after_session_close tests/integration/test_interrupt_resume.py::test_startup_changes_running_only_to_interrupted -q`
 
 Expected: FAIL because the current stream creates its operation ID in memory and cancellation does not finalize a durable operation.
 
-- [ ] **Step 3: Implement coordinator claim, shielded cancellation, and startup recovery.**
+- [x] **Step 3: Implement coordinator claim, shielded cancellation, and startup recovery.**
 
 ```python
 async def stream(self, profile_id: str) -> AsyncIterator[ProfileReextractEvent]:
@@ -640,13 +640,13 @@ async def stream(self, profile_id: str) -> AsyncIterator[ProfileReextractEvent]:
 
 Keep `CancelScope(shield=True)` outside the complete fresh `session_scope`, let the context manager finish before re-raising, and do not reuse a request session. Record provider and retained-file failures with a short fresh failure transaction. Add `recover_running_profile_reextract_operations(session_factory)` to `lifespan` after SQLite readiness and before serving; it must transition only `running` rows to `interrupted`.
 
-- [ ] **Step 4: Run focused durability and cancellation regressions to verify they pass.**
+- [x] **Step 4: Run focused durability and cancellation regressions to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/unit/test_profile_reextraction.py tests/integration/test_profile_reextraction.py::test_duplicate_requests_perform_one_staging_and_provider_call tests/integration/test_interrupt_resume.py::test_startup_changes_running_only_to_interrupted tests/integration/test_chat_api.py::test_disconnect_returns_connections_to_pool -q`
 
 Expected: PASS; a committed operation exists before SSE and provider work, duplicate requests return `PROFILE_REEXTRACT_IN_PROGRESS`, cancellation leaves `interrupted`, and logs contain no pool or active-connection warning.
 
-- [ ] **Step 5: Commit durable orchestration.**
+- [x] **Step 5: Commit durable orchestration.**
 
 ```powershell
 git add backend/app/services/profile_reextraction.py backend/app/main.py backend/tests/unit/test_profile_reextraction.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_interrupt_resume.py
