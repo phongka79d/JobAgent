@@ -13,7 +13,11 @@ from app.db.models.chat import (
     Conversation,
 )
 from app.db.models.cv_tailoring import CVTailoringSession
-from app.db.models.profiles import PROFILE_STATE_READY
+from app.db.models.profiles import (
+    PROFILE_STATE_READY,
+    ProfileDraft,
+    ProfileReextractOperation,
+)
 from app.repositories import profiles as profile_repo
 from app.schemas.cv_tailoring import TAILORING_SESSION_STATE_GENERATING
 
@@ -137,6 +141,51 @@ async def assert_profile_review_clear(
         raise ActivityBlockedError(
             code,
             "Approve or discard the pending profile review first",
+        )
+
+
+async def assert_profile_reextract_clear(
+    session: AsyncSession, *, profile_id: str
+) -> None:
+    """Block lifecycle work while re-extraction owns a review or is running."""
+    owned_draft = await session.scalar(
+        select(ProfileReextractOperation.id)
+        .join(
+            ProfileDraft,
+            ProfileDraft.reextract_operation_id == ProfileReextractOperation.id,
+        )
+        .where(
+            ProfileDraft.target_profile_id == profile_id,
+            ProfileDraft.reextract_operation_id.is_not(None),
+        )
+        .order_by(
+            ProfileReextractOperation.updated_at.desc(),
+            ProfileReextractOperation.id.desc(),
+        )
+        .limit(1)
+    )
+    if owned_draft is not None:
+        raise ActivityBlockedError(
+            "PROFILE_REVIEW_PENDING",
+            "Approve or discard the pending profile re-extraction review first",
+        )
+
+    actionable = await session.scalar(
+        select(ProfileReextractOperation.id)
+        .where(
+            ProfileReextractOperation.profile_id == profile_id,
+            ProfileReextractOperation.state.in_(("running", "review_ready")),
+        )
+        .order_by(
+            ProfileReextractOperation.updated_at.desc(),
+            ProfileReextractOperation.id.desc(),
+        )
+        .limit(1)
+    )
+    if actionable is not None:
+        raise ActivityBlockedError(
+            "PROFILE_REEXTRACT_IN_PROGRESS",
+            "Wait for the profile re-extraction to finish first",
         )
 
 

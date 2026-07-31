@@ -9,12 +9,14 @@ streaming. Schema DDL is owned by Alembic migrations, not this module.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -31,6 +33,34 @@ REQUIRED_BUSY_TIMEOUT_MS = 5000
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+class ImmediateTransactionBusy(RuntimeError):
+    """SQLite could not acquire or finish the immediate writer transaction."""
+
+
+def is_sqlite_busy_or_snapshot(exc: OperationalError) -> bool:
+    """Return whether *exc* is a recognized SQLite writer-contention error."""
+    original = exc.orig
+    if not isinstance(original, sqlite3.OperationalError):
+        return False
+
+    error_code = getattr(original, "sqlite_errorcode", None)
+    error_name = getattr(original, "sqlite_errorname", None)
+    if isinstance(error_code, int) and error_code & 0xFF in {
+        sqlite3.SQLITE_BUSY,
+        sqlite3.SQLITE_LOCKED,
+    }:
+        return True
+    if error_name in {"SQLITE_BUSY", "SQLITE_BUSY_SNAPSHOT", "SQLITE_LOCKED"}:
+        return True
+
+    message = str(original).strip().lower()
+    return message in {
+        "database is locked",
+        "database table is locked",
+        "database schema is locked",
+    }
 
 
 def sqlite_url(sqlite_path: str | Path) -> str:
@@ -146,6 +176,26 @@ async def session_scope(
             yield session
             await session.commit()
         except Exception:
+            await session.rollback()
+            raise
+
+
+@asynccontextmanager
+async def immediate_session_scope(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """Run a short SQLite writer transaction acquired with ``BEGIN IMMEDIATE``."""
+    async with session_factory() as session:
+        try:
+            await session.execute(text("BEGIN IMMEDIATE"))
+            yield session
+            await session.commit()
+        except OperationalError as exc:
+            await session.rollback()
+            if is_sqlite_busy_or_snapshot(exc):
+                raise ImmediateTransactionBusy() from exc
+            raise
+        except BaseException:
             await session.rollback()
             raise
 
