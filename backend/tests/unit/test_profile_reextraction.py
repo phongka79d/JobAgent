@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -296,7 +297,11 @@ async def test_claim_maps_immediate_busy_to_retryable_profile_error(
 @pytest.mark.asyncio
 async def test_cancelled_stream_keeps_original_error_when_interrupt_finalize_fails(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    logger = logging.getLogger("app.services.profile_reextraction")
+    monkeypatch.setattr(logger, "disabled", False)
+    caplog.set_level(logging.ERROR, logger="app.services.profile_reextraction")
     class TestCoordinator(ProfileReextractionCoordinator):
         async def _claim(self, profile_id: str) -> Any:
             return SimpleNamespace(
@@ -327,6 +332,9 @@ async def test_failed_stream_emits_event_when_failed_finalize_fails(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    logger = logging.getLogger("app.services.profile_reextraction")
+    monkeypatch.setattr(logger, "disabled", False)
+    caplog.set_level(logging.ERROR, logger="app.services.profile_reextraction")
     class Storage:
         def exists(self, _path: str) -> bool:
             return True
