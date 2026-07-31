@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from app.db.models.profiles import (
     ProfileReextractOperation,
 )
 from app.db.session import build_async_engine
+from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
@@ -444,6 +446,261 @@ def test_operation_draft_rejects_ownership_mutations_without_mutating_rows(
     run_async(_body())
 
 
+async def _seed_running_publish_case(
+    session: AsyncSession,
+    storage: AttachmentStorage,
+    *,
+    pdf: Path,
+    file_hash: str,
+) -> tuple[Any, Profile, ProfileReextractOperation]:
+    attachment_id = new_uuid()
+    storage_path = storage.write_bytes(attachment_id, pdf.read_bytes())
+    attachment = await att_repo.create_staged(
+        session,
+        file_hash=file_hash,
+        original_name="ready.pdf",
+        size_bytes=pdf.stat().st_size,
+        storage_path=storage_path,
+        page_count=1,
+        attachment_id=attachment_id,
+    )
+    await att_repo.mark_active(session, attachment_id)
+    profile = await profile_repo.create_profile(
+        session,
+        attachment_id=attachment_id,
+        display_name="Ready",
+        profile_json=_valid_profile().model_dump(mode="json"),
+        location=None,
+        extraction_version="old-v1",
+        source_hash="old-source-hash",
+    )
+    workspace = await workspace_repo.set_active_profile_id(session, profile.id)
+    await _seed_cv_document_draft(
+        session,
+        attachment_id=attachment_id,
+        profile_json=profile.profile_json,
+        chunk_text="existing canonical chunk",
+    )
+    operation = await operation_repo.claim_operation(
+        session,
+        profile_id=profile.id,
+        source_attachment_id=attachment_id,
+        base_profile_updated_at=profile.updated_at,
+        base_workspace_updated_at=workspace.updated_at,
+    )
+    return attachment, profile, operation
+
+
+def test_publish_replaces_artifacts_and_creates_operation_owned_review(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment, profile, operation = await _seed_running_publish_case(
+                    session,
+                    storage,
+                    pdf=pdf,
+                    file_hash="publish-success",
+                )
+                await session.commit()
+
+            staged = await stage_cv_document(
+                attachment=attachment,
+                storage=storage,
+                invoker=CoveringDocumentInvoker(),
+                normalizer=_normalizer(),
+            )
+            result = await publish_reextract_stage(
+                session_factory=factory,
+                profile_id=profile.id,
+                operation_id=operation.id,
+                staged=staged,
+            )
+            assert result.state == "review_ready"
+            assert result.revision is not None
+
+            async with factory() as session:
+                rows = await chunk_repo.list_for_attachment(session, attachment.id)
+                assert [(row.ordinal, row.text) for row in rows] == [
+                    (chunk.ordinal, chunk.text) for chunk in staged.chunks
+                ]
+                assert all(row.text != "existing canonical chunk" for row in rows)
+                document = await cv_doc_repo.get_draft(session, attachment.id)
+                assert document is not None
+                assert document.document_json == staged.document_json
+                assert document.profile_json == staged.profile_json
+                assert document.outline_json == staged.outline_json
+                assert document.extraction_version == staged.extraction_version
+                assert document.source_hash == staged.source_hash
+                draft = await profile_repo.get_draft_for_operation(
+                    session, profile.id, operation.id
+                )
+                assert draft is not None
+                assert draft.reextract_operation_id == operation.id
+                assert draft.source_attachment_id == attachment.id
+                assert draft.draft_json == staged.draft_payload.model_dump(mode="json")
+                stored_operation = await operation_repo.get_operation(
+                    session, profile_id=profile.id, operation_id=operation.id
+                )
+                assert stored_operation is not None
+                assert stored_operation.state == "review_ready"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_publish_post_write_cas_failure_rolls_back_then_marks_stale(
+    migrated_sqlite: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment, profile, operation = await _seed_running_publish_case(
+                    session,
+                    storage,
+                    pdf=pdf,
+                    file_hash="publish-post-write-cas",
+                )
+                before_chunks = [
+                    (
+                        row.ordinal,
+                        row.text,
+                        row.preview,
+                        row.char_count,
+                        row.token_estimate,
+                    )
+                    for row in (
+                        await session.scalars(
+                            select(AttachmentTextChunk)
+                            .where(AttachmentTextChunk.attachment_id == attachment.id)
+                            .order_by(AttachmentTextChunk.ordinal)
+                        )
+                    ).all()
+                ]
+                before_document = await cv_doc_repo.get_draft(session, attachment.id)
+                assert before_document is not None
+                before_document_values = (
+                    before_document.document_json,
+                    before_document.profile_json,
+                    before_document.outline_json,
+                    before_document.extraction_version,
+                    before_document.source_hash,
+                )
+                await session.commit()
+
+            staged = await stage_cv_document(
+                attachment=attachment,
+                storage=storage,
+                invoker=CoveringDocumentInvoker(),
+                normalizer=_normalizer(),
+            )
+            real_transition = operation_repo.transition_running_operation
+
+            async def fail_review_ready_then_delegate_stale(
+                session: AsyncSession,
+                *,
+                profile_id: str,
+                operation_id: str,
+                to_state: str,
+                error_code: str | None,
+            ) -> bool:
+                if to_state == "review_ready":
+                    rows = await chunk_repo.list_for_attachment(
+                        session, attachment.id
+                    )
+                    assert [(row.ordinal, row.text) for row in rows] == [
+                        (chunk.ordinal, chunk.text) for chunk in staged.chunks
+                    ]
+                    document = await cv_doc_repo.get_draft(session, attachment.id)
+                    assert document is not None
+                    assert document.document_json == staged.document_json
+                    draft = await profile_repo.get_draft_for_operation(
+                        session, profile.id, operation.id
+                    )
+                    assert draft is not None
+                    assert draft.reextract_operation_id == operation.id
+                    return False
+                return await real_transition(
+                    session,
+                    profile_id=profile_id,
+                    operation_id=operation_id,
+                    to_state=to_state,  # type: ignore[arg-type]
+                    error_code=error_code,
+                )
+
+            monkeypatch.setattr(
+                operation_repo,
+                "transition_running_operation",
+                fail_review_ready_then_delegate_stale,
+            )
+            result = await publish_reextract_stage(
+                session_factory=factory,
+                profile_id=profile.id,
+                operation_id=operation.id,
+                staged=staged,
+            )
+            assert result.state == "stale"
+            assert result.revision is None
+
+            async with factory() as session:
+                assert await profile_repo.get_draft_for_operation(
+                    session, profile.id, operation.id
+                ) is None
+                after_document = await cv_doc_repo.get_draft(session, attachment.id)
+                assert after_document is not None
+                assert (
+                    after_document.document_json,
+                    after_document.profile_json,
+                    after_document.outline_json,
+                    after_document.extraction_version,
+                    after_document.source_hash,
+                ) == before_document_values
+                after_chunks = [
+                    (
+                        row.ordinal,
+                        row.text,
+                        row.preview,
+                        row.char_count,
+                        row.token_estimate,
+                    )
+                    for row in (
+                        await session.scalars(
+                            select(AttachmentTextChunk)
+                            .where(AttachmentTextChunk.attachment_id == attachment.id)
+                            .order_by(AttachmentTextChunk.ordinal)
+                        )
+                    ).all()
+                ]
+                assert after_chunks == before_chunks
+                stored_operation = await operation_repo.get_operation(
+                    session, profile_id=profile.id, operation_id=operation.id
+                )
+                assert stored_operation is not None
+                assert stored_operation.state == "stale"
+                assert stored_operation.error_code == "PROFILE_REEXTRACT_STALE"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_publish_marks_operation_stale_without_partial_writes_when_workspace_revision_changes(  # noqa: E501
     migrated_sqlite: Path,
     tmp_path: Path,
@@ -586,24 +843,51 @@ def test_publish_marks_operation_stale_without_partial_writes_when_workspace_rev
     run_async(_body())
 
 
-def test_publish_compares_profile_workspace_attachment_and_operation() -> None:
-    """Publication keeps every claimed owner/revision check ahead of writes."""
-    import inspect
+def test_publish_compares_profile_workspace_attachment_and_operation(
+    migrated_sqlite: Path,
+    tmp_path: Path,
+) -> None:
+    """A changed claimed attachment owner cannot publish a proposal."""
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
 
-    from app.services.profile_drafts import _publish_reextract_stage_transaction
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment, profile, operation = await _seed_running_publish_case(
+                    session,
+                    storage,
+                    pdf=pdf,
+                    file_hash="publish-attachment-cas",
+                )
+                await session.commit()
+            staged = await stage_cv_document(
+                attachment=attachment,
+                storage=storage,
+                invoker=CoveringDocumentInvoker(),
+                normalizer=_normalizer(),
+            )
+            staged = replace(staged, attachment_id=new_uuid())
+            result = await publish_reextract_stage(
+                session_factory=factory,
+                profile_id=profile.id,
+                operation_id=operation.id,
+                staged=staged,
+            )
+            assert result.state == "stale"
+            async with factory() as session:
+                stored_operation = await operation_repo.get_operation(
+                    session, profile_id=profile.id, operation_id=operation.id
+                )
+                assert stored_operation is not None
+                assert stored_operation.error_code == "PROFILE_REEXTRACT_STALE"
+        finally:
+            await engine.dispose()
 
-    source = inspect.getsource(_publish_reextract_stage_transaction)
-    for invariant in (
-        'operation.state != "running"',
-        "workspace_repo.get_active_profile_id(session) != profile_id",
-        "operation.source_attachment_id != staged.attachment_id",
-        "profile.attachment_id != staged.attachment_id",
-        "profile.updated_at != operation.base_profile_updated_at",
-        "workspace.updated_at != operation.base_workspace_updated_at",
-        "profile_repo.get_draft_for_profile(session, profile_id)",
-        "has_incomplete_profile_setup(session)",
-    ):
-        assert invariant in source
+    run_async(_body())
 
 
 def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
