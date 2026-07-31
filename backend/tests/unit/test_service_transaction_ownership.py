@@ -4,6 +4,7 @@ import inspect
 import sqlite3
 from typing import Self
 
+import anyio
 import pytest
 from app.services import (
     chat_turns,
@@ -72,6 +73,19 @@ class _SessionFactoryStub:
 
     def __call__(self) -> _ImmediateSessionStub:
         return self.session
+
+
+class _CancellableImmediateSessionStub(_ImmediateSessionStub):
+    async def rollback(self) -> None:
+        self.events.append("rollback-start")
+        self.rollback_calls += 1
+        await anyio.sleep(0)
+        self.events.append("rollback-finished")
+
+    async def __aexit__(self, *_args: object) -> None:
+        self.events.append("exit-start")
+        await anyio.sleep(0)
+        self.events.append("exit-finished")
 
 
 def _sqlite_operational_error(message: str, code: int | None = None) -> Exception:
@@ -171,4 +185,25 @@ async def test_immediate_scope_reraises_unrelated_operational_error() -> None:
         async with immediate_session_scope(_SessionFactoryStub(session)):
             pytest.fail("unrelated operational error must fail before yielding")
     assert raised.value is unrelated
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_immediate_scope_shields_cleanup_from_cancellation() -> None:
+    from app.db.session import immediate_session_scope
+
+    session = _CancellableImmediateSessionStub()
+    with anyio.CancelScope() as scope:
+        async with immediate_session_scope(_SessionFactoryStub(session)):
+            scope.cancel()
+            await anyio.sleep(0)
+
+    assert session.events == [
+        "enter",
+        "execute:BEGIN IMMEDIATE",
+        "rollback-start",
+        "rollback-finished",
+        "exit-start",
+        "exit-finished",
+    ]
     assert session.rollback_calls == 1

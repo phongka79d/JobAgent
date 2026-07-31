@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import anyio
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -185,19 +186,26 @@ async def immediate_session_scope(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
     """Run a short SQLite writer transaction acquired with ``BEGIN IMMEDIATE``."""
-    async with session_factory() as session:
+    session_context = session_factory()
+    session = await session_context.__aenter__()
+    try:
         try:
             await session.execute(text("BEGIN IMMEDIATE"))
             yield session
             await session.commit()
         except OperationalError as exc:
-            await session.rollback()
+            with anyio.CancelScope(shield=True):
+                await session.rollback()
             if is_sqlite_busy_or_snapshot(exc):
                 raise ImmediateTransactionBusy() from exc
             raise
         except BaseException:
-            await session.rollback()
+            with anyio.CancelScope(shield=True):
+                await session.rollback()
             raise
+    finally:
+        with anyio.CancelScope(shield=True):
+            await session_context.__aexit__(None, None, None)
 
 
 async def dispose_engine() -> None:
