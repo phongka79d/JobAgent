@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.test_profile_approval import _seed_cv_document_draft
 from tests.support.db_migration import run_async, session_factory
+from tests.support.health import health_client, install_fake_driver, prepare_health_env
 from tests.unit.test_profile_extraction import (
     CV_DIR,
     CoveringDocumentInvoker,
@@ -1998,22 +1999,24 @@ def test_retained_file_failure_marks_exact_operation_failed_without_draft(
                 profile, rel = await _seed_stream_fixture(session, storage, pdf)
                 await session.commit()
             assert storage.delete(rel)
+            invoker = CoveringDocumentInvoker()
             coordinator = ProfileReextractionCoordinator(
                 session_factory=factory,
                 storage=storage,
                 normalizer=_normalizer(),
-                invoker=CoveringDocumentInvoker(),
+                invoker=invoker,
             )
-            events = await _collect_profile_events(coordinator.stream(profile.id))
-            assert events[-1].event == "reextract_failed"
-            assert events[-1].payload.code == "FILE_MISSING"
+            with pytest.raises(ProfileReextractError) as caught:
+                await anext(coordinator.stream(profile.id))
+            assert caught.value.code == "CV_FILE_UNAVAILABLE"
+            assert invoker.calls == []
             async with factory() as session:
                 operation = await operation_repo.get_latest_operation_for_profile(
                     session, profile.id
                 )
                 assert operation is not None
                 assert operation.state == "failed"
-                assert operation.error_code == "FILE_MISSING"
+                assert operation.error_code == "CV_FILE_UNAVAILABLE"
                 assert (
                     await profile_repo.get_draft_for_profile(session, profile.id)
                     is None
@@ -2022,6 +2025,80 @@ def test_retained_file_failure_marks_exact_operation_failed_without_draft(
             await engine.dispose()
 
     run_async(_body())
+
+
+def test_missing_retained_file_fails_before_sse_and_persists_failed_operation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+
+    async def _seed() -> tuple[str, str]:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="missing-retained-api",
+                    original_name="missing.pdf",
+                    size_bytes=10,
+                    storage_path=attachment_id,
+                    page_count=1,
+                    attachment_id=attachment_id,
+                )
+                await att_repo.mark_active(session, attachment_id)
+                profile = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    display_name="Missing retained file",
+                    profile_json=_valid_profile().model_dump(mode="json"),
+                    location=None,
+                    extraction_version="test-v1",
+                    source_hash="missing-retained-source",
+                )
+                await workspace_repo.set_active_profile_id(session, profile.id)
+                await session.commit()
+                return profile.id, attachment_id
+        finally:
+            await engine.dispose()
+
+    profile_id, attachment_id = run_async(_seed())
+    stage = Mock(side_effect=AssertionError("staging must not run"))
+    monkeypatch.setattr(profile_reextraction_service, "stage_cv_document", stage)
+
+    with health_client() as client:
+        response = client.post(f"/api/profiles/{profile_id}/reextract", json={})
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "CV_FILE_UNAVAILABLE"
+    stage.assert_not_called()
+
+    async def _assert_state() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile_id
+                )
+                assert operation is not None
+                assert operation.state == "failed"
+                assert operation.error_code == "CV_FILE_UNAVAILABLE"
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
+                attachment = await att_repo.get_by_id(session, attachment_id)
+                assert attachment is not None
+                assert attachment.state == "active"
+        finally:
+            await engine.dispose()
+
+    run_async(_assert_state())
 
 
 def test_provider_failure_marks_exact_operation_failed_without_draft(

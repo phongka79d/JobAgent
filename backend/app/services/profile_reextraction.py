@@ -459,16 +459,18 @@ class ProfileReextractionCoordinator:
     async def stream(self, profile_id: str) -> AsyncIterator[ProfileReextractEvent]:
         claim = await self._claim(profile_id)
         operation_id = claim.operation_id
+        if not self._storage.exists(claim.storage_path):
+            error = ProfileReextractError(
+                "CV_FILE_UNAVAILABLE", "The retained CV file is unavailable"
+            )
+            await self._finalize_failed(claim, error.code)
+            raise error
         try:
             yield _progress(
                 operation_id=operation_id,
                 profile_id=profile_id,
                 stage="validating_source",
             )
-            if not self._storage.exists(claim.storage_path):
-                raise ProfileReextractError(
-                    "FILE_MISSING", "The retained CV file is unavailable"
-                )
             yield _progress(
                 operation_id=operation_id,
                 profile_id=profile_id,

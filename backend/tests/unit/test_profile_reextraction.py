@@ -26,6 +26,11 @@ OPERATION_ID = "33333333-3333-4333-8333-333333333333"
 REVISION = datetime(2026, 7, 28, 10, tzinfo=UTC)
 
 
+class _ExistingStorage:
+    def exists(self, _path: str) -> bool:
+        return True
+
+
 def _profile(**overrides: object) -> CandidateProfile:
     payload: dict[str, object] = {
         "full_name": "Alex Example",
@@ -203,7 +208,7 @@ async def test_stream_claims_before_first_event_or_provider_call(
     monkeypatch.setattr("app.services.profile_reextraction.stage_cv_document", stage)
     coordinator = TestCoordinator(
         session_factory=object(),  # type: ignore[arg-type]
-        storage=object(),  # type: ignore[arg-type]
+        storage=_ExistingStorage(),  # type: ignore[arg-type]
         normalizer=object(),  # type: ignore[arg-type]
         invoker=object(),
     )
@@ -253,7 +258,7 @@ async def test_cancelled_stream_persists_interrupted_after_session_close(
     )
     coordinator = TestCoordinator(
         session_factory=object(),  # type: ignore[arg-type]
-        storage=object(),  # type: ignore[arg-type]
+        storage=_ExistingStorage(),  # type: ignore[arg-type]
         normalizer=object(),  # type: ignore[arg-type]
         invoker=object(),
     )
@@ -316,7 +321,7 @@ async def test_cancelled_stream_keeps_original_error_when_interrupt_finalize_fai
 
     coordinator = TestCoordinator(
         session_factory=object(),  # type: ignore[arg-type]
-        storage=object(),  # type: ignore[arg-type]
+        storage=_ExistingStorage(),  # type: ignore[arg-type]
         normalizer=object(),  # type: ignore[arg-type]
         invoker=object(),
     )
