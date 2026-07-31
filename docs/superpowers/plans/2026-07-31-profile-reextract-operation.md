@@ -958,7 +958,7 @@ git commit -m "fix: gate uploads behind reextract operations"
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 - Modify: `backend/tests/unit/test_api_sse.py`
 
-- [ ] **Step 1: Write failing endpoint and safe-payload tests.**
+- [x] **Step 1: Write failing endpoint and safe-payload tests.**
 
 ```python
 def test_reextract_routes_require_correlated_operation_identity(client: TestClient) -> None:
@@ -1013,13 +1013,13 @@ def test_status_action_matrix_is_server_owned(
         )
 ```
 
-- [ ] **Step 2: Run API tests to verify they fail.**
+- [x] **Step 2: Run API tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py::test_reextract_routes_require_correlated_operation_identity tests/integration/test_profile_reextraction.py::test_status_payload_has_no_private_extraction_data tests/integration/test_profile_reextraction.py::test_status_action_matrix_is_server_owned tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_without_owned_draft_to_stale tests/integration/test_cv_api.py::test_get_profile_projects_correlated_reextract_operation tests/integration/test_health.py::test_only_public_functional_routes_are_health_chat_cv_and_profile tests/unit/test_api_sse.py -q`
 
 Expected: FAIL because the status endpoint and strict nullable `operation` envelope do not exist.
 
-- [ ] **Step 3: Implement exact request/response contracts and route signatures.**
+- [x] **Step 3: Implement exact request/response contracts and route signatures.**
 
 ```python
 class ProfileReextractOperationStatus(BaseModel):
@@ -1079,13 +1079,13 @@ Lock this public matrix: `running` has no actions; `review_ready` has `can_revie
 
 `GET /api/profile` adds a nullable `reextract_operation` safe projection for the active profile and adds required nullable `operation_id` to `pending_review`. Validate `source="agent_update"` with null operation identity and `source="reextract"` with a non-null exact identity. Keep `pending_review` and `reextract_operation` as separate fields so an ordinary Agent review is never synthesized into an operation. Move the generic `SafeWarning` owner to `schemas/common.py` and re-export/import it from existing callers as needed before `profile.py` imports the operation status type; do not solve the schema cycle with `Any`, duplicate models, or deferred unvalidated dictionaries. Add the status route to `EXPECTED_PUBLIC_API_ROUTES` and `EXPECTED_ROUTE_CONTRACTS` in `tests/support/health.py`.
 
-- [ ] **Step 4: Run focused public-contract tests to verify they pass.**
+- [x] **Step 4: Run focused public-contract tests to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py tests/integration/test_profile_reextraction.py::test_api_rejects_crossed_missing_stale_and_replayed_operation_identity tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_to_stale tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_without_owned_draft_to_stale tests/integration/test_cv_api.py::test_get_profile_projects_correlated_reextract_operation tests/integration/test_health.py tests/integration/test_chat_api.py::test_public_routes_match_the_master_endpoint_inventory tests/unit/test_api_sse.py -q`
 
 Expected: PASS; all five endpoints have strict schemas, duplicate start is a stable 409 without repeat work, and no API payload leaks retained-file or provider details.
 
-- [ ] **Step 5: Commit the public lifecycle contract.**
+- [x] **Step 5: Commit the public lifecycle contract.**
 
 ```powershell
 git add backend/app/schemas/common.py backend/app/schemas/profile_reextraction.py backend/app/schemas/profile.py backend/app/repositories/profile_reextract_operations.py backend/app/services/profile_reextraction.py backend/app/api/profiles.py backend/app/api/profile.py backend/tests/support/health.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_profile_reextraction.py backend/tests/unit/test_api_sse.py
