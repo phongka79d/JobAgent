@@ -102,6 +102,23 @@ def _pending_profile(
     )
 
 
+def _operation(
+    operation_id: str,
+    profile_id: str,
+    attachment_id: str,
+    state: str,
+    error_code_sql: str,
+) -> str:
+    return (
+        "INSERT INTO profile_reextract_operations ("
+        "id, profile_id, source_attachment_id, base_profile_updated_at, "
+        "base_workspace_updated_at, state, error_code, created_at, updated_at"
+        ") VALUES ("
+        f"'{operation_id}', '{profile_id}', '{attachment_id}', '{TS}', '{TS}', "
+        f"'{state}', {error_code_sql}, '{TS}', '{TS}')"
+    )
+
+
 def test_operation_schema_has_exact_constraints(db_path: Path) -> None:
     with sqlite3.connect(db_path) as connection:
         operation_sql_row = connection.execute(
@@ -173,6 +190,89 @@ def test_operation_schema_has_exact_constraints(db_path: Path) -> None:
             "updated_at",
             "id",
         )
+
+
+def test_operation_state_error_coupling_rejects_invalid_sqlite_writes(
+    db_path: Path,
+) -> None:
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with f() as s:
+                for suffix in ("running", "review", "interrupted", "failed", "stale"):
+                    await _x(s, _att(f"att-{suffix}", f"h-{suffix}", f"p-{suffix}"))
+                    await _x(s, _profile(f"profile-{suffix}", f"att-{suffix}"))
+                await s.commit()
+
+            for state in ("running", "review_ready"):
+                await _fail(
+                    f,
+                    _operation(
+                        f"op-invalid-{state}",
+                        f"profile-{'review' if state == 'review_ready' else state}",
+                        f"att-{'review' if state == 'review_ready' else state}",
+                        state,
+                        "'unexpected'",
+                    ),
+                )
+            for state in ("interrupted", "failed", "stale"):
+                await _fail(
+                    f,
+                    _operation(
+                        f"op-invalid-{state}",
+                        f"profile-{state}",
+                        f"att-{state}",
+                        state,
+                        "NULL",
+                    ),
+                )
+        finally:
+            await e.dispose()
+
+    run_async(_c())
+
+
+def test_profile_draft_ownership_constraints_reject_invalid_sqlite_writes(
+    db_path: Path,
+) -> None:
+    async def _c() -> None:
+        e = build_async_engine(db_path)
+        f = session_factory(e)
+        try:
+            async with f() as s:
+                await _x(s, _att("att-draft", "h-draft", "p-draft"))
+                await _x(s, _profile("profile-draft", "att-draft"))
+                await _x(s, _att("att-coupling", "h-coupling", "p-coupling"))
+                await _x(s, _profile("profile-coupling", "att-coupling"))
+                await _x(
+                    s,
+                    "INSERT INTO profile_drafts "
+                    "(id, source_attachment_id, target_profile_id, draft_json, "
+                    "created_at, updated_at) VALUES "
+                    f"('draft-one', NULL, 'profile-draft', '{{}}', '{TS}', '{TS}')",
+                )
+                await s.commit()
+
+            await _fail(
+                f,
+                "INSERT INTO profile_drafts "
+                "(id, source_attachment_id, target_profile_id, draft_json, "
+                "created_at, updated_at) VALUES "
+                f"('draft-duplicate', NULL, 'profile-draft', '{{}}', '{TS}', '{TS}')",
+            )
+            await _fail(
+                f,
+                "INSERT INTO profile_drafts "
+                "(id, source_attachment_id, target_profile_id, draft_json, "
+                "reextract_operation_id, created_at, updated_at) VALUES "
+                f"('draft-missing-source', NULL, 'profile-coupling', '{{}}', "
+                f"'missing-operation', '{TS}', '{TS}')",
+            )
+        finally:
+            await e.dispose()
+
+    run_async(_c())
 
 
 def _conversation(conversation_id: str, profile_id: str) -> str:

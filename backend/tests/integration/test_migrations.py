@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,73 @@ def _sqlite_snapshot(db: Path) -> dict[str, Any]:
                 tuple(row) for row in connection.execute("PRAGMA foreign_key_check")
             ),
         }
+
+
+def _schema_inventory(db: Path) -> dict[str, dict[str, object]]:
+    """Record every SQLite schema detail a 0008 draft rebuild must preserve."""
+    with sqlite3.connect(db) as connection:
+        tables = tuple(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        )
+        inventory: dict[str, dict[str, object]] = {}
+        for table in tables:
+            table_sql_row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            assert table_sql_row is not None
+            table_sql = str(table_sql_row[0])
+            indexes: dict[str, dict[str, object]] = {}
+            for index in connection.execute(f"PRAGMA index_list('{table}')"):
+                index_name = str(index[1])
+                index_sql_row = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                    (index_name,),
+                ).fetchone()
+                indexes[index_name] = {
+                    "metadata": tuple(index[2:]),
+                    "sql": None if index_sql_row is None else index_sql_row[0],
+                    "columns": tuple(
+                        str(row[2])
+                        for row in connection.execute(
+                            f"PRAGMA index_info('{index_name}')"
+                        )
+                    ),
+                }
+            inventory[table] = {
+                "sql": table_sql,
+                "columns": tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        f"PRAGMA table_info('{table}')"
+                    )
+                ),
+                "foreign_keys": tuple(
+                    sorted(
+                        tuple(row[2:])
+                        for row in connection.execute(
+                            f"PRAGMA foreign_key_list('{table}')"
+                        )
+                    )
+                ),
+                "indexes": indexes,
+                "named_constraints": tuple(
+                    sorted(re.findall(r"CONSTRAINT\s+([^\s]+)", table_sql))
+                ),
+                "triggers": tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        "SELECT name, sql FROM sqlite_master "
+                        "WHERE type = 'trigger' AND tbl_name = ? ORDER BY name",
+                        (table,),
+                    )
+                ),
+            }
+        return inventory
 
 
 def _seed_valid_profile_draft(db: Path) -> dict[str, object]:
@@ -281,10 +349,12 @@ def test_0008_preserves_valid_draft_schema_rows_and_json(
 ) -> None:
     payload = _seed_valid_profile_draft(isolated_sqlite)
     before = _sqlite_snapshot(isolated_sqlite)
+    before_inventory = _schema_inventory(isolated_sqlite)
     command.upgrade(
         alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
     )
     after = _sqlite_snapshot(isolated_sqlite)
+    after_inventory = _schema_inventory(isolated_sqlite)
     with sqlite3.connect(isolated_sqlite) as connection:
         row = connection.execute(
             "SELECT id, source_attachment_id, target_profile_id, draft_json, "
@@ -322,10 +392,51 @@ def test_0008_preserves_valid_draft_schema_rows_and_json(
     ]
     assert before["rows"]["attachments"] == after["rows"]["attachments"]
     assert before["rows"]["profiles"] == after["rows"]["profiles"]
-    assert not [
-        row
-        for row in after["master"]
-        if row[0] == "trigger" and row[2] == "profile_drafts"
+    # 0008 may only rebuild profile_drafts and add its operation table; every
+    # other existing table's SQL, defaults/nullability, FKs, indexes, named
+    # constraints, and triggers remain byte-for-byte equivalent.
+    for table, metadata in before_inventory.items():
+        if table not in {"alembic_version", "profile_drafts"}:
+            assert after_inventory[table] == metadata
+
+    before_draft_inventory = before_inventory["profile_drafts"]
+    after_draft_inventory = after_inventory["profile_drafts"]
+    assert before_draft_inventory["triggers"] == after_draft_inventory["triggers"]
+    assert set(before_draft_inventory["foreign_keys"]).issubset(
+        after_draft_inventory["foreign_keys"]  # type: ignore[arg-type]
+    )
+    assert set(before_draft_inventory["named_constraints"]).issubset(
+        after_draft_inventory["named_constraints"]  # type: ignore[arg-type]
+    )
+    for index_name, index in before_draft_inventory["indexes"].items():  # type: ignore[union-attr]
+        assert after_draft_inventory["indexes"][index_name] == index  # type: ignore[index]
+    expected_draft_columns = list(before_draft_inventory["columns"])  # type: ignore[arg-type]
+    target_column = next(
+        index
+        for index, column in enumerate(expected_draft_columns)
+        if column[1] == "target_profile_id"
+    )
+    expected_draft_columns[target_column] = (
+        2,
+        "target_profile_id",
+        "TEXT",
+        1,
+        None,
+        0,
+    )
+    expected_draft_columns.append((6, "reextract_operation_id", "TEXT", 0, None, 0))
+    assert after_draft_inventory["columns"] == tuple(expected_draft_columns)
+    assert "fk_profile_drafts__reextract_operation_id" in after_draft_inventory[
+        "named_constraints"
+    ]
+    assert "uq_profile_drafts__target_profile_id" in after_draft_inventory[
+        "named_constraints"
+    ]
+    assert "uq_profile_drafts__reextract_operation_id" in after_draft_inventory[
+        "named_constraints"
+    ]
+    assert "ck_profile_drafts__reextract_source_coupling" in after_draft_inventory[
+        "named_constraints"
     ]
 
 
