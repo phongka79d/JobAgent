@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,12 @@ ERROR_PROFILE_LIFECYCLE_BUSY: str = "PROFILE_LIFECYCLE_BUSY"
 PDF_MAGIC: bytes = b"%PDF-"
 _READ_CHUNK: int = 64 * 1024
 _CONTROL_OR_SEP = re.compile(r"[\x00-\x1f\x7f/\\]+")
+_UPLOAD_RACE_UNIQUE_MESSAGES = frozenset(
+    {
+        "UNIQUE constraint failed: index 'uq_profiles__single_incomplete'",
+        "UNIQUE constraint failed: attachments.file_hash",
+    }
+)
 
 
 class CvUploadError(Exception):
@@ -104,6 +111,17 @@ class CvUploadError(Exception):
         self.review_source = review_source
         self.operation_id = operation_id
         self.review_revision = review_revision
+
+
+def is_upload_race_unique_conflict(exc: IntegrityError) -> bool:
+    """Recognize only SQLite uniqueness conflicts from concurrent CV uploads."""
+    original = exc.orig
+    if not isinstance(original, sqlite3.IntegrityError):
+        return False
+    if str(original).strip() not in _UPLOAD_RACE_UNIQUE_MESSAGES:
+        return False
+    error_code = getattr(original, "sqlite_errorcode", None)
+    return error_code in (None, sqlite3.SQLITE_CONSTRAINT_UNIQUE)
 
 
 def sanitize_original_name(filename: str | None) -> str:
@@ -238,7 +256,7 @@ async def _stream_to_temp(
         if size <= 0:
             raise CvUploadError(ERROR_EMPTY_UPLOAD, "upload is empty")
         return temp_path, hasher.hexdigest(), size, head
-    except Exception:
+    except BaseException:
         storage.discard_temp(temp_path)
         raise
 
@@ -456,10 +474,7 @@ async def upload_cv(
             if existing is not None:
                 state = existing.state
                 if state == ATTACHMENT_STATE_ACTIVE:
-                    response = await _build_active_response(session, existing)
-                    storage.discard_temp(temp_path)
-                    temp_path = None
-                    return response
+                    return await _build_active_response(session, existing)
 
                 if state == ATTACHMENT_STATE_STAGED:
                     profile = await profile_repo.get_profile_by_attachment_id(
@@ -470,7 +485,7 @@ async def upload_cv(
                             ERROR_PROFILE_SETUP_IN_PROGRESS,
                             "pending profile setup is inconsistent",
                         )
-                    response = await _build_pending_response(
+                    return await _build_pending_response(
                         session,
                         existing,
                         outcome="existing_pending",
@@ -478,9 +493,6 @@ async def upload_cv(
                             session, profile_id=profile.id
                         ),
                     )
-                    storage.discard_temp(temp_path)
-                    temp_path = None
-                    return response
 
                 if state == ATTACHMENT_STATE_FAILED:
                     profile = await profile_repo.get_profile_by_attachment_id(
@@ -494,15 +506,12 @@ async def upload_cv(
                     if not await _pending_can_start(
                         session, profile_id=profile.id
                     ):
-                        response = await _build_pending_response(
+                        return await _build_pending_response(
                             session,
                             existing,
                             outcome="existing_pending",
                             start_extraction=False,
                         )
-                        storage.discard_temp(temp_path)
-                        temp_path = None
-                        return response
                     try:
                         retried = await att_repo.retry_as_staged(
                             session, existing.id
@@ -520,8 +529,6 @@ async def upload_cv(
                     except Exception:
                         await session.rollback()
                         raise
-                    storage.discard_temp(temp_path)
-                    temp_path = None
                     return response
 
                 if state == ATTACHMENT_STATE_ARCHIVED:
@@ -534,12 +541,9 @@ async def upload_cv(
                         )
                     ).scalar_one_or_none()
                     if profile is not None:
-                        response = await _build_existing_profile_response(
+                        return await _build_existing_profile_response(
                             session, existing
                         )
-                        storage.discard_temp(temp_path)
-                        temp_path = None
-                        return response
 
                 raise CvUploadError(
                     ERROR_MALFORMED_PDF,
@@ -550,7 +554,8 @@ async def upload_cv(
         # Promote outside any DB transaction (no FS work while session open).
         attachment_id = new_uuid()
         try:
-            final_relative = storage.promote_temp(temp_path, attachment_id)
+            promoted_relative = storage.promote_temp(temp_path, attachment_id)
+            final_relative = promoted_relative
             temp_path = None  # consumed by promote
         except OSError as exc:
             raise CvUploadError(
@@ -562,7 +567,7 @@ async def upload_cv(
             async with immediate_session_scope(factory) as session:
                 try:
                     await assert_upload_lifecycle_clear(
-                        session, code=ERROR_PROFILE_SETUP_IN_PROGRESS
+                        session, workspace_code=ERROR_PROFILE_SETUP_IN_PROGRESS
                     )
                 except ActivityBlockedError as exc:
                     raise CvUploadError(
@@ -578,7 +583,7 @@ async def upload_cv(
                     file_hash=file_hash,
                     original_name=original_name,
                     size_bytes=size_bytes,
-                    storage_path=final_relative,
+                    storage_path=promoted_relative,
                     page_count=page_count,
                     attachment_id=attachment_id,
                 )
@@ -591,28 +596,26 @@ async def upload_cv(
                     session, profile_id=profile.id
                 )
                 await workspace_repo.set_active_profile_id(session, profile.id)
-                return await _build_pending_response(
+                response = await _build_pending_response(
                     session,
                     row,
                     outcome="new_pending",
                     start_extraction=True,
                 )
+            final_relative = None
+            return response
         except ImmediateTransactionBusy as exc:
-            if final_relative is not None:
-                storage.delete(final_relative)
-                final_relative = None
             raise CvUploadError(
                 ERROR_PROFILE_LIFECYCLE_BUSY,
                 "CV lifecycle is busy; retry the action",
             ) from exc
         except IntegrityError as exc:
-            if final_relative is not None:
-                storage.delete(final_relative)
-                final_relative = None
+            if not is_upload_race_unique_conflict(exc):
+                raise
             try:
                 async with factory() as probe:
                     await assert_upload_lifecycle_clear(
-                        probe, code=ERROR_PROFILE_SETUP_IN_PROGRESS
+                        probe, workspace_code=ERROR_PROFILE_SETUP_IN_PROGRESS
                     )
             except ActivityBlockedError as blocked:
                 raise CvUploadError(
@@ -624,19 +627,11 @@ async def upload_cv(
                     review_revision=blocked.review_revision,
                 ) from exc
             raise
-        except Exception:
-            # Row failure: best-effort delete the new UUID file only.
-            if final_relative is not None:
-                storage.delete(final_relative)
-            raise
-    except CvUploadError:
+    finally:
         if temp_path is not None:
             storage.discard_temp(temp_path)
-        raise
-    except Exception:
-        if temp_path is not None:
-            storage.discard_temp(temp_path)
-        raise
+        if final_relative is not None:
+            storage.delete(final_relative)
 
 
 async def upload_cv_from_upload_file(
@@ -676,6 +671,7 @@ __all__ = [
     "ERROR_STORAGE_FAILURE",
     "PDF_MAGIC",
     "CvUploadError",
+    "is_upload_race_unique_conflict",
     "sanitize_original_name",
     "upload_cv",
     "upload_cv_from_upload_file",

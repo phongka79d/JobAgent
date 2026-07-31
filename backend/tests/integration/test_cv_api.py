@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sqlite3
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -735,6 +736,53 @@ def _attachment_count() -> int:
     return run_async(_body())
 
 
+def _sqlite_integrity_error(
+    message: str,
+    *,
+    error_code: int | None,
+) -> IntegrityError:
+    original = sqlite3.IntegrityError(message)
+    if error_code is not None:
+        original.sqlite_errorcode = error_code
+    return IntegrityError("INSERT", {}, original)
+
+
+@pytest.mark.parametrize(
+    ("message", "error_code", "expected"),
+    [
+        (
+            "UNIQUE constraint failed: index 'uq_profiles__single_incomplete'",
+            sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+            True,
+        ),
+        ("UNIQUE constraint failed: attachments.file_hash", None, True),
+        (
+            "FOREIGN KEY constraint failed",
+            sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY,
+            False,
+        ),
+        (
+            "CHECK constraint failed: state",
+            sqlite3.SQLITE_CONSTRAINT_CHECK,
+            False,
+        ),
+        (
+            "UNIQUE constraint failed: profiles.display_name",
+            sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+            False,
+        ),
+    ],
+)
+def test_upload_race_integrity_classifier_is_exact(
+    message: str,
+    error_code: int | None,
+    expected: bool,
+) -> None:
+    error = _sqlite_integrity_error(message, error_code=error_code)
+
+    assert cv_upload.is_upload_race_unique_conflict(error) is expected
+
+
 def _message_count() -> int:
     async def _body() -> int:
         from app.db.models.chat import ChatMessage
@@ -1109,6 +1157,156 @@ def test_upload_begin_immediate_busy_is_typed_409(
     assert list(files_dir.glob("*")) == []
 
 
+def test_unrelated_upload_integrity_error_reraises_without_probe_and_cleans_files(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    unrelated = _sqlite_integrity_error(
+        "CHECK constraint failed: unrelated_upload_constraint",
+        error_code=sqlite3.SQLITE_CONSTRAINT_CHECK,
+    )
+    real_gate = cv_upload.assert_upload_lifecycle_clear
+    gate_calls = 0
+
+    async def counted_gate(*args: Any, **kwargs: Any) -> None:
+        nonlocal gate_calls
+        gate_calls += 1
+        await real_gate(*args, **kwargs)
+
+    async def fail_insert(*args: Any, **kwargs: Any) -> Any:
+        raise unrelated
+
+    monkeypatch.setattr(cv_upload, "assert_upload_lifecycle_clear", counted_gate)
+    monkeypatch.setattr(att_repo, "create_staged", fail_insert)
+
+    async def _body() -> None:
+        payload = DIGITAL_CV_B.read_bytes()
+        consumed = False
+
+        async def read() -> bytes:
+            nonlocal consumed
+            if consumed:
+                return b""
+            consumed = True
+            return payload
+
+        async with asyncio.timeout(3):
+            with pytest.raises(IntegrityError) as exc_info:
+                await upload_cv(
+                    content_type="application/pdf",
+                    filename="unrelated-integrity.pdf",
+                    read_chunk=read,
+                    storage=AttachmentStorage(files_dir),
+                    session_factory=get_session_factory(),
+                )
+        assert exc_info.value is unrelated
+
+    run_async(_body())
+    assert gate_calls == 1
+    assert _attachment_count() == 0
+    assert list(files_dir.iterdir()) == []
+
+
+def test_upload_cancellation_during_streaming_removes_owned_temp(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+
+    async def _body() -> None:
+        blocked_read = asyncio.Event()
+        release_read = asyncio.Event()
+        reads = 0
+
+        async def read() -> bytes:
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                return b"%PDF-1.4\npartial"
+            blocked_read.set()
+            await release_read.wait()
+            return b""
+
+        task = asyncio.create_task(
+            upload_cv(
+                content_type="application/pdf",
+                filename="cancel-stream.pdf",
+                read_chunk=read,
+                storage=AttachmentStorage(files_dir),
+                session_factory=get_session_factory(),
+            )
+        )
+        try:
+            async with asyncio.timeout(3):
+                await blocked_read.wait()
+                task.cancel()
+                results = await asyncio.gather(task, return_exceptions=True)
+            assert isinstance(results[0], asyncio.CancelledError)
+        finally:
+            release_read.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    run_async(_body())
+    assert _attachment_count() == 0
+    assert list(files_dir.iterdir()) == []
+
+
+def test_upload_cancellation_after_promote_removes_owned_final_file(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    final_gate_entered = asyncio.Event()
+    release_final_gate = asyncio.Event()
+
+    async def held_final_gate(*args: Any, **kwargs: Any) -> None:
+        final_gate_entered.set()
+        await release_final_gate.wait()
+
+    monkeypatch.setattr(
+        cv_upload, "assert_upload_lifecycle_clear", held_final_gate
+    )
+
+    async def _body() -> None:
+        payload = DIGITAL_CV_B.read_bytes()
+        consumed = False
+
+        async def read() -> bytes:
+            nonlocal consumed
+            if consumed:
+                return b""
+            consumed = True
+            return payload
+
+        task = asyncio.create_task(
+            upload_cv(
+                content_type="application/pdf",
+                filename="cancel-final.pdf",
+                read_chunk=read,
+                storage=AttachmentStorage(files_dir),
+                session_factory=get_session_factory(),
+            )
+        )
+        try:
+            async with asyncio.timeout(3):
+                await final_gate_entered.wait()
+                assert list(files_dir.iterdir())
+                task.cancel()
+                results = await asyncio.gather(task, return_exceptions=True)
+            assert isinstance(results[0], asyncio.CancelledError)
+        finally:
+            release_final_gate.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    run_async(_body())
+    assert _attachment_count() == 0
+    assert list(files_dir.iterdir()) == []
+
+
 async def _run_upload_reextract_ordering(
     files_dir: Path,
     factory: Any,
@@ -1157,6 +1355,8 @@ async def _run_upload_reextract_ordering(
     release_claim = asyncio.Event()
     original_prebyte = cv_upload._assert_upload_activity_gate
     original_claim = coordinator._claim
+    child_tasks: list[asyncio.Task[Any]] = []
+    stream: Any | None = None
 
     async def held_prebyte(*args: Any, **kwargs: Any) -> None:
         prebyte_entered.set()
@@ -1190,35 +1390,54 @@ async def _run_upload_reextract_ordering(
         except cv_upload.CvUploadError as exc:
             return exc.code
 
-    cv_upload._assert_upload_activity_gate = held_prebyte
-    try:
-        if first == "upload":
-            coordinator._claim = held_claim  # type: ignore[method-assign]
-            stream = coordinator.stream(profile_id)
-            claim_task = asyncio.create_task(anext(stream))
-            await claim_entered.wait()
+    async def orchestrate() -> tuple[str, str]:
+        nonlocal stream
+        cv_upload._assert_upload_activity_gate = held_prebyte
+        try:
+            if first == "upload":
+                coordinator._claim = held_claim  # type: ignore[method-assign]
+                stream = coordinator.stream(profile_id)
+                claim_task = asyncio.create_task(anext(stream))
+                child_tasks.append(claim_task)
+                await claim_entered.wait()
+                upload_task = asyncio.create_task(run_upload())
+                child_tasks.append(upload_task)
+                await prebyte_entered.wait()
+                release_upload.set()
+                upload_outcome = await upload_task
+                release_claim.set()
+                with pytest.raises(ProfileReextractError) as exc_info:
+                    await claim_task
+                assert exc_info.value.code == "PROFILE_SETUP_IN_PROGRESS"
+                return upload_outcome, "claim_rejected"
+
             upload_task = asyncio.create_task(run_upload())
-            await prebyte_entered.wait()
-            release_upload.set()
-            upload_outcome = await upload_task
-            release_claim.set()
-            with pytest.raises(ProfileReextractError) as exc_info:
-                await claim_task
-            assert exc_info.value.code == "PROFILE_SETUP_IN_PROGRESS"
-            reextract_outcome = "claim_rejected"
-        else:
-            upload_task = asyncio.create_task(run_upload())
+            child_tasks.append(upload_task)
             await prebyte_entered.wait()
             stream = coordinator.stream(profile_id)
             first_event_task = asyncio.create_task(anext(stream))
+            child_tasks.append(first_event_task)
             first_event = await first_event_task
             assert first_event.event == "reextract_progress"
             release_upload.set()
             upload_outcome = await upload_task
-            reextract_outcome = "claimed"
-            await stream.aclose()
-    finally:
-        cv_upload._assert_upload_activity_gate = original_prebyte
+            return upload_outcome, "claimed"
+        finally:
+            release_upload.set()
+            release_claim.set()
+            try:
+                for task in child_tasks:
+                    if not task.done():
+                        task.cancel()
+                if child_tasks:
+                    await asyncio.gather(*child_tasks, return_exceptions=True)
+                if stream is not None:
+                    await stream.aclose()
+            finally:
+                cv_upload._assert_upload_activity_gate = original_prebyte
+
+    async with asyncio.timeout(5):
+        upload_outcome, reextract_outcome = await orchestrate()
 
     async with factory() as session:
         attachment_count = int(

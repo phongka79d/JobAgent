@@ -174,7 +174,7 @@ async def assert_profile_review_clear(
 async def assert_upload_lifecycle_clear(
     session: AsyncSession,
     *,
-    code: str = "PROFILE_REEXTRACT_IN_PROGRESS",
+    workspace_code: str,
 ) -> None:
     """Recheck every upload conflict while holding the immediate writer lock."""
     running = await session.execute(
@@ -225,7 +225,7 @@ async def assert_upload_lifecycle_clear(
             "PROFILE_SETUP_IN_PROGRESS",
             "finish or discard the pending profile setup first",
         )
-    await assert_workspace_idle(session, code=code)
+    await assert_workspace_idle(session, code=workspace_code)
 
 
 async def assert_profile_reextract_clear(
