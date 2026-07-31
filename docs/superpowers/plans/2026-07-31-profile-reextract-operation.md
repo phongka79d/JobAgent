@@ -814,7 +814,7 @@ git commit -m "feat: enforce reextract review compare and swap"
 - Modify: `backend/tests/integration/test_cv_manager_api.py`
 - Modify: `backend/tests/integration/test_cv_manager_deletion.py`
 
-- [ ] **Step 1: Write failing final-gate race and archived-action tests.**
+- [x] **Step 1: Write failing final-gate race and archived-action tests.**
 
 ```python
 async def test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate() -> None:
@@ -882,13 +882,13 @@ def test_inactive_archived_cv_never_projects_reextract() -> None:
     assert actions == ["preview", "download", "activate_profile"]
 ```
 
-- [ ] **Step 2: Run upload/CV projection tests to verify they fail.**
+- [x] **Step 2: Run upload/CV projection tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate tests/integration/test_cv_api.py::test_upload_blocked_by_agent_review_returns_nullable_operation_context tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_loses_to_agent_review tests/integration/test_cv_api.py::test_upload_then_reextract_and_reextract_then_upload_are_serialized tests/integration/test_cv_api.py::test_upload_begin_immediate_busy_is_typed_409 tests/integration/test_cv_manager_api.py::test_inactive_archived_cv_never_projects_reextract tests/integration/test_cv_manager_deletion.py -q`
 
 Expected: FAIL because the final upload write uses a normal transaction and archived inactive profiles still receive `reextract`.
 
-- [ ] **Step 3: Implement the final `BEGIN IMMEDIATE` upload gate and action projection.**
+- [x] **Step 3: Implement the final `BEGIN IMMEDIATE` upload gate and action projection.**
 
 ```python
 async with immediate_session_scope(factory) as session:
@@ -929,13 +929,13 @@ class ProfileReviewPendingDetail(BaseModel):
 
 Extend `ActivityBlockedError` and `CvUploadError` with optional safe profile/review context. `assert_profile_review_clear` loads the exact profile-scoped draft and reports `review_source`, nullable operation ID, and revision. `attachments._http_for_upload_error` emits `ProfileReextractInProgressDetail` only for a running operation and emits `ProfileReviewPendingDetail` for any durable review. An ordinary Agent review therefore has `review_source="agent_update"` and `operation_id=null`; an operation-linked review has `review_source="reextract"` and its exact UUID. Unrelated upload failures preserve their current detail shape. Task 8 reuses `ProfileReextractInProgressDetail` for duplicate starts.
 
-- [ ] **Step 4: Run focused upload race and projection regressions to verify they pass.**
+- [x] **Step 4: Run focused upload race and projection regressions to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate tests/integration/test_cv_api.py::test_upload_then_reextract_and_reextract_then_upload_are_serialized tests/integration/test_cv_manager_api.py::test_inactive_archived_cv_never_projects_reextract tests/integration/test_cv_manager_deletion.py -q`
 
 Expected: PASS; both barrier-controlled ordering cases preserve one authoritative result with no orphan rows or finalized files, and inactive archived CVs do not advertise re-extraction.
 
-- [ ] **Step 5: Commit upload serialization.**
+- [x] **Step 5: Commit upload serialization.**
 
 ```powershell
 git add backend/app/services/cv_upload.py backend/app/services/activity_gate.py backend/app/services/cv_manager_projection.py backend/app/services/cv_manager.py backend/app/schemas/profile_reextraction.py backend/app/api/attachments.py backend/app/api/profiles.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py
@@ -945,10 +945,15 @@ git commit -m "fix: gate uploads behind reextract operations"
 ### Task 8: Publish the strict lifecycle API and correlated profile projection
 
 **Files:**
+- Modify: `backend/app/schemas/common.py`
 - Modify: `backend/app/schemas/profile_reextraction.py`
 - Modify: `backend/app/schemas/profile.py`
+- Modify: `backend/app/repositories/profile_reextract_operations.py`
+- Modify: `backend/app/services/profile_reextraction.py`
 - Modify: `backend/app/api/profiles.py`
 - Modify: `backend/app/api/profile.py`
+- Modify: `backend/tests/support/health.py`
+- Modify: `backend/tests/integration/test_cv_api.py`
 - Modify: `backend/tests/integration/test_profiles_api.py`
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 - Modify: `backend/tests/unit/test_api_sse.py`
@@ -969,11 +974,48 @@ def test_status_payload_has_no_private_extraction_data() -> None:
     assert operation_status.review_revision is None
     for forbidden in ("storage_path", "source_attachment_id", "chunks", "document_json", "provider", "prompt"):
         assert forbidden not in payload
+
+
+@pytest.mark.parametrize(
+    ("state", "error_code", "error_summary", "review_revision", "actions"),
+    [
+        ("running", None, None, None, (False, False, False)),
+        ("review_ready", None, None, REVISION, (True, False, True)),
+        ("interrupted", "PROFILE_REEXTRACT_INTERRUPTED", "The re-extraction was interrupted", None, (False, True, False)),
+        ("failed", "PROFILE_REEXTRACT_FAILED", "CV re-extraction could not be completed", None, (False, True, False)),
+        ("stale", "PROFILE_REEXTRACT_STALE", "The profile changed during re-extraction", REVISION, (True, False, True)),
+        ("stale", "PROFILE_REEXTRACT_STALE", "The profile changed during re-extraction", None, (False, True, False)),
+    ],
+)
+def test_status_action_matrix_is_server_owned(
+    state: str,
+    error_code: str | None,
+    error_summary: str | None,
+    review_revision: datetime | None,
+    actions: tuple[bool, bool, bool],
+) -> None:
+    can_review, can_retry, can_discard = actions
+    status = ProfileReextractOperationStatus(
+        profile_id=PROFILE_ID,
+        operation_id=OPERATION_ID,
+        state=state,
+        error_code=error_code,
+        error_summary=error_summary,
+        review_revision=review_revision,
+        can_review=can_review,
+        can_retry=can_retry,
+        can_discard=can_discard,
+    )
+    assert (status.can_review, status.can_retry, status.can_discard) == actions
+    with pytest.raises(ValidationError):
+        ProfileReextractOperationStatus.model_validate(
+            {**status.model_dump(), "can_retry": not can_retry}
+        )
 ```
 
 - [ ] **Step 2: Run API tests to verify they fail.**
 
-Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py::test_reextract_routes_require_correlated_operation_identity tests/integration/test_profile_reextraction.py::test_status_payload_has_no_private_extraction_data tests/unit/test_api_sse.py -q`
+Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py::test_reextract_routes_require_correlated_operation_identity tests/integration/test_profile_reextraction.py::test_status_payload_has_no_private_extraction_data tests/integration/test_profile_reextraction.py::test_status_action_matrix_is_server_owned tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_without_owned_draft_to_stale tests/integration/test_cv_api.py::test_get_profile_projects_correlated_reextract_operation tests/integration/test_health.py::test_only_public_functional_routes_are_health_chat_cv_and_profile tests/unit/test_api_sse.py -q`
 
 Expected: FAIL because the status endpoint and strict nullable `operation` envelope do not exist.
 
@@ -981,17 +1023,47 @@ Expected: FAIL because the status endpoint and strict nullable `operation` envel
 
 ```python
 class ProfileReextractOperationStatus(BaseModel):
+    model_config = StrictModelConfig
+
     profile_id: UuidStr
     operation_id: UuidStr
     state: Literal["running", "review_ready", "interrupted", "failed", "stale"]
-    error_code: str | None
-    error_summary: str | None
+    error_code: str | None = Field(max_length=80)
+    error_summary: str | None = Field(max_length=200)
     review_revision: AwareUtcDatetime | None
     can_review: bool
     can_retry: bool
     can_discard: bool
 
+    @model_validator(mode="after")
+    def validate_state_actions(self) -> Self:
+        if self.state in {"running", "review_ready"}:
+            if self.error_code is not None or self.error_summary is not None:
+                raise ValueError("actionable operations cannot expose an error")
+        elif self.error_code is None or self.error_summary is None:
+            raise ValueError("terminal operations require a safe error")
+        if self.state == "review_ready" and self.review_revision is None:
+            raise ValueError("review-ready operations require a review revision")
+        if self.state not in {"review_ready", "stale"} and self.review_revision is not None:
+            raise ValueError("operation state cannot own a review revision")
+        expected = {
+            "running": (False, False, False),
+            "review_ready": (True, False, True),
+            "interrupted": (False, True, False),
+            "failed": (False, True, False),
+            "stale": (
+                (True, False, True)
+                if self.review_revision is not None
+                else (False, True, False)
+            ),
+        }[self.state]
+        if (self.can_review, self.can_retry, self.can_discard) != expected:
+            raise ValueError("operation actions do not match its durable state")
+        return self
+
 class ProfileReextractOperationEnvelope(BaseModel):
+    model_config = StrictModelConfig
+
     operation: ProfileReextractOperationStatus | None
 
 @router.get("/profiles/{profile_id}/reextract-operation", response_model=ProfileReextractOperationEnvelope)
@@ -999,18 +1071,24 @@ async def get_profile_reextract_operation(profile_id: UuidStr, deps: ProfileReex
     return ProfileReextractOperationEnvelope(operation=await _profile_reextract_coordinator(deps).get_status(profile_id))
 ```
 
-Use exactly these new Task 8 routes: `POST /api/profiles/{profile_id}/reextract` and `GET /api/profiles/{profile_id}/reextract-operation`. Existing review, approve, and discard routes already receive the discriminated nullable `operation_id` in Task 6 and are not modified here. The status route always returns the strict `ProfileReextractOperationEnvelope` envelope: `operation` is `ProfileReextractOperationStatus | None`, so ordinary profiles with no operation return `{ "operation": null }` rather than 404 or an invented state. Map duplicate start to HTTP 409 with `PROFILE_REEXTRACT_IN_PROGRESS` and the non-null `ProfileReextractInProgressDetail`. Include the same nullable operation envelope in `/api/profile` only for the active profile's re-extraction projection; its independent `pending_review` projection retains Agent reviews with null operation identity. Preserve bounded SSE progress, but require every emitted re-extraction identity to match profile and operation.
+Use exactly these new Task 8 routes: `POST /api/profiles/{profile_id}/reextract` and `GET /api/profiles/{profile_id}/reextract-operation`. Existing review, approve, and discard routes already receive the discriminated nullable `operation_id` in Task 6 and are not modified here. The status route always returns the strict `ProfileReextractOperationEnvelope` envelope: `operation` is `ProfileReextractOperationStatus | None`, so an existing ordinary profile with no operation returns `{ "operation": null }`; a missing profile remains a typed 404. Map duplicate start to HTTP 409 with `PROFILE_REEXTRACT_IN_PROGRESS` and the non-null `ProfileReextractInProgressDetail`. Preserve bounded SSE progress, and reject any emitted event whose profile ID differs from the route profile or whose operation ID differs from the first event.
+
+`ProfileReextractionCoordinator.get_status()` owns the short transactional read. Reuse a session-level status projector from `profile_reextraction.py` in `GET /api/profile` so status/review reconciliation is implemented once and committed. `get_status()` loads only the deterministic latest operation for the requested profile, reconciles `review_ready` against captured profile/workspace revisions, and also CAS-transitions it to `stale` when its exact operation-owned draft is absent. Extend `reconcile_review_ready_to_stale` rather than creating a second stale rule. A `review_ready` status is therefore impossible without its exact draft and revision.
+
+Lock this public matrix: `running` has no actions; `review_ready` has `can_review=true`, `can_retry=false`, `can_discard=true`; `interrupted` and `failed` are retryable only; `stale` with its exact draft is reviewable/discardable but not retryable until discard; `stale` without a draft is retryable only. Only an exact operation-owned draft supplies `review_revision`. `running`/`review_ready` expose null error fields; terminal states expose their bounded stored code and an allowlisted safe summary. Status payloads never expose attachment IDs, storage paths, source text, provider/prompt data, chunks, or document JSON.
+
+`GET /api/profile` adds a nullable `reextract_operation` safe projection for the active profile and adds required nullable `operation_id` to `pending_review`. Validate `source="agent_update"` with null operation identity and `source="reextract"` with a non-null exact identity. Keep `pending_review` and `reextract_operation` as separate fields so an ordinary Agent review is never synthesized into an operation. Move the generic `SafeWarning` owner to `schemas/common.py` and re-export/import it from existing callers as needed before `profile.py` imports the operation status type; do not solve the schema cycle with `Any`, duplicate models, or deferred unvalidated dictionaries. Add the status route to `EXPECTED_PUBLIC_API_ROUTES` and `EXPECTED_ROUTE_CONTRACTS` in `tests/support/health.py`.
 
 - [ ] **Step 4: Run focused public-contract tests to verify they pass.**
 
-Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py tests/integration/test_profile_reextraction.py::test_api_rejects_crossed_missing_stale_and_replayed_operation_identity tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_to_stale tests/unit/test_api_sse.py -q`
+Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profiles_api.py tests/integration/test_profile_reextraction.py::test_api_rejects_crossed_missing_stale_and_replayed_operation_identity tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_to_stale tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_without_owned_draft_to_stale tests/integration/test_cv_api.py::test_get_profile_projects_correlated_reextract_operation tests/integration/test_health.py tests/integration/test_chat_api.py::test_public_routes_match_the_master_endpoint_inventory tests/unit/test_api_sse.py -q`
 
 Expected: PASS; all five endpoints have strict schemas, duplicate start is a stable 409 without repeat work, and no API payload leaks retained-file or provider details.
 
 - [ ] **Step 5: Commit the public lifecycle contract.**
 
 ```powershell
-git add backend/app/schemas/profile_reextraction.py backend/app/schemas/profile.py backend/app/api/profiles.py backend/app/api/profile.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_profile_reextraction.py backend/tests/unit/test_api_sse.py
+git add backend/app/schemas/common.py backend/app/schemas/profile_reextraction.py backend/app/schemas/profile.py backend/app/repositories/profile_reextract_operations.py backend/app/services/profile_reextraction.py backend/app/api/profiles.py backend/app/api/profile.py backend/tests/support/health.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_profile_reextraction.py backend/tests/unit/test_api_sse.py
 git commit -m "feat: expose profile reextract operation api"
 ```
 
