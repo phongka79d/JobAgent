@@ -365,3 +365,55 @@ async def test_failed_stream_emits_event_when_failed_finalize_fails(
     assert events[-1].event == "reextract_failed"
     assert events[-1].payload.code == "PROFILE_REEXTRACT_FAILED"
     assert "profile re-extract failure finalization failed" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "finalization_error",
+    [asyncio.CancelledError(), GeneratorExit()],
+    ids=["cancelled", "generator_exit"],
+)
+async def test_failed_finalize_control_flow_errors_escape_without_failure_event(
+    finalization_error: BaseException,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Storage:
+        def exists(self, _path: str) -> bool:
+            return True
+
+    class TestCoordinator(ProfileReextractionCoordinator):
+        async def _claim(self, profile_id: str) -> Any:
+            return SimpleNamespace(
+                operation_id=OPERATION_ID,
+                profile_id=profile_id,
+                attachment_id="attachment",
+                storage_path="attachment.pdf",
+            )
+
+        async def _load_attachment(self, _claim: Any) -> Any:
+            return SimpleNamespace(storage_path="attachment.pdf", id="attachment")
+
+        async def _transition_failed(self, _claim: Any, _code: str) -> None:
+            raise finalization_error
+
+        async def _draft_available(self, _profile_id: str) -> bool:
+            return False
+
+    async def failed_stage(**_kwargs: Any) -> Any:
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr(
+        "app.services.profile_reextraction.stage_cv_document", failed_stage
+    )
+    coordinator = TestCoordinator(
+        session_factory=object(),  # type: ignore[arg-type]
+        storage=Storage(),  # type: ignore[arg-type]
+        normalizer=object(),  # type: ignore[arg-type]
+        invoker=object(),
+    )
+    stream = coordinator.stream(PROFILE_ID)
+    events: list[Any] = []
+    with pytest.raises(type(finalization_error)):
+        while True:
+            events.append(await anext(stream))
+    assert all(event.event != "reextract_failed" for event in events)

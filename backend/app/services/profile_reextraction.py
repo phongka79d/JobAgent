@@ -424,10 +424,10 @@ class ProfileReextractionCoordinator:
     async def _finalize_failed(self, claim: _Claim, code: str) -> None:
         try:
             await self._transition_failed(claim, code)
-        except BaseException as exc:
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
+        except Exception:
             logger.exception("profile re-extract failure finalization failed")
-            if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
-                raise
 
     async def _draft_available(self, profile_id: str) -> bool:
         async with self._session_factory() as session:
