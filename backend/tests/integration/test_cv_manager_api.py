@@ -413,7 +413,6 @@ def test_cv_manager_list_projects_actions_without_storage_or_hash(
         "preview",
         "download",
         "activate_profile",
-        "reextract",
     ]
     assert by_id[ids["pending"]]["allowed_actions"] == ["retry_upload"]
     assert by_id[ids["deleting"]]["allowed_actions"] == []
@@ -607,7 +606,11 @@ def test_reprocess_active_sse_approval_and_ownership(
         assert names[0] == "reextract_progress"
         assert names[-1] == "reextract_review_ready"
         assert not ({"run_started", "tool_status", "approval_required"} & set(names))
-        review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
+        operation_id = events[-1]["operation_id"]
+        review = client.get(
+            f"/api/profiles/{profile_id}/reextract-draft",
+            params={"operation_id": operation_id},
+        )
         assert review.status_code == 200, review.text
         assert review.json()["profile_id"] == profile_id
         assert review.json()["revision"] == events[-1]["payload"]["revision"]
@@ -895,11 +898,18 @@ def test_reprocess_same_active_save_refreshes_document(
         assert propose.status_code == 200
         events = parse_profile_reextract_wire(propose.text)
         assert _event_names(events)[-1] == "reextract_review_ready"
-        review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
+        operation_id = events[-1]["operation_id"]
+        review = client.get(
+            f"/api/profiles/{profile_id}/reextract-draft",
+            params={"operation_id": operation_id},
+        )
         assert review.status_code == 200, review.text
         save = client.post(
             f"/api/profiles/{profile_id}/reextract-draft/approve",
-            json={"revision": review.json()["revision"]},
+            json={
+                "operation_id": operation_id,
+                "revision": review.json()["revision"],
+            },
         )
         assert save.status_code == 200
         assert save.json()["approved"] is True
@@ -976,4 +986,15 @@ def test_cv_manager_active_ready_policy_never_allows_activation() -> None:
         owner=ready_owner,
         is_active=False,
         file_available=True,
-    ) == ["preview", "download", "reextract"]
+    ) == ["preview", "download"]
+
+
+def test_inactive_archived_cv_never_projects_reextract() -> None:
+    ready_owner = Profile(state="ready")
+
+    assert allowed_actions(
+        state=ATTACHMENT_STATE_ARCHIVED,
+        owner=ready_owner,
+        is_active=False,
+        file_available=True,
+    ) == ["preview", "download", "activate_profile"]

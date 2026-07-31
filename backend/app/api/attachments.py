@@ -7,12 +7,16 @@ active-profile write logic.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.core.settings import Settings
 from app.db.session import get_session_factory
+from app.schemas.profile_reextraction import (
+    ProfileReextractInProgressDetail,
+    ProfileReviewPendingDetail,
+)
 from app.schemas.profile_setup import CvUploadResponse
 from app.services.chat_turns import ERROR_APPROVAL_ACTION_REQUIRED
 from app.services.cv_upload import (
@@ -41,15 +45,46 @@ _UPLOAD_ERROR_STATUS: dict[str, int] = {
     ERROR_MALFORMED_PDF: 422,
     ERROR_STORAGE_FAILURE: 500,
     ERROR_PROFILE_SETUP_IN_PROGRESS: 409,
+    "PROFILE_REEXTRACT_IN_PROGRESS": 409,
+    "PROFILE_LIFECYCLE_BUSY": 409,
     "PROFILE_REVIEW_PENDING": 409,
 }
 
 
 def _http_for_upload_error(exc: CvUploadError) -> HTTPException:
     status = _UPLOAD_ERROR_STATUS.get(exc.code, 400)
+    if (
+        exc.code == "PROFILE_REEXTRACT_IN_PROGRESS"
+        and exc.profile_id is not None
+        and exc.operation_id is not None
+    ):
+        detail = ProfileReextractInProgressDetail(
+            code="PROFILE_REEXTRACT_IN_PROGRESS",
+            summary=exc.message,
+            profile_id=exc.profile_id,
+            operation_id=exc.operation_id,
+        ).model_dump(mode="json")
+    elif (
+        exc.code == "PROFILE_REVIEW_PENDING"
+        and exc.profile_id is not None
+        and exc.review_source is not None
+        and exc.review_revision is not None
+    ):
+        detail = ProfileReviewPendingDetail(
+            code="PROFILE_REVIEW_PENDING",
+            summary=exc.message,
+            profile_id=exc.profile_id,
+            review_source=cast(
+                Literal["agent_update", "reextract"], exc.review_source
+            ),
+            operation_id=exc.operation_id,
+            review_revision=exc.review_revision,
+        ).model_dump(mode="json")
+    else:
+        detail = {"code": exc.code, "summary": exc.message}
     return HTTPException(
         status_code=status,
-        detail={"code": exc.code, "summary": exc.message},
+        detail=detail,
     )
 
 

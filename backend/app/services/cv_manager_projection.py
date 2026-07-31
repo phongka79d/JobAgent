@@ -84,7 +84,8 @@ def allowed_actions(
         actions.extend(['preview', 'download'])
     if state == 'archived' and not is_active:
         actions.append('activate_profile')
-    actions.append('reextract')
+    if state == 'active' and is_active and file_available:
+        actions.append('reextract')
     return actions
 
 

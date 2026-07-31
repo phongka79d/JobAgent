@@ -1,5 +1,7 @@
 """Authoritative chat, tailoring-Agent, and manual-generation activity gates."""
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
@@ -15,6 +17,7 @@ from app.db.models.chat import (
 from app.db.models.cv_tailoring import CVTailoringSession
 from app.db.models.profiles import (
     PROFILE_STATE_READY,
+    Profile,
     ProfileDraft,
     ProfileReextractOperation,
 )
@@ -23,13 +26,30 @@ from app.schemas.cv_tailoring import TAILORING_SESSION_STATE_GENERATING
 
 
 class ActivityBlockedError(Exception):
-    def __init__(self, code: str, summary: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        summary: str,
+        *,
+        profile_id: str | None = None,
+        review_source: str | None = None,
+        operation_id: str | None = None,
+        review_revision: datetime | None = None,
+    ) -> None:
         self.code = code
         self.summary = summary
+        self.profile_id = profile_id
+        self.review_source = review_source
+        self.operation_id = operation_id
+        self.review_revision = review_revision
         super().__init__(summary)
 
 
 _ACTIVE_RUN_STATES = ("running", "interrupted")
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 async def _query_exists(
@@ -138,10 +158,91 @@ async def assert_profile_review_clear(
         and profile.state == PROFILE_STATE_READY
         and draft is not None
     ):
+        review_source = (
+            "reextract" if draft.reextract_operation_id is not None else "agent_update"
+        )
         raise ActivityBlockedError(
             code,
             "Approve or discard the pending profile review first",
+            profile_id=profile_id,
+            review_source=review_source,
+            operation_id=draft.reextract_operation_id,
+            review_revision=_aware_utc(draft.updated_at),
         )
+
+
+async def assert_upload_lifecycle_clear(
+    session: AsyncSession,
+    *,
+    code: str = "PROFILE_REEXTRACT_IN_PROGRESS",
+) -> None:
+    """Recheck every upload conflict while holding the immediate writer lock."""
+    running = await session.execute(
+        select(ProfileReextractOperation).where(
+            ProfileReextractOperation.state == "running"
+        ).order_by(ProfileReextractOperation.updated_at, ProfileReextractOperation.id)
+    )
+    running_operation = running.scalars().first()
+    if running_operation is not None:
+        raise ActivityBlockedError(
+            "PROFILE_REEXTRACT_IN_PROGRESS",
+            "Wait for the profile re-extraction to finish first",
+            profile_id=running_operation.profile_id,
+            operation_id=running_operation.id,
+        )
+
+    drafts = await session.execute(
+        select(ProfileDraft, ProfileReextractOperation)
+        .join(Profile, Profile.id == ProfileDraft.target_profile_id)
+        .outerjoin(
+            ProfileReextractOperation,
+            ProfileReextractOperation.id == ProfileDraft.reextract_operation_id,
+        )
+        .where(Profile.state == PROFILE_STATE_READY)
+        .order_by(ProfileDraft.updated_at, ProfileDraft.id)
+    )
+    for draft, operation in drafts.all():
+        if operation is not None and operation.state == "running":
+            raise ActivityBlockedError(
+                "PROFILE_REEXTRACT_IN_PROGRESS",
+                "Wait for the profile re-extraction to finish first",
+                profile_id=operation.profile_id,
+                operation_id=operation.id,
+            )
+        raise ActivityBlockedError(
+            "PROFILE_REVIEW_PENDING",
+            "Approve or discard the pending profile review first",
+            profile_id=draft.target_profile_id,
+            review_source=(
+                "reextract"
+                if draft.reextract_operation_id is not None
+                else "agent_update"
+            ),
+            operation_id=draft.reextract_operation_id,
+            review_revision=_aware_utc(draft.updated_at),
+        )
+
+    review_ready = await session.execute(
+        select(ProfileReextractOperation)
+        .where(ProfileReextractOperation.state == "review_ready")
+        .order_by(ProfileReextractOperation.updated_at, ProfileReextractOperation.id)
+    )
+    review_ready_operation = review_ready.scalars().first()
+    if review_ready_operation is not None:
+        raise ActivityBlockedError(
+            "PROFILE_REEXTRACT_IN_PROGRESS",
+            "Wait for the profile re-extraction to finish first",
+            profile_id=review_ready_operation.profile_id,
+            operation_id=review_ready_operation.id,
+        )
+
+    incomplete = await profile_repo.get_incomplete_profile(session)
+    if incomplete is not None:
+        raise ActivityBlockedError(
+            "PROFILE_SETUP_IN_PROGRESS",
+            "finish or discard the pending profile setup first",
+        )
+    await assert_workspace_idle(session, code=code)
 
 
 async def assert_profile_reextract_clear(

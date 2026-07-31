@@ -60,6 +60,7 @@ def _http_for_reextract_error(exc: Exception) -> HTTPException:
     status = {
         "PROFILE_NOT_FOUND": 404,
         "PROFILE_NOT_READY": 409,
+        "PROFILE_SETUP_IN_PROGRESS": 409,
         "CV_ATTACHMENT_NOT_FOUND": 404,
         "CV_FILE_UNAVAILABLE": 404,
         "CV_NOT_REPROCESSABLE": 409,

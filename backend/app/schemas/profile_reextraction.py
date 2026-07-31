@@ -16,6 +16,32 @@ ReextractStage = Literal[
 ]
 
 
+class ProfileReextractInProgressDetail(BaseModel):
+    model_config = StrictModelConfig
+
+    code: Literal["PROFILE_REEXTRACT_IN_PROGRESS"]
+    summary: str
+    profile_id: UuidStr
+    operation_id: UuidStr
+
+
+class ProfileReviewPendingDetail(BaseModel):
+    model_config = StrictModelConfig
+
+    code: Literal["PROFILE_REVIEW_PENDING"]
+    summary: str
+    profile_id: UuidStr
+    review_source: Literal["agent_update", "reextract"]
+    operation_id: UuidStr | None
+    review_revision: AwareUtcDatetime
+
+    @model_validator(mode="after")
+    def validate_owner(self) -> ProfileReviewPendingDetail:
+        if (self.review_source == "reextract") != (self.operation_id is not None):
+            raise ValueError("reextract review identity is inconsistent")
+        return self
+
+
 class ProfileReextractProgress(BaseModel):
     model_config = StrictModelConfig
 
@@ -196,9 +222,11 @@ __all__ = [
     "ProfileReextractEvent",
     "ProfileReextractEventName",
     "ProfileReextractFailed",
+    "ProfileReextractInProgressDetail",
     "ProfileReextractProgress",
     "ProfileReextractReview",
     "ProfileReextractReviewReady",
+    "ProfileReviewPendingDetail",
     "ProfileReviewField",
     "PublicProfileSnapshot",
     "ReextractStage",

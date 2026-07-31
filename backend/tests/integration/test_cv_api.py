@@ -7,8 +7,10 @@ temporary SQLite and temporary FILES_DIR.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from io import BytesIO
@@ -26,7 +28,12 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_STAGED,
     Attachment,
 )
-from app.db.session import build_async_engine, get_session_factory
+from app.db.models.profiles import Profile, ProfileDraft, ProfileReextractOperation
+from app.db.session import (
+    ImmediateTransactionBusy,
+    build_async_engine,
+    get_session_factory,
+)
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import chat_messages as messages_repo
@@ -39,7 +46,15 @@ from app.repositories.attachments import (
     InvalidAttachmentTransitionError,
 )
 from app.schemas.profile_setup import CvUploadResponse
+from app.services import cv_upload
+from app.services.activity_gate import ActivityBlockedError
 from app.services.chat_turns import create_user_turn, persist_terminal_failure
+from app.services.cv_upload import upload_cv
+from app.services.profile_reextraction import (
+    ProfileReextractError,
+    ProfileReextractionCoordinator,
+)
+from app.storage.attachments import AttachmentStorage
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from pypdf import PdfWriter
@@ -826,9 +841,11 @@ def test_pending_profile_detail_and_ready_mutations_are_rejected(
             client.post(f"/api/profiles/{profile_id}/reextract", json={}),
         ]
 
-    for response in responses:
+    for response in responses[:3]:
         assert response.status_code == 409, response.text
         assert response.json()["detail"]["code"] == "PROFILE_NOT_READY"
+    assert responses[3].status_code == 409, responses[3].text
+    assert responses[3].json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
 
 
 def test_ready_profile_activation_is_blocked_while_setup_is_pending(
@@ -875,12 +892,12 @@ def test_ready_profile_activation_is_blocked_while_setup_is_pending(
     assert activated.json()["detail"]["code"] == "PROFILE_SETUP_IN_PROGRESS"
 
 
-def test_upload_is_blocked_while_active_profile_review_is_pending(
+def test_upload_blocked_by_agent_review_returns_nullable_operation_context(
     cv_api_env: tuple[Path, Path, FakeDriver],
 ) -> None:
     _db, _files_dir, _fake = cv_api_env
 
-    async def _seed_review() -> None:
+    async def _seed_review() -> tuple[str, Any]:
         factory = get_session_factory()
         async with factory() as session:
             attachment = await att_repo.create_staged(
@@ -909,13 +926,342 @@ def test_upload_is_blocked_while_active_profile_review_is_pending(
                 source_attachment_id=attachment.id,
             )
             await session.commit()
+            draft = await profile_repo.get_draft_for_profile(session, profile.id)
+            assert draft is not None
+            return profile.id, draft.updated_at
 
-    run_async(_seed_review())
+    profile_id, revision = run_async(_seed_review())
     with health_client() as client:
         response = _upload(client, DIGITAL_CV.read_bytes())
 
     assert response.status_code == 409, response.text
-    assert response.json()["detail"]["code"] == "PROFILE_REVIEW_PENDING"
+    assert response.json()["detail"] == {
+        "code": "PROFILE_REVIEW_PENDING",
+        "summary": "Approve or discard the pending profile review first",
+        "profile_id": profile_id,
+        "review_source": "agent_update",
+        "operation_id": None,
+        "review_revision": revision.replace(tzinfo=UTC).isoformat(),
+    }
+
+
+def test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    reached = asyncio.Event()
+    release = asyncio.Event()
+
+    async def final_gate(*args: Any, **kwargs: Any) -> None:
+        reached.set()
+        await release.wait()
+        raise ActivityBlockedError(
+            "PROFILE_REEXTRACT_IN_PROGRESS",
+            "Wait for the profile re-extraction to finish first",
+            profile_id=new_uuid(),
+            operation_id=new_uuid(),
+        )
+
+    monkeypatch.setattr(cv_upload, "assert_upload_lifecycle_clear", final_gate)
+
+    async def _body() -> Any:
+        payload = DIGITAL_CV.read_bytes()
+        consumed = False
+
+        async def read() -> bytes:
+            nonlocal consumed
+            if consumed:
+                return b""
+            consumed = True
+            return payload
+
+        task = asyncio.create_task(
+            upload_cv(
+                content_type="application/pdf",
+                filename="race.pdf",
+                read_chunk=read,
+                storage=AttachmentStorage(files_dir),
+                session_factory=get_session_factory(),
+            )
+        )
+        await reached.wait()
+        release.set()
+        with pytest.raises(cv_upload.CvUploadError) as exc_info:
+            await task
+        return exc_info.value
+
+    error = run_async(_body())
+    assert error.code == "PROFILE_REEXTRACT_IN_PROGRESS"
+    assert list(files_dir.glob("*")) == []
+
+
+def test_upload_begin_immediate_busy_is_typed_409(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+
+    @asynccontextmanager
+    async def busy_scope(*args: Any, **kwargs: Any) -> Any:
+        raise ImmediateTransactionBusy()
+        yield
+
+    monkeypatch.setattr(cv_upload, "immediate_session_scope", busy_scope)
+    with health_client() as client:
+        response = _upload(client, DIGITAL_CV.read_bytes())
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "PROFILE_LIFECYCLE_BUSY",
+        "summary": "CV lifecycle is busy; retry the action",
+    }
+    assert list(files_dir.glob("*")) == []
+
+
+async def _run_upload_reextract_ordering(
+    files_dir: Path,
+    factory: Any,
+    *,
+    first: str,
+) -> dict[str, Any]:
+    storage = AttachmentStorage(files_dir)
+    attachment_id = new_uuid()
+    temp = storage.create_temp_file()
+    temp.write_bytes(DIGITAL_CV.read_bytes())
+    retained_path = storage.promote_temp(temp, attachment_id)
+    async with factory() as session:
+        attachment = await att_repo.create_staged(
+            session,
+            file_hash=f"race-{first}",
+            original_name="retained.pdf",
+            size_bytes=100,
+            storage_path=retained_path,
+            page_count=1,
+            attachment_id=attachment_id,
+        )
+        await att_repo.mark_active(session, attachment.id)
+        profile = await profile_repo.create_profile(
+            session,
+            attachment_id=attachment.id,
+            display_name="Race profile",
+            profile_json={},
+            location=None,
+            extraction_version="fixture-v1",
+            source_hash="fixture-source",
+        )
+        await conversations_repo.create_for_profile(session, profile_id=profile.id)
+        await workspace_repo.set_active_profile_id(session, profile.id)
+        await session.commit()
+        profile_id = profile.id
+
+    coordinator = ProfileReextractionCoordinator(
+        session_factory=factory,
+        storage=storage,
+        normalizer=object(),
+        invoker=object(),
+    )
+    prebyte_entered = asyncio.Event()
+    release_upload = asyncio.Event()
+    claim_entered = asyncio.Event()
+    release_claim = asyncio.Event()
+    original_prebyte = cv_upload._assert_upload_activity_gate
+    original_claim = coordinator._claim
+
+    async def held_prebyte(*args: Any, **kwargs: Any) -> None:
+        prebyte_entered.set()
+        await release_upload.wait()
+
+    async def held_claim(requested_profile_id: str) -> Any:
+        claim_entered.set()
+        await release_claim.wait()
+        return await original_claim(requested_profile_id)
+
+    async def run_upload() -> str:
+        payload = DIGITAL_CV_B.read_bytes()
+        consumed = False
+
+        async def read() -> bytes:
+            nonlocal consumed
+            if consumed:
+                return b""
+            consumed = True
+            return payload
+
+        try:
+            result = await upload_cv(
+                content_type="application/pdf",
+                filename="loser.pdf",
+                read_chunk=read,
+                storage=storage,
+                session_factory=factory,
+            )
+            return result.outcome
+        except cv_upload.CvUploadError as exc:
+            return exc.code
+
+    cv_upload._assert_upload_activity_gate = held_prebyte
+    try:
+        if first == "upload":
+            coordinator._claim = held_claim  # type: ignore[method-assign]
+            stream = coordinator.stream(profile_id)
+            claim_task = asyncio.create_task(anext(stream))
+            await claim_entered.wait()
+            upload_task = asyncio.create_task(run_upload())
+            await prebyte_entered.wait()
+            release_upload.set()
+            upload_outcome = await upload_task
+            release_claim.set()
+            with pytest.raises(ProfileReextractError) as exc_info:
+                await claim_task
+            assert exc_info.value.code == "PROFILE_SETUP_IN_PROGRESS"
+            reextract_outcome = "claim_rejected"
+        else:
+            upload_task = asyncio.create_task(run_upload())
+            await prebyte_entered.wait()
+            stream = coordinator.stream(profile_id)
+            first_event_task = asyncio.create_task(anext(stream))
+            first_event = await first_event_task
+            assert first_event.event == "reextract_progress"
+            release_upload.set()
+            upload_outcome = await upload_task
+            reextract_outcome = "claimed"
+            await stream.aclose()
+    finally:
+        cv_upload._assert_upload_activity_gate = original_prebyte
+
+    async with factory() as session:
+        attachment_count = int(
+            (
+                await session.execute(
+                    select(func.count()).select_from(Attachment)
+                )
+            ).scalar_one()
+        )
+        profile_count = int(
+            (
+                await session.execute(
+                    select(func.count()).select_from(Profile)
+                )
+            ).scalar_one()
+        )
+        operations = list(
+            (
+                await session.execute(select(ProfileReextractOperation))
+            ).scalars()
+        )
+        drafts = list((await session.execute(select(ProfileDraft))).scalars())
+        persisted_paths = {
+            Path(row.storage_path).name
+            for row in (await session.execute(select(Attachment))).scalars()
+        }
+    finalized_files = [
+        path for path in files_dir.iterdir() if path.name not in persisted_paths
+    ]
+    return {
+        "upload": upload_outcome,
+        "reextract": reextract_outcome,
+        "attachments": attachment_count,
+        "profiles": profile_count,
+        "operations": operations,
+        "drafts": drafts,
+        "losing_files": finalized_files,
+    }
+
+
+async def _clear_upload_reextract_race_state(
+    files_dir: Path,
+    factory: Any,
+) -> None:
+    async with factory() as session:
+        await workspace_repo.set_active_profile_id(session, None)
+        for operation in (
+            await session.execute(select(ProfileReextractOperation))
+        ).scalars():
+            await session.delete(operation)
+        for profile in (await session.execute(select(Profile))).scalars():
+            await session.delete(profile)
+        await session.flush()
+        for attachment in (await session.execute(select(Attachment))).scalars():
+            await session.delete(attachment)
+        await session.commit()
+    for path in files_dir.iterdir():
+        path.unlink()
+
+
+def test_upload_then_reextract_and_reextract_then_upload_are_serialized(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+    upload_first = run_async(
+        _run_upload_reextract_ordering(
+            files_dir, get_session_factory(), first="upload"
+        )
+    )
+    run_async(_clear_upload_reextract_race_state(files_dir, get_session_factory()))
+    reextract_first = run_async(
+        _run_upload_reextract_ordering(
+            files_dir, get_session_factory(), first="reextract"
+        )
+    )
+    assert upload_first["upload"] == "new_pending"
+    assert upload_first["reextract"] == "claim_rejected"
+    assert upload_first["attachments"] == 2
+    assert upload_first["profiles"] == 2
+    assert upload_first["operations"] == []
+    assert upload_first["drafts"] == []
+    assert upload_first["losing_files"] == []
+    assert reextract_first["upload"] == "PROFILE_REEXTRACT_IN_PROGRESS"
+    assert reextract_first["reextract"] == "claimed"
+    assert reextract_first["attachments"] == 1
+    assert reextract_first["profiles"] == 1
+    assert len(reextract_first["operations"]) == 1
+    assert reextract_first["operations"][0].state == "interrupted"
+    assert reextract_first["drafts"] == []
+    assert reextract_first["losing_files"] == []
+
+
+def test_upload_that_passed_prebyte_gate_loses_to_agent_review(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, files_dir, _fake = cv_api_env
+
+    async def gate(*args: Any, **kwargs: Any) -> None:
+        raise ActivityBlockedError(
+            "PROFILE_REVIEW_PENDING",
+            "Approve or discard the pending profile review first",
+            profile_id=new_uuid(),
+            review_source="agent_update",
+            review_revision=datetime.now(UTC),
+        )
+
+    async def _body() -> None:
+        original = cv_upload.assert_upload_lifecycle_clear
+        cv_upload.assert_upload_lifecycle_clear = gate
+        try:
+            payload = DIGITAL_CV.read_bytes()
+            consumed = False
+
+            async def read() -> bytes:
+                nonlocal consumed
+                if consumed:
+                    return b""
+                consumed = True
+                return payload
+
+            with pytest.raises(cv_upload.CvUploadError) as exc_info:
+                await upload_cv(
+                    content_type="application/pdf",
+                    filename="review-race.pdf",
+                    read_chunk=read,
+                    storage=AttachmentStorage(files_dir),
+                    session_factory=get_session_factory(),
+                )
+            assert exc_info.value.code == "PROFILE_REVIEW_PENDING"
+        finally:
+            cv_upload.assert_upload_lifecycle_clear = original
+
+    run_async(_body())
+    assert list(files_dir.glob("*")) == []
 
 
 def test_upload_response_rejects_inconsistent_outcome_bootstrap_coupling(

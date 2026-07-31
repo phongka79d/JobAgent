@@ -809,6 +809,7 @@ git commit -m "feat: enforce reextract review compare and swap"
 - Modify: `backend/app/services/cv_manager.py`
 - Modify: `backend/app/schemas/profile_reextraction.py`
 - Modify: `backend/app/api/attachments.py`
+- Modify: `backend/app/api/profiles.py`
 - Modify: `backend/tests/integration/test_cv_api.py`
 - Modify: `backend/tests/integration/test_cv_manager_api.py`
 - Modify: `backend/tests/integration/test_cv_manager_deletion.py`
@@ -937,7 +938,7 @@ Expected: PASS; both barrier-controlled ordering cases preserve one authoritativ
 - [ ] **Step 5: Commit upload serialization.**
 
 ```powershell
-git add backend/app/services/cv_upload.py backend/app/services/activity_gate.py backend/app/services/cv_manager_projection.py backend/app/services/cv_manager.py backend/app/schemas/profile_reextraction.py backend/app/api/attachments.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py
+git add backend/app/services/cv_upload.py backend/app/services/activity_gate.py backend/app/services/cv_manager_projection.py backend/app/services/cv_manager.py backend/app/schemas/profile_reextraction.py backend/app/api/attachments.py backend/app/api/profiles.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py
 git commit -m "fix: gate uploads behind reextract operations"
 ```
 
