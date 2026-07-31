@@ -170,6 +170,10 @@ export type ProfilePreferenceChange = {
 
 export type ProfileReextractReview = {
   profile_id: string;
+  /** Present on parsed server reviews; optional only for legacy test fixtures. */
+  source?: 'agent_update' | 'reextract';
+  operation_id?: string | null;
+  operation_state?: 'review_ready' | 'stale' | null;
   revision: string;
   current: PublicProfileSnapshot;
   proposed: PublicProfileSnapshot;
@@ -190,8 +194,25 @@ export type ProfileReextractApprovalResponse = {
   warning: {code: string; summary: string; guidance: string} | null;
 };
 
+export type ProfileReextractOperation = {
+  profile_id: string;
+  operation_id: string;
+  state: 'running' | 'review_ready' | 'interrupted' | 'failed' | 'stale';
+  error_code: string | null;
+  error_summary: string | null;
+  review_revision: string | null;
+  can_review: boolean;
+  can_retry: boolean;
+  can_discard: boolean;
+};
+
+export type ProfileReextractOperationEnvelope = {
+  operation: ProfileReextractOperation | null;
+};
+
 const EVENT_KEYS = ['event_id', 'operation_id', 'profile_id', 'timestamp', 'event', 'payload'] as const;
-const REVIEW_KEYS = ['profile_id', 'revision', 'current', 'proposed', 'changed_fields', 'preference_changes', 'skills_added', 'skills_removed', 'collection_deltas', 'extraction_confidence', 'can_approve', 'can_discard'] as const;
+const REVIEW_KEYS = ['profile_id', 'source', 'operation_id', 'operation_state', 'revision', 'current', 'proposed', 'changed_fields', 'preference_changes', 'skills_added', 'skills_removed', 'collection_deltas', 'extraction_confidence', 'can_approve', 'can_discard'] as const;
+const OPERATION_KEYS = ['profile_id', 'operation_id', 'state', 'error_code', 'error_summary', 'review_revision', 'can_review', 'can_retry', 'can_discard'] as const;
 const SNAPSHOT_KEYS = ['full_name', 'location', 'phone', 'email', 'github_url', 'summary', 'current_title', 'skill_labels'] as const;
 
 function stringList(value: unknown, name: string): string[] {
@@ -251,6 +272,39 @@ export function parseProfileReextractEvent(raw: unknown): ProfileReextractEvent 
   throw new Error('invalid profile re-extract event');
 }
 
+export function parseProfileReextractOperation(raw: unknown): ProfileReextractOperation {
+  const value = record(raw, 'profile re-extract operation');
+  exact(value, OPERATION_KEYS, 'profile re-extract operation');
+  const state = value.state;
+  if (!['running', 'review_ready', 'interrupted', 'failed', 'stale'].includes(state as string)) {
+    throw new Error('invalid profile re-extract operation state');
+  }
+  const error_code = nullableString(value.error_code, 'error_code');
+  const error_summary = nullableString(value.error_summary, 'error_summary');
+  const review_revision = value.review_revision === null ? null : timestamp(value.review_revision, 'review_revision');
+  const can_review = bool(value.can_review, 'can_review');
+  const can_retry = bool(value.can_retry, 'can_retry');
+  const can_discard = bool(value.can_discard, 'can_discard');
+  if ((error_code === null) !== (error_summary === null)) throw new Error('operation error fields must be consistently nullable');
+  if ((state === 'running' || state === 'review_ready') !== (error_code === null)) throw new Error('operation error does not match state');
+  if (state === 'review_ready' && review_revision === null) throw new Error('review-ready operation requires a review revision');
+  if (!['review_ready', 'stale'].includes(state as string) && review_revision !== null) throw new Error('operation state cannot own a review revision');
+  const expectedActions = state === 'running' ? [false, false, false]
+    : state === 'review_ready' ? [true, false, true]
+      : state === 'interrupted' || state === 'failed' ? [false, true, false]
+        : review_revision === null ? [false, true, false] : [true, false, true];
+  if (can_review !== expectedActions[0] || can_retry !== expectedActions[1] || can_discard !== expectedActions[2]) {
+    throw new Error('operation actions do not match state');
+  }
+  return {profile_id: uuid(value.profile_id, 'profile_id'), operation_id: uuid(value.operation_id, 'operation_id'), state: state as ProfileReextractOperation['state'], error_code, error_summary, review_revision, can_review, can_retry, can_discard};
+}
+
+export function parseProfileReextractOperationEnvelope(raw: unknown): ProfileReextractOperationEnvelope {
+  const value = record(raw, 'profile re-extract operation response');
+  exact(value, ['operation'], 'profile re-extract operation response');
+  return {operation: value.operation === null ? null : parseProfileReextractOperation(value.operation)};
+}
+
 export function parseProfileReextractReview(raw: unknown): ProfileReextractReview {
   const value = record(raw, 'profile re-extract review');
   exact(value, REVIEW_KEYS, 'profile re-extract review');
@@ -284,12 +338,23 @@ export function parseProfileReextractReview(raw: unknown): ProfileReextractRevie
     exact(confidence, ['before', 'after'], 'confidence delta');
     extraction_confidence = {before: finite(confidence.before, 'confidence before'), after: finite(confidence.after, 'confidence after')};
   }
+  const source = value.source;
+  if (source !== 'agent_update' && source !== 'reextract') throw new Error('invalid review source');
+  const operation_id = value.operation_id === null ? null : uuid(value.operation_id, 'operation_id');
+  const operation_state = value.operation_state;
+  if (operation_state !== null && operation_state !== 'review_ready' && operation_state !== 'stale') throw new Error('invalid review operation state');
+  const can_approve = bool(value.can_approve, 'can_approve');
+  const can_discard = bool(value.can_discard, 'can_discard');
+  if (source === 'agent_update' && (operation_id !== null || operation_state !== null || !can_approve || !can_discard)) throw new Error('ordinary review ownership is invalid');
+  if (source === 'reextract' && (operation_id === null || operation_state === null || !can_discard || (operation_state === 'review_ready' && !can_approve) || (operation_state === 'stale' && can_approve))) {
+    throw new Error('re-extract review ownership is invalid');
+  }
   return {
-    profile_id: uuid(value.profile_id, 'profile_id'), revision: timestamp(value.revision, 'revision'),
+    profile_id: uuid(value.profile_id, 'profile_id'), source, operation_id, operation_state, revision: timestamp(value.revision, 'revision'),
     current: parseSnapshot(value.current), proposed: parseSnapshot(value.proposed), changed_fields, preference_changes,
     skills_added: stringList(value.skills_added, 'skills_added'), skills_removed: stringList(value.skills_removed, 'skills_removed'),
     collection_deltas: {experiences: finite(deltas.experiences, 'experiences'), education: finite(deltas.education, 'education'), languages: finite(deltas.languages, 'languages'), certifications: finite(deltas.certifications, 'certifications')},
-    extraction_confidence, can_approve: bool(value.can_approve, 'can_approve'), can_discard: bool(value.can_discard, 'can_discard'),
+    extraction_confidence, can_approve, can_discard,
   };
 }
 

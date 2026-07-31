@@ -3,6 +3,8 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   cvFileUrl,
   deleteCv,
+  approveProfileReextractReview,
+  discardProfileReextractReview,
   fetchCvManager,
   streamProfileReextract,
 } from '../features/cv-manager/api';
@@ -11,6 +13,7 @@ import {
   parseCvManagerListResponse,
   parseProfileReextractEvent,
 } from '../features/cv-manager/types';
+import * as cvManagerTypes from '../features/cv-manager/types';
 import type {
   CvManagerItem,
   CvManagerListResponse,
@@ -364,6 +367,19 @@ describe('CV Manager API transport', () => {
       `http://api.test/api/cvs/${ACTIVE_CV_ID}/file?disposition=attachment`,
     );
   });
+
+  it('keeps legacy review action signals while carrying a nullable operation id', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
+    const signal = new AbortController().signal;
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({profile_id: ACTIVE_PROFILE_ID, approved: true, sync_ok: true, warning: null}), {status: 200})).mockResolvedValueOnce(new Response(null, {status: 204}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await approveProfileReextractReview(ACTIVE_PROFILE_ID, TS, signal);
+    await discardProfileReextractReview(ACTIVE_PROFILE_ID, TS, signal);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `http://api.test/api/profiles/${ACTIVE_PROFILE_ID}/reextract-draft/approve`, expect.objectContaining({body: JSON.stringify({revision: TS, operation_id: null}), signal}));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `http://api.test/api/profiles/${ACTIVE_PROFILE_ID}/reextract-draft?revision=${encodeURIComponent(TS)}`, expect.objectContaining({signal}));
+  });
 });
 
 describe('profile re-extract event parsing', () => {
@@ -402,5 +418,52 @@ describe('profile re-extract event parsing', () => {
     expect(onEvent).toHaveBeenCalledOnce();
     expect(onEvent).toHaveBeenCalledWith(event);
     expect(onMalformed).toHaveBeenCalledOnce();
+  });
+});
+
+describe('profile re-extract operation and review parsing', () => {
+  const operation = {
+    profile_id: ACTIVE_PROFILE_ID,
+    operation_id: '11111111-1111-4111-8111-111111111111',
+    state: 'review_ready',
+    error_code: null,
+    error_summary: null,
+    review_revision: TS,
+    can_review: true,
+    can_retry: false,
+    can_discard: true,
+  };
+  const review = {
+    profile_id: ACTIVE_PROFILE_ID,
+    source: 'reextract',
+    operation_id: operation.operation_id,
+    operation_state: 'review_ready',
+    revision: TS,
+    current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Approved', current_title: null, skill_labels: []},
+    proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: null, skill_labels: []},
+    changed_fields: [],
+    preference_changes: [],
+    skills_added: [],
+    skills_removed: [],
+    collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0},
+    extraction_confidence: null,
+    can_approve: true,
+    can_discard: true,
+  };
+
+  it('strictly parses operation envelopes and rejects contradictory operation states', () => {
+    const parseEnvelope = (cvManagerTypes as typeof cvManagerTypes & {parseProfileReextractOperationEnvelope?: (raw: unknown) => unknown}).parseProfileReextractOperationEnvelope;
+    expect(parseEnvelope).toBeTypeOf('function');
+    expect(parseEnvelope?.({operation})).toEqual({operation});
+    expect(() => parseEnvelope?.({operation: {...operation, can_review: false}})).toThrow();
+    expect(() => parseEnvelope?.({operation: {...operation, revision: TS}})).toThrow();
+    expect(() => parseEnvelope?.({operation, extra: true})).toThrow();
+  });
+
+  it('enforces review source and operation ownership', () => {
+    const parseReview = (cvManagerTypes as typeof cvManagerTypes & {parseProfileReextractReview?: (raw: unknown) => unknown}).parseProfileReextractReview;
+    expect(() => parseReview?.({...review, operation_id: null})).toThrow();
+    expect(() => parseReview?.({...review, can_approve: false})).toThrow();
+    expect(parseReview?.({...review, source: 'agent_update', operation_id: null, operation_state: null})).toMatchObject({operation_id: null});
   });
 });

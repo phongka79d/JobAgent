@@ -1,13 +1,15 @@
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Theme} from '@astryxdesign/core';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {CvManagerDrawer} from '../features/cv-manager/CvManagerDrawer';
-import type {CvManagerViewState} from '../features/cv-manager/state';
+import {useCvManagerState, type CvManagerViewState} from '../features/cv-manager/state';
+import type {CvManagerApi} from '../features/cv-manager/api';
 
 const PROFILE_ID = 'cccccccc-dddd-4eee-8fff-000000000000';
+const REPLACEMENT_PROFILE_ID = 'dddddddd-eeee-4fff-8aaa-111111111111';
 const REVISION = '2026-07-28T10:00:00Z';
 
 afterEach(() => cleanup());
@@ -27,6 +29,28 @@ function controller(state: CvManagerViewState, overrides: Record<string, unknown
 const base: CvManagerViewState = {
   phase: 'ready', items: [], selectedId: null, pendingByAttachment: {}, errorsByAttachment: {}, deleteTargetId: null,
 };
+
+function RecoveryHarness({api, profileId = PROFILE_ID}: {api: Partial<CvManagerApi>; profileId?: string}) {
+  const manager = useCvManagerState({api, profileId, profileReady: true});
+  return <><button type="button" onClick={() => void manager.open()}>Open manager</button><output data-testid="recovery-state">{JSON.stringify(manager.state.reextract)}</output></>;
+}
+
+function ReextractHarness({api}: {api: Partial<CvManagerApi>}) {
+  const manager = useCvManagerState({api, profileId: PROFILE_ID, profileReady: true});
+  return <button type="button" onClick={() => void manager.startReextract(PROFILE_ID)}>Start re-extraction</button>;
+}
+
+type OperationStatusResponse = Awaited<ReturnType<NonNullable<CvManagerApi['getProfileReextractOperation']>>>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return {promise, resolve};
+}
+
+function runningOperation(operationId: string): OperationStatusResponse {
+  return {operation: {profile_id: PROFILE_ID, operation_id: operationId, state: 'running', error_code: null, error_summary: null, review_revision: null, can_review: false, can_retry: false, can_discard: false}};
+}
 
 describe('ProfileReextractReview', () => {
   it('renders direct-stream progress without rendering a synthetic chat turn', () => {
@@ -92,5 +116,103 @@ describe('ProfileReextractReview', () => {
     fireEvent.keyDown(screen.getByRole('dialog', {name: 'CV Manager'}), {key: 'Escape'});
     expect(onOpenChange).toHaveBeenCalledWith(false);
     await waitFor(() => expect(screen.getByRole('button', {name: 'Manage CVs'})).toHaveFocus());
+  });
+
+  it('closing the drawer does not abort a running re-extraction', async () => {
+    const streamAbort = vi.fn();
+    const onOpenChange = vi.fn();
+    render(<Theme theme={neutralTheme}><CvManagerDrawer isOpen onOpenChange={onOpenChange} controller={controller({...base, reextract: {phase: 'loading', profileId: PROFILE_ID, stage: 'extracting_document', review: null, error: null, draftAvailable: false}}, {close: streamAbort})} /></Theme>);
+
+    fireEvent.keyDown(screen.getByRole('dialog', {name: 'CV Manager'}), {key: 'Escape'});
+
+    expect(streamAbort).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.getByText('extracting document')).toBeInTheDocument();
+  });
+
+  it('keeps a same-profile re-extraction stream active when start is requested again', async () => {
+    const streamAbort = vi.fn();
+    const streamProfileReextract = vi.fn(async (_profileId: string, _handlers: Parameters<NonNullable<CvManagerApi['streamProfileReextract']>>[1], signal?: AbortSignal) => {
+      signal?.addEventListener('abort', streamAbort);
+      await new Promise<void>(() => undefined);
+    });
+    render(<ReextractHarness api={{fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), streamProfileReextract}} />);
+
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extraction'}));
+    await waitFor(() => expect(streamProfileReextract).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', {name: 'Start re-extraction'}));
+
+    expect(streamAbort).not.toHaveBeenCalled();
+    expect(streamProfileReextract).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a review-ready operation from authoritative status after open', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const getProfileReextractOperation = vi.fn().mockResolvedValue({operation: {profile_id: PROFILE_ID, operation_id: operationId, state: 'review_ready', error_code: null, error_summary: null, review_revision: REVISION, can_review: true, can_retry: false, can_discard: true}});
+    const getProfileReextractReview = vi.fn().mockResolvedValue({profile_id: PROFILE_ID, source: 'reextract', operation_id: operationId, operation_state: 'review_ready', revision: REVISION, current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Approved', current_title: null, skill_labels: []}, proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: null, skill_labels: []}, changed_fields: [], preference_changes: [], skills_added: [], skills_removed: [], collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0}, extraction_confidence: null, can_approve: true, can_discard: true});
+    render(<RecoveryHarness api={{fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractOperation, getProfileReextractReview}} />);
+
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+
+    await waitFor(() => expect(getProfileReextractReview).toHaveBeenCalledWith(PROFILE_ID, expect.any(AbortSignal), operationId));
+    expect(getProfileReextractOperation).toHaveBeenCalledWith(PROFILE_ID, expect.any(AbortSignal));
+    expect(screen.getByTestId('recovery-state')).toHaveTextContent('"phase":"review"');
+  });
+
+  it('keeps a newer same-scope operation status when an older recovery resolves late', async () => {
+    const first = deferred<OperationStatusResponse>();
+    const second = deferred<OperationStatusResponse>();
+    const getProfileReextractOperation = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    render(<RecoveryHarness api={{fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractOperation}} />);
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', {name: 'Open manager'}));
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(2));
+
+    second.resolve(runningOperation('22222222-2222-4222-8222-222222222222'));
+    await waitFor(() => expect(screen.getByTestId('recovery-state')).toHaveTextContent('22222222-2222-4222-8222-222222222222'));
+    await act(async () => {
+      first.resolve(runningOperation('11111111-1111-4111-8111-111111111111'));
+      await first.promise;
+    });
+
+    expect(screen.getByTestId('recovery-state')).toHaveTextContent('22222222-2222-4222-8222-222222222222');
+  });
+
+  it('aborts the effect-owned operation status request on unmount', async () => {
+    const pending = deferred<OperationStatusResponse>();
+    let requestSignal: AbortSignal | undefined;
+    const getProfileReextractOperation = vi.fn((_profileId: string, signal?: AbortSignal) => {
+      requestSignal = signal;
+      return pending.promise;
+    });
+    const {unmount} = render(<RecoveryHarness api={{fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractOperation}} />);
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(1));
+    expect(requestSignal).toBeDefined();
+    expect(requestSignal?.aborted).toBe(false);
+    unmount();
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('aborts the effect-owned operation status request on real profile-scope replacement', async () => {
+    const first = deferred<OperationStatusResponse>();
+    const second = deferred<OperationStatusResponse>();
+    let firstSignal: AbortSignal | undefined;
+    const getProfileReextractOperation = vi.fn((_profileId: string, signal?: AbortSignal) => {
+      if (getProfileReextractOperation.mock.calls.length === 1) firstSignal = signal;
+      return getProfileReextractOperation.mock.calls.length === 1 ? first.promise : second.promise;
+    });
+    const api = {fetchCvManager: vi.fn().mockResolvedValue({items: []}), deleteCv: vi.fn(), getProfileReextractOperation};
+    const {rerender} = render(<RecoveryHarness api={api} />);
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(1));
+    expect(firstSignal).toBeDefined();
+    rerender(<RecoveryHarness api={api} profileId={REPLACEMENT_PROFILE_ID} />);
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(2));
+    expect(firstSignal?.aborted).toBe(true);
   });
 });

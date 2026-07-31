@@ -17,7 +17,7 @@ import type {CvManagerController, CvManagerViewState} from './state';
 import type {CvManagerItem} from './types';
 import './cv-manager.css';
 
-type DrawerController = Pick<CvManagerController, 'refresh' | 'select' | 'openDeleteDialog' | 'closeDeleteDialog' | 'confirmDelete' | 'startReextract' | 'loadReview' | 'approveReview' | 'discardReview' | 'closeReview'> & {close?: CvManagerController['close']; state: CvManagerViewState};
+type DrawerController = Pick<CvManagerController, 'refresh' | 'select' | 'openDeleteDialog' | 'closeDeleteDialog' | 'confirmDelete' | 'startReextract' | 'loadReview' | 'approveReview' | 'discardReview' | 'closeReview'> & {state: CvManagerViewState};
 
 export type CvManagerDrawerProps = {
   isOpen: boolean;
@@ -56,7 +56,6 @@ export function CvManagerDrawer({isOpen, onOpenChange, controller, onActivatePro
   const listError = state.errorsByAttachment.__list__;
 
   const handleOpenChange = (open: boolean) => {
-    if (!open) controller.close?.();
     onOpenChange(open);
     if (!open) {
       requestAnimationFrame(() => {

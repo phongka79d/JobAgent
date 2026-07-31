@@ -4,10 +4,12 @@ import {
   parseCvManagerListResponse,
   parseProfileReextractApproval,
   parseProfileReextractEvent,
+  parseProfileReextractOperationEnvelope,
   parseProfileReextractReview,
   type CvManagerListResponse,
   type ProfileReextractApprovalResponse,
   type ProfileReextractEvent,
+  type ProfileReextractOperationEnvelope,
   type ProfileReextractReview,
 } from './types';
 
@@ -87,19 +89,30 @@ export async function streamProfileReextract(profileId: string, handlers: Profil
   }
 }
 
-export async function getProfileReextractReview(profileId: string, signal?: AbortSignal): Promise<ProfileReextractReview> {
-  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft`), {method: 'GET', headers: {Accept: 'application/json'}, signal});
+export async function getProfileReextractOperation(profileId: string, signal?: AbortSignal): Promise<ProfileReextractOperationEnvelope> {
+  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-operation`), {method: 'GET', headers: {Accept: 'application/json'}, signal});
+  return parsedJson(response, parseProfileReextractOperationEnvelope);
+}
+
+export async function getProfileReextractReview(profileId: string, signal?: AbortSignal, operationId: string | null = null): Promise<ProfileReextractReview> {
+  const params = operationId === null ? '' : `?${new URLSearchParams({operation_id: operationId})}`;
+  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft${params}`), {method: 'GET', headers: {Accept: 'application/json'}, signal});
   return parsedJson(response, parseProfileReextractReview);
 }
 
-export async function approveProfileReextractReview(profileId: string, revision: string, signal?: AbortSignal): Promise<ProfileReextractApprovalResponse> {
-  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft/approve`), {method: 'POST', headers: {Accept: 'application/json', 'Content-Type': 'application/json'}, body: JSON.stringify({revision}), signal});
+export async function approveProfileReextractReview(profileId: string, revision: string, operationIdOrSignal?: string | null | AbortSignal, signal?: AbortSignal): Promise<ProfileReextractApprovalResponse> {
+  const operationId = typeof operationIdOrSignal === 'string' ? operationIdOrSignal : null;
+  const requestSignal = typeof operationIdOrSignal === 'string' || operationIdOrSignal === null ? signal : operationIdOrSignal;
+  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft/approve`), {method: 'POST', headers: {Accept: 'application/json', 'Content-Type': 'application/json'}, body: JSON.stringify({revision, operation_id: operationId}), signal: requestSignal});
   return parsedJson(response, parseProfileReextractApproval);
 }
 
-export async function discardProfileReextractReview(profileId: string, revision: string, signal?: AbortSignal): Promise<void> {
+export async function discardProfileReextractReview(profileId: string, revision: string, operationIdOrSignal?: string | null | AbortSignal, signal?: AbortSignal): Promise<void> {
+  const operationId = typeof operationIdOrSignal === 'string' ? operationIdOrSignal : null;
+  const requestSignal = typeof operationIdOrSignal === 'string' || operationIdOrSignal === null ? signal : operationIdOrSignal;
   const params = new URLSearchParams({revision});
-  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft?${params}`), {method: 'DELETE', headers: {Accept: 'application/json'}, signal});
+  if (operationId !== null) params.set('operation_id', operationId);
+  const response = await fetch(apiUrl(`/api/profiles/${encodeURIComponent(profileId)}/reextract-draft?${params}`), {method: 'DELETE', headers: {Accept: 'application/json'}, signal: requestSignal});
   if (response.status === 204) return;
   throw parseErrorBody(response.status, await response.text());
 }
@@ -108,8 +121,9 @@ export type CvManagerApi = {
   fetchCvManager: typeof fetchCvManager;
   deleteCv: typeof deleteCv;
   streamProfileReextract?: typeof streamProfileReextract;
+  getProfileReextractOperation?: typeof getProfileReextractOperation;
   getProfileReextractReview?: typeof getProfileReextractReview;
   approveProfileReextractReview?: typeof approveProfileReextractReview;
   discardProfileReextractReview?: typeof discardProfileReextractReview;
 };
-export const defaultCvManagerApi: Required<CvManagerApi> = {fetchCvManager, deleteCv, streamProfileReextract, getProfileReextractReview, approveProfileReextractReview, discardProfileReextractReview};
+export const defaultCvManagerApi: Required<CvManagerApi> = {fetchCvManager, deleteCv, streamProfileReextract, getProfileReextractOperation, getProfileReextractReview, approveProfileReextractReview, discardProfileReextractReview};

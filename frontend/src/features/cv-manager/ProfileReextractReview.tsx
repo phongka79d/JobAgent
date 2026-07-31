@@ -39,12 +39,18 @@ export function ProfileReextractReview({controller, onApproved, onDiscarded}: {c
   if (state.phase === 'error') {
     const retry = state.profileId === null
       ? null
-      : state.draftAvailable
-        ? () => controller.loadReview(state.profileId ?? '')
-        : () => controller.startReextract(state.profileId ?? '');
+      : state.operation?.can_review
+        ? () => controller.loadReview(state.profileId ?? '', state.operation?.review_revision ?? undefined, state.operation?.operation_id)
+        : state.operation?.can_retry
+          ? () => controller.startReextract(state.profileId ?? '')
+          : state.draftAvailable
+            ? () => controller.loadReview(state.profileId ?? '')
+            : !state.operation
+              ? () => controller.startReextract(state.profileId ?? '')
+              : null;
     return <VStack gap={2} aria-live="assertive" aria-atomic="true" aria-describedby="jobagent-profile-review-error">
       <Banner id="jobagent-profile-review-error" status="error" title="Profile review could not be prepared" description={state.error?.summary} />
-      {state.draftAvailable ? <Text type="supporting">A review exists. Retry loads that review without starting another extraction.</Text> : null}
+      {state.operation?.can_review || state.draftAvailable ? <Text type="supporting">A review exists. Retry loads that review without starting another extraction.</Text> : null}
       <HStack gap={1} wrap="wrap">
         {retry ? <Button label="Retry" variant="primary" onClick={() => void retry()} /> : null}
         <Button label="Close" variant="ghost" onClick={controller.closeReview} />
