@@ -230,7 +230,7 @@ git commit -m "refactor: scope profile drafts by owner"
 - Create: `backend/tests/integration/test_profile_reextract_operations.py`
 - Modify: `backend/tests/unit/test_service_transaction_ownership.py`
 
-- [ ] **Step 1: Write failing duplicate-claim and terminal-replacement tests.**
+- [x] **Step 1: Write failing duplicate-claim and terminal-replacement tests.**
 
 ```python
 async def test_claim_allows_one_running_operation(
@@ -326,13 +326,13 @@ async def test_immediate_scope_maps_busy_after_begin(phase: str) -> None:
     assert session.rollback_calls == 1
 ```
 
-- [ ] **Step 2: Run the operation repository tests to verify they fail.**
+- [x] **Step 2: Run the operation repository tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextract_operations.py::test_claim_allows_one_running_operation tests/unit/test_service_transaction_ownership.py::test_immediate_scope_maps_busy_from_begin tests/unit/test_service_transaction_ownership.py::test_immediate_scope_maps_busy_after_begin -q`
 
 Expected: FAIL because no operation repository or `BEGIN IMMEDIATE` transaction helper exists.
 
-- [ ] **Step 3: Implement short immediate transactions and operation CAS functions.**
+- [x] **Step 3: Implement short immediate transactions and operation CAS functions.**
 
 ```python
 class ImmediateTransactionBusy(RuntimeError):
@@ -386,13 +386,13 @@ async def transition_running_operation(
 
 The coordinator claim uses `immediate_session_scope` and performs all SQLite lifecycle preflight after `BEGIN IMMEDIATE`: load and validate the active ready profile, assert no incomplete profile setup or existing draft, call `assert_workspace_idle`, call `assert_profile_review_clear`, reload and validate attachment ownership/state, reject an actionable operation, remove only draftless `interrupted`/`failed`/`stale` rows, capture profile and workspace revisions, then insert `running`. `claim_operation` performs the terminal cleanup and insert only after those validated values are passed to it. `profile_reextract_operations.py` defines and raises `ProfileReextractOperationConflict`; it must not import `ProfileReextractError`. `is_actionable_operation_unique_conflict(exc)` returns true only for `uq_profile_reextract_operations_actionable`; a matching `IntegrityError` maps at `flush`, and every unrelated `IntegrityError` re-raises unchanged. `claim_operation` must not catch busy/snapshot `OperationalError`. `immediate_session_scope` catches those failures from `BEGIN IMMEDIATE`, body writes, and commit, rolls back, and raises `ImmediateTransactionBusy`. Claim and upload map this unknown writer-contention case to HTTP 409 `PROFILE_LIFECYCLE_BUSY` with retry guidance and no invented operation identity. A duplicate claim that acquires the writer lock and observes/hits the actionable operation still returns `PROFILE_REEXTRACT_IN_PROGRESS` with its exact operation ID. Add regressions that inject `OperationalError("database is locked")` separately from initial execute, body write, and commit; all public claim/upload paths return `PROFILE_LIFECYCLE_BUSY`, never 500. The immediate transaction excludes only retained-file access, provider work, SSE yields, and graph work. Task 5 exclusively verifies exactly-one staging/provider call. Add `assert_profile_reextract_clear` that blocks upload, activation, deletion, and a second claim only for actionable operations or any operation-owned draft.
 
-- [ ] **Step 4: Run the operation repository tests to verify they pass.**
+- [x] **Step 4: Run the operation repository tests to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextract_operations.py tests/unit/test_service_transaction_ownership.py -q`
 
 Expected: PASS; the deterministic barrier admits one durable claim, preserves stale-with-draft recovery data, and verifies `BEGIN IMMEDIATE` is issued before lifecycle writes.
 
-- [ ] **Step 5: Commit operation persistence.**
+- [x] **Step 5: Commit operation persistence.**
 
 ```powershell
 git add backend/app/repositories/profile_reextract_operations.py backend/app/db/session.py backend/app/services/activity_gate.py backend/tests/integration/test_profile_reextract_operations.py backend/tests/unit/test_service_transaction_ownership.py
