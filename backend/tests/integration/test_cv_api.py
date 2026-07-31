@@ -13,7 +13,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -2160,6 +2160,7 @@ def test_get_profile_empty_state(
             "draft_present": False,
             "pending_attachment": None,
             "pending_review": None,
+            "reextract_operation": None,
         }
         assert "storage_path" not in response.text
         assert "%PDF" not in response.text
@@ -2213,6 +2214,7 @@ def test_pending_selected_profile_is_not_exposed_as_approved_compatibility_data(
             "draft_present": False,
             "pending_attachment": None,
             "pending_review": None,
+            "reextract_operation": None,
         }
 
         cv = client.get("/api/profile/cv")
@@ -2376,6 +2378,102 @@ def test_get_profile_projects_active_pending_review(
     assert body["pending_review"]["source"] == "agent_update"
     assert body["pending_review"]["can_review"] is True
     assert body["pending_review"]["revision"]
+
+
+def test_get_profile_projects_correlated_reextract_operation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The public profile read preserves correlated stale review state durably."""
+    from app.storage.attachments import AttachmentStorage
+
+    _db_path, files_dir = prepare_health_env(monkeypatch, tmp_path, migrate=True)
+    install_fake_driver(monkeypatch)
+    storage = AttachmentStorage(files_dir)
+    storage.ensure_root()
+    attachment_id = new_uuid()
+
+    async def _seed() -> tuple[str, str]:
+        storage.write_bytes(attachment_id, b"%PDF-1.4 operation\n%%EOF\n")
+        factory = get_session_factory()
+        async with factory() as session:
+            await att_repo.create_staged(
+                session,
+                file_hash="profile-operation-projection",
+                original_name="active.pdf",
+                size_bytes=27,
+                storage_path=attachment_id,
+                page_count=1,
+                attachment_id=attachment_id,
+            )
+            await att_repo.mark_active(session, attachment_id, page_count=1)
+            profile = await profile_repo.upsert_active_profile(
+                session,
+                active_attachment_id=attachment_id,
+                profile_json=_approved_profile_json(),
+            )
+            await profile_repo.upsert_job_preferences(
+                session, preferences_json=_approved_prefs_json()
+            )
+            workspace = await workspace_repo.get_state(session)
+            assert workspace is not None
+            operation = ProfileReextractOperation(
+                id=new_uuid(),
+                profile_id=profile.id,
+                source_attachment_id=attachment_id,
+                base_profile_updated_at=profile.updated_at,
+                base_workspace_updated_at=workspace.updated_at,
+                state="review_ready",
+                error_code=None,
+            )
+            session.add(operation)
+            await session.flush()
+            draft = await profile_repo.upsert_draft_for_profile(
+                session,
+                profile_id=profile.id,
+                source_attachment_id=attachment_id,
+                reextract_operation_id=operation.id,
+                draft_json={
+                    "candidate_profile": _approved_profile_json(),
+                    "job_preferences": _approved_prefs_json(),
+                },
+            )
+            profile.updated_at = profile.updated_at + timedelta(seconds=1)
+            await session.commit()
+            return operation.id, draft.updated_at.isoformat()
+
+    operation_id, draft_revision = run_async(_seed())
+
+    with health_client() as client:
+        response = client.get("/api/profile")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reextract_operation"] == {
+        "profile_id": body["pending_review"]["profile_id"],
+        "operation_id": operation_id,
+        "state": "stale",
+        "error_code": "PROFILE_REEXTRACT_STALE",
+        "error_summary": "The profile changed during re-extraction",
+        "review_revision": draft_revision,
+        "can_review": True,
+        "can_retry": False,
+        "can_discard": True,
+    }
+    assert body["pending_review"] == {
+        "profile_id": body["reextract_operation"]["profile_id"],
+        "revision": draft_revision,
+        "source": "reextract",
+        "operation_id": operation_id,
+        "can_review": True,
+    }
+
+    async def _stored_state() -> str:
+        async with get_session_factory()() as session:
+            operation = await session.get(ProfileReextractOperation, operation_id)
+            assert operation is not None
+            return operation.state
+
+    assert run_async(_stored_state()) == "stale"
 
 
 def test_get_profile_cv_missing_file_is_safe(

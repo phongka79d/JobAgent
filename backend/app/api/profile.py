@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.attachments import ATTACHMENT_MIME_TYPE_PDF, ATTACHMENT_STATE_ACTIVE
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import profiles as profile_repo
 from app.schemas.attachments import AttachmentPublic
@@ -35,6 +35,10 @@ from app.schemas.profile import (
     parse_job_preferences,
 )
 from app.services.cv_upload import sanitize_original_name
+from app.services.profile_reextraction import (
+    ProfileReextractError,
+    project_reextract_operation_status,
+)
 from app.storage.attachments import AttachmentStorage, PathEscapeError
 
 router = APIRouter(tags=["profile"])
@@ -90,17 +94,18 @@ def _pending_review_for_active_profile(
 ) -> ProfilePendingReview | None:
     if draft_row is None or draft_row.target_profile_id != profile_row.id:
         return None
-    source_id = draft_row.source_attachment_id
-    if source_id is None:
+    operation_id = draft_row.reextract_operation_id
+    if operation_id is None:
         source = "agent_update"
         can_review = True
     else:
         source = "reextract"
-        can_review = source_id == profile_row.active_attachment_id
+        can_review = draft_row.source_attachment_id == profile_row.active_attachment_id
     return ProfilePendingReview(
         profile_id=profile_row.id,
         revision=_aware(draft_row.updated_at),
         source=cast(ProfileReviewSource, source),
+        operation_id=operation_id,
         can_review=can_review,
     )
 
@@ -163,6 +168,13 @@ async def build_profile_read_response(
             status=500,
         )
 
+    try:
+        reextract_operation = await project_reextract_operation_status(
+            session, profile_row.id
+        )
+    except ProfileReextractError as exc:
+        raise _http(ERROR_PROFILE_INCONSISTENT, exc.summary, status=500) from exc
+
     return ProfileReadResponse(
         present=True,
         profile=profile,
@@ -174,6 +186,7 @@ async def build_profile_read_response(
             profile_row=profile_row,
             draft_row=draft_row,
         ),
+        reextract_operation=reextract_operation,
     )
 
 
@@ -205,7 +218,7 @@ def content_disposition_for(original_name: str) -> str:
 async def get_profile() -> ProfileReadResponse:
     """``GET /api/profile`` — active profile/preferences/attachment or empty."""
     factory: async_sessionmaker[AsyncSession] = get_session_factory()
-    async with factory() as session:
+    async with session_scope(factory) as session:
         return await build_profile_read_response(session)
 
 

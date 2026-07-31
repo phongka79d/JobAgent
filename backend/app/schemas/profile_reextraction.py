@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
-from app.schemas.profile import SafeWarning
+from app.schemas.common import (
+    AwareUtcDatetime,
+    ProfileReextractOperationEnvelope,
+    ProfileReextractOperationStatus,
+    SafeWarning,
+    StrictModelConfig,
+    UuidStr,
+)
 from pydantic import BaseModel, Field, model_validator
 
 ReextractStage = Literal[
@@ -226,6 +232,8 @@ __all__ = [
     "ProfileReextractProgress",
     "ProfileReextractReview",
     "ProfileReextractReviewReady",
+    "ProfileReextractOperationEnvelope",
+    "ProfileReextractOperationStatus",
     "ProfileReviewPendingDetail",
     "ProfileReviewField",
     "PublicProfileSnapshot",

@@ -28,6 +28,8 @@ from app.schemas.profile import (
 from app.schemas.profile_reextraction import (
     ProfileReextractApprovalResponse,
     ProfileReextractApproveRequest,
+    ProfileReextractEvent,
+    ProfileReextractOperationEnvelope,
     ProfileReextractReview,
 )
 from app.services.profile_activation import (
@@ -79,9 +81,13 @@ def _http_for_reextract_error(exc: Exception) -> HTTPException:
         "PROFILE_INCONSISTENT": 409,
         "PROFILE_SWITCH_BLOCKED": 409,
     }.get(exc.code, 500)
+    detail: dict[str, Any] = {"code": exc.code, "summary": exc.summary}
+    if exc.code == "PROFILE_REEXTRACT_IN_PROGRESS":
+        detail["profile_id"] = getattr(exc, "profile_id", None)
+        detail["operation_id"] = exc.operation_id
     return HTTPException(
         status_code=status,
-        detail={"code": exc.code, "summary": exc.summary},
+        detail=detail,
     )
 
 
@@ -206,12 +212,50 @@ async def reextract_profile(
     deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
 ) -> EventSourceResponse:
     coordinator = _profile_reextract_coordinator(deps)
+    async def correlated_events() -> Any:
+        first_profile: str | None = None
+        first_operation: str | None = None
+        async for event in coordinator.stream(profile_id):
+            if not isinstance(event, ProfileReextractEvent):
+                raise ProfileReextractError(
+                    "PROFILE_REEXTRACT_FAILED",
+                    "CV re-extraction could not be completed",
+                )
+            if first_profile is None:
+                first_profile, first_operation = event.profile_id, event.operation_id
+            if (
+                event.profile_id != profile_id
+                or event.profile_id != first_profile
+                or event.operation_id != first_operation
+            ):
+                raise ProfileReextractError(
+                    "PROFILE_REEXTRACT_CONFLICT",
+                    "The re-extraction operation identity changed",
+                )
+            yield event
     return await open_typed_sse_response(
-        coordinator.stream(profile_id),
+        correlated_events(),
         serializer=format_profile_reextract_sse,
         error_mapper=_http_for_reextract_error,
         error_types=(ProfileReextractError,),
     )
+
+
+@router.get(
+    "/profiles/{profile_id}/reextract-operation",
+    response_model=ProfileReextractOperationEnvelope,
+)
+async def get_profile_reextract_operation(
+    profile_id: Annotated[UuidStr, Path(description="Profile id")],
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+) -> ProfileReextractOperationEnvelope:
+    coordinator = _profile_reextract_coordinator(deps)
+    try:
+        return ProfileReextractOperationEnvelope(
+            operation=await coordinator.get_status(profile_id)
+        )
+    except ProfileReextractError as exc:
+        raise _http_for_reextract_error(exc) from exc
 
 
 @router.get(

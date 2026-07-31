@@ -14,6 +14,7 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_ARCHIVED,
     ATTACHMENT_STATE_STAGED,
 )
+from app.db.models.profiles import ProfileReextractOperation
 from app.db.session import get_session_factory
 from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as attachments_repo
@@ -917,7 +918,6 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
             json={"attachment_id": attachment_id},
         ).status_code == 422
         assert client.post(f"/api/cvs/{attachment_id}/reprocess").status_code == 404
-
     assert captured["profile_id"] == profile_id
     assert review.status_code == 200
     assert approved.status_code == 200
@@ -930,6 +930,100 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
     assert "approval_required" not in response.text
     assert "conversation_id" not in response.text
 
+
+def test_reextract_routes_require_correlated_operation_identity(
+    health_env: tuple[Path, Path, FakeDriver],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del health_env
+    profile_id, _attachment_id, _conversation_id = run_async(
+        _create_profile(
+            state=ATTACHMENT_STATE_ACTIVE, marker="status", display_name="Status"
+        )
+    )
+    run_async(_set_active(profile_id))
+    from types import SimpleNamespace
+
+    from app.api.dependencies import get_profile_reextract_deps
+
+    class FakeCoordinator:
+        async def get_status(self, requested_profile_id: str) -> None:
+            assert requested_profile_id == profile_id
+            return None
+
+    monkeypatch.setattr(
+        "app.api.profiles._profile_reextract_coordinator",
+        lambda _deps: FakeCoordinator(),
+    )
+    client = health_client()
+    client.app.dependency_overrides[get_profile_reextract_deps] = (
+        lambda: SimpleNamespace()
+    )
+    with client:
+        response = client.get(f"/api/profiles/{profile_id}/reextract-operation")
+    assert response.status_code == 200
+    assert response.json() == {"operation": None}
+
+
+def test_status_route_reconciles_missing_operation_owned_draft_durably(
+    health_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    del health_env
+    profile_id, attachment_id, _conversation_id = run_async(
+        _create_profile(
+            state=ATTACHMENT_STATE_ACTIVE,
+            marker="missing-draft",
+            display_name="Missing owned draft",
+        )
+    )
+    run_async(_set_active(profile_id))
+
+    async def _seed() -> str:
+        factory = get_session_factory()
+        async with factory() as session:
+            profile = await profiles_repo.get_profile(session, profile_id)
+            workspace = await workspace_repo.get_state(session)
+            assert profile is not None and workspace is not None
+            operation = ProfileReextractOperation(
+                id=new_uuid(),
+                profile_id=profile_id,
+                source_attachment_id=attachment_id,
+                base_profile_updated_at=profile.updated_at,
+                base_workspace_updated_at=workspace.updated_at,
+                state="review_ready",
+                error_code=None,
+            )
+            session.add(operation)
+            await session.commit()
+            return operation.id
+
+    operation_id = run_async(_seed())
+
+    with health_client() as client:
+        response = client.get(f"/api/profiles/{profile_id}/reextract-operation")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "operation": {
+            "profile_id": profile_id,
+            "operation_id": operation_id,
+            "state": "stale",
+            "error_code": "PROFILE_REEXTRACT_STALE",
+            "error_summary": "The profile changed during re-extraction",
+            "review_revision": None,
+            "can_review": False,
+            "can_retry": True,
+            "can_discard": False,
+        }
+    }
+
+    async def _stored_state() -> str:
+        async with get_session_factory()() as session:
+            operation = await session.get(ProfileReextractOperation, operation_id)
+            assert operation is not None
+            return operation.state
+
+    assert run_async(_stored_state()) == "stale"
 
 def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
     health_env: tuple[Path, Path, FakeDriver],

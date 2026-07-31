@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -16,6 +17,7 @@ from app.schemas.profile_reextraction import (
 )
 from app.schemas.sse import SseEvent, build_sse_event
 from app.services.chat_turns import ChatTurnError
+from app.services.profile_reextraction import ProfileReextractError
 from fastapi import HTTPException
 
 RUN_ID = "11111111-1111-4111-8111-111111111111"
@@ -55,6 +57,48 @@ def test_format_profile_reextract_sse_uses_separate_event_contract() -> None:
     assert "event: reextract_progress" in framed
     assert f"id: {event.event_id}" in framed
     assert '"operation_id":"33333333-3333-4333-8333-333333333333"' in framed
+
+
+@pytest.mark.asyncio
+async def test_reextract_route_rejects_crossed_stream_operation_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.profiles import reextract_profile
+    from app.schemas.profile import ReextractRequest
+
+    def _event(*, profile_id: str, operation_id: str) -> ProfileReextractEvent:
+        return ProfileReextractEvent(
+            event_id="44444444-4444-4444-8444-444444444444",
+            operation_id=operation_id,
+            profile_id=profile_id,
+            timestamp="2026-07-28T10:00:00Z",
+            event="reextract_progress",
+            payload=ProfileReextractProgress(
+                stage="extracting_document",
+                message="Extracting retained CV",
+            ),
+        )
+
+    class FakeCoordinator:
+        async def stream(
+            self, _requested_profile_id: str
+        ) -> AsyncIterator[ProfileReextractEvent]:
+            yield _event(profile_id=PROFILE_ID, operation_id=OPERATION_ID)
+            yield _event(profile_id=PROFILE_ID, operation_id=RUN_ID)
+
+    monkeypatch.setattr(
+        "app.api.profiles._profile_reextract_coordinator",
+        lambda _deps: FakeCoordinator(),
+    )
+    response = await reextract_profile(
+        PROFILE_ID, ReextractRequest(), SimpleNamespace()
+    )
+    assert b'"operation_id":"33333333-3333-4333-8333-333333333333"' in (
+        await response.body_iterator.__anext__()
+    )
+    with pytest.raises(ProfileReextractError) as caught:
+        await response.body_iterator.__anext__()
+    assert caught.value.code == "PROFILE_REEXTRACT_CONFLICT"
 
 
 @pytest.mark.asyncio

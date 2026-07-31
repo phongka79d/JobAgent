@@ -28,7 +28,15 @@ from app.db.models.chat import (
     TOOL_EXECUTION_STATUS_RUNNING,
     TOOL_EXECUTION_STATUSES,
 )
-from pydantic import AfterValidator, BeforeValidator, ConfigDict, PlainSerializer
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    model_validator,
+)
 
 # Recursive JSON value: scalar, list, or object. No special "raw document"
 # escape type — compact IDs/counts/cards use ordinary objects only.
@@ -150,6 +158,63 @@ AwareUtcDatetime = Annotated[
     AfterValidator(_require_aware_utc),
     PlainSerializer(_serialize_datetime_utc, return_type=str),
 ]
+
+
+class SafeWarning(BaseModel):
+    model_config = StrictModelConfig
+
+    code: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=200)
+    guidance: str = Field(min_length=1, max_length=500)
+
+
+class ProfileReextractOperationStatus(BaseModel):
+    model_config = StrictModelConfig
+
+    profile_id: UuidStr
+    operation_id: UuidStr
+    state: Literal["running", "review_ready", "interrupted", "failed", "stale"]
+    error_code: str | None = Field(default=None, max_length=80)
+    error_summary: str | None = Field(default=None, max_length=200)
+    review_revision: AwareUtcDatetime | None = None
+    can_review: bool
+    can_retry: bool
+    can_discard: bool
+
+    @model_validator(mode="after")
+    def validate_state_actions(self) -> ProfileReextractOperationStatus:
+        if self.state in {"running", "review_ready"}:
+            if self.error_code is not None or self.error_summary is not None:
+                raise ValueError("actionable operations cannot expose an error")
+        elif self.error_code is None or self.error_summary is None:
+            raise ValueError("terminal operations require a safe error")
+        if self.state == "review_ready" and self.review_revision is None:
+            raise ValueError("review-ready operations require a review revision")
+        if (
+            self.state not in {"review_ready", "stale"}
+            and self.review_revision is not None
+        ):
+            raise ValueError("operation state cannot own a review revision")
+        expected = {
+            "running": (False, False, False),
+            "review_ready": (True, False, True),
+            "interrupted": (False, True, False),
+            "failed": (False, True, False),
+            "stale": (
+                (True, False, True)
+                if self.review_revision is not None
+                else (False, True, False)
+            ),
+        }[self.state]
+        if (self.can_review, self.can_retry, self.can_discard) != expected:
+            raise ValueError("operation actions do not match its durable state")
+        return self
+
+
+class ProfileReextractOperationEnvelope(BaseModel):
+    model_config = StrictModelConfig
+
+    operation: ProfileReextractOperationStatus | None
 
 
 def reject_status_alias(value: str) -> str:

@@ -28,6 +28,7 @@ from app.repositories import jobs as jobs_repo
 from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
+from app.schemas.profile_reextraction import ProfileReextractOperationStatus
 from app.services.evaluation_context import (
     EvaluationContextFacts,
     evaluation_context_hash,
@@ -43,6 +44,7 @@ from app.services.profile_reextraction import (
     ProfileReextractionCoordinator,
 )
 from app.storage.attachments import AttachmentStorage
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,6 +66,84 @@ def _preferences() -> dict[str, Any]:
         "acceptable_work_modes": ["remote"],
         "target_seniority": ["senior"],
     }
+
+
+def test_status_payload_has_no_private_extraction_data() -> None:
+    status = ProfileReextractOperationStatus(
+        profile_id=new_uuid(),
+        operation_id=new_uuid(),
+        state="interrupted",
+        error_code="PROFILE_REEXTRACT_INTERRUPTED",
+        error_summary="The re-extraction was interrupted",
+        review_revision=None,
+        can_review=False,
+        can_retry=True,
+        can_discard=False,
+    )
+    payload = status.model_dump_json()
+    assert status.error_code == "PROFILE_REEXTRACT_INTERRUPTED"
+    assert status.error_summary == "The re-extraction was interrupted"
+    for forbidden in (
+        "storage_path", "source_attachment_id", "chunks", "document_json",
+        "provider", "prompt",
+    ):
+        assert forbidden not in payload
+
+
+def test_status_action_matrix_is_server_owned() -> None:
+    status = ProfileReextractOperationStatus(
+        profile_id=new_uuid(), operation_id=new_uuid(), state="running",
+        error_code=None, error_summary=None, review_revision=None,
+        can_review=False, can_retry=False, can_discard=False,
+    )
+    with pytest.raises(ValidationError):
+        ProfileReextractOperationStatus.model_validate(
+            {**status.model_dump(), "can_retry": True}
+        )
+
+
+def test_status_read_reconciles_review_ready_without_owned_draft_to_stale() -> None:
+    from app.services.profile_reextraction import _operation_status
+
+    operation = type("Operation", (), {
+        "profile_id": new_uuid(), "id": new_uuid(), "state": "stale",
+        "error_code": "PROFILE_REEXTRACT_STALE",
+    })()
+    status = _operation_status(operation, review_revision=None)
+    assert status.state == "stale"
+    assert status.can_retry is True and status.can_review is False
+
+
+def test_status_read_reconciles_review_ready_to_stale() -> None:
+    from app.services.profile_reextraction import _operation_status
+
+    operation = type("Operation", (), {
+        "profile_id": new_uuid(), "id": new_uuid(), "state": "stale",
+        "error_code": "PROFILE_REEXTRACT_STALE",
+    })()
+    status = _operation_status(operation, review_revision=datetime.now(UTC))
+    assert status.can_review is True and status.can_discard is True
+
+
+def test_api_rejects_crossed_missing_stale_and_replayed_operation_identity() -> None:
+    from app.schemas.profile_reextraction import ProfileReextractReview
+
+    snapshot = {
+        "full_name": None, "location": None, "phone": None, "email": None,
+        "github_url": None, "summary": "", "current_title": None, "skill_labels": [],
+    }
+    with pytest.raises(ValidationError):
+        ProfileReextractReview(
+            profile_id=new_uuid(), source="reextract", operation_id=None,
+            operation_state="stale", revision=datetime.now(UTC), current=snapshot,
+            proposed=snapshot, changed_fields=[], preference_changes=[],
+            skills_added=[], skills_removed=[],
+            collection_deltas={
+                "experiences": 0, "education": 0, "languages": 0,
+                "certifications": 0,
+            },
+            extraction_confidence=None, can_approve=False, can_discard=True,
+        )
 
 
 async def _seed_ready_profile(

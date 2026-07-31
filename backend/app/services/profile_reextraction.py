@@ -33,6 +33,7 @@ from app.repositories import workspace_state as workspace_repo
 from app.repositories.profile_reextract_operations import (
     ProfileReextractOperationState,
 )
+from app.schemas.common import ProfileReextractOperationStatus
 from app.schemas.profile import (
     CandidateProfile,
     JobPreferences,
@@ -90,6 +91,7 @@ _PREFERENCE_FIELDS: tuple[ProfilePreferenceField, ...] = (
     "acceptable_work_modes",
     "target_seniority",
 )
+
 _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
     "validating_source": "Validating the retained CV",
     "extracting_document": "Extracting the CV document",
@@ -100,11 +102,13 @@ _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
 
 class ProfileReextractError(Exception):
     def __init__(
-        self, code: str, summary: str, *, operation_id: str | None = None
+        self, code: str, summary: str, *, operation_id: str | None = None,
+        profile_id: str | None = None
     ) -> None:
         self.code = code
         self.summary = summary
         self.operation_id = operation_id
+        self.profile_id = profile_id
         super().__init__(summary)
 
 
@@ -288,12 +292,75 @@ def _progress(
 
 def _safe_failure_summary(code: str) -> str:
     return {
+        "PROFILE_REEXTRACT_INTERRUPTED": "The re-extraction was interrupted",
+        "PROFILE_REEXTRACT_STALE": "The profile changed during re-extraction",
+        "PROFILE_REEXTRACT_FAILED": "CV re-extraction could not be completed",
         "ATTACHMENT_NOT_FOUND": "The retained CV could not be found",
         "FILE_MISSING": "The retained CV file is unavailable",
         "NO_EXTRACTABLE_TEXT": "The retained CV contains no extractable text",
         "PROFILE_INCONSISTENT": "The profile and retained CV no longer match",
         "ATTACHMENT_NOT_PROCESSABLE": "The retained CV cannot be re-extracted",
     }.get(code, "CV re-extraction could not be completed")
+
+
+def _operation_status(
+    operation: Any,
+    *,
+    review_revision: datetime | None,
+) -> ProfileReextractOperationStatus:
+    state = cast(ProfileReextractOperationState, operation.state)
+    error_code = (
+        None
+        if state in {"running", "review_ready"}
+        else str(operation.error_code)
+    )
+    error_summary = None if error_code is None else _safe_failure_summary(error_code)
+    if state == "review_ready":
+        can_review, can_retry, can_discard = True, False, True
+    elif state in {"interrupted", "failed"}:
+        can_review, can_retry, can_discard = False, True, False
+    elif state == "stale" and review_revision is not None:
+        can_review, can_retry, can_discard = True, False, True
+    else:
+        can_review, can_retry, can_discard = False, True, False
+    return ProfileReextractOperationStatus(
+        profile_id=operation.profile_id,
+        operation_id=operation.id,
+        state=state,
+        error_code=error_code,
+        error_summary=error_summary,
+        review_revision=(
+            _aware(review_revision) if review_revision is not None else None
+        ),
+        can_review=can_review,
+        can_retry=can_retry,
+        can_discard=can_discard,
+    )
+
+
+async def project_reextract_operation_status(
+    session: AsyncSession, profile_id: str
+) -> ProfileReextractOperationStatus | None:
+    profile = await profile_repo.get_profile(session, profile_id)
+    if profile is None:
+        raise ProfileReextractError("PROFILE_NOT_FOUND", "Profile not found")
+    operation = await operation_repo.get_latest_operation_for_profile(
+        session, profile_id
+    )
+    if operation is None:
+        return None
+    if operation.state == "review_ready":
+        operation = await operation_repo.reconcile_review_ready_to_stale(
+            session, profile_id=profile_id, operation_id=operation.id
+        )
+        if operation is None:
+            return None
+    draft = await profile_repo.get_draft_for_operation(
+        session, profile_id, operation.id
+    )
+    return _operation_status(
+        operation, review_revision=draft.updated_at if draft is not None else None
+    )
 
 
 class ProfileReextractionCoordinator:
@@ -313,6 +380,12 @@ class ProfileReextractionCoordinator:
         self._normalizer = normalizer
         self._invoker = invoker
         self._graph_driver = graph_driver
+
+    async def get_status(
+        self, profile_id: str
+    ) -> ProfileReextractOperationStatus | None:
+        async with session_scope(self._session_factory) as session:
+            return await project_reextract_operation_status(session, profile_id)
 
     async def _claim(self, profile_id: str) -> _Claim:
         try:
@@ -390,7 +463,7 @@ class ProfileReextractionCoordinator:
                 else exc.code
             )
             raise ProfileReextractError(
-                exc.code, summary, operation_id=operation_id
+                exc.code, summary, operation_id=operation_id, profile_id=profile_id
             ) from exc
 
     async def _load_attachment(self, claim: _Claim) -> Any:
@@ -801,5 +874,6 @@ __all__ = [
     "ProfileReextractError",
     "ProfileReextractionCoordinator",
     "build_review",
+    "project_reextract_operation_status",
     "recover_running_profile_reextract_operations",
 ]

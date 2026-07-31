@@ -124,6 +124,27 @@ async def reconcile_review_ready_to_stale(
     )
     if operation is None or operation.state != "review_ready":
         return operation
+    owned_draft = await profile_repo.get_draft_for_operation(
+        session, profile_id, operation_id
+    )
+    if owned_draft is None:
+        await session.execute(
+            update(ProfileReextractOperation)
+            .where(
+                ProfileReextractOperation.profile_id == profile_id,
+                ProfileReextractOperation.id == operation_id,
+                ProfileReextractOperation.state == "review_ready",
+            )
+            .values(
+                state="stale",
+                error_code="PROFILE_REEXTRACT_STALE",
+                updated_at=utc_now(),
+            )
+        )
+        await session.flush()
+        return await get_operation(
+            session, profile_id=profile_id, operation_id=operation_id
+        )
     profile = await profile_repo.get_profile(session, profile_id)
     workspace = await workspace_repo.get_state(session)
     profile_updated_at = profile.updated_at if profile is not None else None

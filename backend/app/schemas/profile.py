@@ -28,7 +28,13 @@ from typing import Any, Literal
 from app.core.attachments import ATTACHMENT_MIME_TYPE_PDF
 from app.schemas.attachments import AttachmentPublic
 from app.schemas.chat import ConversationSummary
-from app.schemas.common import AwareUtcDatetime, StrictModelConfig, UuidStr
+from app.schemas.common import (
+    AwareUtcDatetime,
+    ProfileReextractOperationStatus,
+    SafeWarning,
+    StrictModelConfig,
+    UuidStr,
+)
 from app.schemas.contact import (
     normalize_email,
     normalize_github_profile_url,
@@ -190,7 +196,14 @@ class ProfilePendingReview(BaseModel):
     profile_id: UuidStr
     revision: AwareUtcDatetime
     source: ProfileReviewSource
+    operation_id: UuidStr | None
     can_review: bool
+
+    @model_validator(mode="after")
+    def validate_owner(self) -> ProfilePendingReview:
+        if (self.source == "reextract") != (self.operation_id is not None):
+            raise ValueError("reextract review identity is inconsistent")
+        return self
 
 
 class ProfileReadResponse(BaseModel):
@@ -213,6 +226,7 @@ class ProfileReadResponse(BaseModel):
     draft_present: bool = False
     pending_attachment: AttachmentPublic | None = None
     pending_review: ProfilePendingReview | None = None
+    reextract_operation: ProfileReextractOperationStatus | None = None
 
 
 class ProfileSkillTag(BaseModel):
@@ -326,14 +340,6 @@ class ReextractRequest(BaseModel):
     model_config = StrictModelConfig
 
 
-class SafeWarning(BaseModel):
-    model_config = StrictModelConfig
-
-    code: str
-    summary: str
-    guidance: str
-
-
 class SelectionResponse(BaseModel):
     model_config = StrictModelConfig
 
@@ -366,3 +372,17 @@ def empty_profile_read_response(
         pending_attachment=pending_attachment,
         pending_review=pending_review,
     )
+
+
+__all__ = [
+    "SafeWarning",
+    "CandidateProfile",
+    "JobPreferences",
+    "ProfilePendingReview",
+    "ProfileReadResponse",
+    "ProfileReviewSource",
+    "empty_profile_read_response",
+    "parse_candidate_profile",
+    "parse_job_preferences",
+    "parse_profile_draft_payload",
+]
