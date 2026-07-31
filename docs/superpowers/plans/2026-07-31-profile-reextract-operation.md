@@ -656,6 +656,7 @@ git commit -m "feat: recover durable profile reextract operations"
 ### Task 6: Add operation-aware review reconciliation, approval, discard, and mutation gates
 
 **Files:**
+- Modify: `backend/app/repositories/profile_reextract_operations.py`
 - Modify: `backend/app/services/profile_reextraction.py`
 - Modify: `backend/app/services/profile_approval.py`
 - Modify: `backend/app/services/profile_drafts.py`
@@ -795,7 +796,7 @@ Expected: PASS; review reconciliation is durable, stale review cannot be approve
 - [ ] **Step 5: Commit review and approval safety.**
 
 ```powershell
-git add backend/app/services/profile_reextraction.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/activity_gate.py backend/app/services/profile_activation.py backend/app/services/profile_deletion.py backend/app/tools/profile.py backend/app/schemas/profile_reextraction.py backend/app/api/profiles.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_agent_runner.py
+git add backend/app/repositories/profile_reextract_operations.py backend/app/services/profile_reextraction.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/activity_gate.py backend/app/services/profile_activation.py backend/app/services/profile_deletion.py backend/app/tools/profile.py backend/app/schemas/profile_reextraction.py backend/app/api/profiles.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_agent_runner.py
 git commit -m "feat: enforce reextract review compare and swap"
 ```
 
@@ -849,6 +850,15 @@ async def test_upload_that_passed_prebyte_gate_loses_to_agent_review() -> None:
     assert await no_finalized_upload_file(storage)
 
 
+async def test_upload_then_reextract_and_reextract_then_upload_are_serialized() -> None:
+    upload_first = await run_barrier_ordering(first="upload")
+    reextract_first = await run_barrier_ordering(first="reextract")
+    for outcome in (upload_first, reextract_first):
+        assert outcome.authoritative_result_count == 1
+        assert outcome.orphan_row_count == 0
+        assert outcome.losing_upload_file_exists is False
+
+
 @asynccontextmanager
 async def busy_immediate_scope(*args: object, **kwargs: object) -> AsyncIterator[None]:
     raise ImmediateTransactionBusy()
@@ -873,7 +883,7 @@ def test_inactive_archived_cv_never_projects_reextract() -> None:
 
 - [ ] **Step 2: Run upload/CV projection tests to verify they fail.**
 
-Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate tests/integration/test_cv_api.py::test_upload_blocked_by_agent_review_returns_nullable_operation_context tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_loses_to_agent_review tests/integration/test_cv_api.py::test_upload_begin_immediate_busy_is_typed_409 tests/integration/test_cv_manager_api.py::test_inactive_archived_cv_never_projects_reextract tests/integration/test_cv_manager_deletion.py -q`
+Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate tests/integration/test_cv_api.py::test_upload_blocked_by_agent_review_returns_nullable_operation_context tests/integration/test_cv_api.py::test_upload_that_passed_prebyte_gate_loses_to_agent_review tests/integration/test_cv_api.py::test_upload_then_reextract_and_reextract_then_upload_are_serialized tests/integration/test_cv_api.py::test_upload_begin_immediate_busy_is_typed_409 tests/integration/test_cv_manager_api.py::test_inactive_archived_cv_never_projects_reextract tests/integration/test_cv_manager_deletion.py -q`
 
 Expected: FAIL because the final upload write uses a normal transaction and archived inactive profiles still receive `reextract`.
 
@@ -1082,6 +1092,7 @@ git commit -m "feat: recover cv manager reextract operations"
 
 **Files:**
 - Modify: `frontend/src/app/App.tsx`
+- Modify: `frontend/src/lib/api/chat.ts`
 - Modify: `frontend/src/features/profile/CvSidebar.tsx`
 - Modify: `frontend/src/features/profile/ProfileOverviewPanel.tsx`
 - Modify: `frontend/src/features/profile/api.ts`
@@ -1136,7 +1147,7 @@ const uploadLocked = workspaceLocked || tailoringLocked || reextractLocked;
 <ChatPage uploadDisabled={uploadLocked} onProfileReextractConflict={(operationId) => openExistingCvManagerOperation(selectedProfile?.id ?? null, operationId)} />
 ```
 
-Lift the sole `useCvManagerState` call out of `CvSidebar` into `App`, pass its `CvManagerController` down to `CvSidebar` and the drawer, and delete the sidebar-owned hook call. Define three separate actions: `startNewCvManagerReextract(profileId)` invokes `cvManager.startReextract(profileId)` only after the user chooses Re-extract; `openExistingCvManagerOperation(profileId, operationId)` opens/refreshes that exact operation without calling start; and `openAgentPendingReview(profileId, reviewRevision)` loads the exact ordinary review with `operation_id=null`. Keep upload locks active only for `running`; interrupted and failed states permit uploads, while review-ready and stale-with-draft behavior follows server truth. `PROFILE_REEXTRACT_IN_PROGRESS` renders **Check re-extraction** and requires the non-null operation detail. `PROFILE_REVIEW_PENDING` renders **Review changes**: `review_source="reextract"` opens its operation, while `review_source="agent_update"` opens the exact profile/revision ordinary review. No 409 action may call `startNewCvManagerReextract` or start a second extraction. In this task, `profile/api.ts` and `profile/types.ts` strictly parse the Task 7 discriminated union, including source/nullability/revision invariants, before rendering an action. Preserve existing generic upload error parsing and do not infer operation identity from local profile lists.
+Lift the sole `useCvManagerState` call out of `CvSidebar` into `App`, pass its `CvManagerController` down to `CvSidebar` and the drawer, and delete the sidebar-owned hook call. Define three separate actions: `startNewCvManagerReextract(profileId)` invokes `cvManager.startReextract(profileId)` only after the user chooses Re-extract; `openExistingCvManagerOperation(profileId, operationId)` opens/refreshes that exact operation without calling start; and `openAgentPendingReview(profileId, reviewRevision)` loads the exact ordinary review with `operation_id=null`. Keep upload locks active only for `running`; interrupted and failed states permit uploads, while review-ready and stale-with-draft behavior follows server truth. `PROFILE_REEXTRACT_IN_PROGRESS` renders **Check re-extraction** and requires the non-null operation detail. `PROFILE_REVIEW_PENDING` renders **Review changes**: `review_source="reextract"` opens its operation, while `review_source="agent_update"` opens the exact profile/revision ordinary review. No 409 action may call `startNewCvManagerReextract` or start a second extraction. Extend `ChatApiError` and `parseErrorBody` in `frontend/src/lib/api/chat.ts` to preserve the safe structured detail consumed by `profile/api.ts`; then make `profile/types.ts` strictly validate the `PROFILE_REEXTRACT_IN_PROGRESS` and `PROFILE_REVIEW_PENDING` unions, including source/nullability/revision invariants. Preserve existing `code`/`summary` behavior for unrelated callers and do not infer operation identity from local profile lists.
 
 - [ ] **Step 4: Run focused App and upload-control tests to verify they pass.**
 
@@ -1147,7 +1158,7 @@ Expected: PASS; both controls lock together, direct 409 actions open the correla
 - [ ] **Step 5: Commit shared upload behavior.**
 
 ```powershell
-git add frontend/src/app/App.tsx frontend/src/features/profile/CvSidebar.tsx frontend/src/features/profile/ProfileOverviewPanel.tsx frontend/src/features/profile/api.ts frontend/src/features/profile/types.ts frontend/src/features/chat/ChatPage.tsx frontend/src/test/cv-sidebar.test.tsx frontend/src/test/chat-page.test.tsx frontend/src/app/App.test.tsx
+git add frontend/src/app/App.tsx frontend/src/lib/api/chat.ts frontend/src/features/profile/CvSidebar.tsx frontend/src/features/profile/ProfileOverviewPanel.tsx frontend/src/features/profile/api.ts frontend/src/features/profile/types.ts frontend/src/features/chat/ChatPage.tsx frontend/src/test/cv-sidebar.test.tsx frontend/src/test/chat-page.test.tsx frontend/src/app/App.test.tsx
 git commit -m "fix: lock cv uploads during reextract"
 ```
 
