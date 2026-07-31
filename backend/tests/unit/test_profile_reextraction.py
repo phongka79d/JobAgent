@@ -291,3 +291,77 @@ async def test_claim_maps_immediate_busy_to_retryable_profile_error(
         await coordinator._claim(PROFILE_ID)
     assert caught.value.code == "PROFILE_LIFECYCLE_BUSY"
     assert caught.value.operation_id is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_keeps_original_error_when_interrupt_finalize_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class TestCoordinator(ProfileReextractionCoordinator):
+        async def _claim(self, profile_id: str) -> Any:
+            return SimpleNamespace(
+                operation_id=OPERATION_ID,
+                profile_id=profile_id,
+                attachment_id="attachment",
+                storage_path="attachment.pdf",
+            )
+
+        async def _transition_interrupted(self, _claim: Any) -> None:
+            raise RuntimeError("interrupted finalize failed")
+
+    coordinator = TestCoordinator(
+        session_factory=object(),  # type: ignore[arg-type]
+        storage=object(),  # type: ignore[arg-type]
+        normalizer=object(),  # type: ignore[arg-type]
+        invoker=object(),
+    )
+    stream = coordinator.stream(PROFILE_ID)
+    await anext(stream)
+    with pytest.raises(asyncio.CancelledError):
+        await stream.athrow(asyncio.CancelledError())
+    assert "profile re-extract interruption finalization failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_failed_stream_emits_event_when_failed_finalize_fails(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Storage:
+        def exists(self, _path: str) -> bool:
+            return True
+
+    class TestCoordinator(ProfileReextractionCoordinator):
+        async def _claim(self, profile_id: str) -> Any:
+            return SimpleNamespace(
+                operation_id=OPERATION_ID,
+                profile_id=profile_id,
+                attachment_id="attachment",
+                storage_path="attachment.pdf",
+            )
+
+        async def _load_attachment(self, _claim: Any) -> Any:
+            return SimpleNamespace(storage_path="attachment.pdf", id="attachment")
+
+        async def _transition_failed(self, _claim: Any, _code: str) -> None:
+            raise RuntimeError("failed finalize failed")
+
+        async def _draft_available(self, _profile_id: str) -> bool:
+            return False
+
+    async def failed_stage(**_kwargs: Any) -> Any:
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr(
+        "app.services.profile_reextraction.stage_cv_document", failed_stage
+    )
+    coordinator = TestCoordinator(
+        session_factory=object(),  # type: ignore[arg-type]
+        storage=Storage(),  # type: ignore[arg-type]
+        normalizer=object(),  # type: ignore[arg-type]
+        invoker=object(),
+    )
+    events = [event async for event in coordinator.stream(PROFILE_ID)]
+    assert events[-1].event == "reextract_failed"
+    assert events[-1].payload.code == "PROFILE_REEXTRACT_FAILED"
+    assert "profile re-extract failure finalization failed" in caplog.text

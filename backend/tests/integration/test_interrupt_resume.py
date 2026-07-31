@@ -299,7 +299,9 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
                 session_factory=factory,
                 side_effect_counter=counter,
             )
-            model2 = FakeChatModel(responses=[_ai_text("Approved and done.")])
+            model2 = FakeChatModel(
+                responses=[_ai_text("Approved and done.")]
+            )
             bundle2 = build_agent_graph(
                 model=model2,
                 registry=ToolRegistry([tool2]),
@@ -323,7 +325,9 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
             assert counter["n"] == 1
 
             # 03C: resume terminalizes the same execution id (no second pending).
-            resume_statuses = [e for e in resume_events if e.event == "tool_status"]
+            resume_statuses = [
+                e for e in resume_events if e.event == "tool_status"
+            ]
             assert [s.payload.status for s in resume_statuses] == ["completed"]
             assert resume_statuses[0].payload.tool_execution_id == durable_exec_id
             assert resume_statuses[0].payload.duration_ms is not None
@@ -577,7 +581,9 @@ def test_terminal_resume_is_noop_no_graph_or_side_effect(db_path: Path) -> None:
             side_effects_after_complete = counter["n"]
 
             # Model that would fail loudly if the graph were re-invoked.
-            boom_model = FakeChatModel(responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)])
+            boom_model = FakeChatModel(
+                responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)]
+            )
             boom_bundle = build_agent_graph(
                 model=boom_model,
                 registry=ToolRegistry(
@@ -722,7 +728,9 @@ def test_rapid_repeated_approval_accepts_once_exact_counts(db_path: Path) -> Non
                 assert stored.data.get("committed") is True
 
             # --- Sequential rapid re-entry after accept: terminal no-op. ---
-            boom_model = FakeChatModel(responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)])
+            boom_model = FakeChatModel(
+                responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)]
+            )
             boom_bundle = build_agent_graph(
                 model=boom_model,
                 registry=ToolRegistry(
@@ -877,9 +885,9 @@ def test_production_registry_eight_tools_and_synthetic_is_test_only() -> None:
         assert "synthetic_interrupt" not in text
         assert "build_synthetic_interrupt_tool" not in text
 
-    chat_turns_src = (BACKEND_ROOT / "app" / "services" / "chat_turns.py").read_text(
-        encoding="utf-8"
-    )
+    chat_turns_src = (
+        BACKEND_ROOT / "app" / "services" / "chat_turns.py"
+    ).read_text(encoding="utf-8")
     assert "APPROVAL_ACTION_REQUIRED" in chat_turns_src
     assert "pending_approval" in chat_turns_src
     # Generic interruption — no domain profile/CV action names hard-coded.

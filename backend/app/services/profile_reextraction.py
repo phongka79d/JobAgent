@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -67,6 +68,8 @@ from app.services.profile_drafts import (
 )
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
+
+logger = logging.getLogger(__name__)
 
 _SCALAR_FIELDS: tuple[ProfileReviewField, ...] = (
     "full_name",
@@ -409,6 +412,23 @@ class ProfileReextractionCoordinator:
                 error_code="PROFILE_REEXTRACT_INTERRUPTED",
             )
 
+    async def _finalize_interrupted(self, claim: _Claim) -> None:
+        with anyio.CancelScope(shield=True):
+            try:
+                await self._transition_interrupted(claim)
+            except BaseException:
+                logger.exception(
+                    "profile re-extract interruption finalization failed"
+                )
+
+    async def _finalize_failed(self, claim: _Claim, code: str) -> None:
+        try:
+            await self._transition_failed(claim, code)
+        except BaseException as exc:
+            logger.exception("profile re-extract failure finalization failed")
+            if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+                raise
+
     async def _draft_available(self, profile_id: str) -> bool:
         async with self._session_factory() as session:
             draft = await profile_repo.get_draft_for_profile(session, profile_id)
@@ -488,11 +508,10 @@ class ProfileReextractionCoordinator:
                 ),
             )
         except (asyncio.CancelledError, GeneratorExit):
-            with anyio.CancelScope(shield=True):
-                await self._transition_interrupted(claim)
+            await self._finalize_interrupted(claim)
             raise
         except ProfileReextractError as exc:
-            await self._transition_failed(claim, exc.code)
+            await self._finalize_failed(claim, exc.code)
             yield _event(
                 operation_id=operation_id,
                 profile_id=profile_id,
@@ -504,7 +523,7 @@ class ProfileReextractionCoordinator:
                 ),
             )
         except Exception:
-            await self._transition_failed(claim, "PROFILE_REEXTRACT_FAILED")
+            await self._finalize_failed(claim, "PROFILE_REEXTRACT_FAILED")
             yield _event(
                 operation_id=operation_id,
                 profile_id=profile_id,
