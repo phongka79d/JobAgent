@@ -1103,7 +1103,7 @@ git commit -m "feat: expose profile reextract operation api"
 - Modify: `frontend/src/test/cv-manager-api.test.ts`
 - Modify: `frontend/src/test/cv-manager-reextract.test.tsx`
 
-- [ ] **Step 1: Write failing strict-parser, close, and recovery tests.**
+- [x] **Step 1: Write failing strict-parser, close, and recovery tests.**
 
 ```tsx
 it('enforces review source and operation ownership', () => {
@@ -1121,13 +1121,13 @@ it('closing the drawer does not abort running re-extraction', async () => {
 });
 ```
 
-- [ ] **Step 2: Run frontend parser/state tests to verify they fail.**
+- [x] **Step 2: Run frontend parser/state tests to verify they fail.**
 
 Run: `cd frontend; npm test -- --run src/test/cv-manager-api.test.ts src/test/cv-manager-reextract.test.tsx`
 
 Expected: FAIL because the frontend does not parse operation status, stale correlation, or preserve the stream after close.
 
-- [ ] **Step 3: Implement strict operation parsers and status-first recovery state.**
+- [x] **Step 3: Implement strict operation parsers and status-first recovery state.**
 
 ```ts
 export type ProfileReextractOperation = {
@@ -1154,13 +1154,13 @@ export async function getProfileReextractOperation(profileId: string, signal?: A
 
 Use the existing `apiUrl`, `parsedJson`, `ChatApiError`, and exact-key parsers. `parseProfileReextractOperationEnvelope` must require exactly the `operation` key and parse it as nullable; it must reject missing, extra, or malformed fields. The operation parser requires `error_code`, safe derived `error_summary`, and `review_revision`, rejecting the old generic `revision` key. Expand review, approve, and discard calls to carry `operation_id: string | null`. The review parser enforces `source="agent_update"` with null operation/state and `source="reextract"` with a non-null UUID/state; operation-linked state/action combinations remain strict. On CV Manager open, profile scope change, stream closure, and explicit refresh, fetch authoritative operation status before deciding whether to fetch a re-extraction review. `operation: null` is ordinary no-operation state, not an error and does not hide an independently projected Agent review. Change `close` so it only hides the drawer, restores focus through `CvManagerDrawer`, and leaves the re-extraction controller and stream intact. Abort only on unmount or actual active-profile scope replacement. Render `running`, `review_ready`, `interrupted`, `failed`, stale re-extraction review, and ordinary Agent review actions from parsed server flags/source; never treat stream completion as success.
 
-- [ ] **Step 4: Run focused CV Manager tests to verify they pass.**
+- [x] **Step 4: Run focused CV Manager tests to verify they pass.**
 
 Run: `cd frontend; npm test -- --run src/test/cv-manager-api.test.ts src/test/cv-manager-reextract.test.tsx src/test/cv-manager.test.tsx`
 
 Expected: PASS; malformed and contradictory payloads are rejected, close/reopen and reload recover server truth, and stale review offers discard without save.
 
-- [ ] **Step 5: Commit frontend operation recovery.**
+- [x] **Step 5: Commit frontend operation recovery.**
 
 ```powershell
 git add frontend/src/features/cv-manager/types.ts frontend/src/features/cv-manager/api.ts frontend/src/features/cv-manager/state.ts frontend/src/features/cv-manager/ProfileReextractReview.tsx frontend/src/features/cv-manager/CvManagerDrawer.tsx frontend/src/test/cv-manager-api.test.ts frontend/src/test/cv-manager-reextract.test.tsx
