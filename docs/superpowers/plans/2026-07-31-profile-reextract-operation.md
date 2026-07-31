@@ -33,12 +33,13 @@
 **Files:**
 - Create: `backend/migrations/versions/0008_profile_reextract_ownership.py`
 - Modify: `backend/app/db/models/profiles.py`
+- Modify: `backend/app/db/seed.py`
 - Modify: `backend/tests/support/db_migration.py`
 - Modify: `backend/tests/integration/test_migrations.py`
 - Modify: `backend/tests/integration/test_database_contract.py`
 - Modify: `backend/tests/integration/test_compose_runtime.py`
 
-- [ ] **Step 1: Write the failing migration and schema tests.**
+- [x] **Step 1: Write the failing migration and schema tests.**
 
 ```python
 def test_0008_rejects_ambiguous_drafts_before_schema_mutation(legacy_db: Path) -> None:
@@ -64,13 +65,13 @@ def test_0008_is_the_migration_head() -> None:
     assert revision_head() == "0008_profile_reextract_ownership"
 ```
 
-- [ ] **Step 2: Run the migration tests to verify they fail.**
+- [x] **Step 2: Run the migration tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_migrations.py::test_0008_rejects_ambiguous_drafts_before_schema_mutation tests/integration/test_database_contract.py::test_operation_schema_has_exact_constraints -q`
 
 Expected: FAIL because revision `0008_profile_reextract_ownership`, `profile_reextract_operations`, and `reextract_operation_id` do not exist.
 
-- [ ] **Step 3: Implement the guarded migration and ORM model.**
+- [x] **Step 3: Implement the guarded migration and ORM model.**
 
 ```python
 class ProfileReextractOperation(Base):
@@ -89,18 +90,18 @@ class ProfileReextractOperation(Base):
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
 ```
 
-In revision `0008_profile_reextract_ownership`, first query for null or orphan `target_profile_id`, duplicate `target_profile_id`, orphan `source_attachment_id`, and `PRAGMA foreign_key_check`. Raise `alembic.util.CommandError` before any DDL when any query returns data. Rebuild `profile_drafts` preserving every existing scalar and JSON value, make `target_profile_id` non-null and unique, add nullable unique `reextract_operation_id` with `ON DELETE RESTRICT`, and add the check `reextract_operation_id IS NULL OR source_attachment_id IS NOT NULL`. Create `profile_reextract_operations` with named state/error coupling checks, the exact actionable partial unique index shown in Step 1, and index `ix_profile_reextract_operations_recovery(profile_id, updated_at, id)`. Set `tests.support.db_migration.MIGRATION_HEAD` to `0008_profile_reextract_ownership`, make `test_migrations.py` assert that revision, and update `test_compose_runtime.py` to read `0008_profile_reextract_ownership.py` and assert its revision string. Downgrade must raise `CommandError` before DDL when an operation exists or any draft references one; otherwise restore the prior draft shape and drop only the new operation artifacts.
+In revision `0008_profile_reextract_ownership`, first query for null or orphan `target_profile_id`, duplicate `target_profile_id`, orphan `source_attachment_id`, and `PRAGMA foreign_key_check`. Raise `alembic.util.CommandError` before any DDL when any query returns data. Rebuild `profile_drafts` preserving every existing scalar and JSON value, make `target_profile_id` non-null and unique, add nullable unique `reextract_operation_id` with `ON DELETE RESTRICT`, and add the check `reextract_operation_id IS NULL OR source_attachment_id IS NOT NULL`. Create `profile_reextract_operations` with named state/error coupling checks, the exact actionable partial unique index shown in Step 1, and index `ix_profile_reextract_operations_recovery(profile_id, updated_at, id)`. Add `profile_reextract_operations` to `app.db.seed.APPLICATION_TABLE_NAMES`, the single owner consumed by schema-parity and fresh-head checks. Set `tests.support.db_migration.MIGRATION_HEAD` to `0008_profile_reextract_ownership`, make `test_migrations.py` assert that revision, and update `test_compose_runtime.py` to read `0008_profile_reextract_ownership.py` and assert its revision string. Downgrade must raise `CommandError` before DDL when an operation exists or any draft references one; otherwise restore the prior draft shape and drop only the new operation artifacts.
 
-- [ ] **Step 4: Run the focused migration and schema tests to verify they pass.**
+- [x] **Step 4: Run the focused migration and schema tests to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_migrations.py::test_0008_rejects_ambiguous_drafts_before_schema_mutation tests/integration/test_migrations.py::test_0008_preserves_valid_draft_schema_rows_and_json tests/integration/test_migrations.py::test_0008_downgrade_refuses_populated_operation_without_mutation tests/integration/test_migrations.py::test_0008_empty_operation_downgrade_and_reupgrade_preserves_ordinary_draft tests/integration/test_migrations.py::test_0008_is_the_migration_head tests/integration/test_database_contract.py::test_operation_schema_has_exact_constraints tests/integration/test_compose_runtime.py::test_compose_source_has_exact_services_and_migrates_before_uvicorn -q`
 
 Expected: PASS; metadata snapshots, row/scalar/canonical-JSON values, `PRAGMA foreign_key_check`, downgrade refusal, and empty reverse path are all asserted.
 
-- [ ] **Step 5: Commit the schema boundary.**
+- [x] **Step 5: Commit the schema boundary.**
 
 ```powershell
-git add backend/migrations/versions/0008_profile_reextract_ownership.py backend/app/db/models/profiles.py backend/tests/support/db_migration.py backend/tests/integration/test_migrations.py backend/tests/integration/test_database_contract.py backend/tests/integration/test_compose_runtime.py
+git add backend/migrations/versions/0008_profile_reextract_ownership.py backend/app/db/models/profiles.py backend/app/db/seed.py backend/tests/support/db_migration.py backend/tests/integration/test_migrations.py backend/tests/integration/test_database_contract.py backend/tests/integration/test_compose_runtime.py
 git commit -m "feat: add durable profile reextract schema"
 ```
 
@@ -120,6 +121,7 @@ git commit -m "feat: add durable profile reextract schema"
 - Modify: `backend/app/services/profile_reextraction.py`
 - Modify: `backend/app/tools/profile.py`
 - Modify: `backend/tests/unit/test_agent_context.py`
+- Modify: `backend/tests/unit/test_attachment_resolve.py`
 - Modify: `backend/tests/unit/test_profile_extraction.py`
 - Modify: `backend/tests/e2e/test_demo_flow.py`
 - Modify: `backend/tests/integration/test_agent_runner.py`
@@ -180,11 +182,12 @@ async def upsert_draft_for_profile(
         existing = ProfileDraft(id=new_uuid(), target_profile_id=profile_id, draft_json=draft_json, source_attachment_id=source_attachment_id, reextract_operation_id=reextract_operation_id, created_at=utc_now(), updated_at=utc_now())
         session.add(existing)
     else:
-        if existing.reextract_operation_id not in {None, reextract_operation_id}:
+        if existing.reextract_operation_id != reextract_operation_id:
             raise ProfileRepositoryError("draft operation owner cannot change")
+        if reextract_operation_id is not None and existing.source_attachment_id != source_attachment_id:
+            raise ProfileRepositoryError("operation draft source attachment cannot change")
         existing.draft_json = draft_json
         existing.source_attachment_id = source_attachment_id
-        existing.reextract_operation_id = reextract_operation_id or existing.reextract_operation_id
         existing.updated_at = utc_now()
     await session.flush()
     return existing
@@ -201,11 +204,11 @@ async def delete_draft_for_profile(
     return True
 ```
 
-Delete `get_current_draft`, `upsert_current_draft`, and `delete_current_draft` only after migrating every listed production and test caller. Every replacement query must predicate `ProfileDraft.target_profile_id == profile_id`; operation reads must additionally predicate `ProfileDraft.reextract_operation_id == operation_id`. Preserve an existing operation ID only when the same profile updates its own review-ready draft; reject an attempted profile or operation move with `ProfileRepositoryError`. Resolve Agent `draft_id='current'` by the current conversation profile ID, never by global ordering. Do not retain a global, newest-row, compatibility, or alias helper. The authoritative caller inventory is the `rg -l` result captured in this task; rerun it before the commit and add any newly found caller to this same commit.
+Delete `get_current_draft`, `upsert_current_draft`, and `delete_current_draft` only after migrating every listed production and test caller. Every replacement query must predicate `ProfileDraft.target_profile_id == profile_id`; operation reads must additionally predicate `ProfileDraft.reextract_operation_id == operation_id`. An operation ID may be set only when atomic publication inserts a new row after proving no draft exists. An existing ordinary draft cannot gain an operation ID; an existing operation-linked draft cannot clear, replace, or move that ID and cannot change its source attachment. Agent correction code must reload and pass the same operation ID when updating its review-ready draft. Reject every ownership/source move with `ProfileRepositoryError`. Resolve Agent `draft_id='current'` by the current conversation profile ID, never by global ordering or source attachment. Do not retain a global, newest-row, compatibility, or alias helper. The authoritative caller inventory is the `rg -l` result captured in this task; rerun it before the commit and add any newly found caller to this same commit.
 
 - [ ] **Step 4: Run focused scoped-caller regressions to verify they pass.**
 
-Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_drafts_are_isolated_by_explicit_profile_owner tests/unit/test_agent_context.py::test_agent_current_draft_context_uses_requested_profile_only tests/unit/test_profile_extraction.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py tests/integration/test_conversations_api.py tests/integration/test_cv_api.py tests/integration/test_cv_manager_api.py tests/integration/test_cv_manager_deletion.py tests/integration/test_job_tools.py tests/integration/test_match_jobs.py tests/integration/test_profile_approval.py tests/integration/test_profile_deletion.py tests/integration/test_profiles_api.py tests/e2e/test_demo_flow.py -q`
+Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_drafts_are_isolated_by_explicit_profile_owner tests/unit/test_agent_context.py::test_agent_current_draft_context_uses_requested_profile_only tests/unit/test_attachment_resolve.py tests/unit/test_profile_extraction.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py tests/integration/test_conversations_api.py tests/integration/test_cv_api.py tests/integration/test_cv_manager_api.py tests/integration/test_cv_manager_deletion.py tests/integration/test_job_tools.py tests/integration/test_match_jobs.py tests/integration/test_profile_approval.py tests/integration/test_profile_deletion.py tests/integration/test_profiles_api.py tests/e2e/test_demo_flow.py -q`
 
 Run: `rg -n -S "get_current_draft|upsert_current_draft|delete_current_draft" backend/app backend/tests --glob '*.py'; if ($LASTEXITCODE -ne 1) { exit 1 }`
 
@@ -214,7 +217,7 @@ Expected: PASS; Profile A cannot read, mutate, approve, or discard Profile B's d
 - [ ] **Step 5: Commit the repository boundary.**
 
 ```powershell
-git add backend/app/repositories/profiles.py backend/app/agent/context.py backend/app/api/profile.py backend/app/services/attachment_resolve.py backend/app/services/activity_gate.py backend/app/services/cv_manager.py backend/app/services/cv_upload.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/profile_projection.py backend/app/services/profile_reextraction.py backend/app/tools/profile.py backend/tests/unit/test_agent_context.py backend/tests/unit/test_profile_extraction.py backend/tests/e2e/test_demo_flow.py backend/tests/integration/test_agent_runner.py backend/tests/integration/test_chat_api.py backend/tests/integration/test_conversations_api.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py backend/tests/integration/test_job_tools.py backend/tests/integration/test_match_jobs.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py
+git add backend/app/repositories/profiles.py backend/app/agent/context.py backend/app/api/profile.py backend/app/services/attachment_resolve.py backend/app/services/activity_gate.py backend/app/services/cv_manager.py backend/app/services/cv_upload.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/profile_projection.py backend/app/services/profile_reextraction.py backend/app/tools/profile.py backend/tests/unit/test_agent_context.py backend/tests/unit/test_attachment_resolve.py backend/tests/unit/test_profile_extraction.py backend/tests/e2e/test_demo_flow.py backend/tests/integration/test_agent_runner.py backend/tests/integration/test_chat_api.py backend/tests/integration/test_conversations_api.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py backend/tests/integration/test_job_tools.py backend/tests/integration/test_match_jobs.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py
 git commit -m "refactor: scope profile drafts by owner"
 ```
 
