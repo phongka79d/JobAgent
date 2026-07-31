@@ -752,7 +752,10 @@ def test_invalid_profile_update_stops_before_matching(
             async with factory() as session:
                 active = await profile_repo.get_active_profile(session)
                 assert active is not None
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, active.id)
+                    is None
+                )
                 rows = await tool_repo.list_for_run_ids(session, [RUN_A])
                 assert len(rows) == 1
                 assert rows[0].tool_name == PROPOSE_PROFILE_UPDATE_NAME
@@ -900,8 +903,9 @@ def test_invalid_profile_update_cannot_open_stale_profile_approval(
             async with factory() as session:
                 profile = await profile_repo.get_profile(session, profile_id)
                 assert profile is not None
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=profile_id,
                     draft_json={
                         "candidate_profile": profile.profile_json,
                         "job_preferences": {
@@ -912,7 +916,6 @@ def test_invalid_profile_update_cannot_open_stale_profile_approval(
                         },
                     },
                     source_attachment_id=None,
-                    target_profile_id=profile_id,
                 )
                 conversation = await conversations_repo.create_for_profile(
                     session, profile_id=profile_id
@@ -921,7 +924,7 @@ def test_invalid_profile_update_cannot_open_stale_profile_approval(
                 conversation_id = conversation.id
 
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
                 profile = await profile_repo.get_profile(session, profile_id)
                 assert draft is not None
                 assert profile is not None
@@ -996,7 +999,7 @@ def test_invalid_profile_update_cannot_open_stale_profile_approval(
             assert statuses[-1].payload.error_code == ERROR_INVALID_PROFILE_UPDATE
 
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
                 profile = await profile_repo.get_profile(session, profile_id)
                 assert draft is not None
                 assert profile is not None

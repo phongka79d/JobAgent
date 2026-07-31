@@ -549,9 +549,9 @@ def test_reprocess_missing_file_no_mutation(
             att = await att_repo.get_by_id(session, att_id)
             assert att is not None
             assert att.state == ATTACHMENT_STATE_ACTIVE
-            assert await prof_repo.get_current_draft(session) is None
             profile = await prof_repo.get_active_profile(session)
             assert profile is not None
+            assert await prof_repo.get_draft_for_profile(session, profile.id) is None
             assert profile.active_attachment_id == att_id
 
     run_async(_assert())
@@ -617,7 +617,7 @@ def test_reprocess_active_sse_approval_and_ownership(
         from sqlalchemy import func, select
 
         async with factory() as session:
-            draft = await prof_repo.get_current_draft(session)
+            draft = await prof_repo.get_draft_for_profile(session, profile_id)
             assert draft is not None
             assert draft.source_attachment_id == att_id
             assert draft.target_profile_id == profile_id
@@ -774,7 +774,9 @@ def test_reextract_rechecks_active_profile_before_creating_run_or_provider_work(
                 )
                 == 0
             )
-            assert await prof_repo.get_current_draft(session) is None
+            assert await prof_repo.get_draft_for_profile(
+                session, target_profile_id
+            ) is None
 
     run_async(_exercise())
 
@@ -910,7 +912,7 @@ def test_reprocess_same_active_save_refreshes_document(
             profile = await prof_repo.get_active_profile(session)
             assert profile is not None
             assert profile.active_attachment_id == att_id
-            assert await prof_repo.get_current_draft(session) is None
+            assert await prof_repo.get_draft_for_profile(session, profile.id) is None
             doc = await cv_doc_repo.get_document(session, att_id)
             assert doc is not None
             assert doc.source_hash

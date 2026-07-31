@@ -191,10 +191,10 @@ async def project_profile_list_item(
             )
         setup_status: ProfileSetupStatus | None = None
         if row.state == PROFILE_STATE_PENDING:
-            draft = await profiles_repo.get_current_draft(session)
+            draft = await profiles_repo.get_draft_for_profile(session, row.id)
             if attachment.state == ATTACHMENT_STATE_FAILED:
                 setup_status = PROFILE_SETUP_STATUS_EXTRACTION_FAILED  # type: ignore[assignment]
-            elif draft is not None and draft.target_profile_id == row.id:
+            elif draft is not None:
                 setup_status = PROFILE_SETUP_STATUS_AWAITING_APPROVAL  # type: ignore[assignment]
             else:
                 setup_status = PROFILE_SETUP_STATUS_AWAITING_EXTRACTION  # type: ignore[assignment]

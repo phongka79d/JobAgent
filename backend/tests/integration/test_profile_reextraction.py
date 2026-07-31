@@ -8,6 +8,11 @@ from unittest.mock import Mock
 import pytest
 from app.core.ids import new_uuid
 from app.db.models.chat import AgentRun, ChatMessage, Conversation, ToolExecution
+from app.db.models.profiles import (
+    Profile,
+    ProfileDraft,
+    ProfileReextractOperation,
+)
 from app.db.session import build_async_engine
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
@@ -28,6 +33,7 @@ from app.services.profile_reextraction import (
 )
 from app.storage.attachments import AttachmentStorage
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.test_profile_approval import _seed_cv_document_draft
 from tests.support.db_migration import run_async, session_factory
@@ -46,6 +52,389 @@ def _preferences() -> dict[str, Any]:
         "acceptable_work_modes": ["remote"],
         "target_seniority": ["senior"],
     }
+
+
+async def _seed_ready_profile(
+    session: AsyncSession,
+    *,
+    attachment_id: str,
+    file_hash: str,
+) -> Profile:
+    await att_repo.create_staged(
+        session,
+        file_hash=file_hash,
+        original_name=f"{file_hash}.pdf",
+        size_bytes=10,
+        storage_path=f"{attachment_id}.pdf",
+        page_count=1,
+        attachment_id=attachment_id,
+    )
+    return await profile_repo.create_profile(
+        session,
+        attachment_id=attachment_id,
+        display_name=file_hash,
+        profile_json=_valid_profile().model_dump(mode="json"),
+        location=None,
+        extraction_version="test-v1",
+        source_hash=file_hash,
+    )
+
+
+def test_drafts_are_isolated_by_explicit_profile_owner(
+    migrated_sqlite: Path,
+) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_a = new_uuid()
+                attachment_b = new_uuid()
+                profile_a = await _seed_ready_profile(
+                    session, attachment_id=attachment_a, file_hash="draft-owner-a"
+                )
+                profile_b = await _seed_ready_profile(
+                    session, attachment_id=attachment_b, file_hash="draft-owner-b"
+                )
+                draft_a = {"owner": "A", "revision": 1}
+                draft_b = {"owner": "B", "revision": 1}
+
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_a.id,
+                    draft_json=draft_a,
+                    source_attachment_id=attachment_a,
+                )
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_b.id,
+                    draft_json=draft_b,
+                    source_attachment_id=attachment_b,
+                )
+                stored_a = await profile_repo.get_draft_for_profile(
+                    session, profile_a.id
+                )
+                stored_b = await profile_repo.get_draft_for_profile(
+                    session, profile_b.id
+                )
+                assert stored_a is not None
+                assert stored_a.draft_json == draft_a
+                assert stored_b is not None
+                assert stored_b.draft_json == draft_b
+
+                updated_a = {"owner": "A", "revision": 2}
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_a.id,
+                    draft_json=updated_a,
+                    source_attachment_id=attachment_a,
+                )
+                stored_b = await profile_repo.get_draft_for_profile(
+                    session, profile_b.id
+                )
+                assert stored_b is not None
+                assert stored_b.draft_json == draft_b
+                assert await profile_repo.delete_draft_for_profile(
+                    session, profile_id=profile_a.id
+                ) is True
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_a.id)
+                    is None
+                )
+                stored_b = await profile_repo.get_draft_for_profile(
+                    session, profile_b.id
+                )
+                assert stored_b is not None
+                assert stored_b.draft_json == draft_b
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_delete_draft_for_profile_normalizes_revision_cas_to_utc(
+    migrated_sqlite: Path,
+) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            attachment_id = new_uuid()
+            async with factory() as session:
+                profile = await _seed_ready_profile(
+                    session,
+                    attachment_id=attachment_id,
+                    file_hash="draft-revision-cas",
+                )
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile.id,
+                    draft_json={"owner": "revision"},
+                    source_attachment_id=attachment_id,
+                )
+                await session.commit()
+                profile_id = profile.id
+
+            async with factory() as session:
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
+                assert draft is not None
+                revision = draft.updated_at.replace(tzinfo=UTC)
+                assert await profile_repo.delete_draft_for_profile(
+                    session,
+                    profile_id=profile_id,
+                    expected_revision=revision.replace(year=revision.year - 1),
+                ) is False
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is not None
+                )
+                assert await profile_repo.delete_draft_for_profile(
+                    session,
+                    profile_id=profile_id,
+                    expected_revision=revision,
+                ) is True
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_operation_draft_lookup_requires_profile_and_operation_owner(
+    migrated_sqlite: Path,
+) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_a = new_uuid()
+                attachment_b = new_uuid()
+                profile_a = await _seed_ready_profile(
+                    session, attachment_id=attachment_a, file_hash="operation-owner-a"
+                )
+                profile_b = await _seed_ready_profile(
+                    session, attachment_id=attachment_b, file_hash="operation-owner-b"
+                )
+                now = datetime.now(UTC)
+                operation = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile_a.id,
+                    source_attachment_id=attachment_a,
+                    base_profile_updated_at=profile_a.updated_at,
+                    base_workspace_updated_at=now,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                other_operation = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile_b.id,
+                    source_attachment_id=attachment_b,
+                    base_profile_updated_at=profile_b.updated_at,
+                    base_workspace_updated_at=now,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add_all([operation, other_operation])
+                await session.flush()
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_a.id,
+                    draft_json={"owner": "A"},
+                    source_attachment_id=attachment_a,
+                    reextract_operation_id=operation.id,
+                )
+
+                assert await profile_repo.get_draft_for_operation(
+                    session, profile_a.id, operation.id
+                ) is not None
+                assert await profile_repo.get_draft_for_operation(
+                    session, profile_b.id, operation.id
+                ) is None
+                assert await profile_repo.get_draft_for_operation(
+                    session, profile_a.id, other_operation.id
+                ) is None
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_operation_draft_rejects_ownership_mutations_without_mutating_rows(
+    migrated_sqlite: Path,
+) -> None:
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_a = new_uuid()
+                attachment_b = new_uuid()
+                attachment_c = new_uuid()
+                profile_a = await _seed_ready_profile(
+                    session,
+                    attachment_id=attachment_a,
+                    file_hash="operation-mutation-a",
+                )
+                profile_b = await _seed_ready_profile(
+                    session,
+                    attachment_id=attachment_b,
+                    file_hash="operation-mutation-b",
+                )
+                await _seed_ready_profile(
+                    session,
+                    attachment_id=attachment_c,
+                    file_hash="operation-mutation-c",
+                )
+                now = datetime.now(UTC)
+                operation_a = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile_a.id,
+                    source_attachment_id=attachment_a,
+                    base_profile_updated_at=profile_a.updated_at,
+                    base_workspace_updated_at=now,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                operation_b = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile_b.id,
+                    source_attachment_id=attachment_b,
+                    base_profile_updated_at=profile_b.updated_at,
+                    base_workspace_updated_at=now,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add_all([operation_a, operation_b])
+                await session.flush()
+                session.add(
+                    ProfileDraft(
+                        id=new_uuid(),
+                        target_profile_id=profile_a.id,
+                        reextract_operation_id=operation_a.id,
+                        source_attachment_id=attachment_a,
+                        draft_json={"owner": "A", "source": "original"},
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.add(
+                    ProfileDraft(
+                        id=new_uuid(),
+                        target_profile_id=profile_b.id,
+                        source_attachment_id=attachment_b,
+                        draft_json={"owner": "B", "source": "ordinary"},
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                await session.flush()
+
+                profile_a_id = profile_a.id
+                profile_b_id = profile_b.id
+                operation_a_id = operation_a.id
+                operation_b_id = operation_b.id
+                await session.commit()
+
+            async def assert_operation_draft_unchanged(
+                *,
+                profile_id: str,
+                attempted_source_attachment_id: str,
+                attempted_operation_id: str | None,
+                expected_source_attachment_id: str,
+                expected_operation_id: str | None,
+                expected_draft_json: dict[str, str],
+            ) -> None:
+                async with factory() as session:
+                    with pytest.raises(profile_repo.ProfileRepositoryError):
+                        await profile_repo.upsert_draft_for_profile(
+                            session,
+                            profile_id=profile_id,
+                            draft_json={"invalid": "mutation"},
+                            source_attachment_id=attempted_source_attachment_id,
+                            reextract_operation_id=attempted_operation_id,
+                        )
+                    assert not session.new
+                    assert not session.dirty
+                    stored = await profile_repo.get_draft_for_profile(
+                        session, profile_id
+                    )
+                    assert stored is not None
+                    assert stored.source_attachment_id == expected_source_attachment_id
+                    assert stored.reextract_operation_id == expected_operation_id
+                    assert stored.draft_json == expected_draft_json
+
+            await assert_operation_draft_unchanged(
+                profile_id=profile_b_id,
+                attempted_source_attachment_id=attachment_b,
+                attempted_operation_id=operation_b_id,
+                expected_source_attachment_id=attachment_b,
+                expected_operation_id=None,
+                expected_draft_json={"owner": "B", "source": "ordinary"},
+            )
+            await assert_operation_draft_unchanged(
+                profile_id=profile_a_id,
+                attempted_source_attachment_id=attachment_a,
+                attempted_operation_id=None,
+                expected_source_attachment_id=attachment_a,
+                expected_operation_id=operation_a_id,
+                expected_draft_json={"owner": "A", "source": "original"},
+            )
+            await assert_operation_draft_unchanged(
+                profile_id=profile_a_id,
+                attempted_source_attachment_id=attachment_a,
+                attempted_operation_id=operation_b_id,
+                expected_source_attachment_id=attachment_a,
+                expected_operation_id=operation_a_id,
+                expected_draft_json={"owner": "A", "source": "original"},
+            )
+            await assert_operation_draft_unchanged(
+                profile_id=profile_b_id,
+                attempted_source_attachment_id=attachment_b,
+                attempted_operation_id=operation_a_id,
+                expected_source_attachment_id=attachment_b,
+                expected_operation_id=None,
+                expected_draft_json={"owner": "B", "source": "ordinary"},
+            )
+            await assert_operation_draft_unchanged(
+                profile_id=profile_a_id,
+                attempted_source_attachment_id=attachment_c,
+                attempted_operation_id=operation_a_id,
+                expected_source_attachment_id=attachment_a,
+                expected_operation_id=operation_a_id,
+                expected_draft_json={"owner": "A", "source": "original"},
+            )
+
+            async with factory() as session:
+                updated = {"owner": "A", "source": "updated"}
+                stored = await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_a_id,
+                    draft_json=updated,
+                    source_attachment_id=attachment_a,
+                    reextract_operation_id=operation_a_id,
+                )
+                assert stored.draft_json == updated
+                stored = await profile_repo.get_draft_for_operation(
+                    session, profile_a_id, operation_a_id
+                )
+                assert stored is not None
+                assert stored.draft_json == updated
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
@@ -96,14 +485,14 @@ def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
                     github_url="https://github.com/ready-user",
                 )
                 proposed.summary = "Updated summary from chat"
-                draft = await profile_repo.upsert_current_draft(
+                draft = await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=profile.id,
                     draft_json={
                         "candidate_profile": proposed.model_dump(mode="json"),
                         "job_preferences": _preferences(),
                     },
                     source_attachment_id=None,
-                    target_profile_id=profile.id,
                 )
                 await workspace_repo.set_active_profile_id(session, profile.id)
                 await session.commit()
@@ -125,7 +514,10 @@ def test_agent_profile_update_draft_can_be_reviewed_and_discarded(
 
             await coordinator.discard(profile_id, revision=review.revision)
             async with factory() as session:
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
                 document = await cv_doc_repo.get_document(session, attachment_id)
                 assert document is None
         finally:
@@ -216,7 +608,10 @@ def test_source_backed_reextract_draft_accepts_agent_correction_before_approval(
                 assert document.profile_json["summary"] == (
                     "Corrected summary from chat"
                 )
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
                 assert await cv_doc_repo.get_draft(session, attachment_id) is None
         finally:
             await engine.dispose()
@@ -479,7 +874,10 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
             assert stale_discard.value.code == "PROFILE_REEXTRACT_CONFLICT"
             await coordinator.discard(profile_id, revision=review.revision)
             async with factory() as session:
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
                 assert await cv_doc_repo.get_draft(session, attachment_id) is None
             republished = [event async for event in coordinator.stream(profile_id)]
             assert republished[-1].event == "reextract_review_ready"
@@ -490,7 +888,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                         await session.scalar(select(func.count()).select_from(model))
                     )
                 assert after_counts == before_counts
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
                 assert draft is not None
                 original_draft_revision = draft.updated_at
                 assert draft.target_profile_id == profile_id
@@ -518,11 +916,11 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                     "acceptable_work_modes": ["onsite"],
                     "target_seniority": ["junior"],
                 }
-                changed_draft = await profile_repo.upsert_current_draft(
+                changed_draft = await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=profile_id,
                     draft_json=changed,
                     source_attachment_id=attachment_id,
-                    target_profile_id=profile_id,
                 )
                 await session.commit()
 
@@ -606,7 +1004,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
     run_async(_body())
 
 
-def test_approval_rejects_a_draft_without_explicit_profile_owner(
+def test_approval_cannot_read_another_profiles_draft(
     migrated_sqlite: Path, tmp_path: Path
 ) -> None:
     storage = AttachmentStorage(tmp_path / "files")
@@ -622,21 +1020,26 @@ def test_approval_rejects_a_draft_without_explicit_profile_owner(
             async with factory() as session:
                 await att_repo.create_staged(
                     session,
-                    file_hash="ownerless-draft",
-                    original_name="ownerless.pdf",
+                    file_hash="cross-profile-draft",
+                    original_name="cross-profile.pdf",
                     size_bytes=pdf.stat().st_size,
                     storage_path=rel,
                     page_count=1,
                     attachment_id=attachment_id,
                 )
-                await profile_repo.upsert_current_draft(
+                profile = await profile_repo.create_pending_profile(
                     session,
+                    attachment_id=attachment_id,
+                    display_name="Cross-profile draft test",
+                )
+                await profile_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile.id,
                     draft_json={
                         "candidate_profile": _valid_profile().model_dump(mode="json"),
                         "job_preferences": _preferences(),
                     },
                     source_attachment_id=attachment_id,
-                    target_profile_id=None,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -656,7 +1059,7 @@ def test_approval_rejects_a_draft_without_explicit_profile_owner(
                 expected_profile_id=new_uuid(),
             )
             assert result.ok is False
-            assert result.code == "PROFILE_INCONSISTENT"
+            assert result.code == "DRAFT_NOT_FOUND"
         finally:
             await engine.dispose()
 

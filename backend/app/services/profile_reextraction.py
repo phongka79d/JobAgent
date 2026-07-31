@@ -316,8 +316,8 @@ class ProfileReextractionCoordinator:
 
     async def _draft_available(self, profile_id: str) -> bool:
         async with self._session_factory() as session:
-            draft = await profile_repo.get_current_draft(session)
-            return draft is not None and draft.target_profile_id == profile_id
+            draft = await profile_repo.get_draft_for_profile(session, profile_id)
+            return draft is not None
 
     async def stream(self, profile_id: str) -> AsyncIterator[ProfileReextractEvent]:
         operation_id = new_uuid()
@@ -378,8 +378,8 @@ class ProfileReextractionCoordinator:
             stage="publishing_review",
         )
         async with self._session_factory() as session:
-            draft = await profile_repo.get_current_draft(session)
-            if draft is None or draft.target_profile_id != profile_id:
+            draft = await profile_repo.get_draft_for_profile(session, profile_id)
+            if draft is None:
                 yield _event(
                     operation_id=operation_id,
                     profile_id=profile_id,
@@ -408,8 +408,8 @@ class ProfileReextractionCoordinator:
                 raise ProfileReextractError(
                     "PROFILE_NOT_READY", "Profile is not ready"
                 )
-            draft = await profile_repo.get_current_draft(session)
-            if draft is None or draft.target_profile_id != profile_id:
+            draft = await profile_repo.get_draft_for_profile(session, profile_id)
+            if draft is None:
                 raise ProfileReextractError(
                     "PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
                     "No review is available for this profile",
@@ -513,8 +513,8 @@ class ProfileReextractionCoordinator:
     async def discard(self, profile_id: str, *, revision: datetime) -> None:
         expected = _aware(revision)
         async with session_scope(self._session_factory) as session:
-            draft = await profile_repo.get_current_draft(session)
-            if draft is None or draft.target_profile_id != profile_id:
+            draft = await profile_repo.get_draft_for_profile(session, profile_id)
+            if draft is None:
                 raise ProfileReextractError(
                     "PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
                     "No review is available for this profile",
@@ -525,7 +525,16 @@ class ProfileReextractionCoordinator:
                     "The review changed; reload it before discarding",
                 )
             attachment_id = draft.source_attachment_id
-            await profile_repo.delete_current_draft(session)
+            deleted = await profile_repo.delete_draft_for_profile(
+                session,
+                profile_id=profile_id,
+                expected_revision=expected,
+            )
+            if not deleted:
+                raise ProfileReextractError(
+                    "PROFILE_REEXTRACT_CONFLICT",
+                    "The review changed; reload it before discarding",
+                )
             if attachment_id is not None:
                 await cv_doc_repo.delete_draft(session, attachment_id)
 

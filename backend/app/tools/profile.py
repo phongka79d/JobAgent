@@ -271,6 +271,7 @@ def build_propose_profile_from_cv_tool(
                     resolved = await resolve_attachment_id_for_propose(
                         session,
                         effective_attachment_id,
+                        profile_id=target_profile_id,
                         turn_attachment_ids=turn_ids,
                     )
             if resolved is None:
@@ -520,7 +521,9 @@ def build_commit_profile_draft_tool(
 
             # Validate draft exists before interrupt (no active-side effects).
             async with factory() as session:
-                draft_row = await profile_repo.get_current_draft(session)
+                draft_row = await profile_repo.get_draft_for_profile(
+                    session, expected_profile_id
+                )
             if draft_row is None:
                 return ToolResult(
                     ok=False,
@@ -528,14 +531,6 @@ def build_commit_profile_draft_tool(
                     summary="No current profile draft to commit",
                     data={"draft_id": PROFILE_DRAFT_ID},
                 )
-            if draft_row.target_profile_id != expected_profile_id:
-                return ToolResult(
-                    ok=False,
-                    code="PROFILE_INCONSISTENT",
-                    summary="current draft belongs to another profile",
-                    data={"draft_id": PROFILE_DRAFT_ID},
-                )
-
             # Pause before any active profile/preference side effect.
             decision = interrupt(
                 build_profile_commit_projection(

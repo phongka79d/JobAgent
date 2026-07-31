@@ -219,14 +219,6 @@ async def _phase_mark_and_redact(
     for message_id in await _resolve_owned_message_ids(session, attachment_id):
         await messages_repo.redact_for_cv_deletion(session, message_id)
 
-    draft = await profile_repo.get_current_draft(session)
-    if (
-        draft is not None
-        and isinstance(draft.source_attachment_id, str)
-        and draft.source_attachment_id.strip() == attachment_id
-    ):
-        await profile_repo.delete_current_draft(session)
-
     run_ids = await _resolve_cv_run_ids(session, attachment_id)
     return row, run_ids
 

@@ -465,7 +465,9 @@ def test_extraction_failure_writes_no_chunk_rows(
             async with factory() as session:
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
                 assert await cv_doc_repo.get_draft(session, att_id) is None
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, owner.id) is None
+                )
         finally:
             await engine.dispose()
 
@@ -528,7 +530,7 @@ def test_successful_propose_persists_chunks_document_and_profile_atomically(
                 )
                 source_hash = compute_canonical_source_hash(canon)
 
-                draft_row = await profile_repo.get_current_draft(session)
+                draft_row = await profile_repo.get_draft_for_profile(session, owner.id)
                 assert draft_row is not None
                 assert draft_row.source_attachment_id == att_id
                 assert "candidate_profile" in draft_row.draft_json
@@ -607,7 +609,7 @@ def test_optional_identity_is_guarded_before_both_draft_stores(
             assert result.tool_result.ok is True
 
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, owner.id)
                 document_draft = await cv_doc_repo.get_draft(session, att_id)
                 assert draft is not None
                 assert document_draft is not None
@@ -748,7 +750,9 @@ def test_schema_repair_failure_does_not_persist_any_draft_artifacts(
             async with factory() as session:
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
                 assert await cv_doc_repo.get_draft(session, att_id) is None
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, owner.id) is None
+                )
         finally:
             await engine.dispose()
 
@@ -795,11 +799,11 @@ def test_publish_failpoint_rolls_back_all_draft_artifacts(
                 owner = await profile_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="cv.pdf"
                 )
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=prior_draft.model_dump(mode="json"),
                     source_attachment_id=prior_id,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
@@ -817,7 +821,7 @@ def test_publish_failpoint_rolls_back_all_draft_artifacts(
 
             async with factory() as session:
                 # Prior draft truth preserved; no partial new artifacts.
-                draft_row = await profile_repo.get_current_draft(session)
+                draft_row = await profile_repo.get_draft_for_profile(session, owner.id)
                 assert draft_row is not None
                 assert draft_row.source_attachment_id == prior_id
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
@@ -1063,7 +1067,10 @@ def test_propose_active_reuses_profile_without_provider(
             assert invoker.calls == []
 
             async with factory() as session:
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile.id)
+                    is None
+                )
         finally:
             await engine.dispose()
 
@@ -1098,11 +1105,11 @@ def test_propose_existing_draft_reuse_without_provider(
                 owner = await profile_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="cv.pdf"
                 )
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=draft.model_dump(mode="json"),
                     source_attachment_id=att_id,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
@@ -1126,7 +1133,7 @@ def test_propose_existing_draft_reuse_without_provider(
     run_async(_body())
 
 
-def test_propose_rejects_current_draft_owned_by_another_profile_before_provider(
+def test_another_profiles_valid_draft_does_not_block_target_profile_publication(
     migrated_sqlite: Path, files_root: Path
 ) -> None:
     storage = AttachmentStorage(files_root)
@@ -1134,6 +1141,7 @@ def test_propose_rejects_current_draft_owned_by_another_profile_before_provider(
     normalizer = _normalizer()
     pdf = CV_DIR / "digital_cv_01.pdf"
     draft = _valid_draft()
+    other_draft_json = draft.model_dump(mode="json")
 
     async def _body() -> None:
         engine = build_async_engine(migrated_sqlite)
@@ -1178,11 +1186,11 @@ def test_propose_rejects_current_draft_owned_by_another_profile_before_provider(
                     extraction_version="existing-v1",
                     source_hash="other-source",
                 )
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
-                    draft_json=draft.model_dump(mode="json"),
-                    source_attachment_id=attachment_id,
-                    target_profile_id=other_owner.id,
+                    profile_id=other_owner.id,
+                    draft_json=other_draft_json,
+                    source_attachment_id=other_attachment_id,
                 )
                 await session.commit()
 
@@ -1195,14 +1203,23 @@ def test_propose_rejects_current_draft_owned_by_another_profile_before_provider(
                 normalizer=normalizer,
             )
 
-            assert result.tool_result.ok is False
-            assert result.tool_result.code == "PROFILE_INCONSISTENT"
-            assert invoker.calls == []
+            assert result.tool_result.ok is True
+            assert invoker.calls
             async with factory() as session:
-                preserved = await profile_repo.get_current_draft(session)
-                assert preserved is not None
-                assert preserved.target_profile_id == other_owner.id
-                assert preserved.source_attachment_id == attachment_id
+                target_draft = await profile_repo.get_draft_for_profile(
+                    session, expected_owner.id
+                )
+                other_draft = await profile_repo.get_draft_for_profile(
+                    session, other_owner.id
+                )
+                assert target_draft is not None
+                assert target_draft.target_profile_id == expected_owner.id
+                assert target_draft.source_attachment_id == attachment_id
+                assert other_draft is not None
+                assert other_draft.target_profile_id == other_owner.id
+                assert other_draft.source_attachment_id == other_attachment_id
+                assert other_draft.draft_json == other_draft_json
+                assert target_draft.id != other_draft.id
         finally:
             await engine.dispose()
 
@@ -1248,11 +1265,11 @@ def test_propose_new_draft_and_replace_prior_staged(
                 owner = await profile_repo.create_pending_profile(
                     session, attachment_id=new_id, display_name="new.pdf"
                 )
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=old_draft.model_dump(mode="json"),
                     source_attachment_id=old_id,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
 
@@ -1274,7 +1291,7 @@ def test_propose_new_draft_and_replace_prior_staged(
             assert invoker.calls  # document batch/consolidate
 
             async with factory() as session:
-                draft_row = await profile_repo.get_current_draft(session)
+                draft_row = await profile_repo.get_draft_for_profile(session, owner.id)
                 assert draft_row is not None
                 assert draft_row.source_attachment_id == new_id
                 assert draft_row.draft_json["candidate_profile"]["summary"]
@@ -1345,7 +1362,9 @@ def test_failed_extraction_marks_failed_retains_file(
                 assert row is not None
                 assert row.state == ATTACHMENT_STATE_FAILED
                 assert row.failure_code == FAILURE_NO_EXTRACTABLE_TEXT
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, owner.id) is None
+                )
             assert storage.exists(rel)
         finally:
             await engine.dispose()
@@ -1398,7 +1417,9 @@ def test_exhausted_provider_failure_no_success_claim(
                 row = await att_repo.get_by_id(session, att_id)
                 assert row is not None
                 assert row.state == ATTACHMENT_STATE_FAILED
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, owner.id) is None
+                )
                 assert await cv_doc_repo.get_draft(session, att_id) is None
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
         finally:
@@ -1672,7 +1693,9 @@ def test_upload_turn_attachment_wins_over_active_model_argument(
             assert result.data["attachment_id"] == staged_id
 
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(
+                    session, pending_profile_id
+                )
                 assert draft is not None
                 assert draft.source_attachment_id == staged_id
                 assert draft.target_profile_id == pending_profile_id
@@ -1777,7 +1800,7 @@ def test_pending_profile_tool_uses_injected_owner_for_initial_extraction(
             assert result.ok is True
             assert invoker.calls
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, profile.id)
                 assert draft is not None
                 assert draft.target_profile_id == profile.id
                 assert draft.source_attachment_id == attachment_id
@@ -1858,7 +1881,9 @@ def test_pending_profile_ownership_is_rechecked_after_provider_work(
             assert result.tool_result.code == "PROFILE_INCONSISTENT"
 
             async with factory() as session:
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, owner_id) is None
+                )
                 assert await cv_doc_repo.get_draft(session, attachment_id) is None
                 assert await chunk_repo.list_for_attachment(
                     session, attachment_id

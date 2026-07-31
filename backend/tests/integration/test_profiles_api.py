@@ -536,11 +536,11 @@ def test_profile_activation_is_blocked_by_pending_profile_review(
     async def publish_review() -> None:
         factory = get_session_factory()
         async with factory() as session:
-            await profiles_repo.upsert_current_draft(
+            await profiles_repo.upsert_draft_for_profile(
                 session,
+                profile_id=active_id,
                 draft_json={"candidate_profile": _candidate()},
                 source_attachment_id=active_attachment,
-                target_profile_id=active_id,
             )
             await session.commit()
 
@@ -965,7 +965,10 @@ def test_exact_hash_archived_ready_upload_reuses_profile_without_external_work(
         factory = get_session_factory()
         async with factory() as session:
             assert await profiles_repo.get_incomplete_profile(session) is None
-            assert await profiles_repo.get_current_draft(session) is None
+            assert (
+                await profiles_repo.get_draft_for_profile(session, profile_id)
+                is None
+            )
             for table in ("agent_runs", "tool_executions"):
                 count = (
                     await session.execute(text(f"SELECT COUNT(*) FROM {table}"))

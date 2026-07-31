@@ -282,8 +282,9 @@ def test_turn_injects_approved_candidate_context_not_draft(
                 page_count=1,
                 attachment_id=staged_id,
             )
-            await profile_repo.upsert_current_draft(
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=profile.id,
                 source_attachment_id=staged.id,
                 draft_json=draft_json,
             )

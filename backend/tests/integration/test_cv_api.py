@@ -902,11 +902,11 @@ def test_upload_is_blocked_while_active_profile_review_is_pending(
                 source_hash="fixture-source",
             )
             await workspace_repo.set_active_profile_id(session, profile.id)
-            await profile_repo.upsert_current_draft(
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=profile.id,
                 draft_json={"candidate_profile": {}, "job_preferences": {}},
                 source_attachment_id=attachment.id,
-                target_profile_id=profile.id,
             )
             await session.commit()
 
@@ -1070,11 +1070,11 @@ def test_existing_pending_draft_does_not_restart_extraction(
     async def _seed_draft() -> None:
         factory = get_session_factory()
         async with factory() as session:
-            await profile_repo.upsert_current_draft(
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=first["bootstrap"]["profile"]["id"],
                 draft_json={"candidate_profile": {}, "job_preferences": {}},
                 source_attachment_id=first["attachment"]["id"],
-                target_profile_id=first["bootstrap"]["profile"]["id"],
             )
             await session.commit()
 
@@ -1100,11 +1100,11 @@ def test_failed_pending_status_wins_over_retained_draft(
     async def _seed_failed_draft() -> None:
         factory = get_session_factory()
         async with factory() as session:
-            await profile_repo.upsert_current_draft(
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=first["bootstrap"]["profile"]["id"],
                 draft_json={"candidate_profile": {}, "job_preferences": {}},
                 source_attachment_id=first["attachment"]["id"],
-                target_profile_id=first["bootstrap"]["profile"]["id"],
             )
             await att_repo.mark_failed(
                 session,
@@ -1690,14 +1690,14 @@ def test_get_profile_projects_active_pending_review(
             )
             draft = deepcopy(_approved_profile_json())
             draft["summary"] = "Updated summary from agent"
-            row = await profile_repo.upsert_current_draft(
+            row = await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=profile.id,
                 draft_json={
                     "candidate_profile": draft,
                     "job_preferences": _approved_prefs_json(),
                 },
                 source_attachment_id=None,
-                target_profile_id=profile.id,
             )
             await session.commit()
             return profile.id, row.updated_at.isoformat()

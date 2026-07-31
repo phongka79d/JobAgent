@@ -92,6 +92,7 @@ async def resolve_attachment_id_for_propose(
     session: AsyncSession,
     requested: str | None,
     *,
+    profile_id: str,
     turn_attachment_ids: Sequence[str] | None = None,
 ) -> str | None:
     """Resolve a processable attachment id for ``propose_profile_from_cv``.
@@ -139,7 +140,7 @@ async def resolve_attachment_id_for_propose(
 
     candidates: list[str] = []
 
-    draft = await profile_repo.get_current_draft(session)
+    draft = await profile_repo.get_draft_for_profile(session, profile_id)
     if draft is not None and isinstance(draft.source_attachment_id, str):
         source = draft.source_attachment_id.strip()
         if source and source not in candidates:

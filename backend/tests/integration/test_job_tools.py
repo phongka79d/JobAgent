@@ -328,7 +328,7 @@ async def _seed_auth_state(
     *,
     with_active: bool,
     with_draft: bool,
-) -> None:
+) -> str | None:
     """Seed Master authorization matrix preconditions (profile/draft presence)."""
     if with_active:
         active_id = new_uuid()
@@ -342,7 +342,7 @@ async def _seed_auth_state(
             attachment_id=active_id,
         )
         await att_repo.mark_active(session, active_id, page_count=1)
-        await profile_repo.upsert_active_profile(
+        profile = await profile_repo.upsert_active_profile(
             session,
             active_attachment_id=active_id,
             profile_json=_MINIMAL_PROFILE,
@@ -358,8 +358,15 @@ async def _seed_auth_state(
             page_count=1,
             attachment_id=draft_att,
         )
-        await profile_repo.upsert_current_draft(
+        if not with_active:
+            profile = await profile_repo.create_pending_profile(
+                session,
+                attachment_id=draft_att,
+                display_name="Draft profile",
+            )
+        await profile_repo.upsert_draft_for_profile(
             session,
+            profile_id=profile.id,
             source_attachment_id=draft_att,
             draft_json={
                 "profile": _MINIMAL_PROFILE,
@@ -368,6 +375,8 @@ async def _seed_auth_state(
                 "exclusions": [],
             },
         )
+        return profile.id
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +725,7 @@ def test_save_job_allowed_in_all_master_authorization_states(
         try:
             async with factory() as session:
                 run_id = await _seed_run(session, content=f"auth {label}")
-                await _seed_auth_state(
+                draft_profile_id = await _seed_auth_state(
                     session, with_active=with_active, with_draft=with_draft
                 )
                 if with_active:
@@ -724,9 +733,15 @@ def test_save_job_allowed_in_all_master_authorization_states(
                 else:
                     assert await profile_repo.get_active_profile(session) is None
                 if with_draft:
-                    assert await profile_repo.get_current_draft(session) is not None
+                    assert draft_profile_id is not None
+                    assert (
+                        await profile_repo.get_draft_for_profile(
+                            session, draft_profile_id
+                        )
+                        is not None
+                    )
                 else:
-                    assert await profile_repo.get_current_draft(session) is None
+                    assert draft_profile_id is None
                 await session.commit()
 
             tool_fn = build_save_job_tool(

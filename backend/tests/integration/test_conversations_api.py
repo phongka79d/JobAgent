@@ -273,11 +273,11 @@ def test_pending_correction_rejects_attachment_ids(
     async def body() -> None:
         factory = get_session_factory()
         async with factory() as session:
-            await profiles_repo.upsert_current_draft(
+            await profiles_repo.upsert_draft_for_profile(
                 session,
+                profile_id=uploaded["bootstrap"]["profile"]["id"],
                 draft_json={"candidate_profile": {}, "job_preferences": {}},
                 source_attachment_id=uploaded["attachment"]["id"],
-                target_profile_id=uploaded["bootstrap"]["profile"]["id"],
             )
             await session.commit()
         with pytest.raises(ChatTurnError) as exc_info:

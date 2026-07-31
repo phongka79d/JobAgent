@@ -555,8 +555,9 @@ def test_profile_owned_staged_attachment_is_rejected(
                 conversation = await conversations_repo.create_bootstrap_for_profile(
                     session, profile_id=profile.id
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=profile.id,
                     draft_json={
                         "profile": {"full_name": "Draft"},
                         "preferences": None,
@@ -609,7 +610,10 @@ def test_profile_owned_staged_attachment_is_rejected(
             assert exc_info.value.code == ERROR_CV_PROFILE_OWNED_DELETE_FORBIDDEN
             async with factory() as session:
                 assert await att_repo.get_by_id(session, aid) is not None
-                assert await prof_repo.get_current_draft(session) is not None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, profile.id)
+                    is not None
+                )
                 assert await cv_doc_repo.get_draft(session, aid) is not None
         finally:
             await engine.dispose()

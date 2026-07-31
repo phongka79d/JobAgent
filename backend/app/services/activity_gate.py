@@ -127,13 +127,12 @@ async def assert_profile_review_clear(
     code: str = "PROFILE_REVIEW_PENDING",
 ) -> None:
     """Block lifecycle mutations while this profile owns a durable review."""
-    draft = await profile_repo.get_current_draft(session)
+    draft = await profile_repo.get_draft_for_profile(session, profile_id)
     profile = await profile_repo.get_profile(session, profile_id)
     if (
         profile is not None
         and profile.state == PROFILE_STATE_READY
         and draft is not None
-        and draft.target_profile_id == profile_id
     ):
         raise ActivityBlockedError(
             code,

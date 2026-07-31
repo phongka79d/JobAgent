@@ -419,7 +419,7 @@ async def _seed_match_profile(
         await session.commit()
 
 
-async def _seed_pending_draft_with_different_profile(factory: Any) -> None:
+async def _seed_pending_draft_for_active_profile(factory: Any) -> None:
     """Pending replacement draft that must not affect matching."""
     draft = parse_profile_draft_payload(
         {
@@ -452,8 +452,11 @@ async def _seed_pending_draft_with_different_profile(factory: Any) -> None:
         }
     )
     async with factory() as session:
-        await prof_repo.upsert_current_draft(
+        profile_id = await workspace_repo.get_active_profile_id(session)
+        assert profile_id is not None
+        await prof_repo.upsert_draft_for_profile(
             session,
+            profile_id=profile_id,
             draft_json=draft.model_dump(mode="json"),
             source_attachment_id=None,
         )
@@ -525,7 +528,7 @@ def test_match_jobs_uses_approved_profile_with_pending_draft(
     sqlite_factory: Any,
 ) -> None:
     run_async(_seed_match_profile(sqlite_factory))
-    run_async(_seed_pending_draft_with_different_profile(sqlite_factory))
+    run_async(_seed_pending_draft_for_active_profile(sqlite_factory))
     job_id = run_async(
         seed_scorable_job(sqlite_factory, raw_hash="match-approved-draft")
     )
@@ -1211,7 +1214,7 @@ def test_match_jobs_tool_pending_draft_uses_approved_only(
 ) -> None:
     async def _body() -> None:
         await _seed_match_profile(sqlite_factory)
-        await _seed_pending_draft_with_different_profile(sqlite_factory)
+        await _seed_pending_draft_for_active_profile(sqlite_factory)
         job_id = await seed_scorable_job(
             sqlite_factory, raw_hash="match-tool-draft"
         )

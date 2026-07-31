@@ -302,8 +302,8 @@ async def _pending_can_start(
     *,
     profile_id: str,
 ) -> bool:
-    draft = await profile_repo.get_current_draft(session)
-    if draft is not None and draft.target_profile_id == profile_id:
+    draft = await profile_repo.get_draft_for_profile(session, profile_id)
+    if draft is not None:
         return False
     try:
         await assert_profile_review_clear(session, profile_id=profile_id)
@@ -338,7 +338,7 @@ async def _build_pending_response(
             ERROR_PROFILE_SETUP_IN_PROGRESS,
             "pending profile setup is inconsistent",
         )
-    draft = await profile_repo.get_current_draft(session)
+    draft = await profile_repo.get_draft_for_profile(session, profile.id)
     draft_summary: DraftUploadSummary | None
     if draft is None:
         draft_summary = DraftUploadSummary(

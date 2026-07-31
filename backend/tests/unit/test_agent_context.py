@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -608,8 +609,9 @@ def test_load_candidate_context_uses_approved_not_draft(
                     page_count=1,
                     attachment_id=staged_id,
                 )
-                await profile_repo.upsert_current_draft(
+                await profile_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=profile.id,
                     source_attachment_id=staged.id,
                     draft_json={
                         "candidate_profile": _valid_profile_dict(
@@ -666,6 +668,114 @@ def test_load_candidate_context_rejects_missing_owner(
                         conversation_id=TEST_CONVERSATION_ID,
                         profile_id=TEST_PROFILE_ID,
                     )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_agent_current_draft_context_uses_requested_profile_only(
+    migrated_sqlite: Path,
+) -> None:
+    from app.agent.context import load_profile_working_memory_messages
+    from app.core.ids import new_uuid
+    from app.db.models.profiles import ProfileDraft
+    from app.db.session import build_async_engine
+    from app.repositories import attachments as att_repo
+    from app.repositories import conversations as conversations_repo
+    from app.repositories import profiles as profile_repo
+
+    from tests.support.db_migration import run_async, session_factory
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                attachment_a = new_uuid()
+                attachment_b = new_uuid()
+                for attachment_id, file_hash in (
+                    (attachment_a, "context-draft-a"),
+                    (attachment_b, "context-draft-b"),
+                ):
+                    await att_repo.create_staged(
+                        session,
+                        file_hash=file_hash,
+                        original_name=f"{file_hash}.pdf",
+                        size_bytes=10,
+                        storage_path=attachment_id,
+                        page_count=1,
+                        attachment_id=attachment_id,
+                    )
+                profile_a = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_a,
+                    display_name="Profile A",
+                    profile_json=_valid_profile_dict(summary="PROFILE_A_APPROVED"),
+                    location=None,
+                    extraction_version="test-v1",
+                    source_hash="context-draft-a",
+                )
+                profile_b = await profile_repo.create_profile(
+                    session,
+                    attachment_id=attachment_b,
+                    display_name="Profile B",
+                    profile_json=_valid_profile_dict(summary="PROFILE_B_APPROVED"),
+                    location=None,
+                    extraction_version="test-v1",
+                    source_hash="context-draft-b",
+                )
+                conversation_a = await conversations_repo.create_for_profile(
+                    session, profile_id=profile_a.id
+                )
+                profile_a.state = "pending"
+                profile_a.profile_json = None
+                profile_a.location = None
+                profile_a.extraction_version = None
+                profile_a.source_hash = None
+                now = profile_a.updated_at
+                session.add_all(
+                    [
+                        ProfileDraft(
+                            id=new_uuid(),
+                            target_profile_id=profile_a.id,
+                            source_attachment_id=attachment_a,
+                            draft_json={
+                                "candidate_profile": _valid_profile_dict(
+                                    summary="PROFILE_A_DRAFT"
+                                ),
+                                "job_preferences": _valid_prefs_dict(),
+                            },
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                        ProfileDraft(
+                            id=new_uuid(),
+                            target_profile_id=profile_b.id,
+                            source_attachment_id=attachment_b,
+                            draft_json={
+                                "candidate_profile": _valid_profile_dict(
+                                    summary="PROFILE_B_DRAFT"
+                                ),
+                                "job_preferences": _valid_prefs_dict(),
+                            },
+                            created_at=now,
+                            updated_at=now + timedelta(microseconds=1),
+                        ),
+                    ]
+                )
+                await session.commit()
+
+            async with factory() as session:
+                messages = await load_profile_working_memory_messages(
+                    session,
+                    conversation_id=conversation_a.id,
+                    profile_id=profile_a.id,
+                )
+            serialized = str(messages)
+            assert "draft_id=current" in serialized
+            assert "PROFILE_A_DRAFT" in serialized
+            assert "PROFILE_B_DRAFT" not in serialized
         finally:
             await engine.dispose()
 

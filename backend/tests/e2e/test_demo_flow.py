@@ -425,7 +425,7 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         async def _assert_draft() -> None:
             factory = get_session_factory()
             async with factory() as session:
-                draft = await profile_repo.get_current_draft(session)
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
                 assert draft is not None
                 assert UUID(draft.id).version == 4
                 assert draft.source_attachment_id == attachment_id
@@ -475,7 +475,10 @@ def test_demo_flow_greeting_to_matching_public_boundary(
         async def _assert_active_profile() -> None:
             factory = get_session_factory()
             async with factory() as session:
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
                 active = await profile_repo.get_active_profile(session)
                 assert active is not None
                 assert active.id == profile_id
@@ -720,7 +723,10 @@ def test_demo_flow_greeting_to_matching_public_boundary(
             factory = get_session_factory()
             async with factory() as session:
                 # One active CV/profile; draft still gone.
-                assert await profile_repo.get_current_draft(session) is None
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
                 active = await profile_repo.get_active_profile(session)
                 assert active is not None
                 n_active = int(

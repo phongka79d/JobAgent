@@ -302,20 +302,13 @@ async def propose_profile_from_cv(
 
             # --- Staged already backing current draft: reuse ---
             if state == ATTACHMENT_STATE_STAGED:
-                draft_row = await profile_repo.get_current_draft(session)
+                draft_row = await profile_repo.get_draft_for_profile(
+                    session, target_profile_id
+                )
                 if (
                     draft_row is not None
                     and draft_row.source_attachment_id == attachment_id
                 ):
-                    if draft_row.target_profile_id != target_profile_id:
-                        return ProposeFromCvResult(
-                            kind="existing_draft",
-                            tool_result=_tool_fail(
-                                "PROFILE_INCONSISTENT",
-                                "current draft belongs to another profile",
-                            ),
-                            attachment_id=attachment_id,
-                        )
                     draft = parse_profile_draft_payload(draft_row.draft_json)
                     data = {
                         "draft_id": PROFILE_DRAFT_ID,
@@ -466,7 +459,9 @@ async def propose_profile_from_cv(
                         draft_json = draft_payload.model_dump(mode="json")
                         parse_profile_draft_payload(draft_json)
 
-            existing = await profile_repo.get_current_draft(session)
+            existing = await profile_repo.get_draft_for_profile(
+                session, target_profile_id
+            )
             if existing is not None and existing.source_attachment_id is not None:
                 prior_id = existing.source_attachment_id
                 if prior_id != attachment_id:
@@ -478,11 +473,12 @@ async def propose_profile_from_cv(
                         prior_storage_path = prior.storage_path
 
             # One atomic write owner: profile draft + document draft + chunks.
-            await profile_repo.upsert_current_draft(
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=target_profile_id,
                 draft_json=draft_json,
                 source_attachment_id=attachment_id,
-                target_profile_id=target_profile_id,
+                reextract_operation_id=None,
             )
             await cv_doc_repo.upsert_draft(
                 session,
@@ -1057,16 +1053,10 @@ async def propose_profile_update(
     expected_profile_id = expected_profile_id.strip()
 
     async with session_factory() as session:
-        draft_row = await profile_repo.get_current_draft(session)
+        draft_row = await profile_repo.get_draft_for_profile(
+            session, expected_profile_id
+        )
         if draft_row is not None:
-            if draft_row.target_profile_id != expected_profile_id:
-                return ProposeUpdateResult(
-                    base_kind="current_draft",
-                    tool_result=_tool_fail(
-                        "PROFILE_INCONSISTENT",
-                        "current draft belongs to another profile",
-                    ),
-                )
             try:
                 base = parse_profile_draft_payload(draft_row.draft_json)
             except ValidationError as exc:
@@ -1080,6 +1070,7 @@ async def propose_profile_update(
                 )
             source_attachment_id = draft_row.source_attachment_id
             target_profile_id = draft_row.target_profile_id
+            reextract_operation_id = draft_row.reextract_operation_id
             base_kind: UpdateBaseKind = "current_draft"
         else:
             profile_row = await profile_repo.get_profile(
@@ -1124,6 +1115,7 @@ async def propose_profile_update(
             # not CV-backed drafts; source attachment stays null.
             source_attachment_id = None
             target_profile_id = profile_row.id
+            reextract_operation_id = None
             base_kind = "active_context"
 
     try:
@@ -1152,12 +1144,11 @@ async def propose_profile_update(
 
     try:
         async with session_scope(session_factory) as session:
-            live_draft = await profile_repo.get_current_draft(session)
+            live_draft = await profile_repo.get_draft_for_profile(
+                session, expected_profile_id
+            )
             if base_kind == "current_draft":
-                if (
-                    live_draft is None
-                    or live_draft.target_profile_id != expected_profile_id
-                ):
+                if live_draft is None:
                     return ProposeUpdateResult(
                         base_kind=base_kind,
                         tool_result=_tool_fail(
@@ -1189,11 +1180,15 @@ async def propose_profile_update(
                         ),
                         source_attachment_id=source_attachment_id,
                     )
-            await profile_repo.upsert_current_draft(
+            if live_draft is not None and live_draft.reextract_operation_id is not None:
+                source_attachment_id = live_draft.source_attachment_id
+                reextract_operation_id = live_draft.reextract_operation_id
+            await profile_repo.upsert_draft_for_profile(
                 session,
+                profile_id=target_profile_id,
                 draft_json=draft_json,
                 source_attachment_id=source_attachment_id,
-                target_profile_id=target_profile_id,
+                reextract_operation_id=reextract_operation_id,
             )
             if document_draft is not None:
                 assert source_attachment_id is not None

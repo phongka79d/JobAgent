@@ -185,16 +185,13 @@ async def _load_preflight(
     exists on disk. Inside an open SQLite transaction, pass ``check_files=False``
     and ``storage=None`` so the write unit never spans filesystem I/O.
     """
-    draft_row = await profile_repo.get_current_draft(session)
+    draft_row = await profile_repo.get_draft_for_profile(
+        session, expected_profile_id
+    )
     if draft_row is None:
         raise ProfileApprovalError(
             "No current profile draft to approve",
             code=ERROR_DRAFT_NOT_FOUND,
-        )
-    if draft_row.target_profile_id != expected_profile_id:
-        raise ProfileApprovalError(
-            "Current profile draft belongs to another profile",
-            code="PROFILE_INCONSISTENT",
         )
     if expected_draft_updated_at is not None:
         actual_revision = (
@@ -416,7 +413,7 @@ async def _assert_final_invariant(
                 code=ERROR_INVARIANT_VIOLATION,
             )
 
-    draft = await profile_repo.get_current_draft(session)
+    draft = await profile_repo.get_draft_for_profile(session, profile_id)
     if draft is not None:
         raise ProfileApprovalError(
             "profile_drafts('current') still present after delete",
@@ -550,7 +547,16 @@ async def _run_sqlite_approval(
             raise _activation_to_approval_error(exc) from exc
 
     # 5. Delete profile draft.
-    await profile_repo.delete_current_draft(session)
+    deleted = await profile_repo.delete_draft_for_profile(
+        session,
+        profile_id=profile_id,
+        expected_revision=preflight.draft_updated_at,
+    )
+    if not deleted:
+        raise ProfileApprovalError(
+            "profile draft changed before delete",
+            code=ERROR_INVARIANT_VIOLATION,
+        )
 
     # 6. Final invariant, then caller commits.
     await _assert_final_invariant(

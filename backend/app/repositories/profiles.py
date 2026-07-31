@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from app.db.models.profiles import (
     Profile,
     ProfileDraft,
     ProfilePreference,
+    ProfileReextractOperation,
     WorkspaceState,
 )
 from app.repositories import workspace_state as workspace_repo
@@ -186,54 +188,130 @@ async def get_selected_ready_profile(session: AsyncSession) -> Profile | None:
     return profile
 
 
-async def get_current_draft(session: AsyncSession) -> ProfileDraft | None:
+async def get_draft_for_profile(
+    session: AsyncSession, profile_id: str
+) -> ProfileDraft | None:
     result = await session.execute(
-        select(ProfileDraft)
-        .order_by(ProfileDraft.updated_at.desc(), ProfileDraft.id.desc())
-        .limit(1)
+        select(ProfileDraft).where(
+            ProfileDraft.target_profile_id == _required("profile_id", profile_id)
+        )
     )
     return result.scalar_one_or_none()
 
 
-async def upsert_current_draft(
+async def get_draft_for_operation(
+    session: AsyncSession,
+    profile_id: str,
+    operation_id: str,
+) -> ProfileDraft | None:
+    result = await session.execute(
+        select(ProfileDraft).where(
+            ProfileDraft.target_profile_id == _required("profile_id", profile_id),
+            ProfileDraft.reextract_operation_id
+            == _required("operation_id", operation_id),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_draft_for_profile(
     session: AsyncSession,
     *,
+    profile_id: str,
     draft_json: dict[str, Any],
-    source_attachment_id: str | None = None,
-    target_profile_id: str | None = None,
+    source_attachment_id: str | None,
+    reextract_operation_id: str | None = None,
 ) -> ProfileDraft:
+    profile_id = _required("profile_id", profile_id)
     if not isinstance(draft_json, dict):
         raise ProfileRepositoryError("draft_json must be a mapping")
     if source_attachment_id is not None:
         source_attachment_id = _required(
             "source_attachment_id", source_attachment_id
         )
-    if target_profile_id is not None:
-        target_profile_id = _required("target_profile_id", target_profile_id)
-    row = await get_current_draft(session)
-    now = utc_now()
-    if row is None:
-        row = ProfileDraft(
-            id=new_uuid(),
-            source_attachment_id=source_attachment_id,
-            target_profile_id=target_profile_id,
-            draft_json=draft_json,
-            created_at=now,
-            updated_at=now,
+    if reextract_operation_id is not None:
+        reextract_operation_id = _required(
+            "reextract_operation_id", reextract_operation_id
         )
-        session.add(row)
-    else:
-        row.source_attachment_id = source_attachment_id
-        row.target_profile_id = target_profile_id
+
+    row = await get_draft_for_profile(session, profile_id)
+    if row is not None:
+        if row.reextract_operation_id != reextract_operation_id:
+            raise ProfileRepositoryError("draft operation owner cannot change")
+        if (
+            row.reextract_operation_id is not None
+            and row.source_attachment_id != source_attachment_id
+        ):
+            raise ProfileRepositoryError("operation draft source cannot change")
         row.draft_json = draft_json
-        row.updated_at = now
+        row.source_attachment_id = source_attachment_id
+        row.updated_at = utc_now()
+        await session.flush()
+        return row
+
+    profile = await get_profile(session, profile_id)
+    if profile is None:
+        raise ProfileRepositoryError("profile not found")
+    if reextract_operation_id is not None:
+        if source_attachment_id is None:
+            raise ProfileRepositoryError("operation draft requires a source attachment")
+        operation = await session.get(ProfileReextractOperation, reextract_operation_id)
+        if operation is None:
+            raise ProfileRepositoryError("reextract operation not found")
+        if operation.profile_id != profile_id:
+            raise ProfileRepositoryError(
+                "reextract operation belongs to another profile"
+            )
+        if operation.source_attachment_id != source_attachment_id:
+            raise ProfileRepositoryError("reextract operation source does not match")
+
+    now = utc_now()
+    row = ProfileDraft(
+        id=new_uuid(),
+        source_attachment_id=source_attachment_id,
+        target_profile_id=profile_id,
+        reextract_operation_id=reextract_operation_id,
+        draft_json=draft_json,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(row)
     await session.flush()
     return row
 
 
-async def delete_current_draft(session: AsyncSession) -> bool:
-    row = await get_current_draft(session)
+async def delete_draft_for_profile(
+    session: AsyncSession,
+    *,
+    profile_id: str,
+    expected_revision: datetime | None = None,
+    expected_operation_id: str | None = None,
+) -> bool:
+    profile_id = _required("profile_id", profile_id)
+    if expected_operation_id is not None:
+        expected_operation_id = _required(
+            "expected_operation_id", expected_operation_id
+        )
+    row = await get_draft_for_profile(session, profile_id)
     if row is None:
+        return False
+    if expected_revision is not None:
+        actual_revision = (
+            row.updated_at.replace(tzinfo=UTC)
+            if row.updated_at.tzinfo is None
+            else row.updated_at.astimezone(UTC)
+        )
+        expected_revision = (
+            expected_revision.replace(tzinfo=UTC)
+            if expected_revision.tzinfo is None
+            else expected_revision.astimezone(UTC)
+        )
+        if actual_revision != expected_revision:
+            return False
+    if (
+        expected_operation_id is not None
+        and row.reextract_operation_id != expected_operation_id
+    ):
         return False
     await session.delete(row)
     await session.flush()

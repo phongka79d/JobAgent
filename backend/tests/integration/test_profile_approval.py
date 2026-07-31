@@ -1,7 +1,7 @@
 """Integration tests for profile-family repository primitives (pre-service).
 
-Uses a migrated temporary SQLite file (Alembic head). Covers singleton
-active/draft/preferences reads, upserts, deletes, UTC timestamps, missing
+Uses a migrated temporary SQLite file (Alembic head). Covers active-profile,
+profile-owned draft, and preference reads, upserts, deletes, UTC timestamps, missing
 rows, and constraint-visible failures. Full approval transaction ordering and
 API routes remain later service tasks.
 """
@@ -55,7 +55,7 @@ EMPTY_PREFS: dict[str, list[Any]] = {k: [] for k in JOB_PREFERENCE_KEYS}
 
 @pytest.fixture
 def db_path(migrated_sqlite: Path) -> Path:
-    """Migrated isolated SQLite file (Alembic head + singleton seeds)."""
+    """Migrated isolated SQLite file (Alembic head + profile-owned seeds)."""
     return migrated_sqlite
 
 
@@ -78,7 +78,7 @@ async def _staged_attachment(
 
 
 # ---------------------------------------------------------------------------
-# Active profile singleton
+# Active profile selection
 # ---------------------------------------------------------------------------
 
 
@@ -248,26 +248,34 @@ def test_profile_fk_and_attachment_uniqueness_visible(db_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Draft singleton
+# Profile-owned drafts
 # ---------------------------------------------------------------------------
 
 
-def test_draft_upsert_read_delete(db_path: Path) -> None:
-    """Draft singleton create, update, missing delete, and delete success."""
+def test_profile_draft_upsert_read_delete(db_path: Path) -> None:
+    """Profile draft create, update, missing delete, and delete success."""
 
     async def _body() -> None:
         engine = build_async_engine(db_path)
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                assert await prof_repo.get_current_draft(session) is None
-                assert await prof_repo.delete_current_draft(session) is False
-
                 att_id = await _staged_attachment(
                     session, file_hash="draft-h", storage_path="draft.pdf"
                 )
-                draft = await prof_repo.upsert_current_draft(
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="draft.pdf"
+                )
+                assert await prof_repo.get_draft_for_profile(session, owner.id) is None
+                assert (
+                    await prof_repo.delete_draft_for_profile(
+                        session, profile_id=owner.id
+                    )
+                    is False
+                )
+                draft = await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=MINIMAL_DRAFT,
                     source_attachment_id=att_id,
                 )
@@ -282,13 +290,14 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                 await session.commit()
 
             async with factory() as session:
-                found = await prof_repo.get_current_draft(session)
+                found = await prof_repo.get_draft_for_profile(session, owner.id)
                 assert found is not None
                 assert found.id == draft_id
 
                 # Preference-only style: clear source attachment.
-                updated = await prof_repo.upsert_current_draft(
+                updated = await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json={**MINIMAL_DRAFT, "note": "ignored-by-shape"},
                     source_attachment_id=None,
                 )
@@ -297,12 +306,22 @@ def test_draft_upsert_read_delete(db_path: Path) -> None:
                 await session.commit()
 
             async with factory() as session:
-                assert await prof_repo.delete_current_draft(session) is True
+                assert (
+                    await prof_repo.delete_draft_for_profile(
+                        session, profile_id=owner.id
+                    )
+                    is True
+                )
                 await session.commit()
 
             async with factory() as session:
-                assert await prof_repo.get_current_draft(session) is None
-                assert await prof_repo.delete_current_draft(session) is False
+                assert await prof_repo.get_draft_for_profile(session, owner.id) is None
+                assert (
+                    await prof_repo.delete_draft_for_profile(
+                        session, profile_id=owner.id
+                    )
+                    is False
+                )
                 count = (
                     await session.execute(
                         text("SELECT COUNT(*) FROM profile_drafts")
@@ -323,11 +342,20 @@ def test_draft_source_attachment_unique_and_cascade(db_path: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
+                owner_attachment_id = await _staged_attachment(
+                    session, file_hash="cas-owner", storage_path="cas-owner.pdf"
+                )
+                owner = await prof_repo.create_pending_profile(
+                    session,
+                    attachment_id=owner_attachment_id,
+                    display_name="cas-owner.pdf",
+                )
                 att_id = await _staged_attachment(
                     session, file_hash="cas", storage_path="cas.pdf"
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=MINIMAL_DRAFT,
                     source_attachment_id=att_id,
                 )
@@ -344,7 +372,7 @@ def test_draft_source_attachment_unique_and_cascade(db_path: Path) -> None:
                 await session.commit()
 
             async with factory() as session:
-                assert await prof_repo.get_current_draft(session) is None
+                assert await prof_repo.get_draft_for_profile(session, owner.id) is None
         finally:
             await engine.dispose()
 
@@ -357,14 +385,21 @@ def test_draft_rejects_non_mapping_json(db_path: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
+                att_id = await _staged_attachment(session)
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="invalid-draft.pdf"
+                )
                 with pytest.raises(ProfileRepositoryError):
-                    await prof_repo.upsert_current_draft(
+                    await prof_repo.upsert_draft_for_profile(
                         session,
+                        profile_id=owner.id,
                         draft_json=[],  # type: ignore[arg-type]
+                        source_attachment_id=None,
                     )
                 with pytest.raises(ProfileRepositoryError):
-                    await prof_repo.upsert_current_draft(
+                    await prof_repo.upsert_draft_for_profile(
                         session,
+                        profile_id=owner.id,
                         draft_json=MINIMAL_DRAFT,
                         source_attachment_id="",
                     )
@@ -375,7 +410,7 @@ def test_draft_rejects_non_mapping_json(db_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Job preferences singleton (seeded)
+# Job preferences (selected profile)
 # ---------------------------------------------------------------------------
 
 
@@ -473,8 +508,13 @@ def test_profile_mutations_do_not_commit(db_path: Path) -> None:
         factory = session_factory(engine)
         try:
             async with factory() as session:
-                await prof_repo.upsert_current_draft(
-                    session, draft_json=MINIMAL_DRAFT
+                att_id = await _staged_attachment(session)
+                owner = await prof_repo.create_pending_profile(
+                    session, attachment_id=att_id, display_name="uncommitted.pdf"
+                )
+                await prof_repo.upsert_draft_for_profile(
+                    session, profile_id=owner.id, draft_json=MINIMAL_DRAFT,
+                    source_attachment_id=None,
                 )
                 async with factory() as other:
                     n = (
@@ -815,8 +855,9 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
                     display_name="new.pdf",
                 )
                 pending_id = pending.id
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=pending_id,
                     draft_json=old_draft.model_dump(mode="json"),
                     source_attachment_id=old_id,
                 )
@@ -841,7 +882,7 @@ def test_propose_from_cv_creates_validated_draft_and_replaces_prior(
             assert invoker.calls >= 1
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, pending_id)
                 assert draft is not None
                 assert draft.source_attachment_id == new_id
                 assert draft.target_profile_id == pending_id
@@ -921,7 +962,7 @@ def test_propose_from_cv_no_text_marks_failed_retains_file(
                 assert row is not None
                 assert row.state == ATTACHMENT_STATE_FAILED
                 assert row.failure_code == NO_EXTRACTABLE_TEXT
-                assert await prof_repo.get_current_draft(session) is None
+                assert await prof_repo.get_draft_for_profile(session, owner.id) is None
                 assert await cv_doc_repo.get_draft(session, att_id) is None
                 assert await chunk_repo.count_for_attachment(session, att_id) == 0
             assert storage.exists(rel)
@@ -989,10 +1030,10 @@ def _valid_draft_json(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def test_propose_update_current_draft_profile_and_skills(
+def test_propose_update_profile_draft_profile_and_skills(
     db_path: Path,
 ) -> None:
-    """Current-draft update: profile field + skill correction; draft-only write."""
+    """Profile-draft update: profile field + skill correction; draft-only write."""
     from app.services.profile_drafts import propose_profile_update
     from app.services.skill_normalization import SkillNormalizer
 
@@ -1009,11 +1050,11 @@ def test_propose_update_current_draft_profile_and_skills(
                 owner = await prof_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="upd-draft.pdf"
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=att_id,
-                    target_profile_id=owner.id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -1052,7 +1093,7 @@ def test_propose_update_current_draft_profile_and_skills(
             assert py.source == "user_correction"
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, owner_id)
                 assert draft is not None
                 assert draft.source_attachment_id == saved_att
                 assert (
@@ -1072,7 +1113,7 @@ def test_propose_update_current_draft_profile_and_skills(
     run_async(_body())
 
 
-def test_propose_update_rejects_current_draft_owned_by_another_profile(
+def test_propose_update_scopes_profile_draft_to_expected_profile(
     db_path: Path,
 ) -> None:
     from app.services.profile_drafts import propose_profile_update
@@ -1112,11 +1153,11 @@ def test_propose_update_rejects_current_draft_owned_by_another_profile(
                     display_name="Draft owner",
                 )
                 original = _valid_draft_json()
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=draft_owner.id,
                     draft_json=original,
                     source_attachment_id=draft_attachment_id,
-                    target_profile_id=draft_owner.id,
                 )
                 await session.commit()
 
@@ -1127,13 +1168,18 @@ def test_propose_update_rejects_current_draft_owned_by_another_profile(
                 profile_changes={"summary": "must not cross profile ownership"},
             )
 
-            assert result.tool_result.ok is False
-            assert result.tool_result.code == "PROFILE_INCONSISTENT"
+            assert result.tool_result.ok is True
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
-                assert draft is not None
-                assert draft.target_profile_id == draft_owner.id
-                assert draft.draft_json == original
+                other_draft = await prof_repo.get_draft_for_profile(
+                    session, draft_owner.id
+                )
+                assert other_draft is not None
+                assert other_draft.draft_json == original
+                expected_draft = await prof_repo.get_draft_for_profile(
+                    session, expected_owner.id
+                )
+                assert expected_draft is not None
+                assert expected_draft.target_profile_id == expected_owner.id
         finally:
             await engine.dispose()
 
@@ -1143,7 +1189,7 @@ def test_propose_update_rejects_current_draft_owned_by_another_profile(
 def test_propose_update_active_context_copy(
     db_path: Path,
 ) -> None:
-    """No draft: copy approved profile/preferences into a new current draft."""
+    """No draft: copy approved profile/preferences into a new profile draft."""
     from app.db.models.attachments import ATTACHMENT_STATE_ACTIVE
     from app.services.profile_drafts import propose_profile_update
     from app.services.skill_normalization import SkillNormalizer
@@ -1202,7 +1248,7 @@ def test_propose_update_active_context_copy(
             )
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, owner_id)
                 assert draft is not None
                 assert draft.source_attachment_id is None
                 assert draft.target_profile_id == owner_id
@@ -1279,7 +1325,7 @@ def test_propose_update_preference_only_null_source(
             assert result.draft.candidate_profile.summary == "Backend engineer"
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, owner_id)
                 assert draft is not None
                 assert draft.source_attachment_id is None
                 assert draft.draft_json["job_preferences"]["target_roles"] == [
@@ -1317,11 +1363,11 @@ def test_propose_update_exclusions_survive_repeated_updates(
                 owner = await prof_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="upd-repeat.pdf"
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=None,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
                 owner_id = owner.id
@@ -1405,11 +1451,11 @@ def test_propose_update_accumulates_without_duplicate_profile_content(
                 owner = await prof_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="upd-no-dupes.pdf"
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=_valid_draft_json(),
                     source_attachment_id=None,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
                 owner_id = owner.id
@@ -1448,7 +1494,7 @@ def test_propose_update_accumulates_without_duplicate_profile_content(
             assert len(second.draft.candidate_profile.experiences) == 1
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, owner_id)
                 assert draft is not None
                 assert draft.draft_json["candidate_profile"]["summary"] == (
                     "Backend engineer. Improves APIs. Leads platform work."
@@ -1484,11 +1530,11 @@ def test_propose_update_invalid_payload_leaves_prior_unchanged(
                 owner = await prof_repo.create_pending_profile(
                     session, attachment_id=att_id, display_name="upd-invalid.pdf"
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=owner.id,
                     draft_json=prior,
                     source_attachment_id=None,
-                    target_profile_id=owner.id,
                 )
                 await session.commit()
                 owner_id = owner.id
@@ -1503,7 +1549,7 @@ def test_propose_update_invalid_payload_leaves_prior_unchanged(
             assert result.tool_result.code == ERROR_INVALID_PROFILE_UPDATE
 
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, owner_id)
                 assert draft is not None
                 assert draft.draft_json == prior
                 assert await prof_repo.get_active_profile(session) is None
@@ -1772,11 +1818,11 @@ async def _seed_pending_profile_draft_owner(
     )
     if select_workspace:
         await workspace_repo.set_active_profile_id(session, pending.id)
-    await prof_repo.upsert_current_draft(
+    await prof_repo.upsert_draft_for_profile(
         session,
+        profile_id=pending.id,
         draft_json=draft_json,
         source_attachment_id=attachment_id,
-        target_profile_id=pending.id,
     )
     return pending.id, conversation.id
 
@@ -1930,7 +1976,10 @@ def test_first_approval_promotes_pending_profile_and_preserves_bootstrap_chat(
                 assert profile.state == "ready"
                 assert profile.display_name == "Ava Synthetic"
                 assert profile.active_attachment_id == att_id
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, pending_id)
+                    is None
+                )
                 att = await att_repo.get_by_id(session, att_id)
                 assert att is not None
                 assert att.state == ATTACHMENT_STATE_ACTIVE
@@ -2016,13 +2065,13 @@ def test_approved_profile_persists_across_engine_restart(
                     session, profile_id=pending.id
                 )
                 await workspace_repo.set_active_profile_id(session, pending.id)
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=pending.id,
                     draft_json=_approval_draft_json(
                         prefs=prefs, exclude_python=True
                     ),
                     source_attachment_id=att_id,
-                    target_profile_id=pending.id,
                 )
                 await _seed_cv_document_draft(
                     session,
@@ -2080,7 +2129,10 @@ def test_approved_profile_persists_across_engine_restart(
                 assert jp.preferences_json["target_roles"] == [
                     "Platform Engineer"
                 ]
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
 
                 n = (
                     await session.execute(
@@ -2202,7 +2254,10 @@ def test_replacement_archives_old_attachment_and_retains_file(
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
                 assert profile.active_attachment_id == new_id
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, pending_id)
+                    is None
+                )
                 active_n = (
                     await session.execute(
                         text(
@@ -2310,7 +2365,10 @@ def test_preflight_missing_file_leaves_prior_truth(
                 new = await att_repo.get_by_id(session, new_id)
                 assert new is not None
                 assert new.state == "staged"
-                assert await prof_repo.get_current_draft(session) is not None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, pending_id)
+                    is not None
+                )
             assert storage.exists(old_rel)
         finally:
             await engine.dispose()
@@ -2404,7 +2462,7 @@ def test_transaction_failpoint_rolls_back_preserves_staged(
                 new = await att_repo.get_by_id(session, new_id)
                 assert new is not None
                 assert new.state == "staged"
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, pending_id)
                 assert draft is not None
                 assert draft.source_attachment_id == new_id
             assert storage.exists(old_rel)
@@ -2484,7 +2542,10 @@ def test_sync_failure_after_commit_keeps_sqlite_truth(
                     s for s in skills if s["skill"]["canonical_key"] == "python"
                 )
                 assert py["excluded"] is True
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, pending_id)
+                    is None
+                )
                 att = await att_repo.get_by_id(session, att_id)
                 assert att is not None
                 assert att.state == ATTACHMENT_STATE_ACTIVE
@@ -2645,14 +2706,14 @@ def test_preference_only_approval_keeps_attachment(
                         )
                     ],
                 )
-                await prof_repo.upsert_current_draft(
+                await prof_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=ready.id,
                     draft_json={
                         "candidate_profile": corrected_profile,
                         "job_preferences": prefs,
                     },
                     source_attachment_id=None,
-                    target_profile_id=ready.id,
                 )
                 await session.commit()
 
@@ -2685,7 +2746,7 @@ def test_preference_only_approval_keeps_attachment(
                 )
                 assert profile.profile_json["full_name"] == "Ada Lovelace"
                 assert profile.profile_json["location"] is None
-                assert await prof_repo.get_current_draft(session) is None
+                assert await prof_repo.get_draft_for_profile(session, ready.id) is None
             assert storage.exists(rel)
         finally:
             await engine.dispose()
@@ -2977,14 +3038,14 @@ def test_commit_profile_draft_rejects_cross_profile_owner_before_interrupt(
             assert commits == []
             run_id = events[0].run_id
             async with factory() as session:
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, draft_owner)
                 assert draft is not None
                 assert draft.target_profile_id == draft_owner
                 assert run_owner != draft_owner
                 rows = await tool_repo.list_for_run_ids(session, [run_id])
                 assert len(rows) == 1
                 assert rows[0].status == TOOL_EXECUTION_STATUS_FAILED
-                assert rows[0].error_code == "PROFILE_INCONSISTENT"
+                assert rows[0].error_code == "DRAFT_NOT_FOUND"
         finally:
             await engine.dispose()
 
@@ -3130,7 +3191,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 assert len(tools) == 1
                 assert tools[0].status == TOOL_EXECUTION_STATUS_RUNNING
                 assert tools[0].result_json is None
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, _pending_id)
                 assert draft is not None
 
             async with open_checkpointer(db_path) as saver:
@@ -3178,7 +3239,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 assert stored.ok is True
                 assert stored.data is not None
                 assert stored.data.get("committed") is False
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, _pending_id)
                 assert draft is not None
                 assert draft.target_profile_id == _pending_id
                 assert (
@@ -3249,7 +3310,7 @@ def test_commit_profile_draft_request_changes_preserves_draft(
                 tools = await tool_repo.list_for_run_ids(session, [run_id])
                 assert len(tools) == 1
                 assert tools[0].tool_call_id == "call-commit-rc"
-                draft = await prof_repo.get_current_draft(session)
+                draft = await prof_repo.get_draft_for_profile(session, _pending_id)
                 assert draft is not None
                 assert draft.draft_json == draft_json_after
         finally:
@@ -3434,7 +3495,10 @@ def test_commit_profile_draft_save_profile_commits_and_sync_failure_truthful(
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
                 assert profile.active_attachment_id == att_id
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, _pending_id)
+                    is None
+                )
                 att = await att_repo.get_by_id(session, att_id)
                 assert att is not None
                 assert att.state == ATTACHMENT_STATE_ACTIVE
@@ -3625,7 +3689,10 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                     == "https://github.com/saved-user"
                 )
                 profile_updated = profile.updated_at
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, _pending_id)
+                    is None
+                )
 
             # Same-identity ToolResult replay: no second SQLite/graph work.
             replay = await execute_tool_replay(
@@ -3645,7 +3712,10 @@ def test_commit_profile_draft_save_profile_success_and_terminal_noop(
                 profile = await prof_repo.get_active_profile(session)
                 assert profile is not None
                 assert profile.updated_at == profile_updated
-                assert await prof_repo.get_current_draft(session) is None
+                assert (
+                    await prof_repo.get_draft_for_profile(session, _pending_id)
+                    is None
+                )
 
             # Terminal no-op resume / rapid repeated save_profile.
             noop = [
@@ -3957,7 +4027,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             assert pubs[-1].summary
 
             async with factory() as session:
-                draft_before = await prof_repo.get_current_draft(session)
+                draft_before = await prof_repo.get_draft_for_profile(
+                    session, owner_profile_id
+                )
                 assert draft_before is not None
                 draft_json_before = json.dumps(
                     draft_before.draft_json, sort_keys=True
@@ -3981,7 +4053,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             assert pubs[0].tool_execution_id == exec_id_cv
 
             async with factory() as session:
-                draft_after = await prof_repo.get_current_draft(session)
+                draft_after = await prof_repo.get_draft_for_profile(
+                    session, owner_profile_id
+                )
                 assert draft_after is not None
                 assert (
                     json.dumps(draft_after.draft_json, sort_keys=True)
@@ -4011,7 +4085,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             exec_id_upd = pubs[0].tool_execution_id
 
             async with factory() as session:
-                draft_mid = await prof_repo.get_current_draft(session)
+                draft_mid = await prof_repo.get_draft_for_profile(
+                    session, owner_profile_id
+                )
                 assert draft_mid is not None
                 mid_json = json.dumps(draft_mid.draft_json, sort_keys=True)
                 mid_updated = draft_mid.updated_at
@@ -4037,7 +4113,9 @@ def test_five_production_tools_durable_status_and_proposal_replay(
             assert pubs[0].tool_execution_id == exec_id_upd
 
             async with factory() as session:
-                draft_final = await prof_repo.get_current_draft(session)
+                draft_final = await prof_repo.get_draft_for_profile(
+                    session, owner_profile_id
+                )
                 assert draft_final is not None
                 assert (
                     json.dumps(draft_final.draft_json, sort_keys=True)

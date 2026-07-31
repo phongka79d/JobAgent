@@ -163,11 +163,11 @@ async def _create_pending_profile(
     conversation = await conversations_repo.create_bootstrap_for_profile(
         session, profile_id=profile.id
     )
-    await profiles_repo.upsert_current_draft(
+    await profiles_repo.upsert_draft_for_profile(
         session,
+        profile_id=profile.id,
         draft_json={"candidate_profile": {}},
         source_attachment_id=attachment.id,
-        target_profile_id=profile.id,
     )
     return profile.id, attachment.id, conversation.id
 
@@ -237,11 +237,11 @@ def test_profile_delete_preserves_other_profile_global_job_and_normalizes_fallba
                 other.last_opened_at = base + timedelta(minutes=1)
                 target.last_opened_at = base
                 await workspace_repo.set_active_profile_id(session, target_id)
-                await profiles_repo.upsert_current_draft(
+                await profiles_repo.upsert_draft_for_profile(
                     session,
+                    profile_id=target_id,
                     draft_json={"candidate_profile": {"full_name": "a"}},
                     source_attachment_id=target_attachment,
-                    target_profile_id=target_id,
                 )
                 run_id = await _add_completed_run(
                     session,
@@ -287,7 +287,9 @@ def test_profile_delete_preserves_other_profile_global_job_and_normalizes_fallba
                 )
             assert pending_review.value.code == "PROFILE_REVIEW_PENDING"
             async with factory() as session:
-                await profiles_repo.delete_current_draft(session)
+                await profiles_repo.delete_draft_for_profile(
+                    session, profile_id=target_id
+                )
                 await documents_repo.delete_draft(session, target_attachment)
                 await session.commit()
             result = await delete_profile(

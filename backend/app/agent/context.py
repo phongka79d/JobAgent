@@ -348,11 +348,10 @@ async def load_profile_working_memory_messages(
         raise RuntimeError("conversation/profile ownership mismatch")
     messages: list[ContextMessage] = []
     approved = await profile_repo.get_profile(session, profile_id)
-    draft_row = await profile_repo.get_current_draft(session)
+    draft_row = await profile_repo.get_draft_for_profile(session, profile_id)
     if (
         (approved is None or approved.state != PROFILE_STATE_READY)
         and draft_row is not None
-        and draft_row.target_profile_id == profile_id
         and draft_row.source_attachment_id == owner.attachment_id
     ):
         try:

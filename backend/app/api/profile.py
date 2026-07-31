@@ -70,9 +70,10 @@ def _aware(value: datetime) -> datetime:
 
 async def _pending_draft_attachment(
     session: AsyncSession,
+    profile_id: str,
 ) -> tuple[bool, AttachmentPublic | None, Any | None]:
     """Return draft presence and staged source attachment metadata when any."""
-    draft_row = await profile_repo.get_current_draft(session)
+    draft_row = await profile_repo.get_draft_for_profile(session, profile_id)
     if draft_row is None:
         return False, None, None
     pending: AttachmentPublic | None = None
@@ -113,11 +114,16 @@ async def build_profile_read_response(
     state, optionally with draft/staged pending attachment for sidebar display.
     Never returns PDF bytes or storage paths.
     """
-    draft_present, pending_attachment, draft_row = await _pending_draft_attachment(
-        session
-    )
-
     profile_row = await profile_repo.get_selected_ready_profile(session)
+    draft_owner = profile_row
+    if draft_owner is None:
+        draft_owner = await profile_repo.get_incomplete_profile(session)
+    if draft_owner is None:
+        draft_present, pending_attachment, draft_row = False, None, None
+    else:
+        draft_present, pending_attachment, draft_row = await _pending_draft_attachment(
+            session, draft_owner.id
+        )
     if profile_row is None:
         return empty_profile_read_response(
             draft_present=draft_present,
