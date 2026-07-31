@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ids import new_uuid
 from app.core.time import utc_now
 from app.db.models.profiles import ProfileDraft, ProfileReextractOperation
+from app.repositories import profiles as profile_repo
+from app.repositories import workspace_state as workspace_repo
 
 _TERMINAL_STATES = ("interrupted", "failed", "stale")
 _ACTIONABLE_STATES = ("running", "review_ready")
@@ -109,6 +111,47 @@ async def get_operation(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def reconcile_review_ready_to_stale(
+    session: AsyncSession, *, profile_id: str, operation_id: str
+) -> ProfileReextractOperation | None:
+    """CAS a review-ready operation stale when captured ownership changed."""
+    profile_id = _required_id("profile_id", profile_id)
+    operation_id = _required_id("operation_id", operation_id)
+    operation = await get_operation(
+        session, profile_id=profile_id, operation_id=operation_id
+    )
+    if operation is None or operation.state != "review_ready":
+        return operation
+    profile = await profile_repo.get_profile(session, profile_id)
+    workspace = await workspace_repo.get_state(session)
+    profile_updated_at = profile.updated_at if profile is not None else None
+    workspace_updated_at = workspace.updated_at if workspace is not None else None
+    if (
+        profile_updated_at == operation.base_profile_updated_at
+        and workspace is not None
+        and workspace.active_profile_id == profile_id
+        and workspace_updated_at == operation.base_workspace_updated_at
+    ):
+        return operation
+    await session.execute(
+        update(ProfileReextractOperation)
+        .where(
+            ProfileReextractOperation.profile_id == profile_id,
+            ProfileReextractOperation.id == operation_id,
+            ProfileReextractOperation.state == "review_ready",
+        )
+        .values(
+            state="stale",
+            error_code="PROFILE_REEXTRACT_STALE",
+            updated_at=utc_now(),
+        )
+    )
+    await session.flush()
+    return await get_operation(
+        session, profile_id=profile_id, operation_id=operation_id
+    )
 
 
 async def get_latest_operation_for_profile(
@@ -324,3 +367,24 @@ async def delete_operation(
         await session.execute(delete(ProfileReextractOperation).where(*predicates)),
     )
     return int(result.rowcount or 0) == 1
+
+
+async def delete_terminal_operations_without_draft(
+    session: AsyncSession, *, profile_id: str
+) -> int:
+    """Remove terminal recovery metadata that no draft still references."""
+    profile_id = _required_id("profile_id", profile_id)
+    owned_draft = exists().where(
+        ProfileDraft.reextract_operation_id == ProfileReextractOperation.id
+    )
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            delete(ProfileReextractOperation).where(
+                ProfileReextractOperation.profile_id == profile_id,
+                ProfileReextractOperation.state.in_(_TERMINAL_STATES),
+                ~owned_draft,
+            )
+        ),
+    )
+    return int(result.rowcount or 0)

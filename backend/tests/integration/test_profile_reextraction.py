@@ -1556,6 +1556,130 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
     run_async(_body())
 
 
+def test_status_read_reconciles_review_ready_to_stale_and_agent_cannot_edit(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(
+                    session, storage, CV_DIR / "digital_cv_01.pdf"
+                )
+                await session.commit()
+                profile_id = profile.id
+
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            await _collect_profile_events(coordinator.stream(profile_id))
+            async with factory() as session:
+                stored = await profile_repo.get_profile(session, profile_id)
+                assert stored is not None
+                stored.updated_at = utc_now()
+                await session.commit()
+                operation = (
+                    await operation_repo.get_latest_operation_for_profile(
+                        session, profile_id
+                    )
+                )
+                assert operation is not None
+                operation_id = operation.id
+
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
+            assert review.operation_state == "stale"
+            assert review.can_approve is False
+            assert review.can_discard is True
+            correction = await propose_profile_update(
+                session_factory=factory,
+                normalizer=_normalizer(),
+                expected_profile_id=profile_id,
+                profile_changes={"summary": "must be rejected"},
+            )
+            assert correction.tool_result.code == "PROFILE_REEXTRACT_STALE"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_approve_and_discard_require_matching_operation_and_revision(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(
+                    session, storage, CV_DIR / "digital_cv_01.pdf"
+                )
+                await session.commit()
+                profile_id = profile.id
+
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            await _collect_profile_events(coordinator.stream(profile_id))
+            async with factory() as session:
+                operation = (
+                    await operation_repo.get_latest_operation_for_profile(
+                        session, profile_id
+                    )
+                )
+                assert operation is not None
+                operation_id = operation.id
+
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
+            with pytest.raises(ProfileReextractError) as wrong_operation:
+                await coordinator.discard(
+                    profile_id,
+                    operation_id=new_uuid(),
+                    revision=review.revision,
+                )
+            assert wrong_operation.value.code == "PROFILE_REEXTRACT_CONFLICT"
+            approved = await coordinator.approve(
+                profile_id,
+                operation_id=operation_id,
+                revision=review.revision,
+            )
+            assert approved.approved is True
+            async with factory() as session:
+                assert (
+                    await operation_repo.get_operation(
+                        session, profile_id=profile_id, operation_id=operation_id
+                    )
+                    is None
+                )
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
 def test_claim_rejects_incomplete_profile_setup_before_operation_or_provider(
     migrated_sqlite: Path, tmp_path: Path
 ) -> None:

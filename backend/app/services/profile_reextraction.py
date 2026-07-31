@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal, cast
 
 import anyio
 from pydantic import ValidationError
@@ -87,6 +87,7 @@ _PREFERENCE_FIELDS: tuple[ProfilePreferenceField, ...] = (
     "acceptable_work_modes",
     "target_seniority",
 )
+_UNSET_OPERATION = object()
 
 _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
     "validating_source": "Validating the retained CV",
@@ -187,6 +188,11 @@ def build_review(
     proposed_preferences: JobPreferences | None = None,
     profile_id: str,
     revision: datetime,
+    source: Literal["agent_update", "reextract"] = "agent_update",
+    operation_id: str | None = None,
+    operation_state: Literal["review_ready", "stale"] | None = None,
+    can_approve: bool = True,
+    can_discard: bool = True,
 ) -> ProfileReextractReview:
     """Build one bounded public diff without raw text or provider identity."""
     current_snapshot = _snapshot(current)
@@ -238,8 +244,11 @@ def build_review(
             - _collection_size(current, "certifications"),
         ),
         extraction_confidence=confidence,
-        can_approve=True,
-        can_discard=True,
+        source=source,
+        operation_id=operation_id,
+        operation_state=operation_state,
+        can_approve=can_approve,
+        can_discard=can_discard,
     )
 
 
@@ -535,8 +544,13 @@ class ProfileReextractionCoordinator:
                 ),
             )
 
-    async def get_review(self, profile_id: str) -> ProfileReextractReview:
-        async with self._session_factory() as session:
+    async def get_review(
+        self,
+        profile_id: str,
+        *,
+        operation_id: str | None | object = _UNSET_OPERATION,
+    ) -> ProfileReextractReview:
+        async with session_scope(self._session_factory) as session:
             profile = await profile_repo.get_profile(session, profile_id)
             if profile is None:
                 raise ProfileReextractError("PROFILE_NOT_FOUND", "Profile not found")
@@ -547,6 +561,39 @@ class ProfileReextractionCoordinator:
                 raise ProfileReextractError(
                     "PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
                     "No review is available for this profile",
+                )
+            if operation_id is _UNSET_OPERATION:
+                operation_id = draft.reextract_operation_id
+            if operation_id is None:
+                if draft.reextract_operation_id is not None:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review requires its exact re-extraction operation",
+                    )
+                source: Literal["agent_update", "reextract"] = "agent_update"
+                operation_state: Literal["review_ready", "stale"] | None = None
+            else:
+                if not isinstance(operation_id, str):
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review operation identity is invalid",
+                    )
+                operation = await operation_repo.reconcile_review_ready_to_stale(
+                    session, profile_id=profile_id, operation_id=operation_id
+                )
+                if draft.reextract_operation_id != operation_id or operation is None:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review operation identity changed",
+                    )
+                if operation.state not in {"review_ready", "stale"}:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review operation is not actionable",
+                    )
+                source = "reextract"
+                operation_state = cast(
+                    Literal["review_ready", "stale"], operation.state
                 )
             source_id = draft.source_attachment_id
             if source_id is not None and source_id != profile.attachment_id:
@@ -607,17 +654,33 @@ class ProfileReextractionCoordinator:
                 proposed_preferences=draft_payload.job_preferences,
                 profile_id=profile_id,
                 revision=draft.updated_at,
+                source=source,
+                operation_id=operation_id if isinstance(operation_id, str) else None,
+                operation_state=operation_state,
+                can_approve=operation_state != "stale",
+                can_discard=True,
             )
 
     async def approve(
-        self, profile_id: str, *, revision: datetime
+        self,
+        profile_id: str,
+        *,
+        revision: datetime,
+        operation_id: str | None | object = _UNSET_OPERATION,
     ) -> ProfileReextractApprovalResponse:
+        if operation_id is _UNSET_OPERATION:
+            async with self._session_factory() as session:
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
+                operation_id = draft.reextract_operation_id if draft else None
         result = await commit_approved_draft(
             session_factory=self._session_factory,
             storage=self._storage,
             normalizer=self._normalizer,
             expected_profile_id=profile_id,
             expected_draft_updated_at=_aware(revision),
+            expected_operation_id=(
+                operation_id if isinstance(operation_id, str) else None
+            ),
             driver=self._graph_driver,
         )
         if not result.sqlite_committed:
@@ -642,7 +705,13 @@ class ProfileReextractionCoordinator:
             warning=warning,
         )
 
-    async def discard(self, profile_id: str, *, revision: datetime) -> None:
+    async def discard(
+        self,
+        profile_id: str,
+        *,
+        revision: datetime,
+        operation_id: str | None | object = _UNSET_OPERATION,
+    ) -> None:
         expected = _aware(revision)
         async with session_scope(self._session_factory) as session:
             draft = await profile_repo.get_draft_for_profile(session, profile_id)
@@ -656,11 +725,35 @@ class ProfileReextractionCoordinator:
                     "PROFILE_REEXTRACT_CONFLICT",
                     "The review changed; reload it before discarding",
                 )
+            if operation_id is _UNSET_OPERATION:
+                operation_id = draft.reextract_operation_id
+            if draft.reextract_operation_id != operation_id:
+                raise ProfileReextractError(
+                    "PROFILE_REEXTRACT_CONFLICT",
+                    "The review operation identity changed; reload it",
+                )
+            if operation_id is not None:
+                operation = await operation_repo.reconcile_review_ready_to_stale(
+                    session,
+                    profile_id=profile_id,
+                    operation_id=cast(str, operation_id),
+                )
+                if operation is None or operation.state not in {
+                    "stale",
+                    "review_ready",
+                }:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review operation changed",
+                    )
             attachment_id = draft.source_attachment_id
             deleted = await profile_repo.delete_draft_for_profile(
                 session,
                 profile_id=profile_id,
                 expected_revision=expected,
+                expected_operation_id=(
+                    operation_id if isinstance(operation_id, str) else None
+                ),
             )
             if not deleted:
                 raise ProfileReextractError(

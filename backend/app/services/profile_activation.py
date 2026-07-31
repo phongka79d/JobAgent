@@ -251,6 +251,7 @@ async def activate_profile_by_id(
     from app.schemas.profile import SafeWarning, SelectionResponse
     from app.services.activity_gate import (
         ActivityBlockedError,
+        assert_profile_reextract_clear,
         assert_profile_review_clear,
         assert_workspace_idle,
     )
@@ -266,6 +267,9 @@ async def activate_profile_by_id(
                 await assert_workspace_idle(session)
                 current_id = await workspace_repo.get_active_profile_id(session)
                 if current_id is not None:
+                    await assert_profile_reextract_clear(
+                        session, profile_id=current_id
+                    )
                     await assert_profile_review_clear(
                         session, profile_id=current_id
                     )
@@ -280,6 +284,7 @@ async def activate_profile_by_id(
                 raise ProfileActivationError(
                     "PROFILE_NOT_READY", "profile is not ready"
                 )
+            await assert_profile_reextract_clear(session, profile_id=profile_id)
             incomplete = await profiles_repo.get_incomplete_profile(session)
             if incomplete is not None:
                 raise ProfileActivationError(

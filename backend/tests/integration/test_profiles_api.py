@@ -796,11 +796,14 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
             )
 
         async def get_review(
-            self, requested_profile_id: str
+            self, requested_profile_id: str, *, operation_id: str | None
         ) -> ProfileReextractReview:
             snapshot = PublicProfileSnapshot(summary="Profile", skill_labels=[])
             return ProfileReextractReview(
                 profile_id=requested_profile_id,
+                source="agent_update",
+                operation_id=None,
+                operation_state=None,
                 revision=review_revision,
                 current=snapshot,
                 proposed=snapshot,
@@ -820,9 +823,13 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
             )
 
         async def approve(
-            self, requested_profile_id: str, *, revision: datetime
+            self,
+            requested_profile_id: str,
+            *,
+            revision: datetime,
+            operation_id: str | None,
         ) -> ProfileReextractApprovalResponse:
-            captured["approve"] = (requested_profile_id, revision)
+            captured["approve"] = (requested_profile_id, operation_id, revision)
             return ProfileReextractApprovalResponse(
                 profile_id=requested_profile_id,
                 approved=True,
@@ -831,9 +838,13 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
             )
 
         async def discard(
-            self, requested_profile_id: str, *, revision: datetime
+            self,
+            requested_profile_id: str,
+            *,
+            revision: datetime,
+            operation_id: str | None,
         ) -> None:
-            captured["discard"] = (requested_profile_id, revision)
+            captured["discard"] = (requested_profile_id, operation_id, revision)
 
     monkeypatch.setattr(
         "app.api.profiles.ProfileReextractionCoordinator", FakeCoordinator
@@ -854,7 +865,7 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
         review = client.get(f"/api/profiles/{profile_id}/reextract-draft")
         approved = client.post(
             f"/api/profiles/{profile_id}/reextract-draft/approve",
-            json={"revision": review_revision.isoformat()},
+            json={"operation_id": None, "revision": review_revision.isoformat()},
         )
         discarded = client.delete(
             f"/api/profiles/{profile_id}/reextract-draft",
@@ -871,8 +882,8 @@ def test_profile_reextract_uses_direct_typed_stream_without_chat_events(
     assert approved.status_code == 200
     assert approved.json()["approved"] is True
     assert discarded.status_code == 204
-    assert captured["approve"] == (profile_id, review_revision)
-    assert captured["discard"] == (profile_id, review_revision)
+    assert captured["approve"] == (profile_id, None, review_revision)
+    assert captured["discard"] == (profile_id, None, review_revision)
     assert "reextract_review_ready" in response.text
     assert "run_started" not in response.text
     assert "approval_required" not in response.text

@@ -91,6 +91,9 @@ class ProfileReextractReview(BaseModel):
     model_config = StrictModelConfig
 
     profile_id: UuidStr
+    source: Literal["agent_update", "reextract"]
+    operation_id: UuidStr | None
+    operation_state: Literal["review_ready", "stale"] | None
     revision: AwareUtcDatetime
     current: PublicProfileSnapshot
     proposed: PublicProfileSnapshot
@@ -102,6 +105,21 @@ class ProfileReextractReview(BaseModel):
     extraction_confidence: ConfidenceDelta | None
     can_approve: bool
     can_discard: bool
+
+    @model_validator(mode="after")
+    def source_matches_operation(self) -> ProfileReextractReview:
+        if self.source == "agent_update":
+            if self.operation_id is not None or self.operation_state is not None:
+                raise ValueError("agent_update reviews cannot have operation state")
+            if not self.can_approve or not self.can_discard:
+                raise ValueError("ordinary reviews must be actionable")
+        elif self.operation_id is None or self.operation_state is None:
+            raise ValueError("reextract reviews require operation identity and state")
+        if self.operation_state == "review_ready" and not self.can_approve:
+            raise ValueError("review-ready operation reviews must be approvable")
+        if self.operation_state == "stale" and self.can_approve:
+            raise ValueError("stale operation reviews cannot be approvable")
+        return self
 
 
 class ProfileReextractReviewReady(BaseModel):
@@ -121,6 +139,7 @@ class ProfileReextractFailed(BaseModel):
 class ProfileReextractApproveRequest(BaseModel):
     model_config = StrictModelConfig
 
+    operation_id: UuidStr | None
     revision: AwareUtcDatetime
 
 

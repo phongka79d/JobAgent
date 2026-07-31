@@ -1209,6 +1209,22 @@ async def propose_profile_update(
             session, expected_profile_id
         )
         if draft_row is not None:
+            if draft_row.reextract_operation_id is not None:
+                operation = await operation_repo.reconcile_review_ready_to_stale(
+                    session,
+                    profile_id=expected_profile_id,
+                    operation_id=draft_row.reextract_operation_id,
+                )
+                if operation is None or operation.state == "stale":
+                    return ProposeUpdateResult(
+                        base_kind="current_draft",
+                        tool_result=_tool_fail(
+                            "PROFILE_REEXTRACT_STALE",
+                            "The re-extraction review is stale; discard it "
+                            "before editing",
+                        ),
+                        source_attachment_id=draft_row.source_attachment_id,
+                    )
             try:
                 base = parse_profile_draft_payload(draft_row.draft_json)
             except ValidationError as exc:
@@ -1335,6 +1351,21 @@ async def propose_profile_update(
             if live_draft is not None and live_draft.reextract_operation_id is not None:
                 source_attachment_id = live_draft.source_attachment_id
                 reextract_operation_id = live_draft.reextract_operation_id
+                operation = await operation_repo.reconcile_review_ready_to_stale(
+                    session,
+                    profile_id=expected_profile_id,
+                    operation_id=reextract_operation_id,
+                )
+                if operation is None or operation.state == "stale":
+                    return ProposeUpdateResult(
+                        base_kind=base_kind,
+                        tool_result=_tool_fail(
+                            "PROFILE_REEXTRACT_STALE",
+                            "The re-extraction review is stale; discard it "
+                            "before editing",
+                        ),
+                        source_attachment_id=source_attachment_id,
+                    )
             await profile_repo.upsert_draft_for_profile(
                 session,
                 profile_id=target_profile_id,

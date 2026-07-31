@@ -65,6 +65,8 @@ def _http_for_reextract_error(exc: Exception) -> HTTPException:
         "CV_NOT_REPROCESSABLE": 409,
         "PROFILE_REVIEW_PENDING": 409,
         "PROFILE_REEXTRACT_CONFLICT": 409,
+        "PROFILE_REEXTRACT_STALE": 409,
+        "PROFILE_REEXTRACT_IN_PROGRESS": 409,
         "PROFILE_REEXTRACT_DRAFT_NOT_FOUND": 404,
         "PROFILE_REEXTRACT_DRAFT_INVALID": 422,
         "DRAFT_NOT_FOUND": 404,
@@ -217,10 +219,16 @@ async def reextract_profile(
 async def get_profile_reextract_review(
     profile_id: Annotated[UuidStr, Path(description="Profile id")],
     deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+    operation_id: Annotated[
+        UuidStr | None,
+        Query(description="Exact operation owner; null for Agent review"),
+    ] = None,
 ) -> ProfileReextractReview:
     coordinator = _profile_reextract_coordinator(deps)
     try:
-        return await coordinator.get_review(profile_id)
+        return await coordinator.get_review(
+            profile_id, operation_id=operation_id or None
+        )
     except ProfileReextractError as exc:
         raise _http_for_reextract_error(exc) from exc
 
@@ -236,7 +244,9 @@ async def approve_profile_reextract_review(
 ) -> ProfileReextractApprovalResponse:
     coordinator = _profile_reextract_coordinator(deps)
     try:
-        return await coordinator.approve(profile_id, revision=body.revision)
+        return await coordinator.approve(
+            profile_id, revision=body.revision, operation_id=body.operation_id
+        )
     except ProfileReextractError as exc:
         raise _http_for_reextract_error(exc) from exc
 
@@ -248,14 +258,20 @@ async def approve_profile_reextract_review(
 )
 async def discard_profile_reextract_review(
     profile_id: Annotated[UuidStr, Path(description="Profile id")],
+    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
     revision: Annotated[
         AwareUtcDatetime, Query(description="Expected UTC draft revision")
     ],
-    deps: Annotated[ProfileReextractDeps, Depends(get_profile_reextract_deps)],
+    operation_id: Annotated[
+        UuidStr | None,
+        Query(description="Exact operation owner; null for Agent review"),
+    ] = None,
 ) -> Response:
     coordinator = _profile_reextract_coordinator(deps)
     try:
-        await coordinator.discard(profile_id, revision=revision)
+        await coordinator.discard(
+            profile_id, revision=revision, operation_id=operation_id or None
+        )
     except ProfileReextractError as exc:
         raise _http_for_reextract_error(exc) from exc
     return Response(status_code=204)

@@ -57,6 +57,7 @@ from app.repositories import attachment_text_chunks as chunk_repo
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_documents as cv_doc_repo
+from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.cv_document import CVDocument, parse_cv_document
@@ -93,6 +94,7 @@ ERROR_APPROVAL_TRANSACTION_FAILED: str = "APPROVAL_TRANSACTION_FAILED"
 ERROR_INVARIANT_VIOLATION: str = "APPROVAL_INVARIANT_VIOLATION"
 ERROR_DOCUMENT_DRAFT_NOT_FOUND: str = "DOCUMENT_DRAFT_NOT_FOUND"
 ERROR_DOCUMENT_DRAFT_INVALID: str = "DOCUMENT_DRAFT_INVALID"
+_UNSET_OPERATION = object()
 
 # Failpoint names for deterministic integration tests only.
 Failpoint = Literal[
@@ -156,6 +158,7 @@ class _Preflight:
     document_bundle: DocumentDraftBundle | None
     target_profile_id: str
     target_profile_state: str
+    draft_reextract_operation_id: str | None
 
 
 def _activation_to_approval_error(exc: ActivationError) -> ProfileApprovalError:
@@ -339,7 +342,51 @@ async def _load_preflight(
         document_bundle=document_bundle,
         target_profile_id=target_profile_id,
         target_profile_state=target_profile_state,
+        draft_reextract_operation_id=draft_row.reextract_operation_id,
     )
+
+
+async def _validate_operation_linked_approval(
+    session: AsyncSession,
+    *,
+    preflight: _Preflight,
+    expected_profile_id: str,
+    expected_operation_id: str | None | object,
+) -> Any:
+    operation_id = preflight.draft_reextract_operation_id
+    if expected_operation_id is _UNSET_OPERATION:
+        expected_operation_id = operation_id
+    if operation_id is None:
+        if expected_operation_id is not None:
+            raise ProfileApprovalError(
+                "Ordinary draft cannot consume a re-extraction operation",
+                code="PROFILE_REEXTRACT_CONFLICT",
+            )
+        return None
+    if expected_operation_id != operation_id:
+        raise ProfileApprovalError(
+            "Re-extraction operation identity changed",
+            code="PROFILE_REEXTRACT_CONFLICT",
+        )
+    operation = await operation_repo.get_operation(
+        session, profile_id=expected_profile_id, operation_id=operation_id
+    )
+    profile = await profile_repo.get_profile(session, expected_profile_id)
+    workspace = await workspace_repo.get_state(session)
+    if (
+        operation is None
+        or profile is None
+        or workspace is None
+        or operation.state != "review_ready"
+        or profile.updated_at != operation.base_profile_updated_at
+        or workspace.active_profile_id != expected_profile_id
+        or workspace.updated_at != operation.base_workspace_updated_at
+    ):
+        raise ProfileApprovalError(
+            "Re-extraction review is stale",
+            code="PROFILE_REEXTRACT_STALE",
+        )
+    return operation
 
 
 async def _load_approved_cv_sync_inputs(
@@ -584,6 +631,7 @@ async def commit_approved_draft(
     normalizer: SkillNormalizer,
     expected_profile_id: str,
     expected_draft_updated_at: datetime | None = None,
+    expected_operation_id: str | None | object = _UNSET_OPERATION,
     driver: AsyncGraphDriver | None = None,
     failpoint: str | None = None,
     sync_fn: Callable[..., Awaitable[None]] | None = None,
@@ -650,11 +698,17 @@ async def commit_approved_draft(
                 or live.draft_row_source_attachment_id
                 != preflight.draft_row_source_attachment_id
                 or live.active_attachment_id_for_profile != target_att_id
-            ):
+                ):
                 raise ProfileApprovalError(
                     "Draft or attachment changed during approval preflight",
                     code=ERROR_APPROVAL_TRANSACTION_FAILED,
                 )
+            operation = await _validate_operation_linked_approval(
+                session,
+                preflight=live,
+                expected_profile_id=expected_profile_id,
+                expected_operation_id=expected_operation_id,
+            )
             (
                 profile_updated_at,
                 approved_profile_id,
@@ -662,6 +716,18 @@ async def commit_approved_draft(
             ) = await _run_sqlite_approval(
                 session, live, failpoint=failpoint
             )
+            if operation is not None:
+                deleted = await operation_repo.delete_operation(
+                    session,
+                    profile_id=expected_profile_id,
+                    operation_id=operation.id,
+                    expected_state="review_ready",
+                )
+                if not deleted:
+                    raise ProfileApprovalError(
+                        "Re-extraction operation changed during approval",
+                        code="PROFILE_REEXTRACT_CONFLICT",
+                    )
     except ProfileApprovalError as exc:
         return ApprovalCommitResult(
             ok=False,

@@ -29,12 +29,14 @@ from app.repositories import agent_runs as runs_repo
 from app.repositories import attachments as att_repo
 from app.repositories import conversations as conversations_repo
 from app.repositories import cv_tailoring as tailoring_repo
+from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profiles_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.profile import ProfileDeleteResponse
 from app.services.activity_gate import (
     ActivityBlockedError,
     assert_profile_idle,
+    assert_profile_reextract_clear,
     assert_profile_review_clear,
 )
 from app.services.conversations import project_conversation
@@ -93,6 +95,7 @@ async def _mark_for_deletion(
     if profile is None:
         raise ProfileDeletionError("PROFILE_NOT_FOUND", "profile not found")
     try:
+        await assert_profile_reextract_clear(session, profile_id=profile_id)
         await assert_profile_review_clear(session, profile_id=profile_id)
         await assert_profile_idle(
             session, profile_id=profile_id, code="PROFILE_DELETE_BLOCKED"
@@ -129,6 +132,10 @@ async def _mark_for_deletion(
         attachment.state = ATTACHMENT_STATE_DELETING
         attachment.failure_code = None
         await session.flush()
+
+    await operation_repo.delete_terminal_operations_without_draft(
+        session, profile_id=profile_id
+    )
 
     tailoring_sessions = await tailoring_repo.list_sessions_for_profile(
         session, profile_id
