@@ -19,7 +19,11 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_ARCHIVED,
 )
 from app.db.models.profiles import PROFILE_STATE_READY
-from app.db.session import immediate_session_scope, session_scope
+from app.db.session import (
+    ImmediateTransactionBusy,
+    immediate_session_scope,
+    session_scope,
+)
 from app.repositories import attachments as att_repo
 from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profile_reextract_operations as operation_repo
@@ -56,7 +60,11 @@ from app.services.activity_gate import (
     assert_workspace_idle,
 )
 from app.services.profile_approval import commit_approved_draft
-from app.services.profile_drafts import publish_reextract_stage, stage_cv_document
+from app.services.profile_drafts import (
+    has_incomplete_profile_setup,
+    publish_reextract_stage,
+    stage_cv_document,
+)
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 
@@ -301,6 +309,11 @@ class ProfileReextractionCoordinator:
                     await assert_profile_review_clear(session, profile_id=profile_id)
                 except ActivityBlockedError as exc:
                     raise ProfileReextractError(exc.code, exc.summary) from exc
+                if await has_incomplete_profile_setup(session):
+                    raise ProfileReextractError(
+                        "PROFILE_SETUP_IN_PROGRESS",
+                        "Complete the pending profile setup before re-extracting",
+                    )
                 profile = await profile_repo.get_profile(session, profile_id)
                 active_id = await workspace_repo.get_active_profile_id(session)
                 workspace = await workspace_repo.get_state(session)
@@ -341,6 +354,11 @@ class ProfileReextractionCoordinator:
                     attachment_id=attachment.id,
                     storage_path=attachment.storage_path,
                 )
+        except ImmediateTransactionBusy as exc:
+            raise ProfileReextractError(
+                "PROFILE_LIFECYCLE_BUSY",
+                "The profile lifecycle is busy; retry shortly",
+            ) from exc
         except operation_repo.ProfileReextractOperationConflict as exc:
             operation_id = exc.operation_id
             if exc.code == "PROFILE_REEXTRACT_IN_PROGRESS" and operation_id is None:

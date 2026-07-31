@@ -13,6 +13,7 @@ from app.schemas.profile_reextraction import (
     ProfileReextractReviewReady,
 )
 from app.services.profile_reextraction import (
+    ProfileReextractError,
     ProfileReextractionCoordinator,
     build_review,
 )
@@ -261,3 +262,32 @@ async def test_cancelled_stream_persists_interrupted_after_session_close(
         await stream.athrow(asyncio.CancelledError())
     assert transitioned is True
     assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_claim_maps_immediate_busy_to_retryable_profile_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BusyScope:
+        async def __aenter__(self) -> Any:
+            from app.db.session import ImmediateTransactionBusy
+
+            raise ImmediateTransactionBusy
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "app.services.profile_reextraction.immediate_session_scope",
+        lambda _factory: BusyScope(),
+    )
+    coordinator = ProfileReextractionCoordinator(
+        session_factory=object(),  # type: ignore[arg-type]
+        storage=object(),  # type: ignore[arg-type]
+        normalizer=object(),  # type: ignore[arg-type]
+        invoker=object(),
+    )
+    with pytest.raises(ProfileReextractError) as caught:
+        await coordinator._claim(PROFILE_ID)
+    assert caught.value.code == "PROFILE_LIFECYCLE_BUSY"
+    assert caught.value.operation_id is None

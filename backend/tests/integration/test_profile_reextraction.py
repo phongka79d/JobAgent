@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+import app.services.profile_reextraction as profile_reextraction_service
 import pytest
 from app.core.ids import new_uuid
 from app.core.time import utc_now
@@ -87,6 +89,40 @@ async def _seed_ready_profile(
         extraction_version="test-v1",
         source_hash=file_hash,
     )
+
+
+async def _seed_stream_fixture(
+    session: AsyncSession, storage: AttachmentStorage, pdf: Path
+) -> tuple[Profile, str]:
+    attachment_id = new_uuid()
+    rel = storage.write_bytes(attachment_id, pdf.read_bytes())
+    await att_repo.create_staged(
+        session,
+        file_hash=f"stream-{attachment_id}",
+        original_name="ready.pdf",
+        size_bytes=pdf.stat().st_size,
+        storage_path=rel,
+        page_count=1,
+        attachment_id=attachment_id,
+    )
+    await att_repo.mark_active(session, attachment_id)
+    profile = await profile_repo.create_profile(
+        session,
+        attachment_id=attachment_id,
+        display_name="Ready",
+        profile_json=_valid_profile().model_dump(mode="json"),
+        location=None,
+        extraction_version="old-v1",
+        source_hash=f"source-{attachment_id}",
+    )
+    await workspace_repo.set_active_profile_id(session, profile.id)
+    return profile, rel
+
+
+async def _collect_profile_events(
+    stream: Any,
+) -> list[Any]:
+    return [event async for event in stream]
 
 
 def test_drafts_are_isolated_by_explicit_profile_owner(
@@ -1319,7 +1355,44 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
                 invoker=invoker,
                 graph_driver=None,
             )
-            events = [event async for event in coordinator.stream(profile_id)]
+            original_stage = profile_reextraction_service.stage_cv_document
+            stage_started = asyncio.Event()
+            release_stage = asyncio.Event()
+            stage_calls = 0
+
+            async def blocked_stage(**kwargs: Any) -> Any:
+                nonlocal stage_calls
+                stage_calls += 1
+                stage_started.set()
+                await release_stage.wait()
+                return await original_stage(**kwargs)
+
+            monkeypatch.setattr(
+                profile_reextraction_service,
+                "stage_cv_document",
+                blocked_stage,
+            )
+            winner_task = asyncio.create_task(
+                _collect_profile_events(coordinator.stream(profile_id))
+            )
+            await stage_started.wait()
+            async with factory() as session:
+                running = await operation_repo.list_running_operations(
+                    session, profile_id
+                )
+                assert len(running) == 1
+                winner_operation_id = running[0].id
+
+            loser_task = asyncio.create_task(
+                _collect_profile_events(coordinator.stream(profile_id))
+            )
+            with pytest.raises(ProfileReextractError) as duplicate:
+                await loser_task
+            assert duplicate.value.code == "PROFILE_REEXTRACT_IN_PROGRESS"
+            assert duplicate.value.operation_id == winner_operation_id
+            assert stage_calls == 1
+            release_stage.set()
+            events = await winner_task
             assert [event.event for event in events] == [
                 "reextract_progress",
                 "reextract_progress",
@@ -1477,6 +1550,230 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
                 assert lookup.evaluation is not None
                 assert lookup.evaluation.evaluation_context_hash == old_context_hash
             scorer.assert_not_called()
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_claim_rejects_incomplete_profile_setup_before_operation_or_provider(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(session, storage, pdf)
+                pending_attachment_id = new_uuid()
+                await att_repo.create_staged(
+                    session,
+                    file_hash="pending-setup",
+                    original_name="pending.pdf",
+                    size_bytes=pdf.stat().st_size,
+                    storage_path=f"{pending_attachment_id}.pdf",
+                    page_count=1,
+                    attachment_id=pending_attachment_id,
+                )
+                pending = Profile(
+                    id=new_uuid(),
+                    attachment_id=pending_attachment_id,
+                    display_name="Pending",
+                    profile_json=None,
+                    location=None,
+                    extraction_version=None,
+                    source_hash=None,
+                    state="pending",
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                    last_opened_at=None,
+                )
+                session.add(pending)
+                await session.commit()
+
+            invoker = Mock(side_effect=AssertionError("provider must not run"))
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=invoker,
+            )
+            with pytest.raises(ProfileReextractError) as caught:
+                await anext(coordinator.stream(profile.id))
+            assert caught.value.code == "PROFILE_SETUP_IN_PROGRESS"
+            assert invoker.call_count == 0
+            async with factory() as session:
+                assert (
+                    await operation_repo.list_running_operations(session, profile.id)
+                    == []
+                )
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile.id)
+                    is None
+                )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_cancelled_real_stage_persists_interrupted_after_fresh_session_close(
+    migrated_sqlite: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(session, storage, pdf)
+                await session.commit()
+
+            started = asyncio.Event()
+            release = asyncio.Event()
+            original_stage = profile_reextraction_service.stage_cv_document
+
+            async def blocked_stage(**kwargs: Any) -> Any:
+                started.set()
+                await release.wait()
+                return await original_stage(**kwargs)
+
+            monkeypatch.setattr(
+                profile_reextraction_service,
+                "stage_cv_document",
+                blocked_stage,
+            )
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+            )
+            task = asyncio.create_task(
+                _collect_profile_events(coordinator.stream(profile.id))
+            )
+            await started.wait()
+            async with factory() as session:
+                running = await operation_repo.list_running_operations(
+                    session, profile.id
+                )
+                assert len(running) == 1
+                operation_id = running[0].id
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            async with factory() as session:
+                operation = await operation_repo.get_operation(
+                    session, profile_id=profile.id, operation_id=operation_id
+                )
+                assert operation is not None
+                assert operation.state == "interrupted"
+                assert operation.error_code == "PROFILE_REEXTRACT_INTERRUPTED"
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile.id)
+                    is None
+                )
+            assert "no active connection" not in caplog.text.lower()
+            assert "checked out" not in caplog.text.lower()
+            assert "pool" not in caplog.text.lower()
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_retained_file_failure_marks_exact_operation_failed_without_draft(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, rel = await _seed_stream_fixture(session, storage, pdf)
+                await session.commit()
+            assert storage.delete(rel)
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+            )
+            events = await _collect_profile_events(coordinator.stream(profile.id))
+            assert events[-1].event == "reextract_failed"
+            assert events[-1].payload.code == "FILE_MISSING"
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile.id
+                )
+                assert operation is not None
+                assert operation.state == "failed"
+                assert operation.error_code == "FILE_MISSING"
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile.id)
+                    is None
+                )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_provider_failure_marks_exact_operation_failed_without_draft(
+    migrated_sqlite: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    pdf = CV_DIR / "digital_cv_01.pdf"
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(session, storage, pdf)
+                await session.commit()
+
+            async def failed_stage(**_kwargs: Any) -> Any:
+                raise RuntimeError("provider failed")
+
+            monkeypatch.setattr(
+                profile_reextraction_service,
+                "stage_cv_document",
+                failed_stage,
+            )
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+            )
+            events = await _collect_profile_events(coordinator.stream(profile.id))
+            assert events[-1].event == "reextract_failed"
+            assert events[-1].payload.code == "PROFILE_REEXTRACT_FAILED"
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile.id
+                )
+                assert operation is not None
+                assert operation.state == "failed"
+                assert operation.error_code == "PROFILE_REEXTRACT_FAILED"
+                assert (
+                    await profile_repo.get_draft_for_profile(session, profile.id)
+                    is None
+                )
         finally:
             await engine.dispose()
 
