@@ -115,6 +115,8 @@ class ProfileReextractReview(BaseModel):
                 raise ValueError("ordinary reviews must be actionable")
         elif self.operation_id is None or self.operation_state is None:
             raise ValueError("reextract reviews require operation identity and state")
+        if self.source == "reextract" and not self.can_discard:
+            raise ValueError("reextract reviews must be discardable")
         if self.operation_state == "review_ready" and not self.can_approve:
             raise ValueError("review-ready operation reviews must be approvable")
         if self.operation_state == "stale" and self.can_approve:

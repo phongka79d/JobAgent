@@ -29,9 +29,10 @@ from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.profiles import PROFILE_DRAFT_ID
-from app.db.session import get_session_factory
+from app.db.session import get_session_factory, session_scope
 from app.graph.sync_candidate import AsyncGraphDriver
 from app.repositories import profiles as profile_repo
+from app.repositories import tool_executions as tool_repo
 from app.schemas.tools import ToolResult
 from app.services.cv_document_extraction import StructuredCVDocumentInvoker
 from app.services.profile_approval import ApprovalCommitResult, commit_approved_draft
@@ -519,8 +520,9 @@ def build_commit_profile_draft_tool(
                     data={"draft_id": draft_id},
                 )
 
-            # Validate draft exists before interrupt (no active-side effects).
-            async with factory() as session:
+            # Validate and durably capture the exact operation owner before
+            # interrupt; resume must compare against this server-owned stamp.
+            async with session_scope(factory) as session:
                 draft_row = await profile_repo.get_draft_for_profile(
                     session, expected_profile_id
                 )
@@ -531,6 +533,31 @@ def build_commit_profile_draft_tool(
                     summary="No current profile draft to commit",
                     data={"draft_id": PROFILE_DRAFT_ID},
                 )
+            async with session_scope(factory) as session:
+                execution = await tool_repo.get_by_identity(
+                    session, run_id=run_id, tool_call_id=tool_call_id
+                )
+                if execution is None:
+                    return ToolResult(
+                        ok=False,
+                        code="PROFILE_INCONSISTENT",
+                        summary="commit_profile_draft execution owner is missing",
+                        data=None,
+                    )
+                arguments = dict(execution.arguments_summary_json or {})
+                captured_operation_id = arguments.get("operation_id", ...)
+                if captured_operation_id is ...:
+                    captured_operation_id = draft_row.reextract_operation_id
+                    arguments["operation_id"] = captured_operation_id
+                    execution.arguments_summary_json = arguments
+                    await session.flush()
+                elif captured_operation_id != draft_row.reextract_operation_id:
+                    return ToolResult(
+                        ok=False,
+                        code="PROFILE_REEXTRACT_CONFLICT",
+                        summary="The profile review operation changed",
+                        data={"draft_id": PROFILE_DRAFT_ID},
+                    )
             # Pause before any active profile/preference side effect.
             decision = interrupt(
                 build_profile_commit_projection(
@@ -583,6 +610,7 @@ def build_commit_profile_draft_tool(
                 driver=driver,
                 sync_fn=sync_fn,
                 expected_profile_id=expected_profile_id,
+                expected_operation_id=captured_operation_id,
             )
 
             data: dict[str, Any] = {

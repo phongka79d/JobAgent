@@ -94,8 +94,6 @@ ERROR_APPROVAL_TRANSACTION_FAILED: str = "APPROVAL_TRANSACTION_FAILED"
 ERROR_INVARIANT_VIOLATION: str = "APPROVAL_INVARIANT_VIOLATION"
 ERROR_DOCUMENT_DRAFT_NOT_FOUND: str = "DOCUMENT_DRAFT_NOT_FOUND"
 ERROR_DOCUMENT_DRAFT_INVALID: str = "DOCUMENT_DRAFT_INVALID"
-_UNSET_OPERATION = object()
-
 # Failpoint names for deterministic integration tests only.
 Failpoint = Literal[
     "before_commit",
@@ -351,11 +349,9 @@ async def _validate_operation_linked_approval(
     *,
     preflight: _Preflight,
     expected_profile_id: str,
-    expected_operation_id: str | None | object,
+    expected_operation_id: str | None,
 ) -> Any:
     operation_id = preflight.draft_reextract_operation_id
-    if expected_operation_id is _UNSET_OPERATION:
-        expected_operation_id = operation_id
     if operation_id is None:
         if expected_operation_id is not None:
             raise ProfileApprovalError(
@@ -631,7 +627,7 @@ async def commit_approved_draft(
     normalizer: SkillNormalizer,
     expected_profile_id: str,
     expected_draft_updated_at: datetime | None = None,
-    expected_operation_id: str | None | object = _UNSET_OPERATION,
+    expected_operation_id: str | None = None,
     driver: AsyncGraphDriver | None = None,
     failpoint: str | None = None,
     sync_fn: Callable[..., Awaitable[None]] | None = None,

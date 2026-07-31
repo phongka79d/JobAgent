@@ -3319,6 +3319,140 @@ def test_commit_profile_draft_request_changes_preserves_draft(
     run_async(_body())
 
 
+def test_commit_profile_draft_owner_path_requires_exact_reextract_identity(
+    db_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real tool owner captures and forwards the exact operation UUID."""
+    from app.core.ids import new_uuid
+    from app.core.time import utc_now
+    from app.db.models.chat import CHAT_MESSAGE_ROLE_USER, AgentRun
+    from app.db.models.profiles import ProfileReextractOperation
+    from app.repositories import chat_messages as messages_repo
+    from app.repositories import workspace_state as workspace_repo
+    from app.services.profile_approval import commit_approved_draft
+    from app.services.skill_normalization import SkillNormalizer
+    from app.storage.attachments import AttachmentStorage
+    from app.tools.profile import build_commit_profile_draft_tool
+
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+    normalizer = SkillNormalizer.from_path(_skills_fixture())
+
+    async def _body() -> None:
+        engine = build_async_engine(db_path)
+        factory = session_factory(engine)
+        try:
+            att_id = new_uuid()
+            rel = _write_pdf(storage, att_id)
+            async with factory() as session:
+                await att_repo.create_staged(
+                    session,
+                    file_hash="tool-reextract-owner",
+                    original_name="cv.pdf",
+                    size_bytes=40,
+                    storage_path=rel,
+                    page_count=1,
+                    attachment_id=att_id,
+                )
+                profile_id, conversation_id = await _seed_pending_profile_draft_owner(
+                    session,
+                    attachment_id=att_id,
+                    draft_json=_approval_draft_json(),
+                )
+                await _seed_cv_document_draft(session, attachment_id=att_id)
+                profile = await prof_repo.get_profile(session, profile_id)
+                workspace = await workspace_repo.get_state(session)
+                assert profile is not None and workspace is not None
+                now = utc_now()
+                operation = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile_id,
+                    source_attachment_id=att_id,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
+                    state="review_ready",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(operation)
+                await session.flush()
+                draft = await prof_repo.get_draft_for_profile(session, profile_id)
+                assert draft is not None
+                draft.reextract_operation_id = operation.id
+                await session.flush()
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation_id,
+                    role=CHAT_MESSAGE_ROLE_USER,
+                    content="save profile",
+                )
+                run = AgentRun(
+                    id=new_uuid(), user_message_id=user.id, state="running"
+                )
+                session.add(run)
+                await session.commit()
+                run_id = run.id
+
+            missing = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                expected_profile_id=profile_id,
+                sync_fn=lambda: _noop_async(),
+            )
+            assert missing.code == "PROFILE_REEXTRACT_CONFLICT"
+            crossed = await commit_approved_draft(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                expected_profile_id=profile_id,
+                expected_operation_id=new_uuid(),
+                sync_fn=lambda: _noop_async(),
+            )
+            assert crossed.code == "PROFILE_REEXTRACT_CONFLICT"
+
+            monkeypatch.setattr("app.tools.profile.interrupt", lambda _: "save_profile")
+            tool = build_commit_profile_draft_tool(
+                session_factory=factory,
+                storage=storage,
+                normalizer=normalizer,
+                sync_fn=lambda: _noop_async(),
+            )
+            raw = await tool.ainvoke(
+                {
+                    "type": "tool_call",
+                    "id": "tool-reextract-owner",
+                    "name": tool.name,
+                    "args": {
+                        "draft_id": "current",
+                        "state": {
+                            "run_id": run_id,
+                            "profile_id": profile_id,
+                        },
+                    },
+                }
+            )
+            payload = raw.content if hasattr(raw, "content") else raw
+            if isinstance(payload, str):
+                import json
+
+                payload = json.loads(payload)
+            assert payload["ok"] is True
+            async with factory() as session:
+                assert (
+                    await prof_repo.get_draft_for_profile(session, profile_id)
+                    is None
+                )
+        finally:
+            await engine.dispose()
+
+    async def _noop_async() -> None:
+        return None
+
+    run_async(_body())
+
+
 async def execute_tool_replay(
     *,
     factory: object,

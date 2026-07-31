@@ -1102,10 +1102,22 @@ def test_source_backed_reextract_draft_accepts_agent_correction_before_approval(
             assert correction.tool_result.ok is True
             assert correction.source_attachment_id == attachment_id
 
-            review = await coordinator.get_review(profile_id)
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile_id
+                )
+                assert operation is not None
+                operation_id = operation.id
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
             assert review.proposed.summary == "Corrected summary from chat"
 
-            approved = await coordinator.approve(profile_id, revision=review.revision)
+            approved = await coordinator.approve(
+                profile_id,
+                operation_id=operation_id,
+                revision=review.revision,
+            )
             assert approved.approved is True
 
             async with factory() as session:
@@ -1416,14 +1428,25 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
             assert second_reextract.value.code == "PROFILE_REVIEW_PENDING"
             assert provider_calls > 0
             assert len(invoker.calls) == provider_calls
-            review = await coordinator.get_review(profile_id)
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile_id
+                )
+                assert operation is not None
+                operation_id = operation.id
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
             with pytest.raises(ProfileReextractError) as stale_discard:
                 await coordinator.discard(
                     profile_id,
+                    operation_id=operation_id,
                     revision=datetime(2000, 1, 1, tzinfo=UTC),
                 )
             assert stale_discard.value.code == "PROFILE_REEXTRACT_CONFLICT"
-            await coordinator.discard(profile_id, revision=review.revision)
+            await coordinator.discard(
+                profile_id, operation_id=operation_id, revision=review.revision
+            )
             async with factory() as session:
                 assert (
                     await profile_repo.get_draft_for_profile(session, profile_id)
@@ -1486,6 +1509,7 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
                 sync_fn=no_sync,
                 expected_profile_id=profile_id,
                 expected_draft_updated_at=original_draft_revision,
+                expected_operation_id=draft.reextract_operation_id,
             )
             assert conflicted.ok is False
             assert conflicted.code == "PROFILE_REEXTRACT_CONFLICT"
@@ -1497,6 +1521,7 @@ def test_duplicate_requests_perform_one_staging_and_provider_call(
                 sync_fn=no_sync,
                 expected_profile_id=profile_id,
                 expected_draft_updated_at=changed_draft.updated_at,
+                expected_operation_id=changed_draft.reextract_operation_id,
             )
             assert approved.ok is True
             assert approved.profile_id == profile_id
@@ -1600,13 +1625,45 @@ def test_status_read_reconciles_review_ready_to_stale_and_agent_cannot_edit(
             assert review.operation_state == "stale"
             assert review.can_approve is False
             assert review.can_discard is True
-            correction = await propose_profile_update(
-                session_factory=factory,
-                normalizer=_normalizer(),
-                expected_profile_id=profile_id,
-                profile_changes={"summary": "must be rejected"},
+            from app.repositories import chat_messages as messages_repo
+            from app.tools.profile import build_propose_profile_update_tool
+
+            async with factory() as session:
+                conversation = await conversations_repo.create_for_profile(
+                    session, profile_id=profile_id
+                )
+                user = await messages_repo.insert_message(
+                    session,
+                    conversation_id=conversation.id,
+                    role="user",
+                    content="correct profile",
+                )
+                run = AgentRun(
+                    id=new_uuid(), user_message_id=user.id, state="running"
+                )
+                session.add(run)
+                await session.commit()
+                run_id = run.id
+            tool = build_propose_profile_update_tool(
+                session_factory=factory, normalizer=_normalizer()
             )
-            assert correction.tool_result.code == "PROFILE_REEXTRACT_STALE"
+            raw = await tool.ainvoke(
+                {
+                    "type": "tool_call",
+                    "id": "stale-operation-edit",
+                    "name": tool.name,
+                    "args": {
+                        "profile_changes": {"summary": "must be rejected"},
+                        "state": {"run_id": run_id, "profile_id": profile_id},
+                    },
+                }
+            )
+            payload = raw.content if hasattr(raw, "content") else raw
+            if isinstance(payload, str):
+                import json
+
+                payload = json.loads(payload)
+            assert payload["code"] == "PROFILE_REEXTRACT_STALE"
         finally:
             await engine.dispose()
 
@@ -1674,6 +1731,118 @@ def test_approve_and_discard_require_matching_operation_and_revision(
                     await profile_repo.get_draft_for_profile(session, profile_id)
                     is None
                 )
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_operation_linked_consumption_requires_explicit_operation_identity(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(
+                    session, storage, CV_DIR / "digital_cv_01.pdf"
+                )
+                await session.commit()
+                profile_id = profile.id
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            await _collect_profile_events(coordinator.stream(profile_id))
+            async with factory() as session:
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile_id
+                )
+                assert operation is not None
+                operation_id = operation.id
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
+            with pytest.raises(ProfileReextractError) as missing_review_identity:
+                await coordinator.get_review(profile_id)
+            assert missing_review_identity.value.code == "PROFILE_REEXTRACT_CONFLICT"
+            with pytest.raises(ProfileReextractError) as missing_approve_identity:
+                await coordinator.approve(profile_id, revision=review.revision)
+            assert missing_approve_identity.value.code == "PROFILE_REEXTRACT_CONFLICT"
+            with pytest.raises(ProfileReextractError) as missing_discard_identity:
+                await coordinator.discard(profile_id, revision=review.revision)
+            assert missing_discard_identity.value.code == "PROFILE_REEXTRACT_CONFLICT"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
+
+
+def test_stale_discard_rolls_back_when_document_draft_is_missing(
+    migrated_sqlite: Path, tmp_path: Path
+) -> None:
+    storage = AttachmentStorage(tmp_path / "files")
+    storage.ensure_root()
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile, _ = await _seed_stream_fixture(
+                    session, storage, CV_DIR / "digital_cv_01.pdf"
+                )
+                await session.commit()
+                profile_id = profile.id
+            coordinator = ProfileReextractionCoordinator(
+                session_factory=factory,
+                storage=storage,
+                normalizer=_normalizer(),
+                invoker=CoveringDocumentInvoker(),
+                graph_driver=None,
+            )
+            await _collect_profile_events(coordinator.stream(profile_id))
+            async with factory() as session:
+                stored = await profile_repo.get_profile(session, profile_id)
+                operation = await operation_repo.get_latest_operation_for_profile(
+                    session, profile_id
+                )
+                assert stored is not None and operation is not None
+                stored.updated_at = utc_now()
+                await session.commit()
+                operation_id = operation.id
+            review = await coordinator.get_review(
+                profile_id, operation_id=operation_id
+            )
+            async with factory() as session:
+                draft = await profile_repo.get_draft_for_profile(session, profile_id)
+                assert draft is not None
+                assert draft.source_attachment_id is not None
+                assert await cv_doc_repo.delete_draft(
+                    session, draft.source_attachment_id
+                )
+                await session.commit()
+            with pytest.raises(ProfileReextractError) as missing_document:
+                await coordinator.discard(
+                    profile_id,
+                    operation_id=operation_id,
+                    revision=review.revision,
+                )
+            assert missing_document.value.code == "PROFILE_REEXTRACT_CONFLICT"
+            async with factory() as session:
+                assert await profile_repo.get_draft_for_profile(session, profile_id)
+                stored_operation = await operation_repo.get_operation(
+                    session, profile_id=profile_id, operation_id=operation_id
+                )
+                assert stored_operation is not None
+                assert stored_operation.state == "stale"
         finally:
             await engine.dispose()
 

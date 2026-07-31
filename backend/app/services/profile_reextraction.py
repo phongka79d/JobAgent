@@ -30,6 +30,9 @@ from app.repositories import cv_documents as cv_doc_repo
 from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
+from app.repositories.profile_reextract_operations import (
+    ProfileReextractOperationState,
+)
 from app.schemas.profile import (
     CandidateProfile,
     JobPreferences,
@@ -87,8 +90,6 @@ _PREFERENCE_FIELDS: tuple[ProfilePreferenceField, ...] = (
     "acceptable_work_modes",
     "target_seniority",
 )
-_UNSET_OPERATION = object()
-
 _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
     "validating_source": "Validating the retained CV",
     "extracting_document": "Extracting the CV document",
@@ -548,7 +549,7 @@ class ProfileReextractionCoordinator:
         self,
         profile_id: str,
         *,
-        operation_id: str | None | object = _UNSET_OPERATION,
+        operation_id: str | None = None,
     ) -> ProfileReextractReview:
         async with session_scope(self._session_factory) as session:
             profile = await profile_repo.get_profile(session, profile_id)
@@ -562,8 +563,6 @@ class ProfileReextractionCoordinator:
                     "PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
                     "No review is available for this profile",
                 )
-            if operation_id is _UNSET_OPERATION:
-                operation_id = draft.reextract_operation_id
             if operation_id is None:
                 if draft.reextract_operation_id is not None:
                     raise ProfileReextractError(
@@ -666,12 +665,8 @@ class ProfileReextractionCoordinator:
         profile_id: str,
         *,
         revision: datetime,
-        operation_id: str | None | object = _UNSET_OPERATION,
+        operation_id: str | None = None,
     ) -> ProfileReextractApprovalResponse:
-        if operation_id is _UNSET_OPERATION:
-            async with self._session_factory() as session:
-                draft = await profile_repo.get_draft_for_profile(session, profile_id)
-                operation_id = draft.reextract_operation_id if draft else None
         result = await commit_approved_draft(
             session_factory=self._session_factory,
             storage=self._storage,
@@ -710,7 +705,7 @@ class ProfileReextractionCoordinator:
         profile_id: str,
         *,
         revision: datetime,
-        operation_id: str | None | object = _UNSET_OPERATION,
+        operation_id: str | None = None,
     ) -> None:
         expected = _aware(revision)
         async with session_scope(self._session_factory) as session:
@@ -725,18 +720,17 @@ class ProfileReextractionCoordinator:
                     "PROFILE_REEXTRACT_CONFLICT",
                     "The review changed; reload it before discarding",
                 )
-            if operation_id is _UNSET_OPERATION:
-                operation_id = draft.reextract_operation_id
             if draft.reextract_operation_id != operation_id:
                 raise ProfileReextractError(
                     "PROFILE_REEXTRACT_CONFLICT",
                     "The review operation identity changed; reload it",
                 )
+            operation = None
             if operation_id is not None:
                 operation = await operation_repo.reconcile_review_ready_to_stale(
                     session,
                     profile_id=profile_id,
-                    operation_id=cast(str, operation_id),
+                    operation_id=operation_id,
                 )
                 if operation is None or operation.state not in {
                     "stale",
@@ -761,15 +755,28 @@ class ProfileReextractionCoordinator:
                     "The review changed; reload it before discarding",
                 )
             if attachment_id is not None:
-                await cv_doc_repo.delete_draft(session, attachment_id)
-            operation_id = draft.reextract_operation_id
-            if operation_id is not None:
-                await operation_repo.delete_operation(
+                deleted_document = await cv_doc_repo.delete_draft(
+                    session, attachment_id
+                )
+                if operation is not None and not deleted_document:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review document changed; reload it before discarding",
+                    )
+            if operation is not None:
+                deleted_operation = await operation_repo.delete_operation(
                     session,
                     profile_id=profile_id,
-                    operation_id=operation_id,
-                    expected_state="review_ready",
+                    operation_id=operation.id,
+                    expected_state=cast(
+                        ProfileReextractOperationState, operation.state
+                    ),
                 )
+                if not deleted_operation:
+                    raise ProfileReextractError(
+                        "PROFILE_REEXTRACT_CONFLICT",
+                        "The review operation changed; reload it before discarding",
+                    )
 
 
 async def recover_running_profile_reextract_operations(
