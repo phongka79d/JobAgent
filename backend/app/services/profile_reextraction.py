@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
+import anyio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -16,9 +19,10 @@ from app.db.models.attachments import (
     ATTACHMENT_STATE_ARCHIVED,
 )
 from app.db.models.profiles import PROFILE_STATE_READY
-from app.db.session import session_scope
+from app.db.session import immediate_session_scope, session_scope
 from app.repositories import attachments as att_repo
 from app.repositories import cv_documents as cv_doc_repo
+from app.repositories import profile_reextract_operations as operation_repo
 from app.repositories import profiles as profile_repo
 from app.repositories import workspace_state as workspace_repo
 from app.schemas.profile import (
@@ -52,7 +56,7 @@ from app.services.activity_gate import (
     assert_workspace_idle,
 )
 from app.services.profile_approval import commit_approved_draft
-from app.services.profile_drafts import propose_profile_from_cv
+from app.services.profile_drafts import publish_reextract_stage, stage_cv_document
 from app.services.skill_normalization import SkillNormalizer
 from app.storage.attachments import AttachmentStorage
 
@@ -82,10 +86,21 @@ _PROGRESS_MESSAGES: dict[ReextractStage, str] = {
 
 
 class ProfileReextractError(Exception):
-    def __init__(self, code: str, summary: str) -> None:
+    def __init__(
+        self, code: str, summary: str, *, operation_id: str | None = None
+    ) -> None:
         self.code = code
         self.summary = summary
+        self.operation_id = operation_id
         super().__init__(summary)
+
+
+@dataclass(frozen=True, slots=True)
+class _Claim:
+    operation_id: str
+    profile_id: str
+    attachment_id: str
+    storage_path: str
 
 
 def _aware(value: datetime) -> datetime:
@@ -100,9 +115,7 @@ def _bounded(value: str | None, limit: int) -> str | None:
 
 def _snapshot(profile: CandidateProfile) -> PublicProfileSnapshot:
     labels = [
-        item.skill.display_name[:200]
-        for item in profile.skills
-        if not item.excluded
+        item.skill.display_name[:200] for item in profile.skills if not item.excluded
     ][:50]
     return PublicProfileSnapshot(
         full_name=_bounded(profile.full_name, 200),
@@ -280,69 +293,200 @@ class ProfileReextractionCoordinator:
         self._invoker = invoker
         self._graph_driver = graph_driver
 
-    async def _preflight(self, profile_id: str) -> str:
-        async with self._session_factory() as session:
-            try:
-                await assert_workspace_idle(session)
-                await assert_profile_review_clear(session, profile_id=profile_id)
-            except ActivityBlockedError as exc:
-                raise ProfileReextractError(exc.code, exc.summary) from exc
-            profile = await profile_repo.get_profile(session, profile_id)
-            active_id = await workspace_repo.get_active_profile_id(session)
-            if profile is None:
-                raise ProfileReextractError("PROFILE_NOT_FOUND", "Profile not found")
-            if profile.state != PROFILE_STATE_READY or active_id != profile_id:
-                raise ProfileReextractError(
-                    "PROFILE_NOT_READY", "Profile is not the active ready profile"
+    async def _claim(self, profile_id: str) -> _Claim:
+        try:
+            async with immediate_session_scope(self._session_factory) as session:
+                try:
+                    await assert_workspace_idle(session)
+                    await assert_profile_review_clear(session, profile_id=profile_id)
+                except ActivityBlockedError as exc:
+                    raise ProfileReextractError(exc.code, exc.summary) from exc
+                profile = await profile_repo.get_profile(session, profile_id)
+                active_id = await workspace_repo.get_active_profile_id(session)
+                workspace = await workspace_repo.get_state(session)
+                if profile is None:
+                    raise ProfileReextractError(
+                        "PROFILE_NOT_FOUND", "Profile not found"
+                    )
+                if profile.state != PROFILE_STATE_READY or active_id != profile_id:
+                    raise ProfileReextractError(
+                        "PROFILE_NOT_READY", "Profile is not the active ready profile"
+                    )
+                if workspace is None:
+                    raise ProfileReextractError(
+                        "WORKSPACE_UNAVAILABLE", "Workspace state is unavailable"
+                    )
+                attachment = await att_repo.get_by_id(session, profile.attachment_id)
+                if attachment is None:
+                    raise ProfileReextractError(
+                        "CV_ATTACHMENT_NOT_FOUND", "The retained CV could not be found"
+                    )
+                if attachment.state not in {
+                    ATTACHMENT_STATE_ACTIVE,
+                    ATTACHMENT_STATE_ARCHIVED,
+                }:
+                    raise ProfileReextractError(
+                        "CV_NOT_REPROCESSABLE", "The retained CV cannot be re-extracted"
+                    )
+                operation = await operation_repo.claim_operation(
+                    session,
+                    profile_id=profile_id,
+                    source_attachment_id=attachment.id,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
                 )
-            attachment = await att_repo.get_by_id(session, profile.attachment_id)
-            if attachment is None:
+                return _Claim(
+                    operation_id=operation.id,
+                    profile_id=profile_id,
+                    attachment_id=attachment.id,
+                    storage_path=attachment.storage_path,
+                )
+        except operation_repo.ProfileReextractOperationConflict as exc:
+            operation_id = exc.operation_id
+            if exc.code == "PROFILE_REEXTRACT_IN_PROGRESS" and operation_id is None:
+                async with session_scope(self._session_factory) as session:
+                    current = await operation_repo.get_latest_operation_for_profile(
+                        session, profile_id
+                    )
+                    if current is not None and current.state in {
+                        "running",
+                        "review_ready",
+                    }:
+                        operation_id = current.id
+            summary = (
+                "A profile re-extraction is already in progress"
+                if exc.code == "PROFILE_REEXTRACT_IN_PROGRESS"
+                else exc.code
+            )
+            raise ProfileReextractError(
+                exc.code, summary, operation_id=operation_id
+            ) from exc
+
+    async def _load_attachment(self, claim: _Claim) -> Any:
+        async with session_scope(self._session_factory) as session:
+            attachment = await att_repo.get_by_id(session, claim.attachment_id)
+            if attachment is None or attachment.storage_path != claim.storage_path:
                 raise ProfileReextractError(
                     "CV_ATTACHMENT_NOT_FOUND", "The retained CV could not be found"
                 )
-            if attachment.state not in {
-                ATTACHMENT_STATE_ACTIVE,
-                ATTACHMENT_STATE_ARCHIVED,
-            }:
-                raise ProfileReextractError(
-                    "CV_NOT_REPROCESSABLE", "The retained CV cannot be re-extracted"
-                )
-            storage_path = attachment.storage_path
-        if not self._storage.exists(storage_path):
-            raise ProfileReextractError(
-                "CV_FILE_UNAVAILABLE", "The retained CV file is unavailable"
+            return attachment
+
+    async def _transition_failed(self, claim: _Claim, code: str) -> None:
+        async with session_scope(self._session_factory) as session:
+            await operation_repo.transition_running_operation(
+                session,
+                profile_id=claim.profile_id,
+                operation_id=claim.operation_id,
+                to_state="failed",
+                error_code=code[:80],
             )
-        return profile.attachment_id
+
+    async def _transition_interrupted(self, claim: _Claim) -> None:
+        async with session_scope(self._session_factory) as session:
+            await operation_repo.transition_running_operation(
+                session,
+                profile_id=claim.profile_id,
+                operation_id=claim.operation_id,
+                to_state="interrupted",
+                error_code="PROFILE_REEXTRACT_INTERRUPTED",
+            )
 
     async def _draft_available(self, profile_id: str) -> bool:
         async with self._session_factory() as session:
             draft = await profile_repo.get_draft_for_profile(session, profile_id)
             return draft is not None
 
+    async def _current_preferences(self, profile_id: str) -> JobPreferences:
+        async with session_scope(self._session_factory) as session:
+            row = await profile_repo.get_profile_preferences(session, profile_id)
+            if row is None:
+                return _empty_preferences()
+            try:
+                return parse_job_preferences(row.preferences_json)
+            except (TypeError, ValidationError) as exc:
+                raise ProfileReextractError(
+                    "PROFILE_INCONSISTENT", "The profile preferences are invalid"
+                ) from exc
+
     async def stream(self, profile_id: str) -> AsyncIterator[ProfileReextractEvent]:
-        operation_id = new_uuid()
-        attachment_id = await self._preflight(profile_id)
-        yield _progress(
-            operation_id=operation_id,
-            profile_id=profile_id,
-            stage="validating_source",
-        )
-        yield _progress(
-            operation_id=operation_id,
-            profile_id=profile_id,
-            stage="extracting_document",
-        )
+        claim = await self._claim(profile_id)
+        operation_id = claim.operation_id
         try:
-            result = await propose_profile_from_cv(
-                attachment_id=attachment_id,
-                target_profile_id=profile_id,
-                session_factory=self._session_factory,
+            yield _progress(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                stage="validating_source",
+            )
+            if not self._storage.exists(claim.storage_path):
+                raise ProfileReextractError(
+                    "FILE_MISSING", "The retained CV file is unavailable"
+                )
+            yield _progress(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                stage="extracting_document",
+            )
+            staged = await stage_cv_document(
+                attachment=await self._load_attachment(claim),
                 storage=self._storage,
                 normalizer=self._normalizer,
                 invoker=self._invoker,
-                reprocess=True,
+            )
+            staged = replace(
+                staged,
+                draft_payload=staged.draft_payload.model_copy(
+                    update={
+                        "job_preferences": await self._current_preferences(profile_id)
+                    }
+                ),
+            )
+            yield _progress(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                stage="projecting_profile",
+            )
+            yield _progress(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                stage="publishing_review",
+            )
+            published = await publish_reextract_stage(
+                session_factory=self._session_factory,
+                profile_id=profile_id,
+                operation_id=operation_id,
+                staged=staged,
+            )
+            if published.state != "review_ready" or published.revision is None:
+                raise ProfileReextractError(
+                    "PROFILE_REEXTRACT_STALE",
+                    "The profile changed during re-extraction",
+                )
+            yield _event(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                event="reextract_review_ready",
+                payload=ProfileReextractReviewReady(
+                    revision=_aware(published.revision)
+                ),
+            )
+        except (asyncio.CancelledError, GeneratorExit):
+            with anyio.CancelScope(shield=True):
+                await self._transition_interrupted(claim)
+            raise
+        except ProfileReextractError as exc:
+            await self._transition_failed(claim, exc.code)
+            yield _event(
+                operation_id=operation_id,
+                profile_id=profile_id,
+                event="reextract_failed",
+                payload=ProfileReextractFailed(
+                    code=exc.code[:80],
+                    summary=exc.summary[:200],
+                    draft_available=await self._draft_available(profile_id),
+                ),
             )
         except Exception:
+            await self._transition_failed(claim, "PROFILE_REEXTRACT_FAILED")
             yield _event(
                 operation_id=operation_id,
                 profile_id=profile_id,
@@ -353,51 +497,6 @@ class ProfileReextractionCoordinator:
                     draft_available=await self._draft_available(profile_id),
                 ),
             )
-            return
-        if not result.tool_result.ok:
-            code = result.tool_result.code or "PROFILE_REEXTRACT_FAILED"
-            yield _event(
-                operation_id=operation_id,
-                profile_id=profile_id,
-                event="reextract_failed",
-                payload=ProfileReextractFailed(
-                    code=code[:80],
-                    summary=_safe_failure_summary(code),
-                    draft_available=await self._draft_available(profile_id),
-                ),
-            )
-            return
-        yield _progress(
-            operation_id=operation_id,
-            profile_id=profile_id,
-            stage="projecting_profile",
-        )
-        yield _progress(
-            operation_id=operation_id,
-            profile_id=profile_id,
-            stage="publishing_review",
-        )
-        async with self._session_factory() as session:
-            draft = await profile_repo.get_draft_for_profile(session, profile_id)
-            if draft is None:
-                yield _event(
-                    operation_id=operation_id,
-                    profile_id=profile_id,
-                    event="reextract_failed",
-                    payload=ProfileReextractFailed(
-                        code="PROFILE_REEXTRACT_DRAFT_NOT_FOUND",
-                        summary="The review could not be loaded",
-                        draft_available=False,
-                    ),
-                )
-                return
-            revision = _aware(draft.updated_at)
-        yield _event(
-            operation_id=operation_id,
-            profile_id=profile_id,
-            event="reextract_review_ready",
-            payload=ProfileReextractReviewReady(revision=revision),
-        )
 
     async def get_review(self, profile_id: str) -> ProfileReextractReview:
         async with self._session_factory() as session:
@@ -405,9 +504,7 @@ class ProfileReextractionCoordinator:
             if profile is None:
                 raise ProfileReextractError("PROFILE_NOT_FOUND", "Profile not found")
             if profile.state != PROFILE_STATE_READY:
-                raise ProfileReextractError(
-                    "PROFILE_NOT_READY", "Profile is not ready"
-                )
+                raise ProfileReextractError("PROFILE_NOT_READY", "Profile is not ready")
             draft = await profile_repo.get_draft_for_profile(session, profile_id)
             if draft is None:
                 raise ProfileReextractError(
@@ -428,9 +525,7 @@ class ProfileReextractionCoordinator:
                     "PROFILE_REEXTRACT_DRAFT_INVALID",
                     "The review data is invalid",
                 ) from exc
-            prefs_row = await profile_repo.get_profile_preferences(
-                session, profile_id
-            )
+            prefs_row = await profile_repo.get_profile_preferences(session, profile_id)
             if prefs_row is None:
                 current_preferences = _empty_preferences()
             else:
@@ -467,7 +562,7 @@ class ProfileReextractionCoordinator:
                     raise ProfileReextractError(
                         "PROFILE_REEXTRACT_DRAFT_INVALID",
                         "The review data is inconsistent",
-                )
+                    )
             return build_review(
                 current=current,
                 proposed=proposed,
@@ -537,10 +632,35 @@ class ProfileReextractionCoordinator:
                 )
             if attachment_id is not None:
                 await cv_doc_repo.delete_draft(session, attachment_id)
+            operation_id = draft.reextract_operation_id
+            if operation_id is not None:
+                await operation_repo.delete_operation(
+                    session,
+                    profile_id=profile_id,
+                    operation_id=operation_id,
+                    expected_state="review_ready",
+                )
+
+
+async def recover_running_profile_reextract_operations(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Mark only operations left running by a prior process as interrupted."""
+    async with session_scope(session_factory) as session:
+        operations = await operation_repo.list_running_operations(session)
+        for operation in operations:
+            await operation_repo.transition_running_operation(
+                session,
+                profile_id=operation.profile_id,
+                operation_id=operation.id,
+                to_state="interrupted",
+                error_code="PROFILE_REEXTRACT_INTERRUPTED",
+            )
 
 
 __all__ = [
     "ProfileReextractError",
     "ProfileReextractionCoordinator",
     "build_review",
+    "recover_running_profile_reextract_operations",
 ]

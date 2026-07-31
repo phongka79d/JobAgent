@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 from app.agent.checkpoint import open_checkpointer, thread_has_checkpoints
 from app.agent.graph import build_agent_graph
+from app.core.ids import new_uuid
+from app.core.time import utc_now
 from app.db.models.chat import (
     AGENT_RUN_STATE_COMPLETED,
     AGENT_RUN_STATE_INTERRUPTED,
@@ -27,9 +29,12 @@ from app.db.models.chat import (
     AgentRun,
     ChatMessage,
 )
+from app.db.models.profiles import Profile, ProfileReextractOperation
 from app.db.session import build_async_engine
 from app.repositories import agent_runs as runs_repo
+from app.repositories import attachments as att_repo
 from app.repositories import tool_executions as tool_repo
+from app.repositories import workspace_state as workspace_repo
 from app.schemas.sse import SseEvent, parse_sse_event
 from app.services import chat_turns
 from app.services.chat_turns import (
@@ -69,6 +74,95 @@ PROFILE_ID = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb"
 def db_path(migrated_sqlite: Path) -> Path:
     seed_legacy_test_conversation(migrated_sqlite)
     return migrated_sqlite
+
+
+def test_startup_changes_running_only_to_interrupted(migrated_sqlite: Path) -> None:
+    seed_legacy_test_conversation(migrated_sqlite)
+
+    async def _body() -> None:
+        engine = build_async_engine(migrated_sqlite)
+        factory = session_factory(engine)
+        try:
+            async with factory() as session:
+                profile = await session.scalar(select(Profile))
+                assert profile is not None
+                workspace = await workspace_repo.get_state(session)
+                assert workspace is not None
+                now = utc_now()
+                running = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile.id,
+                    source_attachment_id=profile.attachment_id,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                ready = ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=profile.id,
+                    source_attachment_id=profile.attachment_id,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
+                    state="review_ready",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                # Use separate profiles so the actionable unique index remains valid.
+                other_attachment_id = new_uuid()
+                await att_repo.create_staged(
+                    session,
+                    file_hash="recovery-other-attachment",
+                    original_name="other.pdf",
+                    size_bytes=1,
+                    storage_path="other.pdf",
+                    page_count=1,
+                    attachment_id=other_attachment_id,
+                )
+                other = Profile(
+                    id=new_uuid(),
+                    attachment_id=other_attachment_id,
+                    display_name="Other",
+                    profile_json=profile.profile_json,
+                    extraction_version="test-v1",
+                    source_hash="other-source",
+                    state="ready",
+                    created_at=now,
+                    updated_at=now,
+                    last_opened_at=now,
+                )
+                session.add_all([running, other])
+                await session.flush()
+                ready.profile_id = other.id
+                session.add(ready)
+                await session.commit()
+                running_id, ready_id = running.id, ready.id
+
+            from app.services.profile_reextraction import (
+                recover_running_profile_reextract_operations,
+            )
+
+            await recover_running_profile_reextract_operations(factory)
+            async with factory() as session:
+                rows = list(
+                    (
+                        await session.execute(
+                            select(ProfileReextractOperation).order_by(
+                                ProfileReextractOperation.id
+                            )
+                        )
+                    ).scalars()
+                )
+                states = {row.id: row.state for row in rows}
+                assert states[running_id] == "interrupted"
+                assert states[ready_id] == "review_ready"
+        finally:
+            await engine.dispose()
+
+    run_async(_body())
 
 
 def _ai_text(content: str) -> AIMessage:
@@ -205,9 +299,7 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
                 session_factory=factory,
                 side_effect_counter=counter,
             )
-            model2 = FakeChatModel(
-                responses=[_ai_text("Approved and done.")]
-            )
+            model2 = FakeChatModel(responses=[_ai_text("Approved and done.")])
             bundle2 = build_agent_graph(
                 model=model2,
                 registry=ToolRegistry([tool2]),
@@ -231,9 +323,7 @@ def test_interrupt_resume_approve_branch(db_path: Path) -> None:
             assert counter["n"] == 1
 
             # 03C: resume terminalizes the same execution id (no second pending).
-            resume_statuses = [
-                e for e in resume_events if e.event == "tool_status"
-            ]
+            resume_statuses = [e for e in resume_events if e.event == "tool_status"]
             assert [s.payload.status for s in resume_statuses] == ["completed"]
             assert resume_statuses[0].payload.tool_execution_id == durable_exec_id
             assert resume_statuses[0].payload.duration_ms is not None
@@ -487,9 +577,7 @@ def test_terminal_resume_is_noop_no_graph_or_side_effect(db_path: Path) -> None:
             side_effects_after_complete = counter["n"]
 
             # Model that would fail loudly if the graph were re-invoked.
-            boom_model = FakeChatModel(
-                responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)]
-            )
+            boom_model = FakeChatModel(responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)])
             boom_bundle = build_agent_graph(
                 model=boom_model,
                 registry=ToolRegistry(
@@ -634,9 +722,7 @@ def test_rapid_repeated_approval_accepts_once_exact_counts(db_path: Path) -> Non
                 assert stored.data.get("committed") is True
 
             # --- Sequential rapid re-entry after accept: terminal no-op. ---
-            boom_model = FakeChatModel(
-                responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)]
-            )
+            boom_model = FakeChatModel(responses=[_ai_tool_call(SYNTHETIC_TOOL_NAME)])
             boom_bundle = build_agent_graph(
                 model=boom_model,
                 registry=ToolRegistry(
@@ -791,9 +877,9 @@ def test_production_registry_eight_tools_and_synthetic_is_test_only() -> None:
         assert "synthetic_interrupt" not in text
         assert "build_synthetic_interrupt_tool" not in text
 
-    chat_turns_src = (
-        BACKEND_ROOT / "app" / "services" / "chat_turns.py"
-    ).read_text(encoding="utf-8")
+    chat_turns_src = (BACKEND_ROOT / "app" / "services" / "chat_turns.py").read_text(
+        encoding="utf-8"
+    )
     assert "APPROVAL_ACTION_REQUIRED" in chat_turns_src
     assert "pending_approval" in chat_turns_src
     # Generic interruption — no domain profile/CV action names hard-coded.

@@ -143,9 +143,12 @@ def test_drafts_are_isolated_by_explicit_profile_owner(
                 )
                 assert stored_b is not None
                 assert stored_b.draft_json == draft_b
-                assert await profile_repo.delete_draft_for_profile(
-                    session, profile_id=profile_a.id
-                ) is True
+                assert (
+                    await profile_repo.delete_draft_for_profile(
+                        session, profile_id=profile_a.id
+                    )
+                    is True
+                )
                 assert (
                     await profile_repo.get_draft_for_profile(session, profile_a.id)
                     is None
@@ -188,20 +191,26 @@ def test_delete_draft_for_profile_normalizes_revision_cas_to_utc(
                 draft = await profile_repo.get_draft_for_profile(session, profile_id)
                 assert draft is not None
                 revision = draft.updated_at.replace(tzinfo=UTC)
-                assert await profile_repo.delete_draft_for_profile(
-                    session,
-                    profile_id=profile_id,
-                    expected_revision=revision.replace(year=revision.year - 1),
-                ) is False
+                assert (
+                    await profile_repo.delete_draft_for_profile(
+                        session,
+                        profile_id=profile_id,
+                        expected_revision=revision.replace(year=revision.year - 1),
+                    )
+                    is False
+                )
                 assert (
                     await profile_repo.get_draft_for_profile(session, profile_id)
                     is not None
                 )
-                assert await profile_repo.delete_draft_for_profile(
-                    session,
-                    profile_id=profile_id,
-                    expected_revision=revision,
-                ) is True
+                assert (
+                    await profile_repo.delete_draft_for_profile(
+                        session,
+                        profile_id=profile_id,
+                        expected_revision=revision,
+                    )
+                    is True
+                )
                 assert (
                     await profile_repo.get_draft_for_profile(session, profile_id)
                     is None
@@ -261,15 +270,24 @@ def test_operation_draft_lookup_requires_profile_and_operation_owner(
                     reextract_operation_id=operation.id,
                 )
 
-                assert await profile_repo.get_draft_for_operation(
-                    session, profile_a.id, operation.id
-                ) is not None
-                assert await profile_repo.get_draft_for_operation(
-                    session, profile_b.id, operation.id
-                ) is None
-                assert await profile_repo.get_draft_for_operation(
-                    session, profile_a.id, other_operation.id
-                ) is None
+                assert (
+                    await profile_repo.get_draft_for_operation(
+                        session, profile_a.id, operation.id
+                    )
+                    is not None
+                )
+                assert (
+                    await profile_repo.get_draft_for_operation(
+                        session, profile_b.id, operation.id
+                    )
+                    is None
+                )
+                assert (
+                    await profile_repo.get_draft_for_operation(
+                        session, profile_a.id, other_operation.id
+                    )
+                    is None
+                )
         finally:
             await engine.dispose()
 
@@ -622,9 +640,7 @@ def test_publish_post_write_cas_failure_rolls_back_then_marks_stale(
                 error_code: str | None,
             ) -> bool:
                 if to_state == "review_ready":
-                    rows = await chunk_repo.list_for_attachment(
-                        session, attachment.id
-                    )
+                    rows = await chunk_repo.list_for_attachment(session, attachment.id)
                     assert [(row.ordinal, row.text) for row in rows] == [
                         (chunk.ordinal, chunk.text) for chunk in staged.chunks
                     ]
@@ -660,9 +676,12 @@ def test_publish_post_write_cas_failure_rolls_back_then_marks_stale(
             assert result.revision is None
 
             async with factory() as session:
-                assert await profile_repo.get_draft_for_operation(
-                    session, profile.id, operation.id
-                ) is None
+                assert (
+                    await profile_repo.get_draft_for_operation(
+                        session, profile.id, operation.id
+                    )
+                    is None
+                )
                 after_document = await cv_doc_repo.get_draft(session, attachment.id)
                 assert after_document is not None
                 assert (
@@ -802,9 +821,12 @@ def test_publish_marks_operation_stale_without_partial_writes_when_workspace_rev
             assert result.state == "stale"
 
             async with factory() as session:
-                assert await profile_repo.get_draft_for_operation(
-                    session, profile_id, operation_id
-                ) is None
+                assert (
+                    await profile_repo.get_draft_for_operation(
+                        session, profile_id, operation_id
+                    )
+                    is None
+                )
                 after_document = await cv_doc_repo.get_draft(session, attachment_id)
                 assert after_document is not None
                 assert (
@@ -1157,7 +1179,7 @@ def test_preference_only_profile_review_discloses_preference_changes(
     run_async(_body())
 
 
-def test_same_profile_reextraction_preserves_owner_preferences_and_conversations(
+def test_duplicate_requests_perform_one_staging_and_provider_call(
     migrated_sqlite: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = AttachmentStorage(tmp_path / "files")
@@ -1316,8 +1338,11 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                 "publishing_review",
             ]
             with pytest.raises(ProfileReextractError) as second_reextract:
+                provider_calls = len(invoker.calls)
                 _ = [event async for event in coordinator.stream(profile_id)]
             assert second_reextract.value.code == "PROFILE_REVIEW_PENDING"
+            assert provider_calls > 0
+            assert len(invoker.calls) == provider_calls
             review = await coordinator.get_review(profile_id)
             with pytest.raises(ProfileReextractError) as stale_discard:
                 await coordinator.discard(
@@ -1374,6 +1399,7 @@ def test_same_profile_reextraction_preserves_owner_preferences_and_conversations
                     profile_id=profile_id,
                     draft_json=changed,
                     source_attachment_id=attachment_id,
+                    reextract_operation_id=draft.reextract_operation_id,
                 )
                 await session.commit()
 

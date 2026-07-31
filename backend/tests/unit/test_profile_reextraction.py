@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -179,20 +180,74 @@ def test_profile_reextract_event_rejects_mismatched_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_propagates_cancellation_before_draft_publication(
+async def test_stream_claims_before_first_event_or_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class TestCoordinator(ProfileReextractionCoordinator):
-        async def _preflight(self, profile_id: str) -> str:
-            assert profile_id == PROFILE_ID
-            return "44444444-4444-4444-8444-444444444444"
+    calls: list[str] = []
 
-    async def cancelled(**_kwargs: Any) -> None:
-        raise asyncio.CancelledError
+    class TestCoordinator(ProfileReextractionCoordinator):
+        async def _claim(self, profile_id: str) -> Any:
+            calls.append("claim")
+            return SimpleNamespace(
+                operation_id=OPERATION_ID,
+                profile_id=profile_id,
+                attachment_id="attachment",
+                storage_path="attachment.pdf",
+            )
+
+    async def stage(**_kwargs: Any) -> None:
+        calls.append("provider")
+
+    monkeypatch.setattr("app.services.profile_reextraction.stage_cv_document", stage)
+    coordinator = TestCoordinator(
+        session_factory=object(),  # type: ignore[arg-type]
+        storage=object(),  # type: ignore[arg-type]
+        normalizer=object(),  # type: ignore[arg-type]
+        invoker=object(),
+    )
+    stream = coordinator.stream(PROFILE_ID)
+    first = await anext(stream)
+    assert first.operation_id == OPERATION_ID
+    assert calls == ["claim"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_persists_interrupted_after_session_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed = False
+    transitioned = False
+
+    class FakeSession:
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            nonlocal closed
+            closed = True
+
+    class TestCoordinator(ProfileReextractionCoordinator):
+        async def _claim(self, profile_id: str) -> Any:
+            return SimpleNamespace(
+                operation_id=OPERATION_ID,
+                profile_id=profile_id,
+                attachment_id="attachment",
+                storage_path="attachment.pdf",
+            )
+
+    async def transition(*_args: Any, **_kwargs: Any) -> bool:
+        nonlocal transitioned
+        assert closed is False
+        transitioned = True
+        return True
 
     monkeypatch.setattr(
-        "app.services.profile_reextraction.propose_profile_from_cv",
-        cancelled,
+        "app.services.profile_reextraction.operation_repo.transition_running_operation",
+        transition,
+    )
+    monkeypatch.setattr(
+        "app.services.profile_reextraction.session_scope",
+        lambda _factory: FakeSession(),
     )
     coordinator = TestCoordinator(
         session_factory=object(),  # type: ignore[arg-type]
@@ -201,7 +256,8 @@ async def test_stream_propagates_cancellation_before_draft_publication(
         invoker=object(),
     )
     stream = coordinator.stream(PROFILE_ID)
-    assert (await anext(stream)).event == "reextract_progress"
-    assert (await anext(stream)).event == "reextract_progress"
+    await anext(stream)
     with pytest.raises(asyncio.CancelledError):
-        await anext(stream)
+        await stream.athrow(asyncio.CancelledError())
+    assert transitioned is True
+    assert closed is True

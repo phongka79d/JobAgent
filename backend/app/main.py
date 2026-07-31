@@ -36,10 +36,18 @@ from app.api.profile import router as profile_router
 from app.api.profiles import router as profiles_router
 from app.core.settings import Settings, get_settings
 from app.db.seed import ensure_workspace_seed
-from app.db.session import dispose_engine, get_engine, session_scope
+from app.db.session import (
+    dispose_engine,
+    get_engine,
+    get_session_factory,
+    session_scope,
+)
 from app.graph.constraints import ensure_base_schema
 from app.graph.driver import check_connectivity, close_driver, open_driver
 from app.schemas.cv_tailoring import CV_TAILORING_SESSION_HEADER
+from app.services.profile_reextraction import (
+    recover_running_profile_reextract_operations,
+)
 from app.storage.attachments import AttachmentStorage
 
 # ponytail: health tests and older startup callers are migrated in Task 13;
@@ -47,7 +55,7 @@ from app.storage.attachments import AttachmentStorage
 ensure_singleton_seeds = ensure_workspace_seed
 
 
-async def _try_singleton_seeds_if_sqlite_ready() -> None:
+async def _try_singleton_seeds_if_sqlite_ready() -> bool:
     """Run idempotent singleton seeds only after SQLite answers a trivial query.
 
     SQLite unavailability must not terminate application startup; health will
@@ -57,9 +65,10 @@ async def _try_singleton_seeds_if_sqlite_ready() -> None:
         async with session_scope() as session:
             await session.execute(text("SELECT 1"))
     except Exception:
-        return
+        return False
     async with session_scope() as session:
         await ensure_singleton_seeds(session)
+    return True
 
 
 @asynccontextmanager
@@ -74,7 +83,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         get_engine()
         engine_acquired = True
 
-        await _try_singleton_seeds_if_sqlite_ready()
+        if await _try_singleton_seeds_if_sqlite_ready():
+            await recover_running_profile_reextract_operations(get_session_factory())
 
         # Storage handle for health probes; do not eagerly ensure_root().
         storage = AttachmentStorage(settings.FILES_DIR)
