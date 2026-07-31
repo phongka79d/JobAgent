@@ -1,8 +1,8 @@
 # JobAgent Master Plan
 
-**Version:** 2.3
-**Date:** 2026-07-26
-**Status:** Amended for Plan 16 profession-neutral semantic skill labels, verbatim source evidence, the selected-JD compatibility map, controlled multi-Agent governance, and Plan 17 source-grounded derivative CV tailoring with fixed LaTeX rendering
+**Version:** 2.4
+**Date:** 2026-07-31
+**Status:** Amended for Plan 16 profession-neutral semantic skill labels, verbatim source evidence, the selected-JD compatibility map, controlled multi-Agent governance, Plan 17 source-grounded derivative CV tailoring with fixed LaTeX rendering, and durable profile re-extraction ownership and recovery
 **Project type:** Single-user, local-first AI/NLP portfolio project
 
 ---
@@ -2419,7 +2419,289 @@ phase.
 
 ---
 
-## 31. Evidence Sources
+## 31. Version 2.4 Amendment - Durable Profile Re-extraction Ownership and Recovery
+
+This amendment is the architecture, lifecycle, and rollout authority for the
+user-approved durable re-extraction increment. It implements the approved [durable profile
+re-extraction ownership design](../superpowers/specs/2026-07-31-profile-reextract-operation-design.md).
+The design supplies detailed rationale and the Master locks the durable product
+contract. It preserves the completed Plan 17 tailoring scope and every
+unaffected historical CV, Agent, Job, evaluation, tailoring, and Neo4j contract.
+
+### 31.1 Supersession and planning authority
+
+Only the following earlier clauses are superseded where they describe a
+database-wide singleton draft, request-owned direct CV re-extraction, weaker
+publication/approval concurrency, or its former terminal portfolio authority:
+
+- Section 6.1 wording that fixes `profile_drafts.id='current'` as a
+  database-wide singleton;
+- Section 6.2 `profile_drafts` schema and its singleton semantics;
+- Section 6.4 document extraction/reprocessing and profile-approval transaction
+  clauses as they concern direct re-extraction draft publication and approval;
+- Section 10.5 CV Manager reprocessing and its pending-review lock;
+- Section 14 direct profile re-extraction API and upload-lock rules;
+- Section 15.6 reprocessing state ownership and cache recovery behavior;
+- Section 20 CV/profile interruption and recovery rows; and
+- the final sentence of Section 30.5 that names `Plan_17.md` as the sole
+  execution and rollout authority.
+
+All other text in those sections remains historical or continuing scope. In
+particular, normal Agent profile approval, initial upload, document-first
+extraction, tailored-CV contracts, and the exact three-service runtime remain
+in force unless a requirement below explicitly changes their direct
+re-extraction behavior.
+
+`Plan_17.md` remains the completed authority for source-grounded tailoring.
+Its terminal-authority language is superseded only for this approved increment:
+the detailed [durable re-extraction implementation plan](../superpowers/plans/2026-07-31-profile-reextract-operation.md)
+is the execution and rollout authority and consumes the compatible CV/profile
+lifecycle contracts. Per the user's 2026-07-31 override, this increment does not
+create `Plan_18.md` or `task_18.md`.
+
+### 31.2 Durable ownership and database contract
+
+**P18-DRO-01 - Migration and operation identity.** Alembic migration
+`0008_profile_reextract_ownership` is the only schema-evolution owner for this
+increment. It creates `profile_reextract_operations` with UUID `id`, owning
+`profile_id`, retained `source_attachment_id`, captured
+`base_profile_updated_at` and `base_workspace_updated_at`, `state`, nullable
+safe `error_code`, and UTC timestamps. The source attachment is restrictive;
+the profile FK cascades. State is exactly `running | review_ready | interrupted
+| failed | stale`. A named check enforces this set and error-state coupling, a
+partial unique index permits at most one actionable (`running` or
+`review_ready`) operation per profile, and `(profile_id, updated_at, id)` is
+indexed for recovery. No worker, queue, lease table, or fourth Compose service
+is authorized.
+
+**P18-DRO-02 - Profile-scoped draft ownership.** Migration 0008 rebuilds
+`profile_drafts` so `target_profile_id` is non-null and unique. It adds nullable
+unique `reextract_operation_id` referencing the operation table with
+`ON DELETE RESTRICT`, and requires a non-null `source_attachment_id` whenever
+an operation ID is present. `source_attachment_id` otherwise remains nullable:
+Agent/profile-only corrections are valid and must not impersonate PDF work.
+The historical symbolic `draft_id='current'` remains a logical Agent-facing
+name, resolved only under the exact profile identity; it is not a
+database-wide draft selector.
+
+**P18-DRO-03 - Scoped repository boundary.** Production code must retrieve,
+upsert, approve, discard, or delete drafts through explicit profile-scoped
+repository methods. Operation-scoped reads additionally require both profile
+and operation IDs. No compatibility helper may select the newest global draft
+or move a draft between profiles/operations. All callers, including Agent
+context/tools, upload, initial extraction, approval, activity gates, CV Manager
+projection, profile/attachment deletion, and direct re-extraction, must use the
+same boundary. Cumulative Agent corrections preserve the matching operation ID
+when editing its review-ready draft.
+
+**P18-DRO-04 - Migration preservation and downgrade policy.** Before table
+rebuild, migration 0008 rejects null/orphan `target_profile_id`, duplicate
+target rows, orphan source attachments, or any foreign-key violation without
+mutating schema or data. It must not infer ownership from active selection,
+attachment order, timestamps, or draft JSON, and must not delete ambiguous
+rows. Valid drafts copy without payload mutation and receive null operation
+IDs. Migration evidence snapshots table SQL plus `PRAGMA table_info`,
+`index_list`/`index_info`, `foreign_key_list`, and triggers before and after;
+it verifies named constraints/indexes, row counts, scalar values, canonical JSON
+values, and `PRAGMA foreign_key_check`. Downgrade must fail closed, without
+mutation, when any operation exists or a draft references one. Empty-operation
+downgrade followed by re-upgrade is the only supported reverse schema test.
+Production rollback restores the verified pre-migration volume snapshot rather
+than attempting a guessed row-level downgrade.
+
+### 31.3 Operation lifecycle, serialization, and CAS
+
+**P18-DRO-05 - Durable claim before work.** A direct re-extraction claim is
+committed before its first SSE event, PDF read, provider call, or staging work.
+The coordinator validates that the exact active ready profile owns the retained
+attachment, records profile/workspace revisions, and rejects pending draft,
+incomplete setup, conflicting lifecycle activity, or another actionable
+operation. Duplicate claims return the stable 409
+`PROFILE_REEXTRACT_IN_PROGRESS`; they do not repeat provider work. Retained
+file checks and all parsing/provider work occur after the committed claim and
+outside every database session/transaction.
+
+**P18-DRO-06 - Immediate-write serialization.** Re-extraction claim and final
+upload persistence use short SQLite `BEGIN IMMEDIATE` lifecycle transactions.
+The upload's early pre-byte guard is only an optimization. Immediately before
+its first application insert, the upload transaction must acquire the writer
+reservation and recheck actionable re-extraction operations, pending drafts,
+incomplete profile setup, and workspace activity. Claim and upload map
+an observed operation conflict to its correlated 409 response and map unknown
+writer contention from `BEGIN IMMEDIATE`, body writes, or commit to stable 409
+`PROFILE_LIFECYCLE_BUSY`, never 500 or an invented operation identity. This
+persistence boundary prevents an upload that passed an earlier read gate
+from committing behind a later re-extraction claim.
+
+**P18-DRO-07 - Shared stage and atomic publication.** Initial upload and
+direct re-extraction reuse one document-first staging function that produces
+bounded chunks, a validated CV document, projected draft, extraction metadata,
+and source hash in memory. Direct re-extraction publication then atomically
+checks operation/profile/source identity, `running` state, captured
+profile/workspace revisions, current active ownership, absence of another
+profile-scoped draft, and absence of an incomplete upload profile. Only a
+passing transaction replaces staged chunks, writes the document draft, creates
+the operation-linked profile draft, and changes the operation to `review_ready`.
+A failed predicate rolls back all proposal writes and transitions the exact
+operation to `stale` in a separate short transaction. It never overwrites newer
+truth or concatenates extraction output onto a prior payload.
+
+**P18-DRO-08 - State machine and recovery truth.** States transition only as
+follows: `none -> running`; `running -> review_ready | interrupted | failed |
+stale`; and `review_ready -> stale | removed`. A stale operation that owns a
+draft is removed only by discard. Approval consumes the matching review-ready
+draft/operation; discard
+removes only its matching profile draft, document draft, and operation. A
+terminal `interrupted` or `failed` operation with no review is retryable and
+does not block upload. A stale retained review is readable/discardable but
+blocks only until its explicit discard. Replacing an operation removes only
+`interrupted`, `failed`, or `stale` terminal metadata for the same profile that
+owns no draft.
+
+**P18-DRO-09 - Publication and approval CAS.** Review status reads reconcile a
+review-ready operation against its captured profile/workspace revisions before
+projection. A mismatch durably changes it to `stale`. Approval of an
+operation-linked draft requires exact profile ID, operation ID, and draft
+revision and repeats operation state plus profile/workspace CAS inside the
+existing atomic SQLite-first approval transaction. An ordinary Agent/profile
+draft has a null operation ID, rejects any supplied operation identity, and
+retains the existing profile-and-draft-revision approval path. A mismatch returns
+`PROFILE_REEXTRACT_STALE` or revision conflict without mutation. Successful
+approval deletes the matching draft and operation in that transaction; existing
+post-commit Neo4j sync/rebuild behavior remains unchanged.
+
+**P18-DRO-10 - Cumulative corrections and deduplication.** Agent corrections
+to a review-ready re-extraction draft use the existing structured
+`ProfileDraftPayload` merge and canonical deduplication owner. Duplicate
+normalized skills, repeated structured entries/list values, and repeated prose
+units are removed before persistence. Corrections against a stale
+operation-linked draft return `PROFILE_REEXTRACT_STALE` and do not mutate it.
+Re-extraction is proposal replacement, never append/merge of independently
+extracted arrays or prose.
+
+### 31.4 Cancellation, API, and frontend behavior
+
+**P18-DRO-11 - Cancellation and restart finalization.** Claim, publication,
+failure, cancellation, and startup recovery each own a fresh short database
+scope. On `asyncio.CancelledError` or `GeneratorExit`, the coordinator must use
+`anyio.CancelScope(shield=True)` outside a fresh complete session context,
+compare-and-swap only its still-running operation to `interrupted`, commit, and
+await full session close before re-raising the original cancellation. It must
+not reuse the cancelled request's session or rely on `asyncio.shield()` around
+only an UPDATE/iterator close. Finalization failure is safely logged without
+masking cancellation; startup changes orphan `running` rows to `interrupted`
+and leaves `review_ready` drafts untouched. This is required to eliminate
+SQLite `no active connection` and checked-out-connection warnings.
+
+**P18-DRO-12 - Strict public API.** The lifecycle API is exactly:
+
+```text
+POST   /api/profiles/{profile_id}/reextract
+GET    /api/profiles/{profile_id}/reextract-operation
+GET    /api/profiles/{profile_id}/reextract-draft?operation_id={nullable_operation_id}
+POST   /api/profiles/{profile_id}/reextract-draft/approve
+DELETE /api/profiles/{profile_id}/reextract-draft
+```
+
+Creation streams the existing bounded progress vocabulary and persists its
+operation before the first event. Status exposes only strict safe operation
+identity/state/safe-error/review-revision and server-owned `can_review`,
+`can_retry`, and `can_discard` flags. Review reads require profile and operation
+identity for an operation-linked draft; an ordinary Agent review requires the
+same profile with an explicit null operation identity. Review responses include
+`source`, nullable `operation_id`/`operation_state`, draft revision, and
+server-owned `can_approve`/`can_discard`. `review_ready` has both actions;
+`stale` has `can_approve=false` and `can_discard=true`. Approval and discard
+carry the nullable discriminated operation identity and exact revision;
+operation-linked missing/crossed/stale/replayed identities and ordinary drafts
+with a forged operation ID are typed 404/409 errors with no mutation.
+`/api/profile` includes
+the correlated nullable operation ID for a re-extraction review plus safe
+running/interrupted/failed/stale-without-review recovery projection. No route
+returns raw source, paths, prompts, chunks, documents, provider data, or logs.
+
+**P18-DRO-13 - Truthful CV UX.** `useCvManagerState` is the sole frontend owner
+of typed operation status and exact operation identity. Stream closure is never
+completion; terminal truth is reconciled through the status/review reads.
+Closing CV Manager hides the drawer and restores focus but does not abort the
+operation/controller. Reopen and reload first fetch authoritative status.
+`running` shows progress and disables uploads; `review_ready` offers Review,
+Save, and Discard; `interrupted`/`failed` offer Retry; stale review disables
+Save and offers Discard then Retry. Success appears only after authoritative
+approval/discard and profile refresh. Loading, success, error, pending action,
+focus, keyboard, narrow-layout, and live-region states are mandatory.
+
+**P18-DRO-14 - Upload/action projection.** The App combines the CV Manager
+operation lock with server-projected profile state and passes it to both
+Overview/sidebar and chat-composer PDF upload inputs. Backend immediate-write
+gates remain authoritative for other tabs and direct callers. When an upload is
+rejected with `PROFILE_REEXTRACT_IN_PROGRESS` or `PROFILE_REVIEW_PENDING`, its
+local error exposes one direct Check re-extraction or Review changes action for
+the exact active-profile owner. Errors are discriminated: running and
+re-extraction-review conflicts carry a non-null operation ID, while an ordinary
+Agent review carries profile ID, review revision/source, and a null operation ID.
+The user is never directed to search CV Manager. CV Manager projections expose `reextract` only for the server-active
+ready profile with an available retained file; inactive archived CVs never
+advertise a backend-rejected action.
+
+### 31.5 Runtime, rollout, and verification
+
+**P18-DRO-15 - Fixed runtime.** Docker Compose remains exactly `frontend`,
+`backend`, and `neo4j`. This increment adds no worker, queue, scheduler,
+backfill, background extraction service, provider/model, or Neo4j projection
+for re-extraction operations. SQLite and retained files remain together in the
+authoritative `app_data` volume; Neo4j remains derived and rebuildable.
+
+**P18-DRO-16 - Backup, rehearsal, cutover, and rollback.** This increment must add a
+tracked fail-closed PowerShell snapshot utility with `Backup`, `Restore`, and
+`Verify` actions. It writes private archives/manifests only outside the Git
+worktree and requires the
+exact Compose project `jobagentlatest`, volume `jobagentlatest_app_data`, its
+expected stopped backend consumer, explicit restore confirmation, archive
+SHA-256, and recorded manifest identity. It archives the complete volume root,
+including SQLite, WAL/SHM, retained PDFs, and tailored artifacts; the manifest
+records hash/size, file inventory, table counts, Alembic revision, active
+profile, and pending action.
+
+Before release, record container image IDs and tag the running backend/frontend
+images for rollback, stop backend, take and hash the quiesced application-data
+backup, and retain it throughout acceptance. Build candidate frontend/backend
+images with the exact repository-root Compose prefix plus `build --pull`; no
+shortened or implicit Compose command is permitted. Restore the backup into a uniquely
+named labelled clone volume, then run the candidate backend as a networkless,
+non-serving `docker run --rm` against that clone for `alembic upgrade head` and
+a provider-free read-only migration smoke check. The clone must never be bound
+to the live Compose stack or published ports.
+
+Before cutover, reverify the backup hash, exact authoritative volume, consumer,
+and pre-migration manifest. Recreate only frontend/backend from candidate images
+with `up -d --wait --wait-timeout 180 --force-recreate`; do not run `down -v`.
+Acceptance requires migration head `0008_profile_reextract_ownership`, exact
+three-service health, inventory/pending-action parity, browser concurrency and
+recovery acceptance using synthetic data, and clean backend/frontend logs with
+no traceback, cancellation cleanup error, pool warning, or unexpected 5xx. Any
+migration, health, inventory, browser, or log failure stops cutover: keep the
+backend stopped, restore the verified whole-volume snapshot, restore the
+recorded pre-release image tags, restart/wait, verify the old Alembic revision
+and inventory, and run the supported derived-graph rebuild. Rollback never
+guesses row-level reversal, reuses the rehearsal volume, removes the backup, or
+uses `down -v`.
+
+**P18-DRO-17 - Deterministic evidence.** The approved implementation plan maps every P18-DRO requirement
+to focused tests. Required evidence includes migration metadata preservation and
+both downgrade branches; profile A/B scoped-draft isolation; duplicate claims
+with one staging/provider call; barrier-controlled upload/claim orderings
+including the passed-pre-byte-gate race; publication/approval profile/workspace
+CAS; stale review projection/action rejection; exact approve/discard/replay
+identity checks; cancellation session-pool cleanliness; startup recovery;
+frontend dual-upload locks, direct pending actions, close/reopen/reload,
+strict stale parsing, accessibility, and archived-action projection; full
+backend/frontend quality gates; clone rehearsal/cutover/rollback checks; and
+synthetic-browser verification of re-extract/upload concurrency and active CV
+truth. No real CV/JD content, provider payload, secret, runtime database, or
+volume archive is committed.
+
+## 32. Evidence Sources
 
 The following primary documentation supports the material technical decisions in this plan:
 

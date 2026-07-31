@@ -1,7 +1,7 @@
 # Durable Profile Re-extraction Ownership and Recovery Design
 
 **Date:** 2026-07-31
-**Status:** Architecture direction approved; written specification awaiting user review
+**Status:** Approved by the user on 2026-07-31
 **Scope:** Profile CV re-extraction, profile-draft ownership, concurrent CV upload,
 recovery UX, and the local Docker migration rollout
 
@@ -118,9 +118,10 @@ after the SSE connection disappears.
    provider work, an SSE yield, filesystem I/O, or Neo4j I/O.
 6. A re-extraction can publish a review only while its operation is still
    `running` and both captured profile/workspace revisions still match.
-7. Approval requires the exact profile ID, operation ID, and draft revision.
-   Repeating, crossing, or replaying any identity is a conflict, never an
-   overwrite.
+7. Approval of an operation-linked draft requires the exact profile ID,
+   operation ID, and draft revision. An ordinary Agent/profile draft requires
+   the same profile and revision with a null operation ID. Repeating, crossing,
+   forging, or replaying any identity is a conflict, never an overwrite.
 8. Approved profile/CV truth changes only through the existing atomic profile
    approval transaction. Re-extraction itself changes only operation, draft,
    document-draft, and chunk staging data.
@@ -295,9 +296,11 @@ workspace activity, and pending drafts. The earlier check before reading upload
 bytes remains, but never substitutes for this persistence-boundary check.
 
 SQLite writer serialization plus the partial unique index makes concurrent
-claims and upload persistence deterministic. An integrity or busy-snapshot
-conflict is rolled back and mapped to a stable lifecycle 409, never a 500. An
-integrity conflict between duplicate claims maps to
+claims and upload persistence deterministic. An observed operation conflict is
+rolled back and mapped to its correlated lifecycle 409. Unknown writer
+contention from `BEGIN IMMEDIATE`, body writes, or commit maps to
+`PROFILE_LIFECYCLE_BUSY` without inventing an operation identity, never a 500.
+An integrity conflict between duplicate claims maps to
 `PROFILE_REEXTRACT_IN_PROGRESS`, not a 500.
 
 The retained-file existence check follows the claim without an open database
@@ -347,12 +350,18 @@ gate before re-extraction claimed:
 
 ### 9.4 Review, cumulative edits, and deduplication
 
-Review lookup requires both profile ID and operation ID. The response compares
+Operation-linked review lookup requires both profile ID and operation ID. The response compares
 the approved profile with the exact operation-linked draft. Agent edits for the
 same profile may continue to merge into that draft, preserving the operation
 ID and advancing its draft revision while the operation is `review_ready`.
 Agent updates against an operation-linked `stale` draft return
 `PROFILE_REEXTRACT_STALE` without changing the draft.
+
+Ordinary Agent/profile-only drafts remain valid with a null operation ID. The
+same review surface discriminates them with `source='agent_update'`; review,
+approval, and discard require the exact profile and draft revision and reject a
+forged operation ID. This preserves cumulative Agent changes without weakening
+operation-linked ownership.
 
 `ProfileReextractReview` includes `operation_id` and
 `operation_state='review_ready'|'stale'` in addition to the draft revision. For
@@ -454,24 +463,28 @@ projection with operation/profile IDs, state, safe error code/summary,
 `can_discard` flags. It returns no source text, path, provider payload, prompt,
 chunks, or document JSON.
 
-`GET .../reextract-draft` returns only the draft linked to the requested
-operation. Its strict body includes `operation_id`, `operation_state`, and the
-server-owned action flags. A stale review is still readable and discardable at
-its current returned draft revision, but never approvable. Status/review reads
-first persist the idempotent `review_ready` to `stale` reconciliation when live
-CAS no longer matches. The approval endpoint repeats
+`GET .../reextract-draft` is profile-scoped and discriminated. For
+`source='reextract'` it returns only the draft linked to the exact required
+operation. For `source='agent_update'` it accepts only a null operation ID. Its
+strict body includes `source`, nullable `operation_id`/`operation_state`, and
+the server-owned action flags. A stale re-extraction review is still readable
+and discardable at its current returned draft revision, but never approvable.
+Status/review reads first persist the idempotent `review_ready` to `stale`
+reconciliation when live CAS no longer matches. The approval endpoint repeats
 the state/CAS checks and returns `409 PROFILE_REEXTRACT_STALE` even if a stale or
 forged client submits `can_approve=true`.
 
-Approve body:
+Approve body for an operation-linked review:
 
 ```json
 {"operation_id":"<uuid>","revision":"<aware UTC datetime>"}
 ```
 
-Discard query parameters contain the same operation ID and revision. Missing,
-cross-profile, stale, or replayed identities return a typed 404/409 without
-mutating a row.
+An ordinary Agent review sends the same required `operation_id` field as null.
+Discard query parameters carry the nullable discriminated operation identity
+and revision. Missing operation identity for an operation-linked draft,
+cross-profile, forged ordinary-operation, stale, or replayed identities return
+a typed 404/409 without mutating a row.
 
 `GET /api/profile` continues to expose the active profile's pending review and
 adds the correlated nullable operation ID for `source='reextract'`. A nullable
@@ -511,8 +524,10 @@ Backend gates remain authoritative when another tab has the operation.
 
 When upload receives `PROFILE_REEXTRACT_IN_PROGRESS` or
 `PROFILE_REVIEW_PENDING`, the error surface beside that upload includes a
-single direct **Review changes** or **Check re-extraction** action. It opens the
-exact active-profile operation; the user is not told to search another page.
+single direct **Review changes** or **Check re-extraction** action. A running or
+re-extraction-review conflict carries the exact operation ID. An ordinary Agent
+review carries its exact profile ID, revision/source, and a null operation ID.
+The action opens that exact owner; the user is not told to search another page.
 
 ### 12.3 CV action policy
 
@@ -609,7 +624,7 @@ projected actions.
 ## 15. Docker backup, rehearsal, rebuild, and rollback
 
 The implementation is not released directly onto the only authoritative
-volume. Plan 18 adds one tracked PowerShell utility,
+volume. This increment adds one tracked PowerShell utility,
 `infrastructure/scripts/app_data_snapshot.ps1`, with `Backup`, `Restore`, and
 `Verify` actions. It must fail closed unless the exact volume name, Compose
 project label, expected consumers, backend stopped state, archive SHA-256, and
@@ -863,14 +878,13 @@ repository read. It must not add unrelated cleanup or rewrite the CV Manager.
 12. Full source, migration, Docker, browser, data-inventory, rollback-rehearsal,
     and clean-log gates pass on synthetic data.
 
-## 18. Planning governance impact
+## 18. Execution governance impact
 
 This design changes SQLite schema, public API lifecycle, cancellation recovery,
 and release/rollback behavior. It therefore requires a Version 2.4 amendment to
-`docs/plans/Master_plan.md` and cannot be added as an unplanned repair under the
-current terminal Plan 17 contract.
+`docs/plans/Master_plan.md` and a detailed, user-approved implementation plan.
 
-The planning portfolio update must:
+The execution authority must:
 
 - add the Version 2.4 durable profile re-extraction ownership amendment;
 - explicitly supersede only the affected Master contracts: Section 6.1's
@@ -880,16 +894,14 @@ The planning portfolio update must:
   Section 20 cancellation/recovery rows, and the terminal-authority sentence in
   Section 30.5;
 - preserve Plan 17's completed tailoring objective and constraints;
-- change only Plan 17's terminal-portfolio language into an explicit handoff to
-  Plan 18;
-- add `docs/plans/Plan_18.md` as the new terminal execution authority; and
-- pass independent plan review before `docs/tasks/task_18.md` is created.
+- map every durable re-extraction requirement to TDD, data-preservation, browser,
+  Docker, and rollback evidence; and
+- receive independent technical review before source execution.
 
-The order is fixed: commit this specification, obtain user approval of the
-written file, invoke the incremental planning workflow, amend Master/Plan 17 and
-create Plan 18, run independent portfolio review, and only then create Task 18.
-The current Master and Plan 17 intentionally remain unchanged while this written
-specification is awaiting review.
+The user approved this specification and explicitly selected
+`docs/superpowers/plans/2026-07-31-profile-reextract-operation.md` as the
+writing-plans execution authority on 2026-07-31. Per that override, this
+increment does not create `Plan_18.md` or `task_18.md`.
 
 No production code, migration, task file, Docker volume, or image is changed at
 the specification stage.
