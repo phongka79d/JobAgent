@@ -33,6 +33,12 @@ from tests.support.db_migration import (
 )
 
 TS = "2020-01-01"
+OPERATION_ERROR_COUPLING_ERROR = (
+    "CHECK constraint failed: ck_profile_reextract_operations__error_coupling"
+)
+DRAFT_REEXTRACT_SOURCE_COUPLING_ERROR = (
+    "CHECK constraint failed: ck_profile_drafts__reextract_source_coupling"
+)
 
 
 @pytest.fixture
@@ -45,9 +51,14 @@ async def _x(s: AsyncSession, sql: str) -> object:
     return await s.execute(text(sql))
 
 
-async def _fail(f: async_sessionmaker[AsyncSession], sql: str) -> None:
+async def _fail(
+    f: async_sessionmaker[AsyncSession],
+    sql: str,
+    *,
+    match: str | None = None,
+) -> None:
     async with f() as s:
-        with pytest.raises(IntegrityError):
+        with pytest.raises(IntegrityError, match=match):
             await _x(s, sql)
             await s.commit()
         await s.rollback()
@@ -215,6 +226,7 @@ def test_operation_state_error_coupling_rejects_invalid_sqlite_writes(
                         state,
                         "'unexpected'",
                     ),
+                    match=OPERATION_ERROR_COUPLING_ERROR,
                 )
             for state in ("interrupted", "failed", "stale"):
                 await _fail(
@@ -226,7 +238,27 @@ def test_operation_state_error_coupling_rejects_invalid_sqlite_writes(
                         state,
                         "NULL",
                     ),
+                    match=OPERATION_ERROR_COUPLING_ERROR,
                 )
+            async with f() as s:
+                for state, suffix, error_code_sql in (
+                    ("running", "running", "NULL"),
+                    ("review_ready", "review", "NULL"),
+                    ("interrupted", "interrupted", "'interrupted'"),
+                    ("failed", "failed", "'failed'"),
+                    ("stale", "stale", "'stale'"),
+                ):
+                    await _x(
+                        s,
+                        _operation(
+                            f"op-valid-{state}",
+                            f"profile-{suffix}",
+                            f"att-{suffix}",
+                            state,
+                            error_code_sql,
+                        ),
+                    )
+                await s.commit()
         finally:
             await e.dispose()
 
@@ -247,6 +279,16 @@ def test_profile_draft_ownership_constraints_reject_invalid_sqlite_writes(
                 await _x(s, _profile("profile-coupling", "att-coupling"))
                 await _x(
                     s,
+                    _operation(
+                        "operation-coupling",
+                        "profile-coupling",
+                        "att-coupling",
+                        "failed",
+                        "'seeded'",
+                    ),
+                )
+                await _x(
+                    s,
                     "INSERT INTO profile_drafts "
                     "(id, source_attachment_id, target_profile_id, draft_json, "
                     "created_at, updated_at) VALUES "
@@ -260,6 +302,7 @@ def test_profile_draft_ownership_constraints_reject_invalid_sqlite_writes(
                 "(id, source_attachment_id, target_profile_id, draft_json, "
                 "created_at, updated_at) VALUES "
                 f"('draft-duplicate', NULL, 'profile-draft', '{{}}', '{TS}', '{TS}')",
+                match="UNIQUE constraint failed: profile_drafts.target_profile_id",
             )
             await _fail(
                 f,
@@ -267,7 +310,8 @@ def test_profile_draft_ownership_constraints_reject_invalid_sqlite_writes(
                 "(id, source_attachment_id, target_profile_id, draft_json, "
                 "reextract_operation_id, created_at, updated_at) VALUES "
                 f"('draft-missing-source', NULL, 'profile-coupling', '{{}}', "
-                f"'missing-operation', '{TS}', '{TS}')",
+                f"'operation-coupling', '{TS}', '{TS}')",
+                match=DRAFT_REEXTRACT_SOURCE_COUPLING_ERROR,
             )
         finally:
             await e.dispose()
