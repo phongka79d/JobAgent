@@ -137,7 +137,7 @@ git commit -m "feat: add durable profile reextract schema"
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 - Modify: `backend/tests/integration/test_profiles_api.py`
 
-- [ ] **Step 1: Write failing owner-isolation and symbolic-current tests.**
+- [x] **Step 1: Write failing owner-isolation and symbolic-current tests.**
 
 ```python
 async def test_drafts_are_isolated_by_explicit_profile_owner(factory: async_sessionmaker[AsyncSession]) -> None:
@@ -154,13 +154,13 @@ def test_agent_current_draft_context_uses_requested_profile_only() -> None:
     assert "Profile B draft" not in build_profile_context(profile_id=PROFILE_A)
 ```
 
-- [ ] **Step 2: Run the scoped repository tests to verify they fail.**
+- [x] **Step 2: Run the scoped repository tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_drafts_are_isolated_by_explicit_profile_owner tests/unit/test_agent_context.py::test_agent_current_draft_context_uses_requested_profile_only -q`
 
 Expected: FAIL because `get_current_draft` selects the newest draft across the database.
 
-- [ ] **Step 3: Implement explicit repository signatures and migrate every caller.**
+- [x] **Step 3: Implement explicit repository signatures and migrate every caller.**
 
 ```python
 async def get_draft_for_profile(session: AsyncSession, profile_id: str) -> ProfileDraft | None:
@@ -206,7 +206,7 @@ async def delete_draft_for_profile(
 
 Delete `get_current_draft`, `upsert_current_draft`, and `delete_current_draft` only after migrating every listed production and test caller. Every replacement query must predicate `ProfileDraft.target_profile_id == profile_id`; operation reads must additionally predicate `ProfileDraft.reextract_operation_id == operation_id`. An operation ID may be set only when atomic publication inserts a new row after proving no draft exists. An existing ordinary draft cannot gain an operation ID; an existing operation-linked draft cannot clear, replace, or move that ID and cannot change its source attachment. Agent correction code must reload and pass the same operation ID when updating its review-ready draft. Reject every ownership/source move with `ProfileRepositoryError`. Resolve Agent `draft_id='current'` by the current conversation profile ID, never by global ordering or source attachment. Do not retain a global, newest-row, compatibility, or alias helper. The authoritative caller inventory is the `rg -l` result captured in this task; rerun it before the commit and add any newly found caller to this same commit.
 
-- [ ] **Step 4: Run focused scoped-caller regressions to verify they pass.**
+- [x] **Step 4: Run focused scoped-caller regressions to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_drafts_are_isolated_by_explicit_profile_owner tests/unit/test_agent_context.py::test_agent_current_draft_context_uses_requested_profile_only tests/unit/test_attachment_resolve.py tests/unit/test_profile_extraction.py tests/integration/test_agent_runner.py tests/integration/test_chat_api.py tests/integration/test_conversations_api.py tests/integration/test_cv_api.py tests/integration/test_cv_manager_api.py tests/integration/test_cv_manager_deletion.py tests/integration/test_job_tools.py tests/integration/test_match_jobs.py tests/integration/test_profile_approval.py tests/integration/test_profile_deletion.py tests/integration/test_profiles_api.py tests/e2e/test_demo_flow.py -q`
 
@@ -214,7 +214,7 @@ Run: `rg -n -S "get_current_draft|upsert_current_draft|delete_current_draft" bac
 
 Expected: PASS; Profile A cannot read, mutate, approve, or discard Profile B's draft, the Agent-facing symbolic draft identifier remains supported, and the zero-old-symbol scan returns exit code 1 with no output.
 
-- [ ] **Step 5: Commit the repository boundary.**
+- [x] **Step 5: Commit the repository boundary.**
 
 ```powershell
 git add backend/app/repositories/profiles.py backend/app/agent/context.py backend/app/api/profile.py backend/app/services/attachment_resolve.py backend/app/services/activity_gate.py backend/app/services/cv_manager.py backend/app/services/cv_upload.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/profile_projection.py backend/app/services/profile_reextraction.py backend/app/tools/profile.py backend/tests/unit/test_agent_context.py backend/tests/unit/test_attachment_resolve.py backend/tests/unit/test_profile_extraction.py backend/tests/e2e/test_demo_flow.py backend/tests/integration/test_agent_runner.py backend/tests/integration/test_chat_api.py backend/tests/integration/test_conversations_api.py backend/tests/integration/test_cv_api.py backend/tests/integration/test_cv_manager_api.py backend/tests/integration/test_cv_manager_deletion.py backend/tests/integration/test_job_tools.py backend/tests/integration/test_match_jobs.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py
