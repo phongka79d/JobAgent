@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,79 @@ def _pending_profile(
         f"'{profile_id}', '{attachment_id}', 'Pending', NULL, {location_sql}, "
         f"NULL, NULL, 'pending', '{TS}', '{TS}', '{TS}')"
     )
+
+
+def test_operation_schema_has_exact_constraints(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        operation_sql_row = connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'profile_reextract_operations'"
+        ).fetchone()
+        assert operation_sql_row is not None
+        operation_sql = str(operation_sql_row[0])
+        expected_states = (
+            "state IN ('running', 'review_ready', 'interrupted', 'failed', 'stale')"
+        )
+        expected_error_coupling = (
+            "state IN ('interrupted', 'failed', 'stale') "
+            "AND error_code IS NOT NULL"
+        )
+        assert expected_states in operation_sql
+        assert expected_error_coupling in operation_sql
+        operation_fks = {
+            str(row[3]): (str(row[2]), str(row[4]), str(row[6]).upper())
+            for row in connection.execute(
+                "PRAGMA foreign_key_list('profile_reextract_operations')"
+            )
+        }
+        assert operation_fks == {
+            "profile_id": ("profiles", "id", "CASCADE"),
+            "source_attachment_id": ("attachments", "id", "RESTRICT"),
+        }
+        draft_columns = {
+            str(row[1]): bool(row[3])
+            for row in connection.execute("PRAGMA table_info('profile_drafts')")
+        }
+        assert draft_columns["target_profile_id"] is True
+        assert "reextract_operation_id" in draft_columns
+        draft_fks = {
+            str(row[3]): (str(row[2]), str(row[4]), str(row[6]).upper())
+            for row in connection.execute("PRAGMA foreign_key_list('profile_drafts')")
+        }
+        assert draft_fks["reextract_operation_id"] == (
+            "profile_reextract_operations",
+            "id",
+            "RESTRICT",
+        )
+        indexes = {
+            str(row[1]): str(sql_row[0])
+            for row in connection.execute(
+                "PRAGMA index_list('profile_reextract_operations')"
+            )
+            if (
+                sql_row := connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                    (str(row[1]),),
+                ).fetchone()
+            )
+            is not None
+        }
+        assert indexes["uq_profile_reextract_operations_actionable"] == (
+            "CREATE UNIQUE INDEX uq_profile_reextract_operations_actionable "
+            "ON profile_reextract_operations (profile_id) "
+            "WHERE state IN ('running', 'review_ready')"
+        )
+        recovery_info = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "PRAGMA index_info('ix_profile_reextract_operations_recovery')"
+            )
+        )
+        assert tuple(row[2] for row in recovery_info) == (
+            "profile_id",
+            "updated_at",
+            "id",
+        )
 
 
 def _conversation(conversation_id: str, profile_id: str) -> str:
@@ -261,14 +335,17 @@ def test_fk_restrict_and_cascade_chains(db_path: Path) -> None:
                 assert await _cnt(s, "tool_executions") == 0
             async with f() as s:
                 await _x(s, _att("att-d", "hd", "pd"))
+                await _x(s, _profile("profile-d", "att-d"))
                 await _x(
                     s,
                     "INSERT INTO profile_drafts "
-                    "(id, source_attachment_id, draft_json, created_at, updated_at) "
-                    f"VALUES ('draft-1', 'att-d', '{{}}', '{TS}', '{TS}')",
+                    "(id, source_attachment_id, target_profile_id, draft_json, "
+                    "created_at, updated_at) VALUES "
+                    f"('draft-1', 'att-d', 'profile-d', '{{}}', '{TS}', '{TS}')",
                 )
                 await s.commit()
             async with f() as s:
+                await _x(s, "DELETE FROM profiles WHERE id = 'profile-d'")
                 await _x(s, "DELETE FROM attachments WHERE id = 'att-d'")
                 await s.commit()
                 assert await _cnt(s, "profile_drafts") == 0

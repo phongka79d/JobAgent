@@ -21,6 +21,7 @@ APPLICATION_TABLE_NAMES: frozenset[str] = frozenset(
         "cv_tailoring_versions",
         "profiles",
         "profile_drafts",
+        "profile_reextract_operations",
         "profile_preferences",
         "workspace_state",
         "job_posts",

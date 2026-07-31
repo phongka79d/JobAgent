@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import ast
 import json
+import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 from app.db.models.profiles import WORKSPACE_STATE_ID
 from app.db.seed import APPLICATION_TABLE_NAMES, ensure_singleton_seeds
 from app.db.session import (
@@ -48,6 +51,361 @@ def _current(db: Path) -> str:
             await e.dispose()
 
     return run_async(_read())
+
+
+def _sqlite_snapshot(db: Path) -> dict[str, Any]:
+    """Capture schema metadata, migration revision, and ownership rows exactly."""
+    with sqlite3.connect(db) as connection:
+        master = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master "
+                "WHERE type IN ('table', 'index', 'trigger') "
+                "ORDER BY type, name"
+            )
+        )
+        tables = (
+            "profile_drafts",
+            "profile_reextract_operations",
+            "profiles",
+            "attachments",
+            "workspace_state",
+        )
+        metadata: dict[str, object] = {}
+        rows: dict[str, tuple[tuple[object, ...], ...]] = {}
+        for table in tables:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            if exists is None:
+                continue
+            indexes = []
+            for index in connection.execute(f"PRAGMA index_list('{table}')"):
+                index_name = str(index[1])
+                indexes.append(
+                    (
+                        tuple(index),
+                        tuple(
+                            tuple(row)
+                            for row in connection.execute(
+                                f"PRAGMA index_info('{index_name}')"
+                            )
+                        ),
+                    )
+                )
+            metadata[table] = {
+                "table_info": tuple(
+                    tuple(row)
+                    for row in connection.execute(f"PRAGMA table_info('{table}')")
+                ),
+                "foreign_key_list": tuple(
+                    sorted(
+                        (
+                            str(row[2]),
+                            str(row[3]),
+                            str(row[4]),
+                            str(row[5]),
+                            str(row[6]),
+                            str(row[7]),
+                        )
+                        for row in connection.execute(
+                            f"PRAGMA foreign_key_list('{table}')"
+                        )
+                    )
+                ),
+                "index_list": tuple(indexes),
+            }
+            rows[table] = tuple(
+                tuple(row)
+                for row in connection.execute(f"SELECT * FROM '{table}' ORDER BY 1")
+            )
+        return {
+            "master": master,
+            "metadata": metadata,
+            "rows": rows,
+            "alembic_version": tuple(
+                tuple(row)
+                for row in connection.execute("SELECT * FROM alembic_version")
+            ),
+            "foreign_key_check": tuple(
+                tuple(row) for row in connection.execute("PRAGMA foreign_key_check")
+            ),
+        }
+
+
+def _seed_valid_profile_draft(db: Path) -> dict[str, object]:
+    """Plant a 0007 draft with values that migration 0008 must retain exactly."""
+    command.upgrade(alembic_config(db), "0007_add_cv_tailoring")
+    payload = {"summary": "Keep exact JSON", "skills": ["Python", "SQL"]}
+    now = "2026-07-31 00:00:00+00:00"
+    with sqlite3.connect(db) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO attachments "
+            "(id, file_hash, original_name, mime_type, size_bytes, page_count, "
+            "storage_path, state, failure_code, created_at, updated_at) VALUES "
+            "('attachment-0008', 'hash-0008', 'cv.pdf', 'application/pdf', 10, "
+            "1, 'cv.pdf', 'archived', NULL, ?, ?)",
+            (now, now),
+        )
+        connection.execute(
+            "INSERT INTO profiles "
+            "(id, attachment_id, display_name, profile_json, location, "
+            "extraction_version, source_hash, state, created_at, updated_at, "
+            "last_opened_at) VALUES ('profile-0008', 'attachment-0008', "
+            "'Profile', '{}', NULL, 'v1', 'source-0008', 'ready', ?, ?, ?)",
+            (now, now, now),
+        )
+        connection.execute(
+            "INSERT INTO profile_drafts "
+            "(id, source_attachment_id, target_profile_id, draft_json, created_at, "
+            "updated_at) VALUES ('draft-0008', 'attachment-0008', 'profile-0008', "
+            "?, ?, ?)",
+            (json.dumps(payload, separators=(",", ":")), now, now),
+        )
+    return payload
+
+
+def _insert_draft(
+    db: Path,
+    *,
+    draft_id: str,
+    target_profile_id: str | None,
+    source_attachment_id: str | None,
+) -> None:
+    now = "2026-07-31 00:00:00+00:00"
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "INSERT INTO profile_drafts "
+            "(id, source_attachment_id, target_profile_id, draft_json, created_at, "
+            "updated_at) VALUES (?, ?, ?, '{}', ?, ?)",
+            (draft_id, source_attachment_id, target_profile_id, now, now),
+        )
+
+
+def test_0008_rejects_null_draft_target_before_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    command.upgrade(alembic_config(isolated_sqlite), "0007_add_cv_tailoring")
+    _insert_draft(
+        isolated_sqlite,
+        draft_id="draft-null-target",
+        target_profile_id=None,
+        source_attachment_id=None,
+    )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_drafts.target_profile_id"):
+        command.upgrade(
+            alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+        )
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_rejects_orphan_draft_target_before_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    command.upgrade(alembic_config(isolated_sqlite), "0007_add_cv_tailoring")
+    with sqlite3.connect(isolated_sqlite) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+    _insert_draft(
+        isolated_sqlite,
+        draft_id="draft-orphan-target",
+        target_profile_id="missing-profile",
+        source_attachment_id=None,
+    )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_drafts.target_profile_id"):
+        command.upgrade(
+            alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+        )
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_rejects_duplicate_draft_targets_before_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    _seed_valid_profile_draft(isolated_sqlite)
+    _insert_draft(
+        isolated_sqlite,
+        draft_id="draft-duplicate-target",
+        target_profile_id="profile-0008",
+        source_attachment_id=None,
+    )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_drafts.target_profile_id"):
+        command.upgrade(
+            alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+        )
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_rejects_orphan_draft_source_before_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    _seed_valid_profile_draft(isolated_sqlite)
+    with sqlite3.connect(isolated_sqlite) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "UPDATE profile_drafts SET source_attachment_id = 'missing-attachment' "
+            "WHERE id = 'draft-0008'"
+        )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_drafts.source_attachment_id"):
+        command.upgrade(
+            alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+        )
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_rejects_foreign_key_check_before_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    command.upgrade(alembic_config(isolated_sqlite), "0007_add_cv_tailoring")
+    with sqlite3.connect(isolated_sqlite) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "UPDATE workspace_state SET active_profile_id = 'missing-profile' "
+            "WHERE id = 'main'"
+        )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="foreign_key_check"):
+        command.upgrade(
+            alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+        )
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_preserves_valid_draft_schema_rows_and_json(
+    isolated_sqlite: Path,
+) -> None:
+    payload = _seed_valid_profile_draft(isolated_sqlite)
+    before = _sqlite_snapshot(isolated_sqlite)
+    command.upgrade(
+        alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+    )
+    after = _sqlite_snapshot(isolated_sqlite)
+    with sqlite3.connect(isolated_sqlite) as connection:
+        row = connection.execute(
+            "SELECT id, source_attachment_id, target_profile_id, draft_json, "
+            "created_at, updated_at, reextract_operation_id FROM profile_drafts"
+        ).fetchone()
+        assert row is not None
+        assert row == (
+            "draft-0008",
+            "attachment-0008",
+            "profile-0008",
+            json.dumps(payload, separators=(",", ":")),
+            "2026-07-31 00:00:00+00:00",
+            "2026-07-31 00:00:00+00:00",
+            None,
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    before_draft = before["metadata"]["profile_drafts"]
+    after_draft = after["metadata"]["profile_drafts"]
+    assert [row[1] for row in before_draft["table_info"]] == [
+        "id",
+        "source_attachment_id",
+        "target_profile_id",
+        "draft_json",
+        "created_at",
+        "updated_at",
+    ]
+    assert [row[1] for row in after_draft["table_info"]] == [
+        "id",
+        "source_attachment_id",
+        "target_profile_id",
+        "draft_json",
+        "created_at",
+        "updated_at",
+        "reextract_operation_id",
+    ]
+    assert before["rows"]["attachments"] == after["rows"]["attachments"]
+    assert before["rows"]["profiles"] == after["rows"]["profiles"]
+    assert not [
+        row
+        for row in after["master"]
+        if row[0] == "trigger" and row[2] == "profile_drafts"
+    ]
+
+
+def test_0008_downgrade_refuses_populated_operation_without_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    _seed_valid_profile_draft(isolated_sqlite)
+    command.upgrade(
+        alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+    )
+    now = "2026-07-31 00:00:00+00:00"
+    with sqlite3.connect(isolated_sqlite) as connection:
+        connection.execute(
+            "INSERT INTO profile_reextract_operations "
+            "(id, profile_id, source_attachment_id, base_profile_updated_at, "
+            "base_workspace_updated_at, state, error_code, created_at, updated_at) "
+            "VALUES ('operation-0008', 'profile-0008', 'attachment-0008', ?, ?, "
+            "'running', NULL, ?, ?)",
+            (now, now, now, now),
+        )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_reextract_operations"):
+        command.downgrade(alembic_config(isolated_sqlite), "0007_add_cv_tailoring")
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_downgrade_refuses_linked_draft_without_schema_or_data_mutation(
+    isolated_sqlite: Path,
+) -> None:
+    _seed_valid_profile_draft(isolated_sqlite)
+    command.upgrade(
+        alembic_config(isolated_sqlite), "0008_profile_reextract_ownership"
+    )
+    with sqlite3.connect(isolated_sqlite) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "UPDATE profile_drafts SET reextract_operation_id = 'missing-operation' "
+            "WHERE id = 'draft-0008'"
+        )
+    before = _sqlite_snapshot(isolated_sqlite)
+    with pytest.raises(CommandError, match="profile_drafts references an operation"):
+        command.downgrade(alembic_config(isolated_sqlite), "0007_add_cv_tailoring")
+    assert _sqlite_snapshot(isolated_sqlite) == before
+
+
+def test_0008_empty_operation_downgrade_and_reupgrade_preserves_ordinary_draft(
+    isolated_sqlite: Path,
+) -> None:
+    payload = _seed_valid_profile_draft(isolated_sqlite)
+    cfg = alembic_config(isolated_sqlite)
+    before = _sqlite_snapshot(isolated_sqlite)
+    command.upgrade(cfg, "0008_profile_reextract_ownership")
+    upgraded = _sqlite_snapshot(isolated_sqlite)
+    command.downgrade(cfg, "0007_add_cv_tailoring")
+    downgraded = _sqlite_snapshot(isolated_sqlite)
+    command.upgrade(cfg, "0008_profile_reextract_ownership")
+    reupgraded = _sqlite_snapshot(isolated_sqlite)
+    with sqlite3.connect(isolated_sqlite) as connection:
+        draft_json_row = connection.execute(
+            "SELECT draft_json FROM profile_drafts WHERE id = 'draft-0008'"
+        ).fetchone()
+        assert draft_json_row is not None
+        draft_json = draft_json_row[0]
+        assert draft_json == json.dumps(payload, separators=(",", ":"))
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert before["metadata"]["profile_drafts"] == downgraded["metadata"][
+        "profile_drafts"
+    ]
+    assert upgraded["metadata"]["profile_drafts"] == reupgraded["metadata"][
+        "profile_drafts"
+    ]
+    assert before["rows"]["attachments"] == reupgraded["rows"]["attachments"]
+    assert before["rows"]["profiles"] == reupgraded["rows"]["profiles"]
+
+
+def test_0008_is_the_migration_head() -> None:
+    assert MIGRATION_HEAD == "0008_profile_reextract_ownership"
+    assert ScriptDirectory.from_config(
+        alembic_config(Path(":memory:"))
+    ).get_heads() == ["0008_profile_reextract_ownership"]
 
 
 async def _names(e: AsyncEngine) -> set[str]:
@@ -234,7 +592,7 @@ def test_migration_head_adds_tailoring_and_preserves_agent_activity_projection(
                         text("SELECT version_num FROM alembic_version")
                     )
                 ).scalar_one()
-                assert version == "0007_add_cv_tailoring"
+                assert version == "0008_profile_reextract_ownership"
                 tables = await _names(engine)
                 assert "cv_tailoring_sessions" in tables
                 assert "cv_tailoring_versions" in tables

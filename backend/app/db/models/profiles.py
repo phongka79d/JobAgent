@@ -10,7 +10,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    String,
     Text,
+    UniqueConstraint,
     column,
     literal_column,
 )
@@ -112,6 +114,19 @@ class ProfileDraft(Base):
     """Pending candidate/profile-preference draft for an attachment."""
 
     __tablename__ = "profile_drafts"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_profile_id", name="uq_profile_drafts__target_profile_id"
+        ),
+        UniqueConstraint(
+            "reextract_operation_id",
+            name="uq_profile_drafts__reextract_operation_id",
+        ),
+        CheckConstraint(
+            "reextract_operation_id IS NULL OR source_attachment_id IS NOT NULL",
+            name="reextract_source_coupling",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
     source_attachment_id: Mapped[str | None] = mapped_column(
@@ -120,12 +135,72 @@ class ProfileDraft(Base):
         nullable=True,
         unique=True,
     )
-    target_profile_id: Mapped[str | None] = mapped_column(
+    target_profile_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reextract_operation_id: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey("profile_reextract_operations.id", ondelete="RESTRICT"),
         nullable=True,
     )
     draft_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class ProfileReextractOperation(Base):
+    """Durable, profile-owned direct CV re-extraction metadata."""
+
+    __tablename__ = "profile_reextract_operations"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('running', 'review_ready', 'interrupted', 'failed', 'stale')",
+            name="state",
+        ),
+        CheckConstraint(
+            "state IN ('interrupted', 'failed', 'stale') AND error_code IS NOT NULL "
+            "OR state IN ('running', 'review_ready') AND error_code IS NULL",
+            name="error_coupling",
+        ),
+        Index(
+            "uq_profile_reextract_operations_actionable",
+            "profile_id",
+            unique=True,
+            sqlite_where=column("state").in_(("running", "review_ready")),
+        ),
+        Index(
+            "ix_profile_reextract_operations_recovery",
+            "profile_id",
+            "updated_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=new_uuid)
+    profile_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_attachment_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("attachments.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    base_profile_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    base_workspace_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
