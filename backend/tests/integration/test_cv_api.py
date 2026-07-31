@@ -945,55 +945,146 @@ def test_upload_blocked_by_agent_review_returns_nullable_operation_context(
     }
 
 
+def test_upload_blocked_by_reextract_review_returns_exact_operation_context(
+    cv_api_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    _db, _files_dir, _fake = cv_api_env
+
+    async def _seed_review() -> tuple[str, str, datetime]:
+        factory = get_session_factory()
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="ready-reextract-review-upload",
+                original_name="ready.pdf",
+                size_bytes=100,
+                storage_path=new_uuid(),
+                page_count=1,
+            )
+            await att_repo.mark_active(session, attachment.id, page_count=1)
+            profile = await profile_repo.create_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Ready profile",
+                profile_json={},
+                location=None,
+                extraction_version="fixture-v1",
+                source_hash="fixture-source",
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            now = datetime.now(UTC)
+            operation = ProfileReextractOperation(
+                id=new_uuid(),
+                profile_id=profile.id,
+                source_attachment_id=attachment.id,
+                base_profile_updated_at=profile.updated_at,
+                base_workspace_updated_at=now,
+                state="review_ready",
+                error_code=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(operation)
+            await session.flush()
+            draft = ProfileDraft(
+                id=new_uuid(),
+                target_profile_id=profile.id,
+                source_attachment_id=attachment.id,
+                reextract_operation_id=operation.id,
+                draft_json={"candidate_profile": {}, "job_preferences": {}},
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(draft)
+            await session.commit()
+            return profile.id, operation.id, draft.updated_at
+
+    profile_id, operation_id, revision = run_async(_seed_review())
+    with health_client() as client:
+        response = _upload(client, DIGITAL_CV_B.read_bytes())
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "code": "PROFILE_REVIEW_PENDING",
+        "summary": "Approve or discard the pending profile review first",
+        "profile_id": profile_id,
+        "review_source": "reextract",
+        "operation_id": operation_id,
+        "review_revision": revision.replace(tzinfo=UTC).isoformat(),
+    }
+
+
 def test_upload_that_passed_prebyte_gate_is_rejected_at_final_immediate_gate(
     cv_api_env: tuple[Path, Path, FakeDriver],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _db, files_dir, _fake = cv_api_env
-    reached = asyncio.Event()
-    release = asyncio.Event()
 
-    async def final_gate(*args: Any, **kwargs: Any) -> None:
-        reached.set()
-        await release.wait()
-        raise ActivityBlockedError(
-            "PROFILE_REEXTRACT_IN_PROGRESS",
-            "Wait for the profile re-extraction to finish first",
-            profile_id=new_uuid(),
-            operation_id=new_uuid(),
-        )
-
-    monkeypatch.setattr(cv_upload, "assert_upload_lifecycle_clear", final_gate)
-
-    async def _body() -> Any:
-        payload = DIGITAL_CV.read_bytes()
-        consumed = False
-
-        async def read() -> bytes:
-            nonlocal consumed
-            if consumed:
-                return b""
-            consumed = True
-            return payload
-
-        task = asyncio.create_task(
-            upload_cv(
-                content_type="application/pdf",
-                filename="race.pdf",
-                read_chunk=read,
-                storage=AttachmentStorage(files_dir),
-                session_factory=get_session_factory(),
+    async def _seed_running_operation() -> tuple[str, str, set[Path]]:
+        factory = get_session_factory()
+        async with factory() as session:
+            attachment = await att_repo.create_staged(
+                session,
+                file_hash="running-reextract-upload",
+                original_name="retained.pdf",
+                size_bytes=100,
+                storage_path=new_uuid(),
+                page_count=1,
             )
-        )
-        await reached.wait()
-        release.set()
-        with pytest.raises(cv_upload.CvUploadError) as exc_info:
-            await task
-        return exc_info.value
+            await att_repo.mark_active(session, attachment.id, page_count=1)
+            profile = await profile_repo.create_profile(
+                session,
+                attachment_id=attachment.id,
+                display_name="Running reextract profile",
+                profile_json={},
+                location=None,
+                extraction_version="fixture-v1",
+                source_hash="fixture-source",
+            )
+            await conversations_repo.create_for_profile(
+                session, profile_id=profile.id
+            )
+            await workspace_repo.set_active_profile_id(session, profile.id)
+            now = datetime.now(UTC)
+            operation = ProfileReextractOperation(
+                id=new_uuid(),
+                profile_id=profile.id,
+                source_attachment_id=attachment.id,
+                base_profile_updated_at=profile.updated_at,
+                base_workspace_updated_at=now,
+                state="running",
+                error_code=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(operation)
+            await session.commit()
+            before_files = (
+                set(files_dir.iterdir()) if files_dir.exists() else set()
+            )
+            return profile.id, operation.id, before_files
 
-    error = run_async(_body())
-    assert error.code == "PROFILE_REEXTRACT_IN_PROGRESS"
-    assert list(files_dir.glob("*")) == []
+    with health_client() as client:
+        profile_id, operation_id, before_files = run_async(
+            _seed_running_operation()
+        )
+        response = _upload(client, DIGITAL_CV_B.read_bytes(), filename="race.pdf")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "code": "PROFILE_REEXTRACT_IN_PROGRESS",
+        "summary": "Wait for the profile re-extraction to finish first",
+        "profile_id": profile_id,
+        "operation_id": operation_id,
+    }
+    assert set(files_dir.iterdir()) == before_files
+
+    async def _assert_no_upload_row() -> None:
+        async with get_session_factory()() as session:
+            assert (
+                await session.scalar(select(func.count()).select_from(Attachment))
+            ) == 1
+
+    run_async(_assert_no_upload_row())
 
 
 def test_upload_begin_immediate_busy_is_typed_409(
@@ -1158,6 +1249,7 @@ async def _run_upload_reextract_ordering(
         path for path in files_dir.iterdir() if path.name not in persisted_paths
     ]
     return {
+        "profile_id": profile_id,
         "upload": upload_outcome,
         "reextract": reextract_outcome,
         "attachments": attachment_count,
@@ -1215,6 +1307,10 @@ def test_upload_then_reextract_and_reextract_then_upload_are_serialized(
     assert reextract_first["attachments"] == 1
     assert reextract_first["profiles"] == 1
     assert len(reextract_first["operations"]) == 1
+    assert (
+        reextract_first["operations"][0].profile_id
+        == reextract_first["profile_id"]
+    )
     assert reextract_first["operations"][0].state == "interrupted"
     assert reextract_first["drafts"] == []
     assert reextract_first["losing_files"] == []

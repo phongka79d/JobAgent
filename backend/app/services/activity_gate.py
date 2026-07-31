@@ -191,35 +191,18 @@ async def assert_upload_lifecycle_clear(
             operation_id=running_operation.id,
         )
 
-    drafts = await session.execute(
-        select(ProfileDraft, ProfileReextractOperation)
+    draft_owner = await session.scalar(
+        select(ProfileDraft.target_profile_id)
         .join(Profile, Profile.id == ProfileDraft.target_profile_id)
-        .outerjoin(
-            ProfileReextractOperation,
-            ProfileReextractOperation.id == ProfileDraft.reextract_operation_id,
-        )
         .where(Profile.state == PROFILE_STATE_READY)
         .order_by(ProfileDraft.updated_at, ProfileDraft.id)
+        .limit(1)
     )
-    for draft, operation in drafts.all():
-        if operation is not None and operation.state == "running":
-            raise ActivityBlockedError(
-                "PROFILE_REEXTRACT_IN_PROGRESS",
-                "Wait for the profile re-extraction to finish first",
-                profile_id=operation.profile_id,
-                operation_id=operation.id,
-            )
-        raise ActivityBlockedError(
-            "PROFILE_REVIEW_PENDING",
-            "Approve or discard the pending profile review first",
-            profile_id=draft.target_profile_id,
-            review_source=(
-                "reextract"
-                if draft.reextract_operation_id is not None
-                else "agent_update"
-            ),
-            operation_id=draft.reextract_operation_id,
-            review_revision=_aware_utc(draft.updated_at),
+    if draft_owner is not None:
+        await assert_profile_review_clear(
+            session,
+            profile_id=draft_owner,
+            code="PROFILE_REVIEW_PENDING",
         )
 
     review_ready = await session.execute(
