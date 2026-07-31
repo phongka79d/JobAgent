@@ -21,6 +21,7 @@ stays ``running`` across interrupt and terminalizes once.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from langchain_core.tools import InjectedToolCallId, tool
@@ -520,20 +521,19 @@ def build_commit_profile_draft_tool(
                     data={"draft_id": draft_id},
                 )
 
-            # Validate and durably capture the exact operation owner before
+            # Validate and durably capture the exact draft owner/revision before
             # interrupt; resume must compare against this server-owned stamp.
             async with session_scope(factory) as session:
                 draft_row = await profile_repo.get_draft_for_profile(
                     session, expected_profile_id
                 )
-            if draft_row is None:
-                return ToolResult(
-                    ok=False,
-                    code=ERROR_DRAFT_NOT_FOUND,
-                    summary="No current profile draft to commit",
-                    data={"draft_id": PROFILE_DRAFT_ID},
-                )
-            async with session_scope(factory) as session:
+                if draft_row is None:
+                    return ToolResult(
+                        ok=False,
+                        code=ERROR_DRAFT_NOT_FOUND,
+                        summary="No current profile draft to commit",
+                        data={"draft_id": PROFILE_DRAFT_ID},
+                    )
                 execution = await tool_repo.get_by_identity(
                     session, run_id=run_id, tool_call_id=tool_call_id
                 )
@@ -546,16 +546,53 @@ def build_commit_profile_draft_tool(
                     )
                 arguments = dict(execution.arguments_summary_json or {})
                 captured_operation_id = arguments.get("operation_id", ...)
-                if captured_operation_id is ...:
+                captured_revision = arguments.get("draft_revision", ...)
+                current_revision = (
+                    draft_row.updated_at.replace(tzinfo=UTC)
+                    if draft_row.updated_at.tzinfo is None
+                    else draft_row.updated_at.astimezone(UTC)
+                )
+                if captured_operation_id is ... and captured_revision is ...:
                     captured_operation_id = draft_row.reextract_operation_id
+                    captured_revision = current_revision.isoformat()
                     arguments["operation_id"] = captured_operation_id
+                    arguments["draft_revision"] = captured_revision
                     execution.arguments_summary_json = arguments
                     await session.flush()
-                elif captured_operation_id != draft_row.reextract_operation_id:
+                if (
+                    captured_operation_id != draft_row.reextract_operation_id
+                    or not isinstance(captured_revision, str)
+                ):
                     return ToolResult(
                         ok=False,
                         code="PROFILE_REEXTRACT_CONFLICT",
                         summary="The profile review operation changed",
+                        data={"draft_id": PROFILE_DRAFT_ID},
+                    )
+                try:
+                    expected_draft_updated_at = datetime.fromisoformat(
+                        captured_revision
+                    )
+                except ValueError:
+                    return ToolResult(
+                        ok=False,
+                        code="PROFILE_REEXTRACT_CONFLICT",
+                        summary="The profile review revision changed",
+                        data={"draft_id": PROFILE_DRAFT_ID},
+                    )
+                if expected_draft_updated_at.tzinfo is None:
+                    expected_draft_updated_at = expected_draft_updated_at.replace(
+                        tzinfo=UTC
+                    )
+                else:
+                    expected_draft_updated_at = expected_draft_updated_at.astimezone(
+                        UTC
+                    )
+                if expected_draft_updated_at != current_revision:
+                    return ToolResult(
+                        ok=False,
+                        code="PROFILE_REEXTRACT_CONFLICT",
+                        summary="The profile review revision changed",
                         data={"draft_id": PROFILE_DRAFT_ID},
                     )
             # Pause before any active profile/preference side effect.
@@ -611,6 +648,7 @@ def build_commit_profile_draft_tool(
                 sync_fn=sync_fn,
                 expected_profile_id=expected_profile_id,
                 expected_operation_id=captured_operation_id,
+                expected_draft_updated_at=expected_draft_updated_at,
             )
 
             data: dict[str, Any] = {

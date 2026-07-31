@@ -192,6 +192,7 @@ async def activate_profile(
             "PROFILE_SETUP_IN_PROGRESS": 409,
             "PROFILE_SWITCH_BLOCKED": 409,
             "PROFILE_REVIEW_PENDING": 409,
+            "PROFILE_REEXTRACT_IN_PROGRESS": 409,
             "PROFILE_INCONSISTENT": 500,
         }.get(exc.code, 500)
         raise _http(exc.code, exc.summary, status) from exc

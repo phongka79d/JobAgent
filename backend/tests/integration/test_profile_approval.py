@@ -3412,38 +3412,55 @@ def test_commit_profile_draft_owner_path_requires_exact_reextract_identity(
             )
             assert crossed.code == "PROFILE_REEXTRACT_CONFLICT"
 
-            monkeypatch.setattr("app.tools.profile.interrupt", lambda _: "save_profile")
+            class _PauseCommit(Exception):
+                pass
+
+            def _pause(_: object) -> str:
+                raise _PauseCommit()
+
+            monkeypatch.setattr("app.tools.profile.interrupt", _pause)
             tool = build_commit_profile_draft_tool(
                 session_factory=factory,
                 storage=storage,
                 normalizer=normalizer,
                 sync_fn=lambda: _noop_async(),
             )
-            raw = await tool.ainvoke(
-                {
-                    "type": "tool_call",
-                    "id": "tool-reextract-owner",
-                    "name": tool.name,
-                    "args": {
-                        "draft_id": "current",
-                        "state": {
-                            "run_id": run_id,
-                            "profile_id": profile_id,
-                        },
-                    },
-                }
-            )
+            invocation = {
+                "type": "tool_call",
+                "id": "tool-reextract-owner",
+                "name": tool.name,
+                "args": {
+                    "draft_id": "current",
+                    "state": {"run_id": run_id, "profile_id": profile_id},
+                },
+            }
+            with pytest.raises(_PauseCommit):
+                await tool.ainvoke(invocation)
+            async with factory() as session:
+                draft = await prof_repo.get_draft_for_profile(session, profile_id)
+                assert draft is not None
+                await prof_repo.upsert_draft_for_profile(
+                    session,
+                    profile_id=profile_id,
+                    draft_json=dict(draft.draft_json),
+                    source_attachment_id=draft.source_attachment_id,
+                    reextract_operation_id=draft.reextract_operation_id,
+                )
+                await session.commit()
+
+            def _unexpected_interrupt(_: object) -> str:
+                raise AssertionError("changed draft must fail before interrupt")
+
+            monkeypatch.setattr("app.tools.profile.interrupt", _unexpected_interrupt)
+            raw = await tool.ainvoke(invocation)
             payload = raw.content if hasattr(raw, "content") else raw
             if isinstance(payload, str):
                 import json
 
                 payload = json.loads(payload)
-            assert payload["ok"] is True
+            assert payload["code"] == "PROFILE_REEXTRACT_CONFLICT"
             async with factory() as session:
-                assert (
-                    await prof_repo.get_draft_for_profile(session, profile_id)
-                    is None
-                )
+                assert await prof_repo.get_draft_for_profile(session, profile_id)
         finally:
             await engine.dispose()
 

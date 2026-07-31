@@ -284,7 +284,10 @@ async def activate_profile_by_id(
                 raise ProfileActivationError(
                     "PROFILE_NOT_READY", "profile is not ready"
                 )
-            await assert_profile_reextract_clear(session, profile_id=profile_id)
+            try:
+                await assert_profile_reextract_clear(session, profile_id=profile_id)
+            except ActivityBlockedError as exc:
+                raise ProfileActivationError(exc.code, exc.summary) from exc
             incomplete = await profiles_repo.get_incomplete_profile(session)
             if incomplete is not None:
                 raise ProfileActivationError(

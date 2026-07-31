@@ -552,6 +552,47 @@ def test_profile_activation_is_blocked_by_pending_profile_review(
     assert response.json()["detail"]["code"] == "PROFILE_REVIEW_PENDING"
 
 
+def test_profile_activation_maps_running_reextract_operation_to_conflict(
+    health_env: tuple[Path, Path, FakeDriver],
+) -> None:
+    del health_env
+    _active_id, _active_attachment, _, target_id, target_attachment, _ = (
+        _seed_two_profiles()
+    )
+
+    async def start_operation() -> None:
+        from app.db.models.profiles import ProfileReextractOperation
+        from app.repositories import workspace_state as workspace_repo
+
+        factory = get_session_factory()
+        async with factory() as session:
+            profile = await profiles_repo.get_profile(session, target_id)
+            workspace = await workspace_repo.get_state(session)
+            assert profile is not None and workspace is not None
+            now = datetime.now(UTC)
+            session.add(
+                ProfileReextractOperation(
+                    id=new_uuid(),
+                    profile_id=target_id,
+                    source_attachment_id=target_attachment,
+                    base_profile_updated_at=profile.updated_at,
+                    base_workspace_updated_at=workspace.updated_at,
+                    state="running",
+                    error_code=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await session.commit()
+
+    with health_client() as client:
+        run_async(start_operation())
+        response = client.post(f"/api/profiles/{target_id}/activate")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "PROFILE_REEXTRACT_IN_PROGRESS"
+
+
 class _GraphResult:
     async def consume(self) -> None:
         return None
