@@ -408,7 +408,7 @@ git commit -m "feat: serialize profile reextract claims"
 - Modify: `backend/tests/integration/test_profile_reextraction.py`
 - Modify: `backend/tests/integration/test_cv_api.py`
 
-- [ ] **Step 1: Write failing pure-stage and publication-CAS tests.**
+- [x] **Step 1: Write failing pure-stage and publication-CAS tests.**
 
 ```python
 async def test_stage_cv_document_has_no_open_session_and_no_persistence(
@@ -487,13 +487,13 @@ async def test_publish_marks_operation_stale_without_partial_writes_when_workspa
         assert after_chunks == before_chunks
 ```
 
-- [ ] **Step 2: Run the stage/publication tests to verify they fail.**
+- [x] **Step 2: Run the stage/publication tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/unit/test_profile_extraction.py::test_stage_cv_document_has_no_open_session_and_no_persistence tests/integration/test_profile_reextraction.py::test_publish_marks_operation_stale_without_partial_writes_when_workspace_revision_changes tests/integration/test_cv_api.py -q`
 
 Expected: FAIL because `propose_profile_from_cv` performs staging and draft publication as one path with no operation CAS.
 
-- [ ] **Step 3: Implement the shared in-memory stage and atomic publisher.**
+- [x] **Step 3: Implement the shared in-memory stage and atomic publisher.**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -567,13 +567,13 @@ async def publish_reextract_stage(**kwargs: object) -> PublishResult:
 
 `stage_cv_document` may read the retained file and call the provider, but it must not accept a session or write any database row. The purity test inspects its signature and monkeypatches the module's `session_scope`, `cv_doc_repo.upsert_draft`, `profile_repo.upsert_draft_for_profile`, and `persist_canonical_chunks` entrypoints to `pytest.fail` before staging; a row-count assertion alone is insufficient. `publish_reextract_stage` must use a fresh short session and, before any write, check exact operation ID, `running` state, current active profile identity, operation source attachment identity, retained profile attachment identity, captured profile and workspace timestamps, absence of any profile-scoped draft, and global absence of incomplete profile setup via `has_incomplete_profile_setup(session)`. Only then replace canonical chunks, call `cv_documents.upsert_draft` with its actual keyword-only signature shown above, write the profile-scoped operation-linked draft, and change the operation to `review_ready`. `_publish_reextract_stage_transaction` raises `PublishCasMismatch`; the shown outer `publish_reextract_stage` catches it after rollback and opens a separate short session to CAS the exact running operation to `stale` with `PROFILE_REEXTRACT_STALE`.
 
-- [ ] **Step 4: Run focused stage and CAS regressions to verify they pass.**
+- [x] **Step 4: Run focused stage and CAS regressions to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/unit/test_profile_extraction.py::test_stage_cv_document_has_no_open_session_and_no_persistence tests/integration/test_profile_reextraction.py::test_publish_marks_operation_stale_without_partial_writes_when_workspace_revision_changes tests/integration/test_profile_reextraction.py::test_publish_compares_profile_workspace_attachment_and_operation tests/integration/test_cv_api.py -q`
 
 Expected: PASS; provider and filesystem work happen without an open database session, successful publication is atomic, and failed CAS leaves no proposal data.
 
-- [ ] **Step 5: Commit the stage/publication split.**
+- [x] **Step 5: Commit the stage/publication split.**
 
 ```powershell
 git add backend/app/services/profile_drafts.py backend/app/services/profile_extraction.py backend/tests/unit/test_profile_extraction.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_cv_api.py
