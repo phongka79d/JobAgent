@@ -672,7 +672,7 @@ git commit -m "feat: recover durable profile reextract operations"
 - Modify: `backend/tests/integration/test_profiles_api.py`
 - Modify: `backend/tests/integration/test_agent_runner.py`
 
-- [ ] **Step 1: Write failing stale-review and exact-consumption tests.**
+- [x] **Step 1: Write failing stale-review and exact-consumption tests.**
 
 ```python
 async def test_status_read_reconciles_review_ready_to_stale_and_agent_cannot_edit() -> None:
@@ -693,13 +693,13 @@ async def test_approve_and_discard_require_matching_operation_and_revision() -> 
     assert await draft_exists(factory, PROFILE_ID) is False
 ```
 
-- [ ] **Step 2: Run review and approval tests to verify they fail.**
+- [x] **Step 2: Run review and approval tests to verify they fail.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_to_stale_and_agent_cannot_edit tests/integration/test_profile_reextraction.py::test_approve_and_discard_require_matching_operation_and_revision tests/integration/test_profile_approval.py tests/integration/test_profile_deletion.py tests/integration/test_profiles_api.py tests/integration/test_agent_runner.py -q`
 
 Expected: FAIL because review, approval, discard, Agent correction, activation, and deletion do not compare the operation identity and captured workspace revision.
 
-- [ ] **Step 3: Add exact review and consumption CAS contracts.**
+- [x] **Step 3: Add exact review and consumption CAS contracts.**
 
 ```python
 async def get_review(
@@ -787,13 +787,13 @@ On every review read, compare a `review_ready` operation's captured profile/work
 
 This task owns the discriminated `operation_id` changes for existing review endpoints. Add the required-but-nullable `operation_id: UuidStr | None` field to `ProfileReextractApproveRequest`; use a nullable review/discard query. `GET /reextract-draft`, `POST /reextract-draft/approve`, and `DELETE /reextract-draft` must pass it to the coordinator. A profile-scoped ordinary draft accepts only null, while an operation-linked draft accepts only its exact UUID. `ProfileReextractReview` exposes `source: Literal["agent_update", "reextract"]`, nullable `operation_id`, and nullable `operation_state`, with validators enforcing the source/identity combination. Task 8 owns only the new status endpoint and `/api/profile` operation envelope/projection. Keep the coordinator's internal exact methods until this task updates all three routes; do not ship a route that can consume an operation-linked draft by profile identity alone.
 
-- [ ] **Step 4: Run focused review, approval, and deletion regressions to verify they pass.**
+- [x] **Step 4: Run focused review, approval, and deletion regressions to verify they pass.**
 
 Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_profile_reextraction.py::test_status_read_reconciles_review_ready_to_stale_and_agent_cannot_edit tests/integration/test_profile_reextraction.py::test_approve_and_discard_require_matching_operation_and_revision tests/integration/test_profile_approval.py tests/integration/test_profile_deletion.py tests/integration/test_profiles_api.py tests/integration/test_agent_runner.py tests/unit/test_profile_projection.py -q`
 
 Expected: PASS; review reconciliation is durable, stale review cannot be approved or edited, exact approval/discard consumes only matching rows, and deletion preserves restrictive-FK integrity.
 
-- [ ] **Step 5: Commit review and approval safety.**
+- [x] **Step 5: Commit review and approval safety.**
 
 ```powershell
 git add backend/app/repositories/profile_reextract_operations.py backend/app/services/profile_reextraction.py backend/app/services/profile_approval.py backend/app/services/profile_drafts.py backend/app/services/activity_gate.py backend/app/services/profile_activation.py backend/app/services/profile_deletion.py backend/app/tools/profile.py backend/app/schemas/profile_reextraction.py backend/app/api/profiles.py backend/tests/integration/test_profile_approval.py backend/tests/integration/test_profile_deletion.py backend/tests/integration/test_profile_reextraction.py backend/tests/integration/test_profiles_api.py backend/tests/integration/test_agent_runner.py
