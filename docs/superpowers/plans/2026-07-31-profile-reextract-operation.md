@@ -1181,7 +1181,7 @@ git commit -m "feat: recover cv manager reextract operations"
 - Modify: `frontend/src/test/chat-page.test.tsx`
 - Modify: `frontend/src/app/App.test.tsx`
 
-- [ ] **Step 1: Write failing App-level lock and direct-action tests.**
+- [x] **Step 1: Write failing App-level lock and direct-action tests.**
 
 ```tsx
 it('disables sidebar and chat CV uploads while the active operation is running', async () => {
@@ -1209,13 +1209,13 @@ it('opens an ordinary Agent review without inventing an operation id', async () 
 });
 ```
 
-- [ ] **Step 2: Run upload UX tests to verify they fail.**
+- [x] **Step 2: Run upload UX tests to verify they fail.**
 
 Run: `cd frontend; npm test -- --run src/app/App.test.tsx src/test/cv-sidebar.test.tsx src/test/chat-page.test.tsx`
 
 Expected: FAIL because `App` does not receive a durable operation lock and upload errors provide no exact pending-operation action.
 
-- [ ] **Step 3: Wire the single CV Manager controller through `App` and both upload surfaces.**
+- [x] **Step 3: Wire the single CV Manager controller through `App` and both upload surfaces.**
 
 ```tsx
 const cvManager = useCvManagerState({profileId: selectedProfile?.id ?? null, profileReady: selectedProfile?.state === 'ready'});
@@ -1228,13 +1228,13 @@ const uploadLocked = workspaceLocked || tailoringLocked || reextractLocked;
 
 Lift the sole `useCvManagerState` call out of `CvSidebar` into `App`, pass its `CvManagerController` down to `CvSidebar` and the drawer, and delete the sidebar-owned hook call. Define three separate actions: `startNewCvManagerReextract(profileId)` invokes `cvManager.startReextract(profileId)` only after the user chooses Re-extract; `openExistingCvManagerOperation(profileId, operationId)` opens/refreshes that exact operation without calling start; and `openAgentPendingReview(profileId, reviewRevision)` loads the exact ordinary review with `operation_id=null`. Keep upload locks active only for `running`; interrupted and failed states permit uploads, while review-ready and stale-with-draft behavior follows server truth. `PROFILE_REEXTRACT_IN_PROGRESS` renders **Check re-extraction** and requires the non-null operation detail. `PROFILE_REVIEW_PENDING` renders **Review changes**: `review_source="reextract"` opens its operation, while `review_source="agent_update"` opens the exact profile/revision ordinary review. No 409 action may call `startNewCvManagerReextract` or start a second extraction. Extend `ChatApiError` and `parseErrorBody` in `frontend/src/lib/api/chat.ts` to preserve the safe structured detail consumed by `profile/api.ts`; then make `profile/types.ts` strictly validate the `PROFILE_REEXTRACT_IN_PROGRESS` and `PROFILE_REVIEW_PENDING` unions, including source/nullability/revision invariants. Preserve existing `code`/`summary` behavior for unrelated callers and do not infer operation identity from local profile lists.
 
-- [ ] **Step 4: Run focused App and upload-control tests to verify they pass.**
+- [x] **Step 4: Run focused App and upload-control tests to verify they pass.**
 
 Run: `cd frontend; npm test -- --run src/app/App.test.tsx src/test/cv-sidebar.test.tsx src/test/chat-page.test.tsx src/test/cv-manager-reextract.test.tsx`
 
 Expected: PASS; both controls lock together, direct 409 actions open the correlated operation, terminal retryable failures re-enable upload, and inactive archived items have no Re-extract control.
 
-- [ ] **Step 5: Commit shared upload behavior.**
+- [x] **Step 5: Commit shared upload behavior.**
 
 ```powershell
 git add frontend/src/app/App.tsx frontend/src/lib/api/chat.ts frontend/src/features/profile/CvSidebar.tsx frontend/src/features/profile/ProfileOverviewPanel.tsx frontend/src/features/profile/api.ts frontend/src/features/profile/types.ts frontend/src/features/chat/ChatPage.tsx frontend/src/test/cv-sidebar.test.tsx frontend/src/test/chat-page.test.tsx frontend/src/app/App.test.tsx
