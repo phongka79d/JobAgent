@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from app.core.settings import Settings, clear_settings_cache
 from app.graph.rebuild import (
@@ -26,12 +28,82 @@ from app.graph.rebuild_target import (
     AUTHORIZED_SQLITE_PATH,
 )
 from app.schemas.embeddings import LOCKED_EMBEDDING_DIMENSIONS, LOCKED_EMBEDDING_MODEL
+from app.services.profile_reextract_migration_smoke import run_smoke
 from pydantic import AnyHttpUrl, SecretStr
 
 from tests.fakes.graph_rebuild import FakeNeo4jDriver
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER = _REPO_ROOT / "infrastructure" / "scripts" / "rebuild_neo4j.py"
+
+
+def test_migration_smoke_reports_expected_inventory_without_network(
+    monkeypatch: pytest.MonkeyPatch, migrated_sqlite: Path
+) -> None:
+    monkeypatch.setattr(httpx.Client, "request", pytest.fail)
+    monkeypatch.setattr(httpx.AsyncClient, "request", pytest.fail)
+    result = run_smoke(sqlite_path=migrated_sqlite)
+    assert result.alembic_revision == "0008_profile_reextract_ownership"
+    assert result.foreign_key_check == []
+    assert "reextract_operation_id" in result.profile_draft_columns
+    assert "profile_id" in result.operation_columns
+
+
+def test_migration_smoke_counts_only_actionable_reextract_operations(
+    migrated_sqlite: Path,
+) -> None:
+    now = "2026-07-31 00:00:00+00:00"
+    with sqlite3.connect(migrated_sqlite) as connection:
+        for suffix in ("ordinary-a", "ordinary-b", "actionable"):
+            connection.execute(
+                "INSERT INTO attachments "
+                "(id, file_hash, original_name, mime_type, size_bytes, page_count, "
+                "storage_path, state, created_at, updated_at) "
+                "VALUES (?, ?, 'cv.pdf', 'application/pdf', 10, 1, ?, "
+                "'archived', ?, ?)",
+                (f"attachment-{suffix}", f"hash-{suffix}", f"{suffix}.pdf", now, now),
+            )
+            connection.execute(
+                "INSERT INTO profiles "
+                "(id, attachment_id, display_name, profile_json, extraction_version, "
+                "source_hash, state, created_at, updated_at, last_opened_at) "
+                "VALUES (?, ?, 'Profile', '{}', 'v1', ?, 'ready', ?, ?, ?)",
+                (
+                    f"profile-{suffix}",
+                    f"attachment-{suffix}",
+                    f"source-{suffix}",
+                    now,
+                    now,
+                    now,
+                ),
+            )
+        for suffix in ("ordinary-a", "ordinary-b"):
+            connection.execute(
+                "INSERT INTO profile_drafts "
+                "(id, source_attachment_id, target_profile_id, draft_json, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, '{}', ?, ?)",
+                (
+                    f"draft-{suffix}",
+                    f"attachment-{suffix}",
+                    f"profile-{suffix}",
+                    now,
+                    now,
+                ),
+            )
+        connection.execute(
+            "INSERT INTO profile_reextract_operations "
+            "(id, profile_id, source_attachment_id, base_profile_updated_at, "
+            "base_workspace_updated_at, state, error_code, created_at, updated_at) "
+            "VALUES ('operation-actionable', 'profile-actionable', "
+            "'attachment-actionable', ?, ?, 'running', NULL, ?, ?)",
+            (now, now, now, now),
+        )
+
+    result = run_smoke(sqlite_path=migrated_sqlite)
+
+    assert result.table_counts["profile_drafts"] == 2
+    assert result.pending_action_count == 1
 
 
 def _settings(
