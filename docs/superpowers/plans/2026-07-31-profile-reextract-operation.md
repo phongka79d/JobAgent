@@ -1251,7 +1251,7 @@ git commit -m "fix: lock cv uploads during reextract"
 - Modify: `backend/tests/integration/test_migrations.py`
 - Create: `docs/operations/profile-reextract-release.md`
 
-- [ ] **Step 1: Write failing PowerShell contract checks and smoke test.**
+- [x] **Step 1: Write failing PowerShell contract checks and smoke test.**
 
 ```powershell
 $script = Join-Path $PSScriptRoot 'app_data_snapshot.ps1'
@@ -1271,7 +1271,7 @@ def test_migration_smoke_reports_expected_inventory_without_network(monkeypatch:
     assert result.foreign_key_check == []
 ```
 
-- [ ] **Step 2: Run utility/static checks to verify they fail.**
+- [x] **Step 2: Run utility/static checks to verify they fail.**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/scripts/test_app_data_snapshot.ps1`
 
@@ -1279,7 +1279,7 @@ Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_g
 
 Expected: FAIL because the snapshot utility and migration smoke module do not exist.
 
-- [ ] **Step 3: Implement Backup, Restore, Verify, and read-only smoke contracts.**
+- [x] **Step 3: Implement Backup, Restore, Verify, and read-only smoke contracts.**
 
 ```powershell
 param(
@@ -1297,7 +1297,7 @@ param(
 
 Require `jobagentlatest`, reject archive and manifest paths inside the repository worktree, and reject a missing or incorrect expected consumer or clone purpose. `Backup` requires a stopped backend, has no `ExpectedArchiveSha256` parameter requirement, writes an archive plus manifest outside the worktree, and records SHA-256, archive size, full relative-path inventory, SQLite/WAL/SHM presence, table counts, active profile, pending action, and Alembic revision. `Restore` and `Verify` require `ExpectedArchiveSha256`; `Restore` also requires `ConfirmRestore`. Validate authoritative volume name and Compose label separately from the exact expected consumer, and validate clone label `jobagent.release.purpose=plan18-rehearsal` separately from source-volume rules. Restore through a temporary directory and replace only after complete inventory/hash validation. The smoke module must open the supplied SQLite path read-only, report revision/table/file/profile/pending-action parity, verify profile-draft and operation schema metadata, and run `PRAGMA foreign_key_check` without provider, filesystem write, or network use.
 
-- [ ] **Step 4: Run focused snapshot and smoke checks to verify they pass.**
+- [x] **Step 4: Run focused snapshot and smoke checks to verify they pass.**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/scripts/test_app_data_snapshot.ps1`
 
@@ -1305,7 +1305,7 @@ Run: `cd backend; ..\.venv\Scripts\python.exe -m pytest tests/integration/test_g
 
 Expected: PASS; Backup accepts no expected hash, Verify/Restore reject absent or incorrect expected hashes, private-output checks fail closed, and smoke remains provider-free and read-only.
 
-- [ ] **Step 5: Write and verify the exact release/rehearsal/rollback procedure.**
+- [x] **Step 5: Write and verify the exact release/rehearsal/rollback procedure.**
 
 ```powershell
 $ComposeArgs = @('--env-file', '.env', '-f', 'infrastructure/docker-compose.yml', '-p', 'jobagentlatest')
@@ -1319,7 +1319,7 @@ docker compose @ComposeArgs config --services
 
 In `docs/operations/profile-reextract-release.md`, require exactly `backend`, `frontend`, and `neo4j` before every release action. Record and tag running backend/frontend image IDs before build; stop backend; run `Backup` without an expected hash; calculate `$BackupSha256`; build `backend frontend` using `docker compose @ComposeArgs build --pull`; tag candidate IDs after build; create the labelled clone; and restore it using `ExpectedArchiveSha256`. Keep backend stopped continuously from backup through networkless clone migration rehearsal and candidate cutover. Do not run a browser test before candidate cutover. At cutover reverify authoritative volume and consumer separately, stop frontend, recreate only backend/frontend with `up -d --wait --wait-timeout 180 --force-recreate`, then immediately inspect the deployed backend/frontend image IDs and require equality with the rehearsed candidate IDs before health, browser, or log checks. Roll back immediately on image-ID mismatch, migration, health, inventory, browser, or log failure. Rollback stops frontend/backend, restores the verified full source-volume snapshot, restores pre-release tags, restarts backend/frontend, checks the old revision and inventory, then rebuilds the derived graph. The procedure must not use `docker compose down -v`.
 
-- [ ] **Step 6: Commit snapshot and release assets.**
+- [x] **Step 6: Commit snapshot and release assets.**
 
 ```powershell
 git add infrastructure/scripts/app_data_snapshot.ps1 infrastructure/scripts/test_app_data_snapshot.ps1 backend/app/services/profile_reextract_migration_smoke.py backend/tests/integration/test_graph_rebuild_cli.py backend/tests/integration/test_migrations.py docs/operations/profile-reextract-release.md
