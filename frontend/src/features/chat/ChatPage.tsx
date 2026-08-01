@@ -15,6 +15,7 @@ import {
 } from '@astryxdesign/core/Chat';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {FileInput} from '@astryxdesign/core/FileInput';
+import {Button} from '@astryxdesign/core/Button';
 import {Token} from '@astryxdesign/core/Token';
 import {VStack} from '@astryxdesign/core/VStack';
 
@@ -28,7 +29,7 @@ import {
   type StreamCallbacks,
 } from '../../lib/api/chat';
 import {saveAndEvaluateJob as defaultSaveAndEvaluateJob} from '../jobs/api';
-import {uploadCv as defaultUploadCv} from '../profile/api';
+import {getProfileUploadConflict, uploadCv as defaultUploadCv} from '../profile/api';
 import {isProfileCommitApproval} from '../profile/ApprovalCard';
 import type {
   ProfileListItem,
@@ -94,6 +95,9 @@ export type ChatPageProps = {
   /** After zero-result save/evaluate — invalidate saved-JD sidebar caches. */
   onSavedJobsInvalidated?: () => void;
   onOpenTailoringEditor?: (sessionId: string) => void;
+  uploadDisabled?: boolean;
+  onProfileReextractConflict?: (profileId: string, operationId: string) => void;
+  onAgentPendingReview?: (profileId: string, revision: string) => void;
 };
 
 function newClientKey(prefix: string): string {
@@ -119,6 +123,9 @@ export function ChatPage({
   onCvUploadSuccess,
   onSavedJobsInvalidated,
   onOpenTailoringEditor,
+  uploadDisabled: externalUploadDisabled = false,
+  onProfileReextractConflict,
+  onAgentPendingReview,
 }: ChatPageProps) {
   const loadHistory = deps?.loadHistory ?? fetchChatHistory;
   const sendTurn = deps?.sendTurn ?? streamChatTurn;
@@ -158,6 +165,7 @@ export function ChatPage({
     null,
   );
   const [composerFile, setComposerFile] = useState<File | null>(null);
+  const [uploadConflict, setUploadConflict] = useState<ReturnType<typeof getProfileUploadConflict>>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [isAttaching, setIsAttaching] = useState(false);
   /** Local only: first accepted approval action per run (not a second store). */
@@ -384,6 +392,7 @@ export function ChatPage({
       setPendingPdf(null);
       setComposerFile(null);
       setAttachError(null);
+      setUploadConflict(null);
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -599,6 +608,7 @@ export function ChatPage({
       }
       setIsAttaching(true);
       setAttachError(null);
+      setUploadConflict(null);
       try {
         const result = await doUpload(file);
         if (onCvUploadSuccess) {
@@ -624,6 +634,7 @@ export function ChatPage({
               ? err.message
               : 'CV attach failed';
         setAttachError(summary);
+        setUploadConflict(getProfileUploadConflict(err));
         setPendingPdf(null);
       } finally {
         setIsAttaching(false);
@@ -691,7 +702,7 @@ export function ChatPage({
         }
       : undefined;
 
-  const uploadDisabled = locked || isAttaching;
+  const uploadDisabled = locked || isAttaching || externalUploadDisabled;
 
   return (
     <VStack
@@ -704,6 +715,13 @@ export function ChatPage({
         <ChatSystemMessage>
           {`History load issue: ${historyLoadError}`}
         </ChatSystemMessage>
+      ) : null}
+      {uploadConflict?.code === 'PROFILE_REEXTRACT_IN_PROGRESS' ? (
+        <Button label="Check re-extraction" variant="secondary" size="sm" onClick={() => onProfileReextractConflict?.(uploadConflict.profile_id, uploadConflict.operation_id)} />
+      ) : uploadConflict?.code === 'PROFILE_REVIEW_PENDING' ? (
+        <Button label="Review changes" variant="secondary" size="sm" onClick={() => uploadConflict.review_source === 'reextract'
+          ? onProfileReextractConflict?.(uploadConflict.profile_id, uploadConflict.operation_id)
+          : onAgentPendingReview?.(uploadConflict.profile_id, uploadConflict.review_revision)} />
       ) : null}
       <ChatLayout
         emptyState={emptyState}
@@ -741,7 +759,7 @@ export function ChatPage({
                 isLabelHidden
                 isDisabled={uploadDisabled}
                 disabledMessage={
-                  locked
+                  locked || externalUploadDisabled
                     ? 'Attachment upload is disabled while a run is active or interrupted'
                     : undefined
                 }

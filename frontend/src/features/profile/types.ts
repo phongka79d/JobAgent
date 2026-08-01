@@ -89,6 +89,11 @@ export type PendingProfileReview = {
   can_review: boolean;
 };
 
+export type ProfileUploadConflict =
+  | {code: 'PROFILE_REEXTRACT_IN_PROGRESS'; profile_id: string; operation_id: string}
+  | {code: 'PROFILE_REVIEW_PENDING'; profile_id: string; review_source: 'agent_update'; operation_id: null; review_revision: string}
+  | {code: 'PROFILE_REVIEW_PENDING'; profile_id: string; review_source: 'reextract'; operation_id: string; review_revision: string};
+
 /** GET /api/profile body: explicit empty or active state. */
 export type ProfileReadResponse = {
   present: boolean;
@@ -167,6 +172,34 @@ function exact(raw: Record<string, unknown>, keys: readonly string[]): void {
   ) {
     throw new Error('unexpected response field');
   }
+}
+
+const PROFILE_UPLOAD_CONFLICT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const PROFILE_UPLOAD_CONFLICT_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2}|[+-]\d{2})$/;
+
+function uploadConflictUuid(value: unknown, name: string): string {
+  const result = asString(value)?.trim().toLowerCase();
+  if (!result || !PROFILE_UPLOAD_CONFLICT_UUID.test(result)) throw new Error(`${name} must be a UUID v4`);
+  return result;
+}
+
+function uploadConflictTimestamp(value: unknown): string {
+  const result = asString(value);
+  const match = result?.match(PROFILE_UPLOAD_CONFLICT_TIMESTAMP);
+  if (!result || !match || Number(match[1]) < 1 || Number(match[1]) > 9999 || !/^Z$|^[+-]00(?::?00)?$/.test(match[8])) {
+    throw new Error('review_revision must be an ISO timestamp with timezone');
+  }
+  const normalized = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${match[7] ?? ''}Z`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() !== Number(match[1]) || parsed.getUTCMonth() + 1 !== Number(match[2]) || parsed.getUTCDate() !== Number(match[3]) || parsed.getUTCHours() !== Number(match[4]) || parsed.getUTCMinutes() !== Number(match[5]) || parsed.getUTCSeconds() !== Number(match[6])) {
+    throw new Error('review_revision must be a valid UTC timestamp');
+  }
+  return result;
+}
+
+function uploadConflictSummary(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('summary must be a string');
+  return value;
 }
 
 export function parseCvUploadResponse(raw: unknown): CvUploadResponse {
@@ -397,4 +430,30 @@ export function parseProfileReadResponse(raw: unknown): ProfileReadResponse {
     pending_attachment,
     pending_review,
   };
+}
+
+/** Parse only the two upload-conflict detail unions that expose direct actions. */
+export function parseProfileUploadConflict(raw: unknown): ProfileUploadConflict | null {
+  if (!isObject(raw) || typeof raw.code !== 'string') return null;
+  if (raw.code === 'PROFILE_REEXTRACT_IN_PROGRESS') {
+    exact(raw, ['code', 'summary', 'profile_id', 'operation_id']);
+    uploadConflictSummary(raw.summary);
+    return {
+      code: raw.code,
+      profile_id: uploadConflictUuid(raw.profile_id, 'profile_id'),
+      operation_id: uploadConflictUuid(raw.operation_id, 'operation_id'),
+    };
+  }
+  if (raw.code !== 'PROFILE_REVIEW_PENDING') return null;
+  exact(raw, ['code', 'summary', 'profile_id', 'review_source', 'operation_id', 'review_revision']);
+  uploadConflictSummary(raw.summary);
+  const profile_id = uploadConflictUuid(raw.profile_id, 'profile_id');
+  const review_revision = uploadConflictTimestamp(raw.review_revision);
+  if (raw.review_source === 'agent_update' && raw.operation_id === null) {
+    return {code: raw.code, profile_id, review_source: 'agent_update', operation_id: null, review_revision};
+  }
+  if (raw.review_source === 'reextract' && raw.operation_id !== null) {
+    return {code: raw.code, profile_id, review_source: 'reextract', operation_id: uploadConflictUuid(raw.operation_id, 'operation_id'), review_revision};
+  }
+  throw new Error('review conflict owner is inconsistent');
 }

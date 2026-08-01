@@ -12,7 +12,9 @@ import {
 import {
   parseCvUploadResponse,
   parseProfileReadResponse,
+  parseProfileUploadConflict,
   type CvUploadResponse,
+  type ProfileUploadConflict,
   type ProfileReadResponse,
 } from './types';
 import {
@@ -33,6 +35,15 @@ import {
 } from './conversationTypes';
 
 export {ChatApiError};
+
+export function getProfileUploadConflict(error: unknown): ProfileUploadConflict | null {
+  if (!(error instanceof ChatApiError) || error.status !== 409) return null;
+  try {
+    return parseProfileUploadConflict(error.detail);
+  } catch {
+    return null;
+  }
+}
 
 /** GET /api/profile → empty or active profile + attachment metadata. */
 export async function fetchActiveProfileCompat(

@@ -27,6 +27,8 @@ import {
   type CvSidebarDeps,
 } from '../features/profile/CvSidebar';
 import type {CvUploadResponse} from '../features/profile/types';
+import {useCvManagerState} from '../features/cv-manager/state';
+import type {CvManagerApi} from '../features/cv-manager/api';
 import {
   useSavedJobsState,
   type SavedJobsController,
@@ -54,6 +56,7 @@ export type AppDeps = {
   workspace?: Partial<ProfileWorkspaceApi>;
   savedJobs?: Partial<SavedJobsApi>;
   tailoring?: Partial<CvTailoringApi>;
+  cvManager?: Partial<CvManagerApi>;
 };
 
 export type AppProps = {
@@ -158,6 +161,10 @@ export function App({deps}: AppProps = {}) {
     profileId: string;
     startAt: 'reextract';
   } | null>(null);
+  const [cvManagerOpenRequest, setCvManagerOpenRequest] = useState<{
+    requestKey: number;
+    profileId: string;
+  } | null>(null);
   /** Bumps after activation/delete so sidebar invalidates profile + CV caches. */
   const [activationKey, setActivationKey] = useState(0);
   /**
@@ -166,6 +173,7 @@ export function App({deps}: AppProps = {}) {
    */
   const [savedJobsInvalidateKey, setSavedJobsInvalidateKey] = useState(0);
   const requestKeyRef = useRef(0);
+  const cvManagerOpenRequestKeyRef = useRef(0);
   const selectedProfile = workspace.state.profiles.find(
     (profile) => profile.id === workspace.state.activeProfileId,
   );
@@ -179,12 +187,18 @@ export function App({deps}: AppProps = {}) {
     profileReady: selectedProfile?.state === 'ready',
     api: deps?.tailoring,
   });
+  const cvManager = useCvManagerState({
+    api: deps?.cvManager ?? deps?.sidebar?.cvManager,
+    profileId: selectedProfile?.id ?? null,
+    profileReady: selectedProfile?.state === 'ready',
+  });
   const tailoringLocked = tailoring.state.stream.phase === 'loading';
+  const reextractLocked = cvManager.state.reextract?.operation?.state === 'running';
   const currentFreshTailoringRequest = freshTailoringRequest(
     savedJobs.state,
     tailoring.state.detail.data?.session.instruction ?? '',
   );
-  const interactionLocked = uploadLocked || workspaceLocked || tailoringLocked;
+  const interactionLocked = uploadLocked || workspaceLocked || tailoringLocked || reextractLocked;
   const [mainWorkspace, setMainWorkspace] = useState<MainWorkspace>({
     kind: 'chat',
   });
@@ -193,6 +207,7 @@ export function App({deps}: AppProps = {}) {
   useEffect(() => {
     if (workspaceScopeChanged) {
       setMainWorkspace({kind: 'chat'});
+      setCvManagerOpenRequest(null);
     }
   }, [workspaceScope, workspaceScopeChanged]);
   const showTailoringEditor =
@@ -296,6 +311,36 @@ export function App({deps}: AppProps = {}) {
     setProfileRefreshKey((k) => k + 1);
   }, []);
 
+  const openExistingCvManagerOperation = useCallback(async (profileId: string, operationId: string): Promise<boolean> => {
+    if (profileId !== selectedProfile?.id || !operationId) return false;
+    const opened = await cvManager.open(operationId);
+    return opened;
+  }, [cvManager, selectedProfile?.id]);
+
+  const openAgentPendingReview = useCallback(async (profileId: string, reviewRevision: string): Promise<boolean> => {
+    if (profileId !== selectedProfile?.id || !reviewRevision) return false;
+    const opened = await cvManager.loadReview(profileId, reviewRevision, null);
+    return opened;
+  }, [cvManager, selectedProfile?.id]);
+
+  const openExistingCvManagerOperationFromChat = useCallback(async (profileId: string, operationId: string): Promise<boolean> => {
+    const opened = await openExistingCvManagerOperation(profileId, operationId);
+    if (opened) {
+      cvManagerOpenRequestKeyRef.current += 1;
+      setCvManagerOpenRequest({requestKey: cvManagerOpenRequestKeyRef.current, profileId});
+    }
+    return opened;
+  }, [openExistingCvManagerOperation]);
+
+  const openAgentPendingReviewFromChat = useCallback(async (profileId: string, reviewRevision: string): Promise<boolean> => {
+    const opened = await openAgentPendingReview(profileId, reviewRevision);
+    if (opened) {
+      cvManagerOpenRequestKeyRef.current += 1;
+      setCvManagerOpenRequest({requestKey: cvManagerOpenRequestKeyRef.current, profileId});
+    }
+    return opened;
+  }, [openAgentPendingReview]);
+
   const handleProfileReviewDiscarded = useCallback(() => {
     setProfileRefreshKey((k) => k + 1);
   }, []);
@@ -307,6 +352,10 @@ export function App({deps}: AppProps = {}) {
 
   const cvSidebar = useCvSidebarWorkspace({
     isUploadDisabled: interactionLocked,
+    cvManager,
+    cvManagerOpenRequest,
+    onProfileReextractConflict: (operationId) => openExistingCvManagerOperation(selectedProfile?.id ?? '', operationId),
+    onAgentPendingReview: openAgentPendingReview,
     onSidebarUploadSuccess: handleSidebarUploadSuccess,
     onCvDeleted: handleCvDeleted,
     onProfileApproved: handleProfileSaved,
@@ -388,6 +437,9 @@ export function App({deps}: AppProps = {}) {
                   selectedJobId={savedJobs.state.selectedJobId}
                   deps={deps?.chat}
                   onInteractionLockChange={setUploadLocked}
+                  uploadDisabled={interactionLocked}
+                  onProfileReextractConflict={openExistingCvManagerOperationFromChat}
+                  onAgentPendingReview={openAgentPendingReviewFromChat}
                   sidebarAttachmentTurn={sidebarTurn}
                   onSidebarAttachmentTurnHandled={handleSidebarTurnHandled}
                   onProfileSaved={handleProfileSaved}

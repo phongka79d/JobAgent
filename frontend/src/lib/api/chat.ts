@@ -20,13 +20,16 @@ export class ChatApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly summary: string;
+  /** Safe server-provided detail; consumers must validate before acting on it. */
+  readonly detail: unknown;
 
-  constructor(status: number, code: string, summary: string) {
+  constructor(status: number, code: string, summary: string, detail: unknown = null) {
     super(summary);
     this.name = 'ChatApiError';
     this.status = status;
     this.code = code;
     this.summary = summary;
+    this.detail = detail;
   }
 }
 
@@ -65,7 +68,7 @@ export function parseErrorBody(status: number, body: string): ChatApiError {
         typeof json.detail.summary === 'string'
           ? json.detail.summary
           : body.slice(0, 200) || `HTTP ${status}`;
-      return new ChatApiError(status, code, summary);
+      return new ChatApiError(status, code, summary, json.detail);
     }
     if (typeof json.detail === 'string') {
       return new ChatApiError(status, 'HTTP_ERROR', json.detail);

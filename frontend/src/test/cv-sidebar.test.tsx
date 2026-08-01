@@ -23,10 +23,11 @@ import {
   SIDEBAR_CV_TURN_MESSAGE,
 } from '../features/profile/api';
 import type {CvTailoringController} from '../features/cv-tailoring/state';
+import {useCvManagerState} from '../features/cv-manager/state';
 import type {ProfileReextractStreamHandlers} from '../features/cv-manager/api';
 import {createEmptySavedJobsController} from '../features/jobs/savedJobsState';
 import {
-  CvSidebar,
+  CvSidebar as BaseCvSidebar,
   type CvSidebarProps,
 } from '../features/profile/CvSidebar';
 import {
@@ -77,6 +78,12 @@ function emptyTailoringController(): CvTailoringController {
     selectVersion: vi.fn().mockResolvedValue(false),
     deleteSession: vi.fn().mockResolvedValue(true),
   };
+}
+
+function CvSidebar(props: Omit<CvSidebarProps, 'cvManager'>) {
+  const profile = props.workspace.state.profiles.find((item) => item.id === props.workspace.state.activeProfileId);
+  const cvManager = useCvManagerState({api: props.deps?.cvManager, profileId: profile?.id ?? null, profileReady: profile?.state === 'ready'});
+  return <BaseCvSidebar {...props} cvManager={cvManager} />;
 }
 
 function productControllers(): Pick<
@@ -806,6 +813,116 @@ describe('CvSidebar empty / active states', () => {
     expect(
       within(review).getByRole('button', {name: 'Discard review'}),
     ).toBeInTheDocument();
+  });
+
+  it('offers an exact operation check for an in-progress re-extraction upload conflict', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const onProfileReextractConflict = vi.fn();
+    const loadProfile = vi.fn().mockResolvedValue(activeProfile('my-cv.pdf'));
+    const upload = vi.fn().mockRejectedValue(
+      Object.assign(
+        new ChatApiError(
+          409,
+          'PROFILE_REEXTRACT_IN_PROGRESS',
+          'A re-extraction is already running',
+        ),
+        {detail: {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: PROFILE_ID, operation_id: operationId}},
+      ),
+    );
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          {...productControllers()}
+          {...({onProfileReextractConflict} as unknown as Partial<CvSidebarProps>)}
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          deps={{loadProfile, uploadCv: upload}}
+        />
+      </Theme>,
+    );
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4 fake'], 'new.pdf', {type: 'application/pdf'}),
+    );
+
+    await userEvent.click(
+      await screen.findByRole('button', {name: 'Check re-extraction'}),
+    );
+    expect(onProfileReextractConflict).toHaveBeenCalledWith(operationId);
+  });
+
+  it('clears a stale upload conflict when the active profile changes', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const loadProfile = vi
+      .fn()
+      .mockResolvedValueOnce(activeProfile('profile-a.pdf'))
+      .mockResolvedValueOnce(activeProfile('profile-b.pdf'));
+    const upload = vi.fn().mockRejectedValue(
+      Object.assign(
+        new ChatApiError(409, 'PROFILE_REEXTRACT_IN_PROGRESS', 'A re-extraction is already running'),
+        {detail: {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: PROFILE_ID, operation_id: operationId}},
+      ),
+    );
+    const onProfileReextractConflict = vi.fn();
+
+    function Harness() {
+      const [activeProfileId, setActiveProfileId] = useState(PROFILE_ID);
+      const workspace: ProfileWorkspaceController = {
+        state: {
+          profiles: [],
+          activeProfileId,
+          selectedConversationId: CONVERSATION_ID,
+          conversations: [],
+          pending: new Set(),
+          error: null,
+        },
+        activate: vi.fn(),
+        createConversation: vi.fn(),
+        selectConversation: vi.fn(),
+        deleteConversation: vi.fn(),
+        renameProfile: vi.fn(),
+        deleteProfile: vi.fn(),
+        reload: vi.fn(),
+        adoptBootstrap: vi.fn(),
+      };
+      return (
+        <>
+          <button type="button" onClick={() => setActiveProfileId(PROFILE_B_ID)}>
+            Switch profile
+          </button>
+          <CvSidebar
+            {...productControllers()}
+            isUploadDisabled={false}
+            onSidebarUploadSuccess={vi.fn()}
+            onProfileReextractConflict={onProfileReextractConflict}
+            workspace={workspace}
+            deps={{loadProfile, uploadCv: upload}}
+          />
+        </>
+      );
+    }
+
+    render(
+      <Theme theme={neutralTheme}>
+        <Harness />
+      </Theme>,
+    );
+
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4 fake'], 'conflict.pdf', {type: 'application/pdf'}),
+    );
+    expect(await screen.findByTestId('jobagent-cv-upload-error')).toBeInTheDocument();
+    expect(await screen.findByRole('button', {name: 'Check re-extraction'})).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', {name: 'Switch profile'}));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('jobagent-cv-upload-error')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', {name: 'Check re-extraction'})).not.toBeInTheDocument();
+    });
+    expect(onProfileReextractConflict).not.toHaveBeenCalled();
   });
 
   it('lets users discard a stuck pending review from the upload error', async () => {

@@ -9,7 +9,7 @@ import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Text} from '@astryxdesign/core/Text';
 import {HStack} from '@astryxdesign/core/HStack';
 import {VStack} from '@astryxdesign/core/VStack';
-import type {PendingProfileReview} from './types';
+import type {PendingProfileReview, ProfileUploadConflict} from './types';
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
@@ -27,12 +27,15 @@ export type ProfileOverviewPanelProps = {
   isUploading: boolean;
   disabledReason?: string;
   pendingReview: PendingProfileReview | null;
+  uploadConflict?: ProfileUploadConflict | null;
   isDiscardingPendingReview?: boolean;
   pendingReviewDiscardError?: string | null;
   canViewDownload: boolean;
   onFileChange: (files: File | File[] | null) => void;
   onUpload: (files: File | File[] | null) => Promise<void>;
   onReviewPendingChanges: () => void;
+  onProfileReextractConflict?: (operationId: string) => void;
+  onAgentPendingReview?: (profileId: string, revision: string) => void;
   onDiscardPendingReview: () => void;
   onViewDownload: () => void;
   onManageCvs?: () => void;
@@ -50,12 +53,15 @@ export function ProfileOverviewPanel({
   isUploading,
   disabledReason,
   pendingReview,
+  uploadConflict = null,
   isDiscardingPendingReview = false,
   pendingReviewDiscardError = null,
   canViewDownload,
   onFileChange,
   onUpload,
   onReviewPendingChanges,
+  onProfileReextractConflict,
+  onAgentPendingReview,
   onDiscardPendingReview,
   onViewDownload,
   onManageCvs,
@@ -81,6 +87,14 @@ export function ProfileOverviewPanel({
       />
     )
   ) : undefined;
+
+  const uploadConflictAction = uploadConflict?.code === 'PROFILE_REEXTRACT_IN_PROGRESS'
+    ? <Button label="Check re-extraction" variant="secondary" size="sm" onClick={() => onProfileReextractConflict?.(uploadConflict.operation_id)} />
+    : uploadConflict?.review_source === 'reextract'
+      ? <Button label="Review changes" variant="secondary" size="sm" onClick={() => onProfileReextractConflict?.(uploadConflict.operation_id)} />
+      : uploadConflict
+        ? <Button label="Review changes" variant="secondary" size="sm" onClick={() => onAgentPendingReview?.(uploadConflict.profile_id, uploadConflict.review_revision)} />
+        : undefined;
 
   return (
     <VStack
@@ -127,7 +141,7 @@ export function ProfileOverviewPanel({
               ? pendingReviewDescription
               : uploadError
           }
-          endContent={pendingReviewAction}
+          endContent={uploadConflictAction ?? pendingReviewAction}
           container="card"
           data-testid="jobagent-cv-upload-error"
         />

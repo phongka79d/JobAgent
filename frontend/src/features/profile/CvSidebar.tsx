@@ -24,7 +24,7 @@ import {
 
 import {defaultCvManagerApi, type CvManagerApi} from '../cv-manager/api';
 import {CvManagerDrawer} from '../cv-manager/CvManagerDrawer';
-import {useCvManagerState} from '../cv-manager/state';
+import type {CvManagerController} from '../cv-manager/state';
 import type {SavedJobsController} from '../jobs/savedJobsState';
 import type {CvTailoringController} from '../cv-tailoring/state';
 import {
@@ -37,12 +37,13 @@ import type {ProductDestination} from '../navigation/productNavigation';
 import {
   ChatApiError,
   fetchActiveProfileCompat,
+  getProfileUploadConflict,
   getActiveCvUrl,
   uploadCv,
 } from './api';
 import {ProfileOverviewPanel} from './ProfileOverviewPanel';
 import {ProfileConversationSidebar} from './ProfileConversationSidebar';
-import type {CvUploadResponse, ProfileReadResponse} from './types';
+import type {CvUploadResponse, ProfileReadResponse, ProfileUploadConflict} from './types';
 import type {ProfileWorkspaceController} from './workspaceState';
 
 export type CvSidebarDeps = {
@@ -61,6 +62,10 @@ export type CvSidebarProps = {
   onCvDeleted?: () => void;
   onProfileApproved?: () => void;
   onProfileDiscarded?: () => void;
+  cvManager: CvManagerController;
+  cvManagerOpenRequest?: {requestKey: number; profileId: string} | null;
+  onProfileReextractConflict?: (operationId: string) => void | boolean | Promise<boolean>;
+  onAgentPendingReview?: (profileId: string, revision: string) => void | boolean | Promise<boolean>;
   cvManagerRequest?: {requestKey: number; profileId: string; startAt: 'reextract'} | null;
   onCvManagerRequestHandled?: (requestKey: number) => void;
   /** Increment / change to force a profile reload (e.g. after Save Profile). */
@@ -217,6 +222,10 @@ export function useCvSidebarWorkspace({
   onCvDeleted,
   onProfileApproved,
   onProfileDiscarded,
+  cvManager,
+  cvManagerOpenRequest = null,
+  onProfileReextractConflict,
+  onAgentPendingReview,
   cvManagerRequest = null,
   onCvManagerRequestHandled,
   refreshKey = 0,
@@ -234,14 +243,7 @@ export function useCvSidebarWorkspace({
   editorMemoryRef,
   deps,
 }: CvSidebarProps): CvSidebarWorkspace {
-  const selectedWorkspaceProfile = workspace.state.profiles.find(
-    (candidate) => candidate.id === workspace.state.activeProfileId,
-  );
-  const cvManager = useCvManagerState({
-    api: deps?.cvManager,
-    profileId: selectedWorkspaceProfile?.id,
-    profileReady: selectedWorkspaceProfile?.state === 'ready',
-  });
+  const [uploadConflict, setUploadConflict] = useState<ProfileUploadConflict | null>(null);
   const [isCvManagerOpen, setIsCvManagerOpen] = useState(false);
   const [localProductDestination, setLocalProductDestination] =
     useState<ProductDestination>('overview');
@@ -261,6 +263,7 @@ export function useCvSidebarWorkspace({
   const productEditorMemoryRef =
     editorMemoryRef ?? localProductEditorMemoryRef;
   const handledCvManagerRequests = useRef(new Set<number>());
+  const handledCvManagerOpenRequests = useRef(new Set<number>());
   const loadProfile = deps?.loadProfile ?? fetchActiveProfileCompat;
   const doUpload = deps?.uploadCv ?? uploadCv;
   const cvUrl = deps?.getActiveCvUrl ?? getActiveCvUrl;
@@ -290,6 +293,11 @@ export function useCvSidebarWorkspace({
   const loadedActivationKey = useRef(activationKey);
 
   useEffect(() => {
+    setUploadError(null);
+    setUploadConflict(null);
+  }, [profileScope]);
+
+  useEffect(() => {
     if (!workspaceIsReady) setLoadedProfileScope(null);
   }, [workspaceIsReady]);
 
@@ -305,6 +313,13 @@ export function useCvSidebarWorkspace({
     void cvManager.open().then(() => cvManager.startReextract(cvManagerRequest.profileId));
     onCvManagerRequestHandled?.(cvManagerRequest.requestKey);
   }, [cvManager, cvManagerRequest, onCvManagerRequestHandled, workspace.state.activeProfileId]);
+
+  useEffect(() => {
+    if (!cvManagerOpenRequest || handledCvManagerOpenRequests.current.has(cvManagerOpenRequest.requestKey)) return;
+    handledCvManagerOpenRequests.current.add(cvManagerOpenRequest.requestKey);
+    if (cvManagerOpenRequest.profileId !== workspace.state.activeProfileId) return;
+    setIsCvManagerOpen(true);
+  }, [cvManagerOpenRequest, workspace.state.activeProfileId]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -353,6 +368,7 @@ export function useCvSidebarWorkspace({
       const file = Array.isArray(files) ? (files[0] ?? null) : files;
       setSelectedFile(file);
       setUploadError(null);
+      setUploadConflict(null);
       setPendingReviewDiscardError(null);
     },
     [],
@@ -380,6 +396,7 @@ export function useCvSidebarWorkspace({
               ? err.message
               : 'CV upload failed';
         setUploadError(`${summary} (${code})`);
+        setUploadConflict(getProfileUploadConflict(err));
         if (code === 'PROFILE_REVIEW_PENDING') {
           await reload();
         }
@@ -503,6 +520,20 @@ export function useCvSidebarWorkspace({
     onProfileDiscarded?.();
   }, [onProfileDiscarded, reload]);
 
+  const handleProfileReextractConflict = useCallback(async (operationId: string) => {
+    if (!operationId) return;
+    const opened = onProfileReextractConflict ? await onProfileReextractConflict(operationId) : true;
+    if (opened === false) return;
+    setIsCvManagerOpen(true);
+  }, [onProfileReextractConflict]);
+
+  const handleAgentPendingReview = useCallback(async (profileId: string, reviewRevision: string) => {
+    if (profileId !== workspace.state.activeProfileId || !reviewRevision) return;
+    const opened = onAgentPendingReview ? await onAgentPendingReview(profileId, reviewRevision) : true;
+    if (opened === false) return;
+    setIsCvManagerOpen(true);
+  }, [onAgentPendingReview, workspace.state.activeProfileId]);
+
   const state = profileStateLabel(scopedProfile);
   const activeName = scopedProfile?.active_attachment?.original_name ?? null;
   const pendingName = scopedProfile?.pending_attachment?.original_name ?? null;
@@ -547,12 +578,15 @@ export function useCvSidebarWorkspace({
         isUploading={isUploading}
         disabledReason={disabledReason}
         pendingReview={scopedProfile?.pending_review ?? null}
+        uploadConflict={uploadConflict}
         isDiscardingPendingReview={isDiscardingPendingReview}
         pendingReviewDiscardError={pendingReviewDiscardError}
         canViewDownload={hasActive}
         onFileChange={handleFileChange}
         onUpload={handleUpload}
         onReviewPendingChanges={handleReviewPendingChanges}
+        onProfileReextractConflict={handleProfileReextractConflict}
+        onAgentPendingReview={handleAgentPendingReview}
         onDiscardPendingReview={handleDiscardPendingReview}
         onViewDownload={handleViewDownload}
         onManageCvs={() => {

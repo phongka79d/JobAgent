@@ -16,6 +16,7 @@ import type {
   ProfileListResponse,
 } from '../features/profile/conversationTypes';
 import type {TailoringSessionDetailResponse} from '../features/cv-tailoring/types';
+import {ChatApiError} from '../lib/api/chat';
 
 afterEach(() => {
   cleanup();
@@ -78,7 +79,636 @@ function appConversation(id: string, profileId: string): ConversationSummary {
   };
 }
 
+const CONFLICT_PROFILE_ID = '11111111-1111-4111-8111-111111111111';
+const CONFLICT_OPERATION_ID = '22222222-2222-4222-8222-222222222222';
+const CONFLICT_REVISION = '2026-07-31T12:00:00.000Z';
+const SWITCHED_PROFILE_ID = '44444444-4444-4444-8444-444444444444';
+
+function reextractReview(
+  profileId: string,
+  operationId: string | null,
+  source: 'agent_update' | 'reextract',
+) {
+  return {
+    profile_id: profileId,
+    source,
+    operation_id: operationId,
+    operation_state: source === 'reextract' ? 'review_ready' : null,
+    revision: CONFLICT_REVISION,
+    current: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Current', current_title: null, skill_labels: []},
+    proposed: {full_name: null, location: null, phone: null, email: null, github_url: null, summary: 'Proposed', current_title: null, skill_labels: []},
+    changed_fields: [],
+    preference_changes: [],
+    skills_added: [],
+    skills_removed: [],
+    collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0},
+    extraction_confidence: null,
+    can_approve: true,
+    can_discard: true,
+  };
+}
+
+function renderUploadConflictApp(
+  detail: Record<string, unknown>,
+  getProfileReextractOperation: ReturnType<typeof vi.fn>,
+  getProfileReextractReview: ReturnType<typeof vi.fn>,
+  startReextract: ReturnType<typeof vi.fn>,
+) {
+  const profile = appProfile(CONFLICT_PROFILE_ID, true);
+  const fetchCvManager = vi.fn().mockResolvedValue({items: []});
+  render(
+    <Theme theme={neutralTheme}>
+      <App
+        deps={{
+          workspace: {
+            fetchProfiles: vi.fn().mockResolvedValue({items: [profile], active_profile_id: profile.id}),
+            fetchProfileConversations: vi.fn().mockResolvedValue({items: [appConversation('conflict-conversation', profile.id)], next_cursor: null}),
+          },
+          chat: {loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null})},
+          sidebar: {
+            loadProfile: vi.fn().mockResolvedValue({
+              present: true,
+              profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+              preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+              active_attachment: {id: 'attachment-conflict', original_name: 'conflict.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+              draft_present: false,
+              pending_attachment: null,
+              pending_review: null,
+            }),
+            uploadCv: vi.fn().mockRejectedValue(new ChatApiError(409, String(detail.code), String(detail.summary), detail)),
+          },
+          cvManager: {
+            fetchCvManager,
+            getProfileReextractOperation,
+            getProfileReextractReview,
+            streamProfileReextract: startReextract,
+          },
+        }}
+      />
+    </Theme>,
+  );
+  return {profile, fetchCvManager};
+}
+
+function renderChatConflictApp(
+  detail: Record<string, unknown>,
+  getProfileReextractOperation: ReturnType<typeof vi.fn>,
+  getProfileReextractReview: ReturnType<typeof vi.fn>,
+  startReextract: ReturnType<typeof vi.fn>,
+) {
+  const profile = appProfile(CONFLICT_PROFILE_ID, true);
+  const fetchCvManager = vi.fn().mockResolvedValue({items: []});
+  render(
+    <Theme theme={neutralTheme}>
+      <App
+        deps={{
+          workspace: {
+            fetchProfiles: vi.fn().mockResolvedValue({items: [profile], active_profile_id: profile.id}),
+            fetchProfileConversations: vi.fn().mockResolvedValue({items: [appConversation('chat-conflict-conversation', profile.id)], next_cursor: null}),
+          },
+          chat: {
+            loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+            uploadCv: vi.fn().mockRejectedValue(new ChatApiError(409, String(detail.code), String(detail.summary), detail)),
+          },
+          sidebar: {
+            loadProfile: vi.fn().mockResolvedValue({
+              present: true,
+              profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+              preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+              active_attachment: {id: 'attachment-chat-conflict', original_name: 'chat-conflict.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+              draft_present: false,
+              pending_attachment: null,
+              pending_review: null,
+            }),
+          },
+          cvManager: {
+            fetchCvManager,
+            getProfileReextractOperation,
+            getProfileReextractReview,
+            streamProfileReextract: startReextract,
+          },
+        }}
+      />
+    </Theme>,
+  );
+  return {profile, fetchCvManager};
+}
+
 describe('App foundation shell', () => {
+  it('disables both CV upload controls while the recovered re-extraction operation is running', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const profile = appProfile('11111111-1111-4111-8111-111111111111', true);
+    const runningOperation = {
+      profile_id: profile.id,
+      operation_id: '11111111-1111-4111-8111-111111111111',
+      state: 'running' as const,
+      error_code: null,
+      error_summary: null,
+      review_revision: null,
+      can_review: false,
+      can_retry: false,
+      can_discard: false,
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [profile],
+                active_profile_id: profile.id,
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [appConversation('running-conversation', profile.id)],
+                next_cursor: null,
+              }),
+            },
+            chat: {loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null})},
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue({
+                present: true,
+                profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+                preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+                active_attachment: {id: 'attachment-running', original_name: 'running.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+                draft_present: false,
+                pending_attachment: null,
+                pending_review: null,
+              }),
+              cvManager: {
+                getProfileReextractOperation: vi.fn().mockResolvedValue({operation: runningOperation}),
+              },
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    const sidebarUpload = await screen.findByTestId('jobagent-cv-upload');
+    const chatUpload = await screen.findByTestId('jobagent-chat-pdf-upload');
+    await waitFor(() => {
+      expect(sidebarUpload).toBeDisabled();
+      expect(chatUpload).toBeDisabled();
+    });
+  });
+
+  it('does not present a different operation after an upload conflict names an exact operation', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const profile = appProfile('11111111-1111-4111-8111-111111111111', true);
+    const conflictOperationId = '22222222-2222-4222-8222-222222222222';
+    const returnedOperationId = '33333333-3333-4333-8333-333333333333';
+    const getProfileReextractOperation = vi
+      .fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockResolvedValueOnce({
+        operation: {
+          profile_id: profile.id,
+          operation_id: returnedOperationId,
+          state: 'running' as const,
+          error_code: null,
+          error_summary: null,
+          review_revision: null,
+          can_review: false,
+          can_retry: false,
+          can_discard: false,
+        },
+      });
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [profile],
+                active_profile_id: profile.id,
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [appConversation('conflict-conversation', profile.id)],
+                next_cursor: null,
+              }),
+            },
+            chat: {loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null})},
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue({
+                present: true,
+                profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+                preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+                active_attachment: {id: 'attachment-conflict', original_name: 'conflict.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+                draft_present: false,
+                pending_attachment: null,
+                pending_review: null,
+              }),
+              uploadCv: vi.fn().mockRejectedValue(Object.assign(
+                new ChatApiError(409, 'PROFILE_REEXTRACT_IN_PROGRESS', 'A re-extraction is already running'),
+                {detail: {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: profile.id, operation_id: conflictOperationId}},
+              )),
+              cvManager: {
+                fetchCvManager: vi.fn().mockResolvedValue({items: []}),
+                getProfileReextractOperation,
+              },
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4'], 'conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+  });
+
+  it('recovers one structured re-extraction conflict operation and never starts another extraction', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const getProfileReextractOperation = vi.fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockResolvedValue({operation: {
+        profile_id: CONFLICT_PROFILE_ID,
+        operation_id: CONFLICT_OPERATION_ID,
+        state: 'review_ready' as const,
+        error_code: null,
+        error_summary: null,
+        review_revision: CONFLICT_REVISION,
+        can_review: true,
+        can_retry: false,
+        can_discard: true,
+      }});
+    const getProfileReextractReview = vi.fn().mockResolvedValue(
+      reextractReview(CONFLICT_PROFILE_ID, CONFLICT_OPERATION_ID, 'reextract'),
+    );
+    const startReextract = vi.fn();
+    const {profile, fetchCvManager} = renderUploadConflictApp(
+      {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: CONFLICT_PROFILE_ID, review_source: 'reextract', operation_id: CONFLICT_OPERATION_ID, review_revision: CONFLICT_REVISION},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    fetchCvManager.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4'], 'conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+    await screen.findByTestId('jobagent-profile-reextract-review');
+
+    expect(getProfileReextractOperation).toHaveBeenCalledTimes(1);
+    expect(fetchCvManager).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledWith(profile.id, expect.any(AbortSignal), CONFLICT_OPERATION_ID);
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('loads one structured ordinary review with its exact revision and never starts re-extraction', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const getProfileReextractOperation = vi.fn().mockResolvedValue({operation: null});
+    const getProfileReextractReview = vi.fn().mockResolvedValue(
+      reextractReview(CONFLICT_PROFILE_ID, null, 'agent_update'),
+    );
+    const startReextract = vi.fn();
+    const {profile} = renderUploadConflictApp(
+      {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: CONFLICT_PROFILE_ID, review_source: 'agent_update', operation_id: null, review_revision: CONFLICT_REVISION},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-cv-upload'),
+      new File(['%PDF-1.4'], 'conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+    await screen.findByTestId('jobagent-profile-reextract-review');
+
+    expect(getProfileReextractOperation).not.toHaveBeenCalled();
+    expect(getProfileReextractReview).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledWith(profile.id, undefined);
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('opens the exact running operation after a Chat-originated in-progress conflict', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const getProfileReextractOperation = vi.fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockResolvedValue({operation: {
+        profile_id: CONFLICT_PROFILE_ID,
+        operation_id: CONFLICT_OPERATION_ID,
+        state: 'running' as const,
+        error_code: null,
+        error_summary: null,
+        review_revision: null,
+        can_review: false,
+        can_retry: false,
+        can_discard: false,
+      }});
+    const getProfileReextractReview = vi.fn();
+    const startReextract = vi.fn();
+    const {profile, fetchCvManager} = renderChatConflictApp(
+      {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: CONFLICT_PROFILE_ID, operation_id: CONFLICT_OPERATION_ID},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    fetchCvManager.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+    await screen.findByRole('dialog', {name: 'CV Manager'});
+
+    expect(getProfileReextractOperation).toHaveBeenCalledTimes(1);
+    expect(fetchCvManager).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).not.toHaveBeenCalled();
+    expect(startReextract).not.toHaveBeenCalled();
+    expect(profile.id).toBe(CONFLICT_PROFILE_ID);
+  });
+
+  it('opens the exact re-extraction review after a Chat-originated pending conflict', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const getProfileReextractOperation = vi.fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockResolvedValue({operation: {
+        profile_id: CONFLICT_PROFILE_ID,
+        operation_id: CONFLICT_OPERATION_ID,
+        state: 'review_ready' as const,
+        error_code: null,
+        error_summary: null,
+        review_revision: CONFLICT_REVISION,
+        can_review: true,
+        can_retry: false,
+        can_discard: true,
+      }});
+    const getProfileReextractReview = vi.fn().mockResolvedValue(
+      reextractReview(CONFLICT_PROFILE_ID, CONFLICT_OPERATION_ID, 'reextract'),
+    );
+    const startReextract = vi.fn();
+    const {profile, fetchCvManager} = renderChatConflictApp(
+      {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: CONFLICT_PROFILE_ID, review_source: 'reextract', operation_id: CONFLICT_OPERATION_ID, review_revision: CONFLICT_REVISION},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    fetchCvManager.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+    await screen.findByRole('dialog', {name: 'CV Manager'});
+    await screen.findByTestId('jobagent-profile-reextract-review');
+
+    expect(getProfileReextractOperation).toHaveBeenCalledTimes(1);
+    expect(fetchCvManager).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledWith(profile.id, expect.any(AbortSignal), CONFLICT_OPERATION_ID);
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('opens the exact ordinary review after a Chat-originated agent-update conflict', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const getProfileReextractOperation = vi.fn().mockResolvedValue({operation: null});
+    const getProfileReextractReview = vi.fn().mockResolvedValue(
+      reextractReview(CONFLICT_PROFILE_ID, null, 'agent_update'),
+    );
+    const startReextract = vi.fn();
+    const {profile, fetchCvManager} = renderChatConflictApp(
+      {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: CONFLICT_PROFILE_ID, review_source: 'agent_update', operation_id: null, review_revision: CONFLICT_REVISION},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    fetchCvManager.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+    await screen.findByRole('dialog', {name: 'CV Manager'});
+    await screen.findByTestId('jobagent-profile-reextract-review');
+
+    expect(getProfileReextractOperation).not.toHaveBeenCalled();
+    expect(fetchCvManager).not.toHaveBeenCalled();
+    expect(getProfileReextractReview).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).toHaveBeenCalledWith(profile.id, undefined);
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('discards a deferred Chat operation presentation when the active profile switches before consumption', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const oldProfile = appProfile(CONFLICT_PROFILE_ID, true);
+    const switchedProfile = appProfile(SWITCHED_PROFILE_ID, false);
+    const oldConversation = appConversation('old-chat-conversation', oldProfile.id);
+    const switchedConversation = appConversation('switched-chat-conversation', switchedProfile.id);
+    const operationDeferred = deferred<{operation: {
+      profile_id: string;
+      operation_id: string;
+      state: 'running';
+      error_code: null;
+      error_summary: null;
+      review_revision: null;
+      can_review: false;
+      can_retry: false;
+      can_discard: false;
+    } | null}>();
+    const getProfileReextractOperation = vi.fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockImplementationOnce(() => operationDeferred.promise)
+      .mockResolvedValue({operation: null});
+    const getProfileReextractReview = vi.fn();
+    const startReextract = vi.fn();
+    const fetchCvManager = vi.fn().mockResolvedValue({items: []});
+    const loadProfile = vi.fn().mockResolvedValue({
+      present: true,
+      profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+      preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+      active_attachment: {id: 'attachment-chat-conflict', original_name: 'chat-conflict.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+      draft_present: false,
+      pending_attachment: null,
+      pending_review: null,
+    });
+    const chat = {
+      loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+      uploadCv: vi.fn().mockRejectedValue(new ChatApiError(409, 'PROFILE_REEXTRACT_IN_PROGRESS', 'A re-extraction is already running', {
+        code: 'PROFILE_REEXTRACT_IN_PROGRESS',
+        summary: 'A re-extraction is already running',
+        profile_id: oldProfile.id,
+        operation_id: CONFLICT_OPERATION_ID,
+      })),
+    };
+    const cvManager = {fetchCvManager, getProfileReextractOperation, getProfileReextractReview, streamProfileReextract: startReextract};
+    const initialWorkspace = {
+      fetchProfiles: vi.fn().mockResolvedValue({items: [oldProfile, switchedProfile], active_profile_id: oldProfile.id}),
+      fetchProfileConversations: vi.fn().mockResolvedValue({items: [oldConversation], next_cursor: null}),
+    };
+    const switchedWorkspace = {
+      fetchProfiles: vi.fn().mockResolvedValue({items: [{...oldProfile, is_active: false}, {...switchedProfile, is_active: true}], active_profile_id: switchedProfile.id}),
+      fetchProfileConversations: vi.fn().mockResolvedValue({items: [switchedConversation], next_cursor: null}),
+    };
+    const initialDeps = {workspace: initialWorkspace, chat, sidebar: {loadProfile}, cvManager};
+    const switchedDeps = {workspace: switchedWorkspace, chat, sidebar: {loadProfile}, cvManager};
+    const {rerender} = render(
+      <Theme theme={neutralTheme}><App deps={initialDeps} /></Theme>,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(1));
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      operationDeferred.resolve({operation: {
+        profile_id: oldProfile.id,
+        operation_id: CONFLICT_OPERATION_ID,
+        state: 'running',
+        error_code: null,
+        error_summary: null,
+        review_revision: null,
+        can_review: false,
+        can_retry: false,
+        can_discard: false,
+      }});
+      await Promise.resolve();
+      rerender(<Theme theme={neutralTheme}><App deps={switchedDeps} /></Theme>);
+    });
+
+    await waitFor(() => expect(switchedWorkspace.fetchProfiles).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+    rerender(<Theme theme={neutralTheme}><App deps={initialDeps} /></Theme>);
+    await waitFor(() => expect(initialWorkspace.fetchProfiles).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('discards a deferred Chat ordinary-review presentation after a profile switch and remount', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const oldProfile = appProfile(CONFLICT_PROFILE_ID, true);
+    const switchedProfile = appProfile(SWITCHED_PROFILE_ID, false);
+    const oldConversation = appConversation('old-review-conversation', oldProfile.id);
+    const switchedConversation = appConversation('switched-review-conversation', switchedProfile.id);
+    const reviewDeferred = deferred<ReturnType<typeof reextractReview>>();
+    const getProfileReextractOperation = vi.fn().mockResolvedValue({operation: null});
+    const getProfileReextractReview = vi.fn().mockImplementationOnce(() => reviewDeferred.promise);
+    const startReextract = vi.fn();
+    const loadProfile = vi.fn().mockResolvedValue({
+      present: true,
+      profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+      preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+      active_attachment: {id: 'attachment-chat-review', original_name: 'chat-review.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+      draft_present: false,
+      pending_attachment: null,
+      pending_review: null,
+    });
+    const chat = {
+      loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null}),
+      uploadCv: vi.fn().mockRejectedValue(new ChatApiError(409, 'PROFILE_REVIEW_PENDING', 'Review pending', {
+        code: 'PROFILE_REVIEW_PENDING',
+        summary: 'Review pending',
+        profile_id: oldProfile.id,
+        review_source: 'agent_update',
+        operation_id: null,
+        review_revision: CONFLICT_REVISION,
+      })),
+    };
+    const cvManager = {getProfileReextractOperation, getProfileReextractReview, streamProfileReextract: startReextract};
+    const initialWorkspace = {
+      fetchProfiles: vi.fn().mockResolvedValue({items: [oldProfile, switchedProfile], active_profile_id: oldProfile.id}),
+      fetchProfileConversations: vi.fn().mockResolvedValue({items: [oldConversation], next_cursor: null}),
+    };
+    const switchedWorkspace = {
+      fetchProfiles: vi.fn().mockResolvedValue({items: [{...oldProfile, is_active: false}, {...switchedProfile, is_active: true}], active_profile_id: switchedProfile.id}),
+      fetchProfileConversations: vi.fn().mockResolvedValue({items: [switchedConversation], next_cursor: null}),
+    };
+    const initialDeps = {workspace: initialWorkspace, chat, sidebar: {loadProfile}, cvManager};
+    const switchedDeps = {workspace: switchedWorkspace, chat, sidebar: {loadProfile}, cvManager};
+    const {rerender} = render(
+      <Theme theme={neutralTheme}><App deps={initialDeps} /></Theme>,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-review.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+    await waitFor(() => expect(getProfileReextractReview).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      reviewDeferred.resolve(reextractReview(oldProfile.id, null, 'agent_update'));
+      await Promise.resolve();
+      rerender(<Theme theme={neutralTheme}><App deps={switchedDeps} /></Theme>);
+    });
+
+    await waitFor(() => expect(switchedWorkspace.fetchProfiles).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+    rerender(<Theme theme={neutralTheme}><App deps={initialDeps} /></Theme>);
+    await waitFor(() => expect(initialWorkspace.fetchProfiles).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
+  it('keeps the drawer closed after a Chat-originated operation mismatch', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const returnedOperationId = '33333333-3333-4333-8333-333333333333';
+    const getProfileReextractOperation = vi.fn()
+      .mockResolvedValueOnce({operation: null})
+      .mockResolvedValue({operation: {
+        profile_id: CONFLICT_PROFILE_ID,
+        operation_id: returnedOperationId,
+        state: 'running' as const,
+        error_code: null,
+        error_summary: null,
+        review_revision: null,
+        can_review: false,
+        can_retry: false,
+        can_discard: false,
+      }});
+    const getProfileReextractReview = vi.fn();
+    const startReextract = vi.fn();
+    const {fetchCvManager} = renderChatConflictApp(
+      {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: CONFLICT_PROFILE_ID, operation_id: CONFLICT_OPERATION_ID},
+      getProfileReextractOperation,
+      getProfileReextractReview,
+      startReextract,
+    );
+
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalled());
+    getProfileReextractOperation.mockClear();
+    fetchCvManager.mockClear();
+    await userEvent.upload(
+      await screen.findByTestId('jobagent-chat-pdf-upload'),
+      new File(['%PDF-1.4'], 'chat-conflict.pdf', {type: 'application/pdf'}),
+    );
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+    await waitFor(() => expect(getProfileReextractOperation).toHaveBeenCalledTimes(1));
+
+    expect(fetchCvManager).toHaveBeenCalledTimes(1);
+    expect(getProfileReextractReview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', {name: 'CV Manager'})).not.toBeInTheDocument();
+    expect(startReextract).not.toHaveBeenCalled();
+  });
+
   it('retains only a selected scorable Job for fresh tailoring recovery', () => {
     const job = {
       id: '11111111-1111-4111-8111-111111111111',

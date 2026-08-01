@@ -17,7 +17,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {App} from '../app/App';
 import {ChatPage, type ChatPageDeps} from '../features/chat/ChatPage';
 import type {HistoryPage, SseEvent} from '../features/chat/types';
-import type {StreamCallbacks, TurnRequest} from '../lib/api/chat';
+import {ChatApiError, type StreamCallbacks, type TurnRequest} from '../lib/api/chat';
 
 const RUN_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const EVENT_A = '11111111-1111-4111-8111-111111111111';
@@ -1254,6 +1254,209 @@ describe('ChatPage PDF attachment token (04A)', () => {
     await act(async () => {
       resolveStream?.();
     });
+  });
+
+  it('opens the exact existing operation for an upload re-extraction conflict without starting a chat turn', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const onProfileReextractConflict = vi.fn();
+    const uploadCv = vi.fn().mockRejectedValue(Object.assign(
+      new ChatApiError(409, 'PROFILE_REEXTRACT_IN_PROGRESS', 'A re-extraction is already running'),
+      {detail: {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'A re-extraction is already running', profile_id: '22222222-2222-4222-8222-222222222222', operation_id: operationId}},
+    ));
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onProfileReextractConflict={onProfileReextractConflict}
+        />
+      </Theme>,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'conflict.pdf', {type: 'application/pdf'}));
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+    expect(onProfileReextractConflict).toHaveBeenCalledWith(
+      '22222222-2222-4222-8222-222222222222',
+      operationId,
+    );
+  });
+
+  it('clears an upload conflict CTA after a replacement upload succeeds', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const onProfileReextractConflict = vi.fn();
+    const uploadCv = vi.fn()
+      .mockRejectedValueOnce(new ChatApiError(
+        409,
+        'PROFILE_REEXTRACT_IN_PROGRESS',
+        'A re-extraction is already running',
+        {
+          code: 'PROFILE_REEXTRACT_IN_PROGRESS',
+          summary: 'A re-extraction is already running',
+          profile_id: '22222222-2222-4222-8222-222222222222',
+          operation_id: operationId,
+        },
+      ))
+      .mockResolvedValueOnce({
+        attachment: {
+          id: '44444444-4444-4444-8444-444444444444',
+          original_name: 'replacement.pdf',
+          mime_type: 'application/pdf',
+          size_bytes: 100,
+          page_count: 1,
+          state: 'active',
+          failure_code: null,
+        },
+        outcome: 'existing_active',
+        profile: null,
+        draft: null,
+        bootstrap: null,
+      });
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onProfileReextractConflict={onProfileReextractConflict}
+        />
+      </Theme>,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'conflict.pdf', {type: 'application/pdf'}));
+    expect(await screen.findByRole('button', {name: 'Check re-extraction'})).toBeInTheDocument();
+
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'replacement.pdf', {type: 'application/pdf'}));
+
+    await waitFor(() => {
+      expect(uploadCv).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole('button', {name: 'Check re-extraction'})).not.toBeInTheDocument();
+      expect(screen.getByTestId('jobagent-chat-pdf-token')).toBeInTheDocument();
+    });
+    expect(onProfileReextractConflict).not.toHaveBeenCalled();
+  });
+
+  const validProfileId = '22222222-2222-4222-8222-222222222222';
+  const validOperationId = '33333333-3333-4333-8333-333333333333';
+  const validRevision = '2026-07-31T12:00:00.000Z';
+  const malformedConflictDetails: Array<[string, Record<string, unknown>]> = [
+    ['invalid in-progress profile ID', {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'Running', profile_id: 'not-a-uuid', operation_id: validOperationId}],
+    ['invalid in-progress operation ID', {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'Running', profile_id: validProfileId, operation_id: 'not-a-uuid'}],
+    ['timezone-free review revision', {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: validProfileId, review_source: 'agent_update', operation_id: null, review_revision: '2026-07-31T12:00:00'}],
+    ['unparseable review revision', {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: validProfileId, review_source: 'agent_update', operation_id: null, review_revision: 'not-a-revision'}],
+    ['inconsistent review operation ownership', {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: validProfileId, review_source: 'agent_update', operation_id: validOperationId, review_revision: validRevision}],
+    ['malformed required summary', {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 42, profile_id: validProfileId, operation_id: validOperationId}],
+    ['UUID v1 profile ID', {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'Running', profile_id: '11111111-1111-1111-8111-111111111111', operation_id: validOperationId}],
+    ['UUID v5 operation ID', {code: 'PROFILE_REEXTRACT_IN_PROGRESS', summary: 'Running', profile_id: validProfileId, operation_id: '55555555-5555-5555-8555-555555555555'}],
+    ['nonzero UTC offset review revision', {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: validProfileId, review_source: 'agent_update', operation_id: null, review_revision: '2026-07-31T19:00:00+07:00'}],
+    ['invalid calendar review revision', {code: 'PROFILE_REVIEW_PENDING', summary: 'Review pending', profile_id: validProfileId, review_source: 'agent_update', operation_id: null, review_revision: '2026-02-30T12:00:00Z'}],
+  ];
+
+  it.each(malformedConflictDetails)('does not expose a CTA for %s', async (_label, detail) => {
+    const onProfileReextractConflict = vi.fn();
+    const onAgentPendingReview = vi.fn();
+    const uploadCv = vi.fn().mockRejectedValue(
+      new ChatApiError(409, String(detail.code), 'Upload conflict', detail),
+    );
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onProfileReextractConflict={onProfileReextractConflict}
+          onAgentPendingReview={onAgentPendingReview}
+        />
+      </Theme>,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'malformed-conflict.pdf', {type: 'application/pdf'}));
+
+    expect(screen.queryByRole('button', {name: 'Check re-extraction'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Review changes'})).not.toBeInTheDocument();
+    expect(onProfileReextractConflict).not.toHaveBeenCalled();
+    expect(onAgentPendingReview).not.toHaveBeenCalled();
+  });
+
+  it('keeps a valid UUID and aware review revision actionable', async () => {
+    const onAgentPendingReview = vi.fn();
+    const uploadCv = vi.fn().mockRejectedValue(
+      new ChatApiError(409, 'PROFILE_REVIEW_PENDING', 'Review pending', {
+        code: 'PROFILE_REVIEW_PENDING',
+        summary: 'Review pending',
+        profile_id: validProfileId,
+        review_source: 'agent_update',
+        operation_id: null,
+        review_revision: validRevision,
+      }),
+    );
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onAgentPendingReview={onAgentPendingReview}
+        />
+      </Theme>,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'valid-conflict.pdf', {type: 'application/pdf'}));
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+
+    expect(onAgentPendingReview).toHaveBeenCalledWith(validProfileId, validRevision);
+  });
+
+  it('normalizes uppercase UUID v4 conflict identities before dispatching the CTA', async () => {
+    const onProfileReextractConflict = vi.fn();
+    const uppercaseProfileId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+    const uppercaseOperationId = '12345678-9abc-4def-8abc-123456789abc';
+    const uploadCv = vi.fn().mockRejectedValue(
+      new ChatApiError(409, 'PROFILE_REEXTRACT_IN_PROGRESS', 'Running', {
+        code: 'PROFILE_REEXTRACT_IN_PROGRESS',
+        summary: 'Running',
+        profile_id: uppercaseProfileId.toUpperCase(),
+        operation_id: uppercaseOperationId.toUpperCase(),
+      }),
+    );
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onProfileReextractConflict={onProfileReextractConflict}
+        />
+      </Theme>,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'uppercase-conflict.pdf', {type: 'application/pdf'}));
+    await userEvent.click(await screen.findByRole('button', {name: 'Check re-extraction'}));
+
+    expect(onProfileReextractConflict).toHaveBeenCalledWith(uppercaseProfileId, uppercaseOperationId);
+  });
+
+  it('keeps a valid explicit UTC-zero review revision actionable', async () => {
+    const onAgentPendingReview = vi.fn();
+    const utcZeroRevision = '2026-07-31T12:00:00+00:00';
+    const uploadCv = vi.fn().mockRejectedValue(
+      new ChatApiError(409, 'PROFILE_REVIEW_PENDING', 'Review pending', {
+        code: 'PROFILE_REVIEW_PENDING',
+        summary: 'Review pending',
+        profile_id: validProfileId,
+        review_source: 'agent_update',
+        operation_id: null,
+        review_revision: utcZeroRevision,
+      }),
+    );
+    const {container} = render(
+      <Theme theme={neutralTheme}>
+        <ChatPage
+          deps={{loadHistory: vi.fn().mockResolvedValue(emptyHistory()), sendTurn: vi.fn(), uploadCv}}
+          onAgentPendingReview={onAgentPendingReview}
+        />
+      </Theme>,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(input, new File(['%PDF-1.4'], 'utc-zero-conflict.pdf', {type: 'application/pdf'}));
+    await userEvent.click(await screen.findByRole('button', {name: 'Review changes'}));
+
+    expect(onAgentPendingReview).toHaveBeenCalledWith(validProfileId, utcZeroRevision);
   });
 });
 

@@ -91,7 +91,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     operationStatusControllerRef.current = null;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (expectedOperationId?: string) => {
     const scope = scopeRef.current;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
@@ -107,7 +107,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
         selectedId: response.items.some((item) => item.id === previous.selectedId) ? previous.selectedId : (response.items[0]?.id ?? null),
       }));
       if (options.profileId !== undefined && options.profileId !== null && options.profileReady !== false) {
-        await recoverOperation(options.profileId, controller.signal);
+        return await recoverOperation(options.profileId, controller.signal, expectedOperationId);
       }
       return true;
     } catch (error) {
@@ -118,7 +118,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     }
   }, [api, options.profileId, options.profileReady, publish]);
 
-  const open = useCallback(async () => refresh(), [refresh]);
+  const open = useCallback(async (expectedOperationId?: string) => refresh(expectedOperationId), [refresh]);
   const close = useCallback(() => {
     generationRef.current += 1;
     listControllerRef.current?.abort();
@@ -194,7 +194,7 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     }
   }, [api, publish]);
 
-  async function recoverOperation(profileId: string, signal?: AbortSignal): Promise<boolean> {
+  async function recoverOperation(profileId: string, signal?: AbortSignal, expectedOperationId?: string): Promise<boolean> {
     if (!supportsOperationStatus) return false;
     const scope = scopeRef.current;
     const reextractGeneration = reextractGenerationRef.current;
@@ -209,6 +209,9 @@ export function useCvManagerState(options: UseCvManagerStateOptions = {}) {
     try {
       const {operation} = await api.getProfileReextractOperation(profileId, controller.signal);
       if (controller.signal.aborted || scopeRef.current !== scope || reextractGenerationRef.current !== reextractGeneration || operationStatusGenerationRef.current !== operationStatusGeneration) return false;
+      if (expectedOperationId !== undefined && (operation === null || operation.operation_id !== expectedOperationId)) {
+        throw new Error('The recovered re-extraction operation does not match the upload conflict');
+      }
       if (operation === null) {
         publish((previous) => {
           const reextract = previous.reextract;
