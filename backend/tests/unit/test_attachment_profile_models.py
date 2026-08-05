@@ -46,7 +46,7 @@ _PROFILE_COLS = {
 }
 _DRAFT_COLS = {
     "id", "source_attachment_id", "target_profile_id", "draft_json", "created_at",
-    "updated_at",
+    "updated_at", "reextract_operation_id",
 }
 _PREF_COLS = {"profile_id", "preferences_json", "created_at", "updated_at"}
 
@@ -296,8 +296,8 @@ def test_profile_drafts_contract() -> None:
     table = _t("profile_drafts")
     _assert_cols(
         table, _DRAFT_COLS,
-        not_null={"id", "draft_json", "created_at", "updated_at"},
-        nullable={"source_attachment_id", "target_profile_id"},
+        not_null={"id", "target_profile_id", "draft_json", "created_at", "updated_at"},
+        nullable={"source_attachment_id", "reextract_operation_id"},
     )
     assert _default_name(_c(table, "id")) == "new_uuid"
     assert "JSON" in str(_c(table, "draft_json").type).upper()
@@ -312,6 +312,17 @@ def test_profile_drafts_contract() -> None:
     target = list(target_fk.elements)[0]
     assert target.column.table.name == "profiles"
     assert target.ondelete == "CASCADE"
+    assert "uq_profile_drafts__target_profile_id" in _uq(table)
+
+    operation_fk = _fk(table, "fk_profile_drafts__reextract_operation_id")
+    operation = list(operation_fk.elements)[0]
+    assert operation.column.table.name == "profile_reextract_operations"
+    assert operation.column.name == "id"
+    assert operation.ondelete == "RESTRICT"
+    assert "uq_profile_drafts__reextract_operation_id" in _uq(table)
+    assert _check_sql(table)["ck_profile_drafts__reextract_source_coupling"] == (
+        "reextract_operation_id IS NULL OR source_attachment_id IS NOT NULL"
+    )
 
 
 def test_profile_preferences_contract() -> None:

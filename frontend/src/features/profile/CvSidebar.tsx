@@ -295,6 +295,7 @@ export function useCvSidebarWorkspace({
   useEffect(() => {
     setUploadError(null);
     setUploadConflict(null);
+    setIsCvManagerOpen(false);
   }, [profileScope]);
 
   useEffect(() => {
@@ -320,6 +321,18 @@ export function useCvSidebarWorkspace({
     if (cvManagerOpenRequest.profileId !== workspace.state.activeProfileId) return;
     setIsCvManagerOpen(true);
   }, [cvManagerOpenRequest, workspace.state.activeProfileId]);
+
+  useEffect(() => {
+    const operation = cvManager.state.reextract?.operation;
+    if (
+      !operation ||
+      operation.profile_id !== workspace.state.activeProfileId ||
+      (operation.state !== 'running' && operation.state !== 'review_ready')
+    ) {
+      return;
+    }
+    setIsCvManagerOpen(true);
+  }, [cvManager.state.reextract?.operation, workspace.state.activeProfileId]);
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
@@ -468,13 +481,25 @@ export function useCvSidebarWorkspace({
     if (!pendingReview?.can_review) {
       return;
     }
+    if (pendingReview.source === 'reextract' && !pendingReview.operation_id) {
+      return;
+    }
     const controller = new AbortController();
     setIsCvManagerOpen(true);
-    void cvManager.loadReview(
-      pendingReview.profile_id,
-      pendingReview.revision,
-      controller.signal,
-    );
+    if (pendingReview.source === 'reextract') {
+      void cvManager.loadReview(
+        pendingReview.profile_id,
+        pendingReview.revision,
+        pendingReview.operation_id,
+        controller.signal,
+      );
+    } else {
+      void cvManager.loadReview(
+        pendingReview.profile_id,
+        pendingReview.revision,
+        controller.signal,
+      );
+    }
   }, [cvManager, scopedProfile?.pending_review]);
 
   const handleDiscardPendingReview = useCallback(async () => {

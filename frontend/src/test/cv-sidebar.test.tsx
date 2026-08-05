@@ -163,6 +163,7 @@ function activeProfileWithPendingReview(): ProfileReadResponse {
       profile_id: PROFILE_ID,
       revision: NOW,
       source: 'agent_update',
+      operation_id: null,
       can_review: true,
     },
   };
@@ -176,6 +177,7 @@ function activeProfileWithStuckPendingReview(): ProfileReadResponse {
       profile_id: PROFILE_ID,
       revision: NOW,
       source: 'reextract',
+      operation_id: '11111111-1111-4111-8111-111111111111',
       can_review: false,
     },
   };
@@ -256,6 +258,28 @@ beforeEach(() => {
 });
 
 describe('profile transport parsers', () => {
+  it('preserves the operation identity in a pending re-extraction review', () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const parsed = parseProfileReadResponse({
+      present: false,
+      pending_review: {
+        profile_id: PROFILE_ID,
+        revision: NOW,
+        source: 'reextract',
+        operation_id: operationId,
+        can_review: true,
+      },
+    });
+
+    expect(parsed.pending_review).toEqual({
+      profile_id: PROFILE_ID,
+      revision: NOW,
+      source: 'reextract',
+      operation_id: operationId,
+      can_review: true,
+    });
+  });
+
   it('parses empty and active profile without storage_path', () => {
     expect(parseProfileReadResponse({present: false})).toEqual(emptyProfile());
     const active = parseProfileReadResponse({
@@ -280,6 +304,7 @@ describe('profile transport parsers', () => {
         profile_id: PROFILE_ID,
         revision: NOW,
         source: 'agent_update',
+        operation_id: null,
         can_review: true,
       },
     });
@@ -337,6 +362,109 @@ describe('profile transport parsers', () => {
 });
 
 describe('CvSidebar empty / active states', () => {
+  it.each([
+    ['running', 'jobagent-profile-reextract-progress'],
+    ['review_ready', 'jobagent-profile-reextract-review'],
+  ] as const)('opens CV Manager for a recovered %s re-extraction', async (operationState, recoveredView) => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const profile = {
+      ...uploadResponse('recovered.pdf').bootstrap!.profile,
+      attachment_state: 'active' as const,
+      extraction_version: 'v1',
+      source_hash: 'recovered-source',
+      state: 'ready' as const,
+      setup_status: null,
+    };
+    const workspace: ProfileWorkspaceController = {
+      state: {
+        profiles: [profile],
+        activeProfileId: PROFILE_ID,
+        selectedConversationId: CONVERSATION_ID,
+        conversations: [],
+        pending: new Set(),
+        error: null,
+      },
+      activate: vi.fn(),
+      createConversation: vi.fn(),
+      selectConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      renameProfile: vi.fn(),
+      deleteProfile: vi.fn(),
+      reload: vi.fn(),
+      adoptBootstrap: vi.fn(),
+    };
+    const recoveredReview = {
+      profile_id: PROFILE_ID,
+      source: 'reextract' as const,
+      operation_id: operationId,
+      operation_state: 'review_ready' as const,
+      revision: NOW,
+      current: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Approved',
+        current_title: 'Engineer',
+        skill_labels: [],
+      },
+      proposed: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Proposed',
+        current_title: 'Senior Engineer',
+        skill_labels: [],
+      },
+      changed_fields: [],
+      preference_changes: [],
+      skills_added: [],
+      skills_removed: [],
+      collection_deltas: {experiences: 0, education: 0, languages: 0, certifications: 0},
+      extraction_confidence: null,
+      can_approve: true,
+      can_discard: true,
+    };
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          {...productControllers()}
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          workspace={workspace}
+          deps={{
+            loadProfile: vi.fn().mockResolvedValue(activeProfile('recovered.pdf')),
+            uploadCv: vi.fn(),
+            cvManager: {
+              fetchCvManager: vi.fn().mockResolvedValue({items: []}),
+              getProfileReextractOperation: vi.fn().mockResolvedValue({
+                operation: {
+                  profile_id: PROFILE_ID,
+                  operation_id: operationId,
+                  state: operationState,
+                  error_code: null,
+                  error_summary: null,
+                  review_revision: operationState === 'review_ready' ? NOW : null,
+                  can_review: operationState === 'review_ready',
+                  can_retry: false,
+                  can_discard: operationState === 'review_ready',
+                },
+              }),
+              getProfileReextractReview: vi.fn().mockResolvedValue(recoveredReview),
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    expect(await screen.findByRole('dialog', {name: 'CV Manager'})).toBeInTheDocument();
+    expect(await screen.findByTestId(recoveredView)).toBeInTheDocument();
+  });
+
   it('recovers product navigation from a legacy zero-width SideNav resize value', async () => {
     const legacyResizeKey =
       'astryx-resizable:jobagent-observability-sidebar-width-v2';
@@ -813,6 +941,84 @@ describe('CvSidebar empty / active states', () => {
     expect(
       within(review).getByRole('button', {name: 'Discard review'}),
     ).toBeInTheDocument();
+  });
+
+  it('loads a pending re-extraction review with its exact operation id', async () => {
+    const operationId = '11111111-1111-4111-8111-111111111111';
+    const loadProfile = vi.fn().mockResolvedValue({
+      ...activeProfile('my-cv.pdf'),
+      draft_present: true,
+      pending_review: {
+        profile_id: PROFILE_ID,
+        revision: NOW,
+        source: 'reextract',
+        operation_id: operationId,
+        can_review: true,
+      },
+    });
+    const getProfileReextractReview = vi.fn().mockResolvedValue({
+      profile_id: PROFILE_ID,
+      source: 'reextract',
+      operation_id: operationId,
+      operation_state: 'review_ready',
+      revision: NOW,
+      current: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Approved',
+        current_title: 'Engineer',
+        skill_labels: [],
+      },
+      proposed: {
+        full_name: null,
+        location: null,
+        phone: null,
+        email: null,
+        github_url: null,
+        summary: 'Proposed',
+        current_title: 'Senior Engineer',
+        skill_labels: [],
+      },
+      changed_fields: [],
+      preference_changes: [],
+      skills_added: [],
+      skills_removed: [],
+      collection_deltas: {
+        experiences: 0,
+        education: 0,
+        languages: 0,
+        certifications: 0,
+      },
+      extraction_confidence: null,
+      can_approve: true,
+      can_discard: true,
+    });
+
+    render(
+      <Theme theme={neutralTheme}>
+        <CvSidebar
+          {...productControllers()}
+          isUploadDisabled={false}
+          onSidebarUploadSuccess={vi.fn()}
+          deps={{loadProfile, uploadCv: vi.fn(), cvManager: {getProfileReextractReview}}}
+        />
+      </Theme>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Upload new CV')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', {name: 'Review pending changes'}));
+
+    await waitFor(() =>
+      expect(getProfileReextractReview).toHaveBeenCalledWith(
+        PROFILE_ID,
+        expect.any(AbortSignal),
+        operationId,
+      ),
+    );
+    expect(await screen.findByTestId('jobagent-profile-reextract-review')).toBeInTheDocument();
   });
 
   it('offers an exact operation check for an in-progress re-extraction upload conflict', async () => {

@@ -646,6 +646,14 @@ Keep raw manual/browser data out of documentation and reports. Use the
 and [Plan 13 acceptance ledger](docs/acceptance/plan13_acceptance_ledger.md) for the
 sanitized manual and browser procedures.
 
+The profile re-extraction release gate is defined by the
+[profile re-extraction release procedure](docs/operations/profile-reextract-release.md).
+Its [Task 12 acceptance ledger](docs/acceptance/profile-reextract-operation-evidence.md)
+records only sanitized synthetic outcomes. A failed source gate stops candidate
+cutover and browser acceptance; use `http://localhost:5173/` for the CORS-aligned
+browser origin, repair the owning source/test boundary, and rerun all source gates
+before proceeding.
+
 ## Failure and Recovery
 
 - **Health is degraded:** inspect the `overall`, `sqlite`, `filesystem`, and
@@ -665,6 +673,10 @@ sanitized manual and browser procedures.
   Uvicorn, so a migration error prevents serving. Correct the configuration or
   migration issue and recreate the backend container; never bypass Alembic with
   `create_all()` or schema mutations in FastAPI startup.
+- **A release source gate fails:** stop before candidate cutover, clone rehearsal,
+  or browser work. Preserve the named volumes and rollback image tags, repair only
+  the failing owning source/test boundary, and rerun the complete backend/frontend
+  gates. Do not downgrade a failed gate to a warning or use `docker compose down -v`.
 - **Neo4j is unavailable, stale, or a post-commit sync fails:** SQLite and
   retained files remain authoritative. Restore Neo4j, then rebuild the derived
   projection from the running Compose backend:

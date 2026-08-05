@@ -1333,7 +1333,7 @@ git commit -m "feat: add profile reextract release rehearsal"
 - Modify: `README.md`
 - Create: `docs/acceptance/profile-reextract-operation-evidence.md`
 
-- [ ] **Step 1: Add failing acceptance ledger checks for required evidence rows.**
+- [x] **Step 1: Add failing acceptance ledger checks for required evidence rows.**
 
 ```powershell
 $evidence = Get-Content -Raw 'docs/acceptance/profile-reextract-operation-evidence.md'
@@ -1342,13 +1342,13 @@ $evidence = Get-Content -Raw 'docs/acceptance/profile-reextract-operation-eviden
 }
 ```
 
-- [ ] **Step 2: Run the acceptance ledger check to verify it fails.**
+- [x] **Step 2: Run the acceptance ledger check to verify it fails.**
 
 Run: `powershell -NoProfile -Command "$evidence = Test-Path 'docs/acceptance/profile-reextract-operation-evidence.md'; if (-not $evidence) { throw 'profile reextract acceptance ledger is missing' }"`
 
 Expected: FAIL because the acceptance ledger does not exist.
 
-- [ ] **Step 3: Document and execute the full validation sequence on synthetic data only.**
+- [x] **Step 3: Document and execute the full validation sequence on synthetic data only.**
 
 ```powershell
 cd backend
@@ -1364,11 +1364,11 @@ npm run build
 
 After all source gates pass, follow `docs/operations/profile-reextract-release.md` exactly: back up the stopped authoritative volume, tag pre-release images before build and candidate images after build, restore and rehearse the labelled clone, perform candidate cutover, verify the deployed image IDs equal the rehearsed candidate IDs, then run the browser flow against synthetic PDFs. Capture screenshots for running re-extraction, both disabled upload controls, direct 409 action, close/reopen, reload recovery, stale review, discard, retry, approval, active-CV lineage, narrow viewport, and keyboard focus restoration. Collect `docker compose @ComposeArgs logs --no-color backend frontend` after browser acceptance and fail on `Traceback`, `no active connection`, `checked out`, `pool`, or an unexpected ` 5xx `. On any post-cutover failure, perform the documented rollback immediately before any further browser attempt. Keep full commands, screenshot files, manifest inventory, filenames, local hashes, archive paths, and user paths outside Git. The tracked ledger may contain only synthetic case IDs, counts, redacted image-ID suffixes or non-reversible hashes where needed, pass/fail codes, UTC timestamps, and non-sensitive artifact handles; it must not contain private screenshot paths, manifest paths, inventory, filenames, local file hashes, or user paths.
 
-- [ ] **Step 4: Run the final local static checks and whitespace check.**
+- [x] **Step 4: Run the final local static checks and whitespace check.**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File infrastructure/scripts/test_app_data_snapshot.ps1`
 
-Run: `powershell -NoProfile -Command "$p = 'T[B]D|T[O]DO|\.{3}|all[ ]files[ ]above|implement[ ]the[ ]lifecycle'; rg -n -i -- $p docs/superpowers/plans/2026-07-31-profile-reextract-operation.md; if ($LASTEXITCODE -ne 1) { exit 1 }"`
+Run: `powershell -NoProfile -Command { $p = 'T[B]D|T[O]DO|\.{3}|all[ ]files[ ]above|implement[ ]the[ ]lifecycle'; & rg -n -i -- $p docs/superpowers/plans/2026-07-31-profile-reextract-operation.md; if ($LASTEXITCODE -ne 1) { exit 1 }; exit 0 }`
 
 Run: `rg -n -S "DocumentPublicationArtifacts|upsert_draft\(|ImmediateTransactionBusy|ProfileReextractOperationConflict|ProfileReextractInProgressDetail|ProfileReviewPendingDetail|ProfileReextractOperationStatus|ProfileReextractOperationEnvelope|error_summary|review_revision|useCvManagerState|run_smoke\(sqlite_path" docs/superpowers/plans/2026-07-31-profile-reextract-operation.md`
 
@@ -1376,7 +1376,7 @@ Run: `git add -N docs/acceptance/profile-reextract-operation-evidence.md; git di
 
 Expected: the utility tests pass; the placeholder scan returns exit code 1 with no matches; the Windows-safe intent-to-add `git diff --check` exits 0 with no whitespace error.
 
-- [ ] **Step 5: Commit the acceptance documentation.**
+- [x] **Step 5: Commit the acceptance documentation.**
 
 ```powershell
 git add docs/operations/profile-reextract-release.md README.md docs/acceptance/profile-reextract-operation-evidence.md

@@ -86,6 +86,7 @@ export type PendingProfileReview = {
   profile_id: string;
   revision: string;
   source: 'agent_update' | 'reextract';
+  operation_id: string | null;
   can_review: boolean;
 };
 
@@ -132,15 +133,19 @@ function parsePendingProfileReview(raw: unknown): PendingProfileReview | null {
   if (!isObject(raw)) {
     throw new Error('pending_review must be an object or null');
   }
-  exact(raw, ['profile_id', 'revision', 'source', 'can_review']);
+  exact(raw, ['profile_id', 'revision', 'source', 'operation_id', 'can_review']);
   const profile_id = asString(raw.profile_id);
   const revision = asString(raw.revision);
+  const operation_id = raw.operation_id === null ? null : asString(raw.operation_id);
   const can_review = asBoolean(raw.can_review);
   if (!profile_id) {
     throw new Error('pending_review.profile_id must be string');
   }
   if (!revision) {
     throw new Error('pending_review.revision must be string');
+  }
+  if (raw.operation_id !== null && operation_id === null) {
+    throw new Error('pending_review.operation_id must be string or null');
   }
   if (raw.source !== 'agent_update' && raw.source !== 'reextract') {
     throw new Error('pending_review.source is invalid');
@@ -152,6 +157,7 @@ function parsePendingProfileReview(raw: unknown): PendingProfileReview | null {
     profile_id,
     revision,
     source: raw.source,
+    operation_id,
     can_review,
   };
 }

@@ -55,18 +55,27 @@ function Assert-Archive([string]$ExpectedHash) {
 function Get-SnapshotFacts([string]$MountPath = '/source') {
   $program = @"
 import json
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 path = Path('$MountPath/jobagent.db')
 if not path.is_file():
     raise SystemExit('jobagent.db is missing from the source volume')
-with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as connection:
-    tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-    counts = {table: connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in tables}
-    revision = connection.execute('SELECT version_num FROM alembic_version').fetchone()
-    active = connection.execute("SELECT active_profile_id FROM workspace_state WHERE id = 'main'").fetchone()
-    pending = connection.execute("SELECT COUNT(*) FROM profile_reextract_operations WHERE state IN ('running', 'review_ready')").fetchone()[0]
+with tempfile.TemporaryDirectory() as temporary:
+    scratch = Path(temporary) / 'jobagent.db'
+    shutil.copy2(path, scratch)
+    for suffix in ('-wal', '-shm'):
+        sidecar = Path(f'{path}{suffix}')
+        if sidecar.is_file():
+            shutil.copy2(sidecar, Path(f'{scratch}{suffix}'))
+    with sqlite3.connect(f'file:{scratch}?mode=ro', uri=True) as connection:
+        tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        counts = {table: connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in tables}
+        revision = connection.execute('SELECT version_num FROM alembic_version').fetchone()
+        active = connection.execute("SELECT active_profile_id FROM workspace_state WHERE id = 'main'").fetchone()
+        pending = connection.execute("SELECT COUNT(*) FROM profile_reextract_operations WHERE state IN ('running', 'review_ready')").fetchone()[0]
 print(json.dumps({
     'table_counts': counts,
     'active_profile': None if active is None else active[0],
@@ -74,14 +83,24 @@ print(json.dumps({
     'alembic_revision': '' if revision is None else revision[0],
 }))
 "@
-  $json = docker run --rm -v "${VolumeName}:${MountPath}:ro" python:3.13-alpine python -c $program
+  $json = $program | docker run --rm -i -v "${VolumeName}:${MountPath}:ro" python:3.13-alpine python -
   if ($LASTEXITCODE -ne 0) { Fail 'could not collect SQLite snapshot facts' }
-  return ($json | ConvertFrom-Json)
+  if ([string]::IsNullOrWhiteSpace(($json | Out-String))) { Fail 'SQLite snapshot facts output is empty' }
+  try { return ($json | ConvertFrom-Json -ErrorAction Stop) } catch { Fail 'SQLite snapshot facts output is malformed JSON' }
 }
 function Get-LiveInventory {
   $inventory = docker run --rm -v "${VolumeName}:/target:ro" alpine:3.20 sh -c 'cd /target && find . -type f -print | sort' | Where-Object { $_ }
   Assert-NativeSucceeded 'live inventory collection'
   return @($inventory)
+}
+function Get-ComparableInventory([object[]]$LiveInventory, [object[]]$ManifestInventory) {
+  $manifestEntries = @{}
+  foreach ($entry in @($ManifestInventory)) { $manifestEntries[[string]$entry] = $true }
+  return @($LiveInventory | Where-Object {
+      $path = [string]$_
+      $match = [regex]::Match($path, '^(?<base>.+)-(?<sidecar>wal|shm)$')
+      -not ($match.Success -and $manifestEntries.ContainsKey($match.Groups['base'].Value))
+    })
 }
 
 Assert-PrivatePath $ArchivePath
@@ -120,7 +139,8 @@ if ($Action -eq 'Backup') {
 $manifest = Assert-Archive $ExpectedArchiveSha256
 if ($Action -eq 'Verify') {
   $liveInventory = Get-LiveInventory
-  if ((@($liveInventory | Sort-Object) -join "`n") -ne (@($manifest.inventory | Sort-Object) -join "`n")) { Fail 'live volume inventory mismatch' }
+  $comparableInventory = Get-ComparableInventory $liveInventory $manifest.inventory
+  if ((@($comparableInventory | Sort-Object) -join "`n") -ne (@($manifest.inventory | Sort-Object) -join "`n")) { Fail 'live volume inventory mismatch' }
   $liveFacts = Get-SnapshotFacts '/target'
   if ($liveFacts.alembic_revision -ne $manifest.alembic_revision) { Fail 'live Alembic revision mismatch' }
   return

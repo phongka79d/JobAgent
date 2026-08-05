@@ -195,6 +195,56 @@ function renderChatConflictApp(
 }
 
 describe('App foundation shell', () => {
+  it('disables both CV upload controls while re-extraction is loading before operation recovery', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
+    const profile = appProfile('11111111-1111-4111-8111-111111111111', true);
+    const extractionStream = deferred<void>();
+    const streamProfileReextract = vi.fn().mockReturnValue(extractionStream.promise);
+
+    render(
+      <Theme theme={neutralTheme}>
+        <App
+          deps={{
+            workspace: {
+              fetchProfiles: vi.fn().mockResolvedValue({
+                items: [profile],
+                active_profile_id: profile.id,
+              }),
+              fetchProfileConversations: vi.fn().mockResolvedValue({
+                items: [appConversation('loading-conversation', profile.id)],
+                next_cursor: null,
+              }),
+            },
+            chat: {loadConversationHistory: vi.fn().mockResolvedValue({items: [], next_cursor: null})},
+            sidebar: {
+              loadProfile: vi.fn().mockResolvedValue({
+                present: true,
+                profile: {summary: 'Synthetic candidate', current_title: 'Engineer'},
+                preferences: {target_roles: [], preferred_locations: [], acceptable_work_modes: [], target_seniority: []},
+                active_attachment: {id: 'attachment-loading', original_name: 'loading.pdf', mime_type: 'application/pdf', size_bytes: 1, page_count: 1, state: 'active', failure_code: null},
+                draft_present: false,
+                pending_attachment: null,
+                pending_review: null,
+              }),
+            },
+            cvManager: {
+              fetchCvManager: vi.fn().mockResolvedValue({items: []}),
+              streamProfileReextract,
+            },
+          }}
+        />
+      </Theme>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', {name: `Actions for ${profile.display_name}`}));
+    await userEvent.click(await screen.findByRole('menuitem', {name: 'Re-extract CV'}));
+    await screen.findByTestId('jobagent-profile-reextract-progress');
+    expect(streamProfileReextract).toHaveBeenCalledWith(profile.id, expect.any(Object), expect.any(AbortSignal));
+
+    expect(await screen.findByTestId('jobagent-cv-upload')).toBeDisabled();
+    expect(await screen.findByTestId('jobagent-chat-pdf-upload')).toBeDisabled();
+  });
+
   it('disables both CV upload controls while the recovered re-extraction operation is running', async () => {
     vi.stubEnv('VITE_API_BASE_URL', 'http://api.example.test');
     const profile = appProfile('11111111-1111-4111-8111-111111111111', true);

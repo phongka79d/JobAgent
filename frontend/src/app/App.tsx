@@ -193,7 +193,9 @@ export function App({deps}: AppProps = {}) {
     profileReady: selectedProfile?.state === 'ready',
   });
   const tailoringLocked = tailoring.state.stream.phase === 'loading';
-  const reextractLocked = cvManager.state.reextract?.operation?.state === 'running';
+  const reextractLocked =
+    cvManager.state.reextract?.phase === 'loading' ||
+    cvManager.state.reextract?.operation?.state === 'running';
   const currentFreshTailoringRequest = freshTailoringRequest(
     savedJobs.state,
     tailoring.state.detail.data?.session.instruction ?? '',
